@@ -44,6 +44,28 @@ async def test_question_is_announced_before_the_answer_is_awaited(events):
     assert events.index("ask_human") < events.index("port") < events.index("ask_human_done"), events
 
 
+async def test_cancelled_question_is_closed_too(events):
+    """Отмена обязана закрыть событие вопроса, а не оставить его висеть.
+
+    `CancelledError` — не `Exception`, и раньше проходила мимо обоих обработчиков:
+    событие `ask_human` из `_begin_ask` оставалось незакрытым, и баннер «агент
+    спрашивает» висел в TUI и у встраивающего после отмены `stream()` или
+    остановки сервера.
+    """
+    import asyncio
+
+    async def port(question):
+        raise asyncio.CancelledError
+
+    ctx = local_ctx()
+    ctx.ask_human = port
+
+    with pytest.raises(asyncio.CancelledError):
+        await AskHuman(ctx=ctx).acall(question="Любимый цвет?")
+
+    assert events == ["ask_human", "ask_human_done"], events
+
+
 @pytest.mark.parametrize("question", ["", "   ", "x" * 5000])
 async def test_invalid_question_is_rejected_without_waiting(events, question):
     async def port(_question):

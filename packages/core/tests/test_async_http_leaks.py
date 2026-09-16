@@ -237,12 +237,18 @@ def test_shared_sync_client_is_actually_used():
     def _dispatch(request):
         return httpx.Response(200, json={"ok": True})
 
+    # Клиент ОБЩИЙ на процесс, поэтому подменённый транспорт обязан вернуться
+    # так же, как `httpx.Client`. Без этого следующие тесты прогона получают
+    # через него `200 {"ok": true}`: тест голоса ждал отказа соединения, видел
+    # пустой ответ и падал — в изоляции зелёный, в полном прогоне красный.
+    real_transport = NO_NETRC_SESSION._transport
     NO_NETRC_SESSION._transport = httpx.MockTransport(_dispatch)
     httpx.Client = _Counting
     try:
         NO_NETRC_SESSION.request("GET", "https://example.com", verify=True)
     finally:
         httpx.Client = real_client
+        NO_NETRC_SESSION._transport = real_transport
 
     assert one_shots == [], (
         "verify=True снова поднял одноразовый клиент — общий пул декоративен"

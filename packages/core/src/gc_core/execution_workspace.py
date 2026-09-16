@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -62,8 +63,20 @@ async def aprime_backend_cwd(backend: Any) -> None:
     такого метода делать нечего.
     """
     prime = getattr(backend, "aprime_default_cwd", None)
-    if callable(prime):
-        await prime()
+    if not callable(prime):
+        return
+    if await prime() is None:
+        # Молчаливый откат к `/` уже стоил одного прогона: корнем рабочей
+        # области становилась корневая файловая система вместо WORKDIR
+        # контейнера. Значение отсюда подсунуть некуда — `discover_backend_cwd`
+        # спрашивает сам бэкенд через `default_cwd()`, — но отказ должен быть
+        # виден в логе, а не растворяться.
+        logging.getLogger(__name__).warning(
+            "backend_cwd_prime_failed: рабочий каталог окружения не узнан, "
+            "корнем станет '/' (бэкенд: %s)",
+            type(backend).__name__,
+            extra={"event": "backend_cwd_prime_failed"},
+        )
 
 
 def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:

@@ -158,6 +158,17 @@ async def acreate_run_context(
       поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
       запуск (детект — ``config.cli_forces_legacy_model``).
     """
+    # Хранилище встраивающего проверяем ДО всего остального. Проверка стояла в
+    # `_finish_run_context`, то есть после MCP-дискавери и создания логгера: на
+    # негодном сторе исключение прилетало, когда stdio-сессии уже подняты под
+    # токеном владельца, а `AsyncAgent.create` на ошибке закрывает только пул
+    # httpx — persistent stdio (браузер) и логгер с открытым файлом доживали до
+    # конца процесса.
+    if thread_store is not None:
+        from gc_core.thread_store_async import athread_store
+
+        athread_store(thread_store)
+
     prep = _prepare_run_context(
         config_dict, run_id=run_id, environment=environment, loop=loop,
         os_backend=os_backend, log_handlers=log_handlers,

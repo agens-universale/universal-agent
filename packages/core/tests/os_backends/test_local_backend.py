@@ -348,30 +348,31 @@ async def test_run_python_timeout(be, tmp_path):
     assert "go" in res.stdout
 
 
-async def test_drain_keeps_reading_after_head_is_full():
-    """После заполнения головы чанки продолжают считаться и обновлять хвост.
+async def test_drain_keeps_reading_after_head_is_full(tmp_path):
+    """После заполнения головы чтение продолжается: счётчик и хвост настоящие.
 
-    Свойство пришло с develop, где дренаж синхронный и живёт в потоке. У нас
-    он корутина (`_adrain_stream`), поэтому проверяем нашу форму: важно, что
-    чтение НЕ прекращается по заполнении головы — иначе ни счётчик, ни хвост
-    не будут настоящими, а труба переполнится и заблокирует процесс.
+    Свойство пришло с develop, где чтение синхронное и живёт в потоке. У нас
+    это корутина над файлом захвата (`_adrain_file`): важно, что чтение НЕ
+    прекращается по заполнении головы — иначе ни счётчик, ни хвост не будут
+    настоящими, а вызывающий получит только начало вывода.
     """
-    from gc_core.backends.local import _Capture, _adrain_stream
+    import asyncio
+    import os
 
-    class _Stream:
-        def __init__(self):
-            self._chunks = [b"A" * 50, b"B" * 50, b"END"]
-            self._i = 0
+    from gc_core.backends.local import _Capture, _adrain_file
 
-        async def read(self, _n):
-            if self._i >= len(self._chunks):
-                return b""
-            chunk = self._chunks[self._i]
-            self._i += 1
-            return chunk
+    path = tmp_path / "captured"
+    path.write_bytes(b"A" * 50 + b"B" * 50 + b"END")
+    read_fd = os.open(path, os.O_RDONLY)
 
     sink = _Capture(40)
-    await _adrain_stream(_Stream(), sink)
+    # Писатель уже закончил: просим дочитать остаток и выйти.
+    stop = asyncio.Event()
+    stop.set()
+    try:
+        await _adrain_file(read_fd, sink, stop=stop)
+    finally:
+        os.close(read_fd)
     cs = sink.stream
 
     assert cs.total_chars == 103, "счётчик считает только голову — чтение обрывается"

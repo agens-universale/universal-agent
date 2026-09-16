@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import os
@@ -9,7 +10,7 @@ import sys
 from typing import Any, Callable, Iterable
 
 from gc_core.trace_id import trace_id_from_config
-from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
 
 
 @dataclass(frozen=True)
@@ -225,13 +226,17 @@ def enforce_write_guard(
                             blocked_result_factory=blocked_result_factory,
                         )
                     if _decision == "ask":
-                        _ok = request_confirm(
+                        # Ожидание человека уходит в поток: в TUI это до 600 с, и
+                        # на event loop вместе с ним встали бы субагенты и
+                        # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
+                        _ok = (yield OffLoop(functools.partial(
+                            request_confirm,
                             title="Защита записи",
                             question=f"Разрешить запись в {candidate_path}?",
                             fields=[("path", candidate_path)],
                             ctx=context.ctx,
                             decision_key=f"write:{candidate_path}",
-                        )
+                        )))
                         if not _ok:
                             _err = {
                                 "type": "protected_path_denied",
@@ -285,14 +290,17 @@ def enforce_write_guard(
                     )
                     return (yield)
                 if wg_mode == "ask":
-                    confirmed = _ask_user_confirmation_for_write(
+                    # Тот же приём, что и у защищённых путей выше: подтверждение
+                    # ждётся в потоке, а не на event loop вызывающего.
+                    confirmed = (yield OffLoop(functools.partial(
+                        _ask_user_confirmation_for_write,
                         tool_name=_tool_name(func, args),
                         path=candidate_path,
                         operation=operation,
                         error=exc.error,
                         ctx=context.ctx,
                         decision_key=f"write:{candidate_path}",
-                    )
+                    )))
                     if confirmed:
                         audit_policy_decision(
                             context,

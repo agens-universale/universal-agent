@@ -1081,6 +1081,12 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Хранилище тредов — туда же, и по той же причине: трассу субагента
+        # пишет `apersist_subagent_trace`, а без этого поля она уходила в
+        # файловое хранилище по умолчанию. У встраивающего, отдавшего свой стор
+        # (`AsyncAgent.create(cfg, thread_store=…)`), трасса либо терялась, либо
+        # ложилась на диск хоста мимо него.
+        child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
         child_ctx.subagent_tool_name = tool_name
         return child_ctx
 

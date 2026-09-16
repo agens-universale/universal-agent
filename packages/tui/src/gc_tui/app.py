@@ -1012,11 +1012,25 @@ class TuiApp(App):
     def on_unmount(self) -> None:
         """Выход приложения — отпустить всё, что держит его из модулей ядра.
 
-        Логгер прогона (см. `AgentRunner.release`) и подписка на
+        Сначала `stop()`, и это не вежливость. Пока агент ждёт ответа человека,
+        его поток сидит в `queue.get()` внутри `asyncio.to_thread`, то есть в
+        потоке пула `concurrent.futures`, а такие потоки интерпретатор ждёт на
+        выходе. `/quit` зовёт `app.exit()` без остановки прогона, и процесс
+        оставался жить, пока в очередь не придёт строка. `stop()` кладёт туда
+        пустую (`cancel_ask_human`) и снимает ожидание подтверждения.
+
+        Затем логгер прогона (см. `AgentRunner.release`) и подписка на
         runtime-уведомления: и то и другое живёт в модульных реестрах до конца
         процесса и держит приложение целиком, если его не снять.
         """
-        _release_runner(self.active_runner)
+        runner = self.active_runner
+        stop = getattr(runner, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+        _release_runner(runner)
         unregister_runtime_notices_listener(self._on_runtime_notice)
 
     def _finish_onboarding(self) -> None:
@@ -1131,18 +1145,33 @@ class TuiApp(App):
         # рабочем потоке на всё приложение. Он же убрал бы TLS-рукопожатие,
         # которое TUI платит на каждое сообщение, закрывая пул после хода.
         import asyncio
-        ctx = asyncio.run(acreate_run_context(
-            cfg, auth_connector=auth, on_progress=progress.update,
-            on_stream_delta=self._stream_pump.on_delta,
-            is_tui=True,
-            level_provider=self._level_provider,
-            circuit_breaker=self._circuit_breaker,
-            # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url поверх
-            # непустого реестра — тот же детект, что уже используют CLI/server
-            # (config.cli_forces_legacy_model); без него ран резолвил бы через
-            # реестр, расходясь с честным хинтом /level (display_router).
-            force_legacy=cli_forces_legacy_model(cfg),
-        ))
+
+        async def _abuild_ctx():
+            # Пул httpx ЭТОГО loop закрываем здесь же: `asyncio.run` ниже убьёт
+            # loop, а реестр клиентов ключуется по нему. Ход и `/compact` так и
+            # делают, а сборка — нет: клиент легаси http/sse MCP оставался в
+            # реестре с открытыми сокетами, и так на каждой пересборке (смена
+            # конфига сессии, `/profiles`).
+            from gc_core.utils.async_http import aclose_clients
+
+            try:
+                return await acreate_run_context(
+                    cfg, auth_connector=auth, on_progress=progress.update,
+                    on_stream_delta=self._stream_pump.on_delta,
+                    is_tui=True,
+                    level_provider=self._level_provider,
+                    circuit_breaker=self._circuit_breaker,
+                    # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
+                    # поверх непустого реестра — тот же детект, что уже
+                    # используют CLI/server (config.cli_forces_legacy_model); без
+                    # него ран резолвил бы через реестр, расходясь с честным
+                    # хинтом /level (display_router).
+                    force_legacy=cli_forces_legacy_model(cfg),
+                )
+            finally:
+                await aclose_clients()
+
+        ctx = asyncio.run(_abuild_ctx())
         # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
         from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
         _attach_diff(ctx, cfg)

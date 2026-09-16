@@ -77,6 +77,24 @@ def test_get_runner_releases_the_stale_one(app):
     assert fresh is not runner
 
 
+def test_exit_stops_the_runner_before_releasing_it(app):
+    """На выходе агент может ждать ответа человека — тогда процесс не завершится.
+
+    Поток ожидания сидит в `queue.get()` внутри `asyncio.to_thread`, то есть в
+    потоке пула `concurrent.futures`, а его интерпретатор ждёт на выходе. `/quit`
+    зовёт `app.exit()` и прогон не останавливает, поэтому снять ожидание должен
+    `on_unmount`: `stop()` кладёт в очередь пустую строку и гасит confirm.
+    """
+    runner = _Runner(running=True)
+    app.active_runner = runner
+
+    app.on_unmount()
+
+    assert runner.events == ["stop", "release"], (
+        f"порядок на выходе: {runner.events} — ожидание человека не снято"
+    )
+
+
 def test_stop_and_replace_releases_after_stop():
     """Esc / Ctrl+C: сначала кооперативный стоп, потом отдача логгера.
 

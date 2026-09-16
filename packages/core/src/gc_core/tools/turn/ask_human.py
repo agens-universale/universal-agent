@@ -239,6 +239,18 @@ Do not implement until they confirm.
             return self._ask_interrupted(question, via_name)
         except Exception as exc:                  # EOFError, отказ порта встраивающего
             return self._ask_failed(question, via_name, exc)
+        except BaseException:
+            # `CancelledError` — не `Exception`, и проходила мимо: событие
+            # `ask_human` из `_begin_ask` оставалось незакрытым, а баннер
+            # «агент спрашивает» висел в TUI и у встраивающего после отмены
+            # `stream()` или остановки сервера. Закрываем и пробрасываем.
+            from gc_core.tools.subagents.progress import emit_progress
+
+            emit_progress(
+                self._ctx, self._state, "ask_human_done",
+                tool_name=via_name, ok=False,
+            )
+            raise
         return self._ask_answered(question, via_name, response)
 
     def _begin_ask(self, question: Any):

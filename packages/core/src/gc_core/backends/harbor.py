@@ -43,6 +43,11 @@ from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
 # глушатся, чтобы conda-хуки не попали в stdout/stderr команды; ``set +e``
 # после source — чтобы ``set -e`` / ``return`` в rc не подменили код возврата
 # пользовательской команды. Имя окружения не зашито. Из develop, как есть.
+#: Потолок на один вопрос «где мы» при сборке контекста. Со стороны ядра
+#: дедлайна нет, и без него медленный контейнер задерживал бы сборку сколько
+#: угодно; сам ответ приходит за миллисекунды.
+_CWD_PRIME_TIMEOUT_SEC = 20
+
 _BASHRC_EXEC_INIT = """\
 PS1=${PS1-dummy}
 . /etc/profile >/dev/null 2>&1 || true
@@ -563,7 +568,9 @@ class HarborBackend(FsBackend):
         """
         if self._discovered_cwd is None:
             try:
-                res = await self._aexec_impl("pwd")
+                # Таймаут обязателен: без него сборка контекста ждала бы медленный
+                # контейнер сколько угодно — со стороны ядра дедлайна нет.
+                res = await self._aexec_impl("pwd", timeout=_CWD_PRIME_TIMEOUT_SEC)
             except Exception:  # noqa: BLE001 — окружение может быть недоступно
                 return None
             lines = (res.stdout or "").strip().splitlines()

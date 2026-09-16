@@ -607,7 +607,26 @@ class PersistentStdioRegistry:
         всё это уезжало в ``asyncio.to_thread``; теперь ожидание — опрос, и
         поток не нужен. Форма та же, что у ``stream_client``: синхронный
         ``close_all`` рядом с ``aclose_all``.
+
+        Отмена приходит из двух РАЗНЫХ мест, и поступать с ними надо
+        по-разному; различаем по счётчику ``Task.cancelling()``:
+
+        * **сняли НАС** (счётчик вырос) — останавливаемся и пробрасываем.
+          Остаток остаётся В РЕЕСТРЕ: он видим следующему сносу и
+          ``close_everything``. Проглотить чужую отмену, чтобы доработать ещё
+          по 7 с на сессию, значит держать уже снятый прогон.
+        * **отменилась САМА сессия** — ``CancelledError`` прилетел из её
+          ``aclose`` (обычно из anyio cancel scope). Тогда копим и закрываем
+          остальные: прежний ``raise`` прямо из цикла гасил ровно одну, а
+          прочие оставались в реестре и ЖИВЫМИ. Подстраховки на выходе может
+          не быть вовсе — ``_arm_exit_hook`` ставится только на
+          безвладельческом пути, — а в долгоживущем сервере выход процесса и
+          не горизонт. Для playwright это значит, что Chromium переживает
+          агента.
         """
+        task = asyncio.current_task()
+        outer_cancels = task.cancelling() if task is not None else 0
+        cancelled = None
         while True:
             session = self._take_one_own()
             if session is None:
@@ -618,10 +637,14 @@ class PersistentStdioRegistry:
                 # и оборванный на середине teardown оставляет чужой процесс
                 # (браузер) жить дальше.
                 await asyncio.shield(session.aclose())
-            except asyncio.CancelledError:
-                raise
+            except asyncio.CancelledError as exc:
+                if task is not None and task.cancelling() > outer_cancels:
+                    raise                  # сняли нас: остаток — в реестре
+                cancelled = exc            # отменилась сессия: гасим остальные
             except Exception:
                 pass
+        if cancelled is not None:
+            raise cancelled
 
     def close_everything(self) -> None:
         """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.

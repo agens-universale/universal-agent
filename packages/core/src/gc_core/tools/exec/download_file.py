@@ -409,7 +409,10 @@ class DownloadFile(AbstractSimpleTool):
 
         dest = os.path.join(download_root, validated_filename)
 
-        write_guard_error = self._check_write_guard(dest)
+        # Гард записи в режиме `ask` ждёт человека, а `_check_write_guard`
+        # синхронный: прямой вызов отсюда держал бы event loop вызывающего всё
+        # время ожидания. Гарды-декораторы делают то же самое через `OffLoop`.
+        write_guard_error = await asyncio.to_thread(self._check_write_guard, dest)
         if write_guard_error is not None:
             return self._result(path=dest, filename=validated_filename, error=write_guard_error)
 

@@ -961,6 +961,7 @@ name = "gc-core"
 version = "0.3.0"
 source = { editable = "packages/core" }
 dependencies = [
+    { name = "certifi" },
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
     { name = "httpx-sse" },
@@ -975,6 +976,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi" },
     { name = "chardet", specifier = ">=7.4.3" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "httpx-sse", specifier = ">=0.4.0" },

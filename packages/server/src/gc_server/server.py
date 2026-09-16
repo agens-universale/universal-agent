@@ -377,6 +377,23 @@ async def events_webhook(request: Request):
             "task_id": task_id,
         }
 
+    # Ключ занимаем ДО первого await: сборка контекста ниже идёт с дискавери
+    # MCP по сети, и без резерва второй вебхук на ту же задачу успевал
+    # проскочить проверку занятости выше.
+    if not agent_run_registry.reserve(system=system, task_id=task_id):
+        agent_run_registry.add_user_message(
+            system=system,
+            task_id=task_id,
+            make_message=_make_user_message,
+            content=message_str,
+        )
+        return {
+            "status": "queued",
+            "payload": payload,
+            "system": system,
+            "task_id": task_id,
+        }
+
     config_dict = dict(BASE_AGENT_CONFIG)
     if trace_id:
         # Shallow copy достаточно: значение — скаляр. Мутировать
@@ -393,19 +410,26 @@ async def events_webhook(request: Request):
     # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на всё
     # это время, а с переездом прогоны стали тасками на общем loop, поэтому
     # заморозка била разом по всем эндпоинтам и всем идущим прогонам.
-    ctx = await acreate_run_context(
-        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
-    )
+    try:
+        ctx = await acreate_run_context(
+            config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+        )
 
-    await agent_run_registry.astart_if_absent(
-        system=system,
-        task_id=task_id,
-        executor_factory=AgentExecutor,
-        ctx=ctx,
-        initial_user_message=message_str,
-        thread_id=task_id,
-        verbose=None,
-    )
+        await agent_run_registry.astart_if_absent(
+            system=system,
+            task_id=task_id,
+            executor_factory=AgentExecutor,
+            ctx=ctx,
+            initial_user_message=message_str,
+            thread_id=task_id,
+            verbose=None,
+        )
+    finally:
+        # Снять резерв в ЛЮБОМ исходе. Обычно его забирает `astart_if_absent`
+        # вместе с накопленными сообщениями, и тогда здесь пусто; но сборка
+        # контекста может отказать — и без этого ключ навсегда остался бы
+        # «строящимся», а следующие вебхуки получали бы `queued` в пустоту.
+        agent_run_registry.release_reservation(system=system, task_id=task_id)
 
     return {
         "status": "started",

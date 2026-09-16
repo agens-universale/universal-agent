@@ -470,6 +470,12 @@ async def arun_cli() -> int:
     ctx = await acreate_run_context(
         config_dict, auth_connector=auth_connector, force_legacy=force_legacy
     )
+    # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
+    # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
+    # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
+    from gc_cli.ask_human_port import make_cli_ask_human_port
+
+    ctx.ask_human = make_cli_ask_human_port()
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli

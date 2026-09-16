@@ -52,6 +52,9 @@ class AgentRunRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._runs: dict[str, ActiveRun] = {}
+        #: Задачи, у которых контекст ещё строится: ключ → сообщения, пришедшие
+        #: за это время. Резерв держит ключ занятым с ПЕРВОГО запроса.
+        self._reservations: dict[str, list] = {}
         self._completed: dict[str, ActiveRun] = {}
         self._completed_ttl_s = 15 * 60
         self._completed_max = 500
@@ -87,6 +90,30 @@ class AgentRunRegistry:
             self._cleanup_completed_locked()
             return self._completed.get(key)
 
+    def reserve(self, *, system: str, task_id: str) -> bool:
+        """Занять ключ задачи ДО сборки контекста. False — ключ уже занят.
+
+        Сборка идёт через `await` (дискавери MCP по сети), и между проверкой
+        «идёт ли прогон» и стартом было окно: второй вебхук на ту же задачу
+        видел ключ свободным, строил ВТОРОЙ контекст, оба запроса отвечали
+        `started`, а сообщение второго до агента не доходило. Контекст
+        проигравшего оставался висеть — с логгером и MCP-сессиями, которые
+        некому закрыть.
+        """
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            run = self._runs.get(key)
+            if (run is not None and not run.done) or key in self._reservations:
+                return False
+            self._reservations[key] = []
+            return True
+
+    def release_reservation(self, *, system: str, task_id: str) -> list:
+        """Снять резерв (сборка не удалась) и вернуть накопленные сообщения."""
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            return self._reservations.pop(key, [])
+
     async def astart_if_absent(
         self,
         *,
@@ -101,11 +128,22 @@ class AgentRunRegistry:
         key = _make_registry_key(system, task_id)
         with self._lock:
             self._cleanup_completed_locked()
+            # Резерв снимаем ВСЕГДА, даже если стартовать не будем: иначе ключ
+            # остался бы «строящимся» навсегда, и следующие запросы получали бы
+            # `queued` в пустоту.
+            queued_messages = self._reservations.pop(key, [])
             existing = self._runs.get(key)
             if existing is not None and not existing.done:
+                for message in queued_messages:
+                    existing.executor.add_message(message)
                 return existing
 
             executor = executor_factory(ctx)
+            # Сообщения, пришедшие пока строился контекст, отдаём ДО старта
+            # таски: `create_task` только ставит корутину в очередь loop, до
+            # первого шага `arun` управление сюда ещё вернётся.
+            for message in queued_messages:
+                executor.add_message(message)
             started_at = time.time()
             run_ref: ActiveRun | None = None
 
@@ -190,7 +228,13 @@ class AgentRunRegistry:
         with self._lock:
             run = self._runs.get(key)
             if run is None or run.done:
-                return False
+                reserved = self._reservations.get(key)
+                if reserved is None:
+                    return False
+                # Контекст этой задачи ещё строится: копим здесь, агент получит
+                # сообщение сразу после старта (см. `reserve`).
+                reserved.append(make_message(content))
+                return True
             run.last_activity_at = time.time()
 
         run.executor.add_message(make_message(content))
