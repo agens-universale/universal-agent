@@ -147,12 +147,58 @@ def is_empty_completion(dct: dict) -> bool:
     return not has_payload(ch0.get("message") or {})
 
 
+# Семантика finish_reason для транспорта (accept) и политики цикла (bounce/final).
+FINISH_KIND_STOP = "stop"
+FINISH_KIND_TOOL_CALLS = "tool_calls"
+FINISH_KIND_LENGTH = "length"
+FINISH_KIND_BLOCKED = "blocked"  # content_filter / refusal / safety
+FINISH_KIND_UNKNOWN = "unknown"
+
+# Известные значения OpenAI-совместимых API → kind. Ключи — lower-case.
+_KNOWN_FINISH_KINDS = {
+    "stop": FINISH_KIND_STOP,
+    "tool_calls": FINISH_KIND_TOOL_CALLS,
+    "length": FINISH_KIND_LENGTH,
+    "content_filter": FINISH_KIND_BLOCKED,
+    "refusal": FINISH_KIND_BLOCKED,
+    "safety": FINISH_KIND_BLOCKED,
+}
+
+
 class FinishDecision(NamedTuple):
-    accept: bool   # принять ответ (не крашиться/не ретраить)
+    accept: bool   # принять payload в историю (не крашиться/не ретраить транспорт)
     unknown: bool  # finish_reason незнакомый → залогировать warning
+    kind: str      # stop | tool_calls | length | blocked | unknown
 
 
-_KNOWN_FINISH_REASONS = frozenset({"stop", "tool_calls", "length"})
+def _finish_reason_key(finish_reason) -> str | None:
+    if not isinstance(finish_reason, str):
+        return None
+    key = finish_reason.strip().lower()
+    return key or None
+
+
+def classify_finish_kind(finish_reason) -> str:
+    """Одна классификация finish_reason для цикла агента и bounce-сообщений."""
+    key = _finish_reason_key(finish_reason)
+    if key is None:
+        return FINISH_KIND_UNKNOWN
+    return _KNOWN_FINISH_KINDS.get(key, FINISH_KIND_UNKNOWN)
+
+
+def finish_blocks_final(finish_reason) -> bool:
+    """Отказ провайдера: не принимать как финальный text answer (даже в allow)."""
+    return classify_finish_kind(finish_reason) == FINISH_KIND_BLOCKED
+
+
+def finish_prevents_text_final(finish_reason) -> bool:
+    """Не принимать prose как финал хода: blocked (отказ) или length (усечение).
+
+    Транспортный accept и запись в историю от этого не зависят — только
+    решение text_response в run_agent (даже при text_answer_mode=allow).
+    """
+    kind = classify_finish_kind(finish_reason)
+    return kind == FINISH_KIND_BLOCKED or kind == FINISH_KIND_LENGTH
 
 
 def normalize_finish_reason(
@@ -164,15 +210,24 @@ def normalize_finish_reason(
 ) -> FinishDecision:
     """Permissive-но-честная трактовка finish_reason (провайдер-агностично).
 
-    Известный {stop, tool_calls, length} → принять. Незнакомый/null + есть
-    content/tool_calls/reasoning → принять как «stop», но пометить unknown (warning).
-    Незнакомый/null + пусто → не принять (генуинно непригодно; конвертер отдаёт
-    пустой батч → bounce, не транспортный ретрай)."""
-    if finish_reason in _KNOWN_FINISH_REASONS:
-        return FinishDecision(accept=True, unknown=False)
+    Известный stop/tool_calls/length/blocked → принять, unknown=False.
+    Незнакомый/null + есть content/tool_calls/reasoning → принять как payload,
+    но пометить unknown (warning). Незнакомый/null + пусто → не принять
+    (генуинно непригодно; конвертер отдаёт пустой батч → bounce, не
+    транспортный ретрай).
+
+    ``kind`` отделяет транспортный accept от политики цикла: blocked/length
+    всё равно попадают в историю (если есть текст), но не становятся финалом
+    (см. ``finish_prevents_text_final``).
+    """
+    key = _finish_reason_key(finish_reason)
+    if key is not None and key in _KNOWN_FINISH_KINDS:
+        return FinishDecision(
+            accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
+        )
     if has_content or has_tool_calls or has_reasoning:
-        return FinishDecision(accept=True, unknown=True)
-    return FinishDecision(accept=False, unknown=True)
+        return FinishDecision(accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN)
+    return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)
 
 
 def is_model_unavailable_error(exc: BaseException) -> bool:

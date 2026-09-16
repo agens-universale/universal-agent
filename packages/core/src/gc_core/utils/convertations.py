@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
 from gc_core.utils.backend_errors import (
+    FINISH_KIND_LENGTH,
     nonempty_reasoning_text,
     normalize_finish_reason,
 )
@@ -170,7 +171,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                 "(content/tool_calls/reasoning present): payload=%s",
                 fr, _safe_json_for_log(dct),
             )
-        if fr == "length" and logger_override is not None:
+        if _decision.kind == FINISH_KIND_LENGTH and logger_override is not None:
             logger_override.warning(
                 "chat/completions choice finished with length (output may be truncated; "
                 "tool JSON may be incomplete). payload=%s",

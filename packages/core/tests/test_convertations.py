@@ -86,9 +86,15 @@ def _dct(finish_reason, content="ответ", tool_calls=None):
     return {"choices": [{"index": 0, "message": msg, "finish_reason": finish_reason}]}
 
 
+def test_get_output_list_accepts_blocked_finish_with_content():
+    # content_filter — известный blocked, не ValueError и не unknown warning
+    out = get_output_list(_dct("content_filter", content="текст"))
+    assert any(o["type"] == "message" for o in out)
+
+
 def test_get_output_list_accepts_unknown_finish_with_content():
     # раньше падало ValueError("Unknown finish reason"); теперь принимает
-    out = get_output_list(_dct("content_filter", content="текст"))
+    out = get_output_list(_dct("eos", content="текст"))
     assert any(o["type"] == "message" for o in out)
 
 def test_get_output_list_empty_unknown_finish_is_empty_batch():
@@ -137,14 +143,22 @@ def test_get_output_list_empty_unknown_finish_logs_error():
     log.warning.assert_not_called()
 
 
-def test_get_output_list_unknown_finish_with_content_logs_warning():
+def test_get_output_list_blocked_finish_with_content_no_unknown_warning():
     log = MagicMock()
     out = get_output_list(_dct("content_filter", content="текст"), logger_override=log)
+    assert any(o["type"] == "message" for o in out)
+    log.warning.assert_not_called()
+    log.error.assert_not_called()
+
+
+def test_get_output_list_unknown_finish_with_content_logs_warning():
+    log = MagicMock()
+    out = get_output_list(_dct("eos", content="текст"), logger_override=log)
     assert any(o["type"] == "message" for o in out)
     log.warning.assert_called_once()
     msg = log.warning.call_args[0][0] % log.warning.call_args[0][1:]
     assert "content/tool_calls/reasoning present" in msg
-    assert "content_filter" in msg
+    assert "eos" in msg
     log.error.assert_not_called()
 
 

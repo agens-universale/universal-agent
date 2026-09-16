@@ -68,7 +68,12 @@ from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
     extract_last_assistant_text,
     format_no_tool_call_bounce,
-    is_content_filter_finish,
+)
+from gc_core.utils.backend_errors import (
+    FINISH_KIND_LENGTH,
+    classify_finish_kind,
+    finish_blocks_final,
+    finish_prevents_text_final,
 )
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
@@ -690,7 +695,7 @@ _TRUNCATED_ARGUMENTS_HINT = (
 def _attach_truncation_hint(exc: WrongFunctionArgumentsException, state: Any) -> None:
     """Дописать объяснение про усечение к фидбэку, не затирая подсказку самого
     тула (wrong_arguments_feedback_hint), которую положило место возбуждения."""
-    if getattr(state, "last_finish_reason", None) != "length":
+    if classify_finish_kind(getattr(state, "last_finish_reason", None)) != FINISH_KIND_LENGTH:
         return
     hints = [h for h in (getattr(exc, "extra_hint", None), _TRUNCATED_ARGUMENTS_HINT) if h]
     exc.extra_hint = "\n\n".join(hints)
@@ -1502,10 +1507,11 @@ def run_agent(
                     )
                     last_finish = getattr(state, "last_finish_reason", None)
                     bounce_msg = format_no_tool_call_bounce(finish_reason=last_finish)
-                    # content_filter — отказ провайдера, не ответ модели: даже
-                    # text_answer_mode=allow не принимает его финалом, иначе
-                    # тот же промпт крутится до no_tool_call_max_count.
-                    if is_content_filter_finish(last_finish):
+                    # blocked / length — не финал даже в allow: отказ провайдера
+                    # или усечение (обрезок тулы/ответа). Иначе allow принимает
+                    # мусор и крутит до no_tool_call_max_count / сдаёт ход.
+                    # Payload уже в state/jsonl; reject → bounce, не discard.
+                    if finish_prevents_text_final(last_finish):
                         decision_accept = False
                         decision_reject_feedback = None
                     else:
@@ -1541,10 +1547,16 @@ def run_agent(
                     tool_error_cnt += 1
                     if decision_reject_feedback is not None:      # judge-reject c причиной
                         bounce_msg = decision_reject_feedback
-                    elif is_content_filter_finish(last_finish):
+                    elif finish_blocks_final(last_finish):
                         run_logger.warning(
-                            "Provider blocked the completion (content_filter); "
-                            "requesting a rephrased attempt"
+                            "Provider blocked the completion (%s); "
+                            "requesting a rephrased attempt",
+                            last_finish,
+                        )
+                    elif classify_finish_kind(last_finish) == FINISH_KIND_LENGTH:
+                        run_logger.warning(
+                            "Agent response truncated (finish_reason=length); "
+                            "requesting a shorter tool call"
                         )
                     else:                                         # deny / пусто / нет гейта / ошибка
                         run_logger.warning(
