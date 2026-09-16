@@ -65,6 +65,27 @@ class ExecuteCommand(AbstractSimpleTool):
                             "additionalProperties": False,
                         },
                     },
+                    "run_in_background": {
+                        "type": "boolean",
+                        "description": (
+                            "Start the command detached and return immediately, without waiting "
+                            "for it to finish. Use this for anything long-lived: dev servers, "
+                            "watchers, `npm run dev`, `uvicorn`. The reply carries the pid and the "
+                            "log path instead of the output. A command started WITHOUT this flag "
+                            "does not outlive the call — appending `&` to it is not enough, "
+                            "because its output pipes close when the call returns."
+                        ),
+                    },
+                    "log_path": {
+                        "type": "string",
+                        "description": (
+                            "Where to write the background command's output. Defaults to a file "
+                            "under .gc/tmp/ inside the project. Only used together with "
+                            "run_in_background. A path outside the project requires the user's "
+                            "confirmation; if writing is refused the command still starts, but its "
+                            "output is discarded — the reply says so explicitly."
+                        ),
+                    },
                 },
                 "required": ["command"],
                 "additionalProperties": False
@@ -85,6 +106,13 @@ Usage:
 - The command is executed in the current working directory.
 - Always returns both stdout and stderr; check ok / exit_code for success or failure.
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
+- Long-lived commands (dev servers, watchers, `npm run dev`, `uvicorn`) MUST be started
+  with `run_in_background: true`. They then keep running after this call returns and
+  after the agent itself exits, and you read their output from the returned log path.
+  Appending `&` to a normal foreground command is NOT enough: such a command is killed
+  on timeout and its output pipes close when the call returns.
+- On timeout the command is stopped and its work is lost. If it simply needs longer,
+  re-run it with a bigger `timeout_seconds`, or start it with `run_in_background: true`.
 - Don't remove or create any files or folders outside of project directory!
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
 - This tool is essential for inspecting system state, verifying installations, or automating workflows.
@@ -320,6 +348,8 @@ Important Usage Rules:
         timeout_seconds: int | None = None,
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
+        run_in_background: bool = False,
+        log_path: str | None = None,
         **kwargs,
     ) -> str:
         """Нативный вход: процесс через ``asyncio.create_subprocess_shell``.
@@ -343,6 +373,8 @@ Important Usage Rules:
         early, plan = await self._plan(command, timeout_seconds, cwd, env_vars)
         if early is not None:
             return early
+        if run_in_background:
+            return await self._abackground(plan, log_path)
         try:
             res = await aexec_port(self._backend).aexec(
                 plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
@@ -351,6 +383,135 @@ Important Usage Rules:
         except Exception as exc:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)
+
+    async def _abackground(self, plan: dict, log_path: str | None) -> str:
+        """Запустить и НЕ ждать: отдать pid и путь к логу.
+
+        Два случая разведены намеренно. Команда переднего плана живёт секунды,
+        её вывод нужен сейчас, и переживать вызов она не должна. Долгоживущая —
+        наоборот: ждать её нельзя, а её вывод приходит часами, поэтому он идёт
+        в ФАЙЛ, который не зависит от того, жив ли читатель. Ровно поэтому фон
+        переживает и конец хода, и выход самого агента: файлу всё равно, кто
+        его открыл.
+
+        Лог открываем ЗДЕСЬ, а не в бэкенде: решение принимает гард записи, а
+        он живёт на слое тулы. Бэкенд получает готовый дескриптор либо ничего.
+        """
+        import os
+        import time
+
+        from gc_core.config_modules.env_vars import project_gc_dir
+        from gc_core.security.path_policy import (
+            WriteGuardViolation,
+            check_write_path_allowed,
+            resolve_tool_context,
+        )
+
+        cwd_used = plan["cwd"]
+        log_fd: int | None = None
+        note = ""
+        try:
+            context = resolve_tool_context(self)
+        except Exception as exc:                      # контекст не собрался
+            return self._exec_failed(plan, exc)
+
+        if log_path:
+            candidate = log_path
+        else:
+            # Якорь — КОРЕНЬ ПРОЕКТА, а не cwd команды: иначе `exec` с
+            # `cwd=/tmp` заводил бы лог в `/tmp/.gc/tmp/`, то есть вне
+            # периметра и там, где его никто не найдёт.
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            candidate = str(project_gc_dir(context.launch_root) / "tmp" / f"bg-{stamp}.log")
+
+        try:
+            allowed = check_write_path_allowed(
+                candidate,
+                context.launch_root,
+                context.write_guard.extra_paths,
+                base_dir=cwd_used or context.launch_root,
+                operation="write",
+            )
+        except WriteGuardViolation as exc:
+            allowed = None
+            note = await self._aconfirm_log_path(candidate, exc)
+            if note == "":
+                allowed = os.path.abspath(candidate)
+
+        if allowed is not None:
+            try:
+                os.makedirs(os.path.dirname(str(allowed)) or ".", exist_ok=True)
+                log_fd = os.open(str(allowed), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            except OSError as exc:
+                # Молчаливый откат — худшее, что тут можно сделать: модель пойдёт
+                # читать лог, которого нет, и начнёт строить догадки.
+                allowed = None
+                note = f"log not written ({exc.strerror or exc}); output discarded"
+
+        try:
+            started = await self._backend.aspawn_background(
+                plan["command"], cwd=cwd_used, env=plan["env"], log_fd=log_fd,
+            )
+        except Exception as exc:
+            return self._exec_failed(plan, exc)
+        finally:
+            if log_fd is not None:
+                try:
+                    os.close(log_fd)          # копия потомка своя
+                except OSError:
+                    pass
+
+        background = {"pid": started.get("pid"), "log_path": str(allowed) if allowed else None}
+        if note:
+            background["note"] = note
+        return build_exec_envelope(
+            tool=ExecuteCommand.registered_tool_name(),
+            ok=True,
+            exit_code=None,
+            timed_out=False,
+            stdout=as_captured_stream(""),
+            stderr=as_captured_stream(""),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            error=None,
+            head_fields={
+                "command": plan["command"],
+                "cwd": cwd_used or "",
+                "background": background,
+            },
+        )
+
+    async def _aconfirm_log_path(self, candidate: str, exc: "Exception") -> str:
+        """Путь вне периметра: спросить пользователя тем же вопросом, что и гард.
+
+        Возврат — пустая строка, если писать разрешили, иначе объяснение для
+        модели. Подтверждение ждётся В ПОТОКЕ: на event loop висят соседние
+        агенты и keep-alive MCP-сессий, и держать их ради вопроса нельзя.
+        """
+        import asyncio
+
+        from gc_core.constants.tool_names import EXEC_COMMAND_NAME
+        from gc_core.security.path_policy import resolve_tool_context
+        # Приватный помощник берём намеренно: у вопроса о записи вне периметра
+        # должен быть ОДИН текст и одна память решений, а не второй такой же.
+        from gc_core.security.path_policy import _ask_user_confirmation_for_write
+
+        context = resolve_tool_context(self)
+        mode = (context.write_guard.mode or "deny").strip().lower()
+        if not context.write_guard.enabled or mode == "allow":
+            return ""
+        if mode != "ask":
+            return "log path is outside the project perimeter; output discarded"
+        confirmed = await asyncio.to_thread(
+            _ask_user_confirmation_for_write,
+            tool_name=EXEC_COMMAND_NAME,
+            path=candidate,
+            operation="write",
+            error=getattr(exc, "error", {"type": "write_guard_violation"}),
+            ctx=context.ctx,
+        )
+        if confirmed:
+            return ""
+        return "user declined writing the log outside the project; output discarded"
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:
         """Отказ запуска — общий для обоих входов."""
