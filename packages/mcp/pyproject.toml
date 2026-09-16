@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-mcp"
 # Версии ВСЕХ манифестов обязаны совпадать: профили пинят друг друга точно.
-version = "0.3.0"
+version = "0.3.1"
 description = "GigaCode Universal Agent — менеджер MCP-серверов и курируемые рецепты"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.3.0",
+    "gc-core==0.3.1",
     "pyyaml>=6.0.3",
 ]
 
