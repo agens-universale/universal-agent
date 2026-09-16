@@ -2,8 +2,12 @@ import asyncio
 import subprocess
 import threading
 import pytest
-from gc_core.backends.harbor import HarborBackend
+from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
 from gc_core.backends.protocol import FsBackend
+
+
+def _user_shell(command, *, cwd=None, env=None):
+    return build_harbor_shell_command(command, cwd=cwd, env=env, exec_init="bashrc")
 
 
 class FakeExecResult:
@@ -53,11 +57,17 @@ def loop_in_thread():
 
 def test_exec_bridges_sync_to_async(loop_in_thread):
     env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     result = backend.exec("echo hi")
     assert result.return_code == 0
-    assert result.stdout == "ran:echo hi"
-    assert env.calls == ["echo hi"]
+    wired = _user_shell("echo hi")
+    assert result.stdout == f"ran:{wired}"
+    assert env.calls == [wired]
+    assert "echo hi" in wired
+    assert ".bashrc" in wired
+    assert "PS1=" in wired
+    assert "testbed" not in wired
+    assert "/opt/miniconda" not in wired
 
 
 def test_write_uses_upload(loop_in_thread):
@@ -197,24 +207,28 @@ def test_append_concatenates_existing_content(loop_in_thread):
 
 def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     backend.exec("echo hi", env={"FOO": "bar baz"})
-    assert env.calls == ["env FOO='bar baz' bash -c 'echo hi'"]
+    assert env.calls == [_user_shell("echo hi", env={"FOO": "bar baz"})]
+    assert env.calls[0].startswith("env FOO='bar baz' bash -c ")
 
 
 def test_exec_env_prefix_with_cwd(loop_in_thread):
     env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     backend.exec("echo hi", cwd="/work", env={"FOO": "bar"})
-    assert env.calls == ["cd /work && env FOO=bar bash -c 'echo hi'"]
+    wired = env.calls[0]
+    assert wired == _user_shell("echo hi", cwd="/work", env={"FOO": "bar"})
+    assert wired.startswith("cd /work && env FOO=bar bash -c ")
+    assert not wired.startswith("env ")
 
 
 def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path):
-    """`env` must not swallow `cd`/`&&`: the user script runs inside bash -c."""
+    """`env` must not swallow `cd`/`&&`: with exec_init the script is one bash -c arg."""
     work = tmp_path / "proj"
     work.mkdir()
     env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     backend.exec(
         'cd sub && printf "%s\\n" "$FOO" && printf "%s\\n" "$(pwd)"',
         cwd=str(work),
@@ -249,6 +263,60 @@ def test_run_python_env_survives_bash_c_wrap(loop_in_thread):
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == "it's\n"
+
+
+def test_exec_raw_is_bare_posix(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    result = backend.exec_raw("echo hi")
+    assert result.stdout == "ran:echo hi"
+    assert env.calls == ["echo hi"]
+
+
+def test_exec_raw_env_cwd_without_profile(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exec_raw("echo hi", cwd="/work", env={"FOO": "bar baz"})
+    assert env.calls == ["cd /work && env FOO='bar baz' echo hi"]
+    assert ".bashrc" not in env.calls[0]
+
+
+def test_fs_helpers_use_raw_channel(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.exists("/work/a.txt")
+    assert env.calls == ["test -e /work/a.txt"]
+    env.calls.clear()
+    backend.walk_entries("/work")
+    assert env.calls[-1].startswith("find -H /work")
+    assert ".bashrc" not in env.calls[-1]
+
+
+def test_build_harbor_shell_command_quotes_user_inner():
+    import shlex
+
+    from gc_core.backends.harbor import _BASHRC_EXEC_INIT
+
+    wired = build_harbor_shell_command(
+        "echo hi", cwd="/work", env={"FOO": "bar baz"}, exec_init="bashrc"
+    )
+    assert wired.startswith("cd /work && env FOO='bar baz' bash -c ")
+    inner = shlex.split(wired)[-1]
+    assert inner.startswith(_BASHRC_EXEC_INIT)
+    assert inner.endswith("echo hi")
+    raw = build_harbor_shell_command("echo hi", cwd="/work", env={"FOO": "x"})
+    assert raw == "cd /work && env FOO=x echo hi"
+
+
+def test_exec_defaults_to_raw_and_custom_init_is_prefixed(loop_in_thread):
+    env = FakeEnv()
+    HarborBackend(env, loop_in_thread).exec("echo raw")
+    assert env.calls == ["echo raw"]
+
+    env.calls.clear()
+    HarborBackend(env, loop_in_thread, exec_init="export READY=1").exec("echo custom")
+    inner = __import__("shlex").split(env.calls[0])[-1]
+    assert inner == "export READY=1\necho custom"
 
 
 def test_every_impl_signature_accepts_protocol_parameters():

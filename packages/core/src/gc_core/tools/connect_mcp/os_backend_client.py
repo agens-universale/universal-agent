@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
+from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS, run_backend_exec_raw
 from gc_core.tools.connect_mcp.client import (
     MCP_INIT_PARAMS,
     _merge_mcp_headers,
@@ -226,7 +226,8 @@ class OsBackendStatelessClient(McpClientPort):
         """Probe once per backend: the carrier is an environment property."""
         cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
         if cached is None:
-            probe = self.os_backend.exec(
+            probe = run_backend_exec_raw(
+                self.os_backend,
                 "command -v python3 2>/dev/null || true",
                 timeout=min(_PROBE_TIMEOUT_SEC, max(1, int(timeout))),
             )

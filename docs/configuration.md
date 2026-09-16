@@ -238,6 +238,12 @@ mcp:
 - `agent.exec_timeout_sec` — дефолтный таймаут `execute_command` / `run_python_code`
   (секунды), если модель не передала `timeout`. По умолчанию `120`. Для длинных
   контейнерных сборок (Harbor) обычно поднимают до `600`.
+- `agent.harbor_exec_init` — инициализация окружения перед model-facing
+  `execute_command` при `os_backend: harbor`. По умолчанию `null`: команда уходит в
+  сырой shell без profile. Значение `bashrc` включает встроенный типовой bootstrap
+  (`/etc/profile` и `~/.bashrc` с обходом non-interactive guard). Любая другая
+  непустая строка выполняется как custom shell-префикс перед командой. Внутренние
+  FS/search/capability/MCP-вызовы всегда используют raw-канал и этот ключ игнорируют.
 - `agent.exec_output_capture_max_chars` — потолок захвата stdout/stderr на поток
   (decoded UTF-8 chars) для exec. По умолчанию `40000`: первые `floor(L/2)` символов
   головы и последние `L - floor(L/2)` символов настоящего хвоста, середина необратимо

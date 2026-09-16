@@ -14,6 +14,7 @@ import tempfile
 import uuid
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
+from gc_core.backends.protocol import run_backend_exec_raw
 from gc_core.backends.walk_util import WalkEntry
 from gc_core.utils.native_fs_search import (
     build_find_xargs_grep_command,
@@ -55,7 +56,7 @@ def _which_bin(backend: "FsBackend", name: str) -> Optional[str]:
     """Resolve binary via backend exec (no shell alias). Fail → None."""
     # Prefer `command -v` (POSIX); fall back to plain name.
     try:
-        res = backend.exec(f"command -v {shlex.quote(name)}", timeout=10)
+        res = run_backend_exec_raw(backend, f"command -v {shlex.quote(name)}", timeout=10)
         if res.return_code == 0:
             path = (res.stdout or "").strip().splitlines()
             if path and path[0]:
@@ -137,16 +138,16 @@ def probe_has_grep(backend: "FsBackend") -> bool:
     host_tmp: Optional[str] = None
     try:
         if getattr(backend, "is_sandbox", False):
-            res = backend.exec("mktemp -d -t gc_probe_XXXXXX", timeout=10)
+            res = run_backend_exec_raw(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
             if res.return_code != 0 or not (res.stdout or "").strip():
                 tmp_remote = f"/tmp/{_probe_tmp_name()}"
-                mk = backend.exec(f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+                mk = run_backend_exec_raw(backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
                 if mk.return_code != 0:
                     return False
             else:
                 tmp_remote = (res.stdout or "").strip().splitlines()[0].strip()
             fpath = f"{tmp_remote.rstrip('/')}/beta.txt"
-            w = backend.exec(
+            w = run_backend_exec_raw(backend,
                 f"printf 'alpha\\nbeta\\n' > {shlex.quote(fpath)}", timeout=10
             )
             if w.return_code != 0:
@@ -191,7 +192,7 @@ def probe_has_grep(backend: "FsBackend") -> bool:
     finally:
         try:
             if tmp_remote:
-                backend.exec(f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+                run_backend_exec_raw(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
         except Exception:
             pass
         if host_tmp:
@@ -211,7 +212,7 @@ def _make_probe_tree(backend: "FsBackend"):
     def cleanup() -> None:
         try:
             if tmp_remote:
-                backend.exec(f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+                run_backend_exec_raw(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
         except Exception:
             pass
         if host_tmp:
@@ -223,10 +224,10 @@ def _make_probe_tree(backend: "FsBackend"):
                 pass
 
     if getattr(backend, "is_sandbox", False):
-        res = backend.exec("mktemp -d -t gc_probe_XXXXXX", timeout=10)
+        res = run_backend_exec_raw(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
         if res.return_code != 0 or not (res.stdout or "").strip():
             tmp_remote = f"/tmp/{_probe_tmp_name()}"
-            mk = backend.exec(f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+            mk = run_backend_exec_raw(backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
             if mk.return_code != 0:
                 return None, cleanup
         else:
@@ -239,7 +240,7 @@ def _make_probe_tree(backend: "FsBackend"):
             f"printf 'secret\\n' > {shlex.quote(root + '/other.py')} && "
             f"printf 'secret\\n' > {shlex.quote(root + '/other.txt')}"
         )
-        w = backend.exec(cmds, timeout=10)
+        w = run_backend_exec_raw(backend, cmds, timeout=10)
         if w.return_code != 0:
             return None, cleanup
         return root, cleanup
@@ -328,7 +329,7 @@ def probe_find_xargs_grep(backend: "FsBackend") -> bool:
     try:
         if not root:
             return False
-        res = backend.exec(
+        res = run_backend_exec_raw(backend,
             build_find_xargs_grep_command(
                 root,
                 exclude_dir_names=["skip"],
@@ -349,7 +350,7 @@ def probe_find_xargs_grep(backend: "FsBackend") -> bool:
             return False
 
         # -r step: find matches nothing → xargs must not invoke grep at all.
-        res = backend.exec(
+        res = run_backend_exec_raw(backend,
             build_find_xargs_grep_command(
                 root,
                 exclude_dir_names=["skip"],
