@@ -83,6 +83,9 @@ class AgentConfig(BaseModel):
     # (Harbor: find -printf для walk/listdir), нативный grep, MCP-carrier под os_backend.
     # Переполнение — fail-closed: walk_too_large / McpExecCarrierError, не частичный ответ.
     walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS
+    # Инициализация model-facing exec в Harbor: None = raw, "bashrc" = встроенный
+    # profile/bootstrap, любая другая непустая строка = custom shell-префикс.
+    harbor_exec_init: str | None = None
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
     inject_tool_fields: dict[str, str] = Field(default_factory=dict)
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
@@ -187,6 +190,16 @@ class AgentConfig(BaseModel):
             raise ValueError("agent.model_steering должен быть строкой")
         return value.strip()
 
+    @field_validator("harbor_exec_init", mode="before")
+    @classmethod
+    def normalize_harbor_exec_init(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("agent.harbor_exec_init должен быть строкой или null")
+        text = value.strip()
+        return text or None
+
 
 def exec_output_preview_edge_chars_from_config_dict(
     config_dict: dict[str, Any] | None,
@@ -244,6 +257,18 @@ def walk_output_max_chars_from_config_dict(
     except (TypeError, ValueError):
         return WALK_OUTPUT_MAX_CHARS
     return n if n > 0 else WALK_OUTPUT_MAX_CHARS
+
+
+def harbor_exec_init_from_config_dict(
+    config_dict: dict[str, Any] | None,
+) -> str | None:
+    """Optional Harbor model-facing shell init from the flat config."""
+    raw = (config_dict or {}).get("harbor_exec_init")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError("harbor_exec_init должен быть строкой или null")
+    return raw.strip() or None
 
 
 def resolve_model_steering_text(

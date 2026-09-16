@@ -87,7 +87,7 @@ class _PosixBox(LocalFsBackend):
 
     # --- exec surface ---
 
-    def exec(self, command, *, cwd=None, timeout=None, env=None):
+    def exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.commands.append(command)
         if command.startswith("command -v "):
             name = shlex.split(command)[2]
@@ -96,7 +96,7 @@ class _PosixBox(LocalFsBackend):
             return self._pipeline(command)
         return ExecResult("", "", 0)
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None):
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
         argv = [str(a) for a in argv]
         self.commands.append(" ".join(argv))
         prog = os.path.basename(argv[0])

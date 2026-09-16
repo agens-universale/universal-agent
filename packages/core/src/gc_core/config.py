@@ -402,6 +402,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
         "exec_output_preview_edge_chars": app_cfg.agent.exec_output_preview_edge_chars,
         "walk_output_max_chars": app_cfg.agent.walk_output_max_chars,
+        "harbor_exec_init": app_cfg.agent.harbor_exec_init,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "model_steering": app_cfg.agent.model_steering,
         "limit_trace_summary": app_cfg.agent.limit_trace_summary,
