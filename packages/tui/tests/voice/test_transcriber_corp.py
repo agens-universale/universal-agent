@@ -1,6 +1,6 @@
 # tests/voice/test_transcriber_corp.py
 """Корп-сеть: TLS-перехват облачного STT лечится системным трастом (retry)."""
-import requests
+from gc_testkit.net_support import tls_failure
 
 from gc_tui.voice_runtime import net as net
 from gc_tui.voice.transcriber import transcribe
@@ -22,7 +22,7 @@ def test_openai_retries_after_ssl_error(monkeypatch):
     def fake_post(url, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise requests.exceptions.SSLError("self-signed certificate in chain")
+            raise tls_failure()                # так TLS-отказ приходит из httpx
         return Resp()
 
     monkeypatch.setattr("gc_tui.voice.transcriber.voice_post", fake_post)

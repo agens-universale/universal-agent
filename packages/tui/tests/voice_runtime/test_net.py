@@ -2,7 +2,11 @@
 import ssl
 
 import pytest
-import requests
+
+# Форма отказа — общая на два набора, поэтому из gc_testkit. Раньше тесты кидали
+# `requests.exceptions.SSLError`: форму, которой на этом пути не бывает с
+# переезда ядра на httpx, — и проверяли ветку, которой нет.
+from gc_testkit.net_support import tls_failure
 
 from gc_tui.voice_runtime import net as net
 
@@ -26,7 +30,7 @@ def test_ssl_error_injects_once_and_retries(monkeypatch):
     def fn():
         calls["fn"] += 1
         if calls["fn"] == 1:
-            raise requests.exceptions.SSLError("self-signed in chain")
+            raise tls_failure()
         return "ok"
 
     assert net.with_system_trust_retry(fn) == "ok"
