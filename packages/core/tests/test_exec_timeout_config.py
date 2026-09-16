@@ -158,6 +158,19 @@ def test_run_python_uses_config_default(monkeypatch):
     assert seen["timeout"] == 600
 
 
+def test_tool_schema_timeout_default_comes_from_config():
+    for cls in (ExecuteCommand, RunPythonCode):
+        spec = cls.tool_description({"exec_timeout_sec": 600})
+        timeout = spec["parameters"]["properties"]["timeout"]
+        assert timeout["default"] == 600
+        assert "600" in timeout["description"]
+        assert "120" not in timeout["description"]
+        assert '"default": 600' in cls.prompt_description({"exec_timeout_sec": 600})
+
+        omitted = cls.tool_description()
+        assert omitted["parameters"]["properties"]["timeout"]["default"] == DEFAULT_EXEC_TIMEOUT_SEC
+
+
 def test_tool_descriptions_stay_lean():
     for cls in (ExecuteCommand, RunPythonCode):
         desc = cls.tool_description()

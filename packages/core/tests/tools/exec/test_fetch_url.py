@@ -52,7 +52,7 @@ def test_fetch_url_validation():
     tool = with_local_ctx(FetchUrl)
     assert json.loads(tool(url=""))["error"]["field"] == "url"
     assert json.loads(tool(url="ftp://x"))["error"]["field"] == "url"
-    assert json.loads(tool(url="https://x", timeout_seconds=-1))["error"]["field"] == "timeout_seconds"
+    assert json.loads(tool(url="https://x", timeout=-1))["error"]["field"] == "timeout"
     assert json.loads(tool(url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
     assert json.loads(tool(url="https://x", offset=-1))["error"]["field"] == "offset"
     assert json.loads(tool(url="https://x", limit=0))["error"]["field"] == "limit"

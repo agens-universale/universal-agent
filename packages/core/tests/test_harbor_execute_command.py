@@ -43,7 +43,7 @@ def test_envelope_shape_matches_base_contract():
 
 
 def test_default_timeout_flows_from_exec_timeout_sec_config():
-    """When timeout_seconds is omitted, agent.exec_timeout_sec from config is used."""
+    """When timeout is omitted, agent.exec_timeout_sec from config is used."""
     b = _RecordingFakeBackend()
     _tool(b, config_dict={"exec_timeout_sec": 600})(command="x")
     assert b.calls[0]["timeout"] == 600
@@ -55,9 +55,9 @@ def test_default_timeout_without_config_is_schema_default():
     assert b.calls[0]["timeout"] == 120
 
 
-def test_explicit_timeout_seconds_forwarded():
+def test_explicit_timeout_forwarded():
     b = _RecordingFakeBackend()
-    _tool(b)(command="x", timeout_seconds=90)
+    _tool(b)(command="x", timeout=90)
     assert b.calls[0]["timeout"] == 90
 
 
@@ -95,7 +95,7 @@ def test_empty_command_keeps_base_message():
 
 def test_timed_out_result_sets_timeout_envelope():
     b = _RecordingFakeBackend(timed_out=True)
-    env = json.loads(_tool(b)(command="x", timeout_seconds=1))
+    env = json.loads(_tool(b)(command="x", timeout=1))
     assert env["ok"] is False
     assert env["timed_out"] is True
     assert env["exit_code"] is None
@@ -160,25 +160,25 @@ def test_env_vars_item_not_dict_returns_invalid_argument():
     assert len(b.calls) == 0
 
 
-# --- Gap 2: timeout_seconds and max_output_chars validation ---
+# --- Gap 2: timeout and max_output_chars validation ---
 
-def test_timeout_seconds_zero_returns_invalid_argument():
-    """timeout_seconds=0 must return invalid_argument with field='timeout_seconds'."""
+def test_timeout_zero_returns_invalid_argument():
+    """timeout=0 must return invalid_argument with field='timeout'."""
     b = _RecordingFakeBackend()
-    env = json.loads(_tool(b)(command="x", timeout_seconds=0))
+    env = json.loads(_tool(b)(command="x", timeout=0))
     assert env["ok"] is False
     assert env["error"]["type"] == "invalid_argument"
-    assert env["error"]["field"] == "timeout_seconds"
+    assert env["error"]["field"] == "timeout"
     assert len(b.calls) == 0
 
 
-def test_timeout_seconds_negative_returns_invalid_argument():
-    """timeout_seconds<0 must return invalid_argument."""
+def test_timeout_negative_returns_invalid_argument():
+    """timeout<0 must return invalid_argument."""
     b = _RecordingFakeBackend()
-    env = json.loads(_tool(b)(command="x", timeout_seconds=-5))
+    env = json.loads(_tool(b)(command="x", timeout=-5))
     assert env["ok"] is False
     assert env["error"]["type"] == "invalid_argument"
-    assert env["error"]["field"] == "timeout_seconds"
+    assert env["error"]["field"] == "timeout"
 
 
 def test_max_output_chars_argument_no_longer_exists():

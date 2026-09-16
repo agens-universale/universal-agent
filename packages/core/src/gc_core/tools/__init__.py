@@ -7,10 +7,10 @@ import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
 from gc_core.tools.connect_mcp import get_mcp_tools_data
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, annotate_output_with_dropped_arguments, parse_and_validate_tool_arguments
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
-from gc_core.tools.registry import get_builtin_tools_data
+from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
 from gc_core.tools.skills.registry import SkillsRegistry
@@ -177,10 +177,11 @@ def apply_subagent_tools_filter(
     ``build_tools_data``. Фильтр в раннере пришлось бы дублировать, и два
     call-site'а обязаны были бы оставаться синхронными.
 
-    Применяется ПОСЛЕ подмешивания скиллов и MCP (иначе ``mcp_*`` было бы не
-    отфильтровать, как это происходит с глобальным ``stop_tools``) и ДО сборки
-    ``tools_spec`` — иначе модель увидела бы в схеме тул, который не сможет
-    вызвать.
+    Применяется ПОСЛЕ подмешивания скиллов и MCP, ПОСЛЕ глобального
+    ``stop_tools`` по слитому набору и ДО сборки ``tools_spec`` — иначе модель
+    увидела бы в схеме тул, который не сможет вызвать. Глобальный stop идёт
+    раньше: служебное ядро возвращается только если оно ещё есть во входящем
+    наборе, снятое им не восстанавливаем.
     """
     allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
     stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
@@ -238,10 +239,19 @@ def build_tools_data(
     os_backend: FsBackend | None = None,
     skills_registry: SkillsRegistry | None = None,
     logger: Any = None,
+    registered_names: Optional[list] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """
     Собрать единый словарь tools_data и производные списки spec/description
     на основе config_dict.
+
+    ``stop_tools`` режет уже слитый набор (builtin + скиллы + MCP + сабагенты),
+    до сабагентского фильтра: тот возвращает служебное ядро только из входящего
+    набора и не должен восстанавливать глобально снятое.
+
+    ``registered_names`` — опциональный out-список. Если передан, в него
+    записываются имена до вычитания ``stop_tools`` (для валидатора: успешно
+    снятый тул не опечатка).
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
@@ -274,6 +284,12 @@ def build_tools_data(
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
 
+    # Каталог до вычитания: валидатор stop_tools сверяется с ним, а не с уже
+    # отфильтрованным словарём (снятый skills_list иначе снова «опечатка»).
+    if registered_names is not None:
+        registered_names[:] = list(tools_data)
+
+    tools_data = _apply_stop_tools(tools_data, config_dict)
     tools_data = apply_subagent_tools_filter(tools_data, config_dict, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
@@ -387,12 +403,14 @@ def apply_tool(
             return f"Subagent {tool_name}: missing state or run_agent_func"
         entry = tools_data_.get(tool_name) or {}
         tool_spec = entry.get("spec", {}) or {}
+        dropped_unknown: list[str] = []
         parsed_args = parse_and_validate_tool_arguments(
             tool_name=tool_name,
             arguments=arguments,
             tool_spec=tool_spec,
             allow_empty_for_empty_schema=False,
             tool_fabric=entry.get("tool_fabric"),
+            dropped_unknown=dropped_unknown,
         )
         prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
         if callable(prepare):
@@ -402,11 +420,14 @@ def apply_tool(
             injected_fields=entry.get("injected_fields") or [],
         )
         runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-        return runner.run(
-            tool_name,
-            parsed_args,
-            run_agent_func,
-            parent_call_id=kwargs.get("call_id"),
+        return annotate_output_with_dropped_arguments(
+            runner.run(
+                tool_name,
+                parsed_args,
+                run_agent_func,
+                parent_call_id=kwargs.get("call_id"),
+            ),
+            dropped_unknown,
         )
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
@@ -429,12 +450,14 @@ def apply_tool(
 
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
+    dropped_unknown: list[str] = []
     arguments = parse_and_validate_tool_arguments(
         tool_name=tool_name,
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
         tool_fabric=tool_fabric,
+        dropped_unknown=dropped_unknown,
     )
     entry = tools_data_[tool_name]
     prepare = getattr(tool_fabric, "prepare_args_before_strip", None)
@@ -476,10 +499,13 @@ def apply_tool(
             tool_name,
             call_id,
         )
-        return format_internal_tool_error_output(
-            tool_name=tool_name,
-            exc=e,
-            call_id=call_id,
+        return annotate_output_with_dropped_arguments(
+            format_internal_tool_error_output(
+                tool_name=tool_name,
+                exc=e,
+                call_id=call_id,
+            ),
+            dropped_unknown,
         )
 
     if isinstance(res, str):
@@ -491,7 +517,7 @@ def apply_tool(
     else:
         res_str = str(res)
 
-    return res_str
+    return annotate_output_with_dropped_arguments(res_str, dropped_unknown)
 
 
 __all__ = [

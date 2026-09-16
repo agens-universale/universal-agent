@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 import threading
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
@@ -222,6 +223,48 @@ def test_exec_env_prefix_with_cwd(loop_in_thread):
     assert not wired.startswith("env ")
 
 
+def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path):
+    """`env` must not swallow `cd`/`&&`: with exec_init the script is one bash -c arg."""
+    work = tmp_path / "proj"
+    work.mkdir()
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    backend.exec(
+        'cd sub && printf "%s\\n" "$FOO" && printf "%s\\n" "$(pwd)"',
+        cwd=str(work),
+        env={"FOO": "bar baz"},
+    )
+    script = env.calls[0]
+    assert script.startswith(f"cd {work} && env FOO='bar baz' bash -c ")
+    # cwd снаружи, скрипт агента — один закавыченный аргумент, не префикс env.
+    assert "cd sub &&" in script.split("bash -c ", 1)[1]
+
+    (work / "sub").mkdir()
+    proc = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == f"bar baz\n{work / 'sub'}\n"
+
+
+def test_run_python_env_survives_bash_c_wrap(loop_in_thread):
+    """Heredoc of run_python must still run after the env prefix is quoted."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    backend.run_python("import os\nprint(os.environ['FOO'])\n", env={"FOO": "it's"})
+    proc = subprocess.run(
+        ["bash", "-c", env.calls[0]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "it's\n"
+
+
 def test_exec_raw_is_bare_posix(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
@@ -350,10 +393,10 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     async def head_exec(command, **kw):
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
-            return FakeExecResult(
-                stdout=base64.b64encode(raw).decode("ascii"),
-                return_code=0,
-            )
+            # Default GNU wrap (76 cols). ``-w 0`` is a one-line blob and
+            # trips Harbor's 64 KiB readline.
+            wrapped = base64.encodebytes(raw).decode("ascii")
+            return FakeExecResult(stdout=wrapped, return_code=0)
         return FakeExecResult(stdout="", return_code=1)
 
     env.exec = head_exec
@@ -361,7 +404,7 @@ def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     sample = backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
     assert any(
-        c.startswith("head -c 3 ") and "| base64" in c for c in env.calls
+        c.startswith("head -c 3 ") and c.endswith("| base64") for c in env.calls
     )
 
 

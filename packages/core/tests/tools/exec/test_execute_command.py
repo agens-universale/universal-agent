@@ -23,7 +23,7 @@ def test_execute_env_timeout_and_truncation(tmp_path):
         )
     )
     assert env["ok"] is True and env["stdout"]["content"].rstrip("\n") == "v"
-    timeout = json.loads(tool(command=f'"{sys.executable}" -c "import time; time.sleep(2)"', timeout_seconds=1))
+    timeout = json.loads(tool(command=f'"{sys.executable}" -c "import time; time.sleep(2)"', timeout=1))
     assert timeout["ok"] is False and timeout["timed_out"] is True
     trunc_tool = with_local_ctx(
         ExecuteCommand,
@@ -38,7 +38,7 @@ def test_execute_env_timeout_and_truncation(tmp_path):
 def test_execute_validation(tmp_path):
     tool = with_local_ctx(ExecuteCommand)
     assert json.loads(tool(command=""))["error"]["field"] == "command"
-    assert json.loads(tool(command="echo 1", timeout_seconds=0))["error"]["field"] == "timeout_seconds"
+    assert json.loads(tool(command="echo 1", timeout=0))["error"]["field"] == "timeout"
     assert json.loads(tool(command="echo 1", cwd=str(tmp_path / "none")))["error"]["field"] == "cwd"
 
 
