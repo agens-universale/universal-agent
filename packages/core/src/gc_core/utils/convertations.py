@@ -126,6 +126,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
     ``reasoning_content`` копируется в канон только при ``persist_reasoning_content``.
     Reasoning-only без tools и без прозы (дефолтный strip) salvage в ``<think>…</think>``.
     Смешанный ход (think + проза): при strip think в канон не кладётся, остаётся проза.
+    Tools + think-only content при strip: message не эмитим (только function_call).
     Совсем пустой choice — пустой output (цикл bounce), не ValueError.
     """
     output_list = []
@@ -181,12 +182,21 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
         text_out = None
         item_reasoning = persist_field if persist_reasoning_content else None
         if has_tools:
-            # Случай A: tools. Salvage не трогает. Носитель CoT — только persist.
-            if content is not None or item_reasoning is not None:
-                raw = "" if content is None else content
-                text_out = _canon_content_text(
-                    raw, persist_reasoning=persist_reasoning_content
-                )
+            # Случай A: tools. Salvage не трогает. CoT в историю — только persist.
+            # Think-only inline content при strip не эмитим (как reasoning_content).
+            if persist_reasoning_content:
+                if content is not None or item_reasoning is not None:
+                    raw = "" if content is None else content
+                    text_out = _canon_content_text(raw, persist_reasoning=True)
+            elif content is not None:
+                if isinstance(content, str):
+                    prose = _visible_prose_without_think(content)
+                    if prose:
+                        text_out = _canon_content_text(
+                            content, persist_reasoning=False
+                        )
+                else:
+                    text_out = content
         elif content:
             # Think + проза при strip — только проза; think-only content — as-is.
             text_out = _canon_content_text(

@@ -321,6 +321,29 @@ def test_get_output_list_tools_mixed_content_keeps_only_prose():
     assert "reasoning_content" not in msg
 
 
+def test_get_output_list_tools_think_only_content_drops_message():
+    """strip_think: think-only + tools → только function_call, мысль не в историю."""
+    payload = _dct(
+        "tool_calls",
+        content="<think>длинная мысль перед тулом</think>",
+        tool_calls=[_tool_call()],
+    )
+    out = get_output_list(payload)
+    assert [o["type"] for o in out] == ["function_call"]
+
+
+def test_get_output_list_persist_tools_think_only_keeps_message():
+    payload = _dct(
+        "tool_calls",
+        content="<think>план</think>",
+        tool_calls=[_tool_call()],
+    )
+    out = get_output_list(payload, persist_reasoning_content=True)
+    assert [o["type"] for o in out] == ["message", "function_call"]
+    _, text = _message_text(out)
+    assert text == "<think>план</think>"
+
+
 def test_get_output_list_visible_prose_not_salvaged():
     payload = _dct("stop", content="<think>план</think>\nсделаю вывод")
     payload["choices"][0]["message"]["reasoning_content"] = "secret"
