@@ -162,11 +162,29 @@ class AgentExecutor:
         self._ctx = ctx
         self._lock = threading.Lock()
         self._pending_messages: list[dict] = []
+        #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
+        #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
+        #: ответили «принято», и молча терять их нельзя — пусть владелец решает.
+        self._undelivered_messages: list[dict] = []
         self._state: State | None = None
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
         self.last_terminal_outcome: Optional[str] = None
+
+    def take_undelivered_messages(self) -> list[dict]:
+        """Забрать сообщения, которые прогон не успел доставить агенту.
+
+        Пусто в обычном случае. Непусто, когда прогон остановили или он упал
+        между постановкой сообщения в очередь и его вычерпыванием циклом.
+        Владелец (сервер, TUI, SDK) решает сам: доложить в следующий прогон,
+        ответить клиенту ошибкой или хотя бы записать в лог. Раньше выбора не
+        было — такие сообщения стирались сбросом очереди молча.
+        """
+        with self._lock:
+            out = self._undelivered_messages[:]
+            self._undelivered_messages = []
+            return out
 
     async def arun(
         self,
@@ -399,7 +417,13 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
-            self._pending_messages = []
+            # Очередь здесь НЕ сбрасываем. Сброс стоял тут с тех пор, когда до
+            # него не было setup-фазы и класть сообщения заранее было некому.
+            # Теперь кладут: бронь сервера (клиенту уже ответили `queued`),
+            # `_prebuild_messages` в TUI, `AsyncAgent.send` — и всё это
+            # стиралось, не доходя до агента. Смысл сброса («новый прогон не
+            # проигрывает хвост прошлого») сохранён, но перенесён на ВЫХОД из
+            # цикла: между прогонами очередь пуста по построению.
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
@@ -570,6 +594,14 @@ class AgentExecutor:
         # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
         # ровно своё, не тронув сессии параллельных агентов на том же loop.
         _owner_reset = set_owner(getattr(self._ctx, "mcp_session_owner", "") or None)
+        # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
+        # сообщений прогона: клиент, которому ответили `queued`, должен попасть
+        # к модели в том же запросе, а не ждать следующего хода.
+        with self._lock:
+            queued_before_loop = self._pending_messages[:]
+            self._pending_messages.clear()
+        if queued_before_loop:
+            messages = [*messages, *queued_before_loop]
         try:
             response = await arun_agent(
                 messages,
@@ -617,6 +649,16 @@ class AgentExecutor:
                     # запись должна быть последней, иначе её затрёт.
                     await _aappend_trace_id_to_meta(thread_session, _run_trace_id, logger)
         finally:
+            # Граница «чистого листа» между прогонами. Раньше она стояла в
+            # setup и стирала то, что положили ДО старта; здесь она стирает то,
+            # что прогон не успел съесть, — а это ровно исходный смысл.
+            with self._lock:
+                # КОПИМ, а не присваиваем: иначе следующий прогон затрёт хвост
+                # предыдущего пустым списком — то самое молчаливое исчезновение,
+                # ради которого всё и затевалось. Забрать накопленное владелец
+                # может когда угодно, `take_undelivered_messages` его очистит.
+                self._undelivered_messages.extend(self._pending_messages)
+                self._pending_messages = []
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
             # Ждём напрямую, без потока: блокирующим в закрытии было только

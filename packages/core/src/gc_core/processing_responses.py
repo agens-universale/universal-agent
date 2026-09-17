@@ -1145,6 +1145,7 @@ async def arun_agent(
     state.unknown_tool_repeat_count = 0
     state.last_batch_unknown_tool_count = 0
     state.last_batch_invalid_arguments_count = 0
+    first_poll = True
     while True:
         if check_stop is not None and check_stop():
             clear_loop_detector(state)
@@ -1152,7 +1153,13 @@ async def arun_agent(
         if get_pending_messages is not None:
             pending = get_pending_messages()
             if pending:
-                messages = pending
+                # На ПЕРВОМ опросе склеиваем со стартовым батчем, а не
+                # подменяем его: сообщение, пришедшее между стартом прогона и
+                # первым запросом к модели, иначе вытесняло стартовое — и оно
+                # не доходило ни до модели, ни до треда. Дальше подмена верна:
+                # там `messages` — это уже ответ модели, а не просьба человека.
+                messages = [*messages, *pending] if first_poll else pending
+        first_poll = False
         # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
         # не передаём его дальше в check_mode, чтобы не падать
         # с ValueError('Empty messages list'). Вместо этого генерируем понятное
