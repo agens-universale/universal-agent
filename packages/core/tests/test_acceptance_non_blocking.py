@@ -78,15 +78,21 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
+    from gc_testkit import quiet_gc_for_loop_timing
+
     gaps: list = []
     stop = asyncio.Event()
-    beat = asyncio.create_task(_heartbeat(stop, gaps))
+    # Сборщик глушится на окне замера: замерено зондом, что в полном наборе в
+    # это окно попадает до 872 мс пауз stop-the-world при собственной работе
+    # 0,39 с — тест мерил сборщик, а не ядро. В изоляции пауз нет.
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(_heartbeat(stop, gaps))
 
-    async with await AsyncAgent.create(cfg) as agent:
-        answer = await agent.run("поспи 0.3 секунды", thread_id="t1")
+        async with await AsyncAgent.create(cfg) as agent:
+            answer = await agent.run("поспи 0.3 секунды", thread_id="t1")
 
-    stop.set()
-    await beat
+        stop.set()
+        await beat
 
     assert answer
     assert len(gaps) > 10, f"хартбит почти не тикал: {len(gaps)} тиков"
@@ -97,30 +103,37 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
 
 async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     """Критерий 2: два прогона идут внахлёст, а не друг за другом."""
+    from gc_testkit import quiet_gc_for_loop_timing
+
     cfg_solo = parity_config(tmp_path / "solo", monkeypatch, model="solo")
     install_many(monkeypatch, {"solo": ScriptedBackend(list(TURNS))})
-    async with await AsyncAgent.create(cfg_solo) as solo:
-        started = time.monotonic()
-        await solo.run("поспи", thread_id="t1")
-        single = time.monotonic() - started
+    # Оба замера — под заглушенным сборщиком. Иначе тест сравнивает не
+    # параллельность, а то, сколько пауз поколения 2 попало в каждую фазу:
+    # замерено 15 пауз на 872 мс в окне пары против одной в окне одиночки, и
+    # отношение уезжало к 2× при неперекрываемых 0,09 с собственной работы.
+    with quiet_gc_for_loop_timing():
+        async with await AsyncAgent.create(cfg_solo) as solo:
+            started = time.monotonic()
+            await solo.run("поспи", thread_id="t1")
+            single = time.monotonic() - started
 
-    # По сценарию на агента: общий раздаёт ходы в порядке вызовов, и второй
-    # агент забрал бы финализатор первого — тест мерил бы очередь, а не
-    # параллельность.
-    cfg_a = parity_config(tmp_path / "a", monkeypatch, model="агент-а")
-    cfg_b = parity_config(tmp_path / "b", monkeypatch, model="агент-б")
-    install_many(monkeypatch, {
-        "агент-а": ScriptedBackend(list(TURNS)),
-        "агент-б": ScriptedBackend(list(TURNS)),
-    })
-    a = await AsyncAgent.create(cfg_a)
-    b = await AsyncAgent.create(cfg_b)
-    started = time.monotonic()
-    async with a, b:
-        r1, r2 = await asyncio.gather(
-            a.run("поспи", thread_id="t1"), b.run("поспи", thread_id="t2")
-        )
-    pair = time.monotonic() - started
+        # По сценарию на агента: общий раздаёт ходы в порядке вызовов, и второй
+        # агент забрал бы финализатор первого — тест мерил бы очередь, а не
+        # параллельность.
+        cfg_a = parity_config(tmp_path / "a", monkeypatch, model="агент-а")
+        cfg_b = parity_config(tmp_path / "b", monkeypatch, model="агент-б")
+        install_many(monkeypatch, {
+            "агент-а": ScriptedBackend(list(TURNS)),
+            "агент-б": ScriptedBackend(list(TURNS)),
+        })
+        a = await AsyncAgent.create(cfg_a)
+        b = await AsyncAgent.create(cfg_b)
+        started = time.monotonic()
+        async with a, b:
+            r1, r2 = await asyncio.gather(
+                a.run("поспи", thread_id="t1"), b.run("поспи", thread_id="t2")
+            )
+        pair = time.monotonic() - started
 
     assert r1 and r2
     assert pair < single * 1.6, (

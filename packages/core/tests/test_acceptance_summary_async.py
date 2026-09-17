@@ -318,12 +318,19 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
     # База: тот же пульс, тот же процесс, та же загрузка машины — но loop
     # свободен. Окно соизмеримо с прогоном, чтобы хвост считался по сравнимому
     # числу тиков.
-    async with _Pulse() as baseline:
-        await asyncio.sleep(0.3)
+    # Сборщик глушится на обоих окнах. База и замер ловят занятость машины
+    # одинаково, но НЕ паузы сборщика: замерено, что в окно этого теста попадает
+    # до 6 пауз на 327 мс при худшей 188 мс, а база снимается за 0,3 с и часто
+    # не ловит ни одной. Отношение сравнивало бы «с паузой» против «без паузы».
+    from gc_testkit import quiet_gc_for_loop_timing
 
-    async with _Pulse() as during:
-        async with await AsyncAgent.create(cfg) as agent:
-            await agent.run("сделай что-нибудь", thread_id="t-s2")
+    with quiet_gc_for_loop_timing():
+        async with _Pulse() as baseline:
+            await asyncio.sleep(0.3)
+
+        async with _Pulse() as during:
+            async with await AsyncAgent.create(cfg) as agent:
+                await agent.run("сделай что-нибудь", thread_id="t-s2")
 
     assert was_compacted(cfg, "sdk", "t-s2"), "компакция не сработала — тест пуст"
 
@@ -395,31 +402,37 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
     держит цикл дольше обычного хода, поэтому именно на ней очередь заметнее
     всего.
     """
+    from gc_testkit import quiet_gc_for_loop_timing
+
     solo_cfg = compacting_config(tmp_path / "solo", monkeypatch, model="соло")
     install_many(monkeypatch, {"соло": slow_script()})
-    solo = await AsyncAgent.create(solo_cfg)
-    started = time.monotonic()
-    try:
-        await solo.run("один", thread_id="t-s4-solo")
-    finally:
-        await solo.aclose()
-    alone = time.monotonic() - started
+    # Оба замера под заглушенным сборщиком: замерено 18 пауз на 1311 мс в окне
+    # этого теста при собственной работе около 0,8 с. Отношение мерило долю
+    # пауз, попавших в каждую фазу, а не сериализацию компакцией.
+    with quiet_gc_for_loop_timing():
+        solo = await AsyncAgent.create(solo_cfg)
+        started = time.monotonic()
+        try:
+            await solo.run("один", thread_id="t-s4-solo")
+        finally:
+            await solo.aclose()
+        alone = time.monotonic() - started
 
-    cfg_a = compacting_config(tmp_path / "pa", monkeypatch, model="пара-а")
-    cfg_b = compacting_config(tmp_path / "pb", monkeypatch, model="пара-б")
-    install_many(monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()})
-    a = await AsyncAgent.create(cfg_a)
-    b = await AsyncAgent.create(cfg_b)
-    started = time.monotonic()
-    try:
-        await asyncio.gather(
-            a.run("первый", thread_id="t-s4-a"),
-            b.run("второй", thread_id="t-s4-b"),
-        )
-    finally:
-        await a.aclose()
-        await b.aclose()
-    together = time.monotonic() - started
+        cfg_a = compacting_config(tmp_path / "pa", monkeypatch, model="пара-а")
+        cfg_b = compacting_config(tmp_path / "pb", monkeypatch, model="пара-б")
+        install_many(monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()})
+        a = await AsyncAgent.create(cfg_a)
+        b = await AsyncAgent.create(cfg_b)
+        started = time.monotonic()
+        try:
+            await asyncio.gather(
+                a.run("первый", thread_id="t-s4-a"),
+                b.run("второй", thread_id="t-s4-b"),
+            )
+        finally:
+            await a.aclose()
+            await b.aclose()
+        together = time.monotonic() - started
 
     assert was_compacted(cfg_a, "sdk", "t-s4-a"), "компакция не сработала — тест пуст"
     ratio = together / alone if alone else 0.0

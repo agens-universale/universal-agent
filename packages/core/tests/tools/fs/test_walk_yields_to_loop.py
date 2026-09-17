@@ -112,12 +112,17 @@ async def _worst_gap_while(coro):
             gaps.append(now - prev)
             prev = now
 
-    beat = asyncio.create_task(_pulse())
-    try:
-        result = await coro
-    finally:
-        stop.set()
-        await beat
+    # Сборщик глушится на окне: замерено, что в полном наборе паузы поколения 2
+    # дают 180–220 мс каждая, а тест меряет обход, а не сборку мусора.
+    from gc_testkit import quiet_gc_for_loop_timing
+
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(_pulse())
+        try:
+            result = await coro
+        finally:
+            stop.set()
+            await beat
     return result, (max(gaps) if gaps else 0.0), len(gaps)
 
 

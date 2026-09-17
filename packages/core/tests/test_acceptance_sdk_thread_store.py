@@ -259,12 +259,17 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
             gaps.append(now - prev)
             prev = now
 
-    beat = asyncio.create_task(heartbeat())
+    from gc_testkit import quiet_gc_for_loop_timing
+
     store = SlowAsyncStore()
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
-        await agent.run("сделай что-нибудь", thread_id="t-sdk")
-    stop.set()
-    await beat
+    # Сборщик глушится на окне: тест судит НАТИВНОСТЬ ожидания хранилища, а
+    # пауза поколения 2 на куче набора (180–220 мс) кратно больше бюджета.
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(heartbeat())
+        async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+            await agent.run("сделай что-нибудь", thread_id="t-sdk")
+        stop.set()
+        await beat
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
     from gc_testkit import assert_loop_was_free
