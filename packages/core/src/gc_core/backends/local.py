@@ -39,6 +39,10 @@ def _size_without_following(entry: os.DirEntry) -> Optional[int]:
 class LocalFsBackend(FsBackend):
     is_sandbox = False
     default_exec_timeout = None
+    #: Умеем запускать фоном: процесс отцепляется в свою сессию, вывод идёт в
+    #: файл. У порта по умолчанию False — бэкенд песочницы (Harbor) так не
+    #: умеет, и тул обязан сказать об этом честно, а не падать AttributeError.
+    supports_background = True
 
     def __init__(
         self,
@@ -322,26 +326,34 @@ class LocalFsBackend(FsBackend):
         Своя сессия обязательна: без неё потомок остался бы в нашей группе
         процессов и получал бы адресованные нам сигналы.
         """
+        import subprocess
+
         from gc_core.utils.win_console import preserve_console_mode
 
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
-        sink = log_fd if log_fd is not None else asyncio.subprocess.DEVNULL
+        sink = log_fd if log_fd is not None else subprocess.DEVNULL
         # stderr — туда же, куда stdout: у фоновой команды разделять потоки
         # некому, а один лог читается человеком и моделью как одна лента.
-        err_sink = asyncio.subprocess.STDOUT if log_fd is not None else asyncio.subprocess.DEVNULL
+        err_sink = subprocess.STDOUT if log_fd is not None else subprocess.DEVNULL
         spawn_kwargs = {"start_new_session": True} if os.name != "nt" else {}
+        _reap_finished_background()
         with preserve_console_mode():
-            proc = await asyncio.create_subprocess_shell(
+            # `Popen`, а НЕ `asyncio.create_subprocess_shell`. Асинхронный
+            # подпроцесс привязан к наблюдателю за потомками и к транспорту
+            # своего loop — то есть к loop ХОДА. На Linux финализатор
+            # транспорта при выходе интерпретатора шлёт процессу kill, и
+            # фоновая команда погибала вместе с агентом; на macOS она выживала,
+            # но в stderr сыпалось «Loop … is closed». Фоновому процессу loop
+            # не нужен вовсе: мы его не ждём и не читаем.
+            proc = subprocess.Popen(                       # noqa: S602 — shell намеренно
                 command,
+                shell=True,
                 stdout=sink, stderr=err_sink,
-                stdin=asyncio.subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
                 cwd=cwd, env=merged_env,
                 **spawn_kwargs,
             )
         _BACKGROUND_PROCS.add(proc)
-        _BACKGROUND_PROCS.difference_update(
-            {p for p in _BACKGROUND_PROCS if p.returncode is not None}
-        )
         return {"pid": proc.pid}
 
     def default_cwd(self) -> Optional[str]:
@@ -381,11 +393,26 @@ _KILL_GRACE_SEC = 0.5
 #: непрерываемом системном вызове процесса, а не от нормального случая.
 _KILL_EXIT_GRACE_SEC = 1.0
 
-#: Запущенные фоном процессы. Держим ссылку намеренно: пока объект жив, asyncio
-#: дожинает потомка при его выходе. Отдав объект сборщику, мы получили бы зомби
-#: на всё время жизни агента — своя сессия не делает процесс чужим, он остаётся
-#: нашим ПРЯМЫМ потомком. Вышедшие выметаем на следующем запуске.
+#: Запущенные фоном процессы. Держим ссылку, чтобы дожать вышедших: иначе они
+#: остаются зомби до конца жизни агента — своя сессия не делает процесс чужим,
+#: он остаётся нашим ПРЯМЫМ потомком. Выметаем на следующем запуске.
 _BACKGROUND_PROCS: set = set()
+
+
+def _reap_finished_background() -> None:
+    """Снять с учёта вышедших фоновых потомков.
+
+    Прежняя редакция смотрела на `returncode` объекта asyncio — и это был
+    мёртвый код: его выставляет наблюдатель ТОГО loop, на котором процесс
+    создан, а loop хода к этому времени закрыт. Записи не удалялись никогда.
+    У `Popen` состояние спрашивается синхронно и без всякого loop.
+    """
+    for proc in list(_BACKGROUND_PROCS):
+        try:
+            if proc.poll() is not None:
+                _BACKGROUND_PROCS.discard(proc)
+        except Exception:                      # noqa: BLE001 — учёт не критичен
+            _BACKGROUND_PROCS.discard(proc)
 
 
 # --- асинхронный запуск процесса (async-переезд, Задача 18) -----------------

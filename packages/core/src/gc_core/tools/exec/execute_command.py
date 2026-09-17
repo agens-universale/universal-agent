@@ -1,6 +1,8 @@
 from gc_core.backends.async_protocol import aexec_port
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import json
+import os
+import time
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
@@ -8,7 +10,45 @@ from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_con
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
+from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
+
+
+def _open_unique_log(directory: str) -> "tuple[int, str]":
+    """Открыть СВОЙ лог, а не чужой: имя уникально, создание атомарно.
+
+    Имя было `bg-<время до секунды>.log`, и два фоновых запуска в одной пачке
+    вызовов — скажем, фронтенд и бэкенд — получали один путь. Их вывод
+    перемешивался в одном файле, хотя обеим моделям сказано «читай свой лог».
+
+    `O_EXCL` здесь важнее случайного суффикса: он и делает «занять имя»
+    атомарным. `mkstemp` не подошёл бы — он не умеет `O_APPEND`, а дозапись
+    нужна, потому что дескриптор наследует потомок.
+    """
+    import errno
+    import secrets
+
+    os.makedirs(directory, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND
+    for _ in range(8):
+        path = os.path.join(directory, f"bg-{stamp}-{secrets.token_hex(4)}.log")
+        try:
+            return os.open(path, flags, 0o600), path
+        except FileExistsError:
+            continue
+    raise OSError(errno.EEXIST, "no free background log name", directory)
+
+
+def _guard_refusal_as_value(error: dict) -> dict:
+    """Отказ гарда — ЗНАЧЕНИЕ, а не готовый ответ тула.
+
+    `enforce_write_guard` по умолчанию собирает из ошибки envelope тула и
+    возвращает его наружу. Для лога это неверно: отказ в логе НЕ отменяет
+    запуск команды, он лишь означает «вывод девать некуда». Поэтому забираем
+    словарь ошибки себе и вкладываем причину в `note` фонового ответа.
+    """
+    return error
 
 
 class ExecuteCommand(AbstractSimpleTool):
@@ -397,48 +437,79 @@ Important Usage Rules:
         Лог открываем ЗДЕСЬ, а не в бэкенде: решение принимает гард записи, а
         он живёт на слое тулы. Бэкенд получает готовый дескриптор либо ничего.
         """
-        import os
-        import time
-
         from gc_core.config_modules.env_vars import project_gc_dir
-        from gc_core.security.path_policy import (
-            WriteGuardViolation,
-            check_write_path_allowed,
-            resolve_tool_context,
-        )
+        from gc_core.security.path_policy import resolve_tool_context
 
         cwd_used = plan["cwd"]
         log_fd: int | None = None
         note = ""
+
+        # Отказ ДО всего остального: если бэкенд не умеет фон, не создаём ни
+        # лога, ни процесса. Раньше метода на порту не было, и вызов через
+        # обёртку TUI падал `AttributeError` — в единственном месте, где
+        # фоновый режим и нужен.
+        if not getattr(self._backend, "supports_background", False):
+            return self._result(
+                ok=False,
+                command=plan["command"],
+                cwd=cwd_used or "",
+                exit_code=None,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                error={
+                    "type": "background_not_supported",
+                    "message": (
+                        "This backend cannot start background commands. "
+                        "Run the command in the foreground instead."
+                    ),
+                },
+            )
+
         try:
             context = resolve_tool_context(self)
         except Exception as exc:                      # контекст не собрался
             return self._exec_failed(plan, exc)
 
         if log_path:
-            candidate = log_path
-        else:
-            # Якорь — КОРЕНЬ ПРОЕКТА, а не cwd команды: иначе `exec` с
-            # `cwd=/tmp` заводил бы лог в `/tmp/.gc/tmp/`, то есть вне
-            # периметра и там, где его никто не найдёт.
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            candidate = str(project_gc_dir(context.launch_root) / "tmp" / f"bg-{stamp}.log")
-
-        try:
-            allowed = check_write_path_allowed(
-                candidate,
-                context.launch_root,
-                context.write_guard.extra_paths,
-                base_dir=cwd_used or context.launch_root,
-                operation="write",
+            # Путь называет МОДЕЛЬ, значит он обязан пройти ровно тот же гард,
+            # что и запись файловым тулом: периметр — лишь половина политики,
+            # защищённые пути (AGENTS.md — спросить, `.gc` и конфиг — запретить)
+            # живут только в `enforce_write_guard`. Без этого фоновый лог был
+            # примитивом записи в файл, который агент читает как свои правила.
+            target = os.path.abspath(
+                os.path.join(cwd_used or context.launch_root, log_path)
             )
-        except WriteGuardViolation as exc:
-            allowed = None
-            note = await self._aconfirm_log_path(candidate, exc)
-            if note == "":
-                allowed = os.path.abspath(candidate)
+            refusal = await self._alog_write_refusal(path=target)
+            if refusal is None:
+                allowed = target
+            else:
+                allowed = None
+                note = (
+                    f"log not written ({refusal.get('type')}: "
+                    f"{refusal.get('message')}); the command was started, "
+                    f"its output is discarded"
+                )
+        else:
+            # Путь по умолчанию выбираем МЫ, а не модель, и якорим к КОРНЮ
+            # ПРОЕКТА: иначе `exec` с `cwd=/tmp` заводил бы лог в
+            # `/tmp/.gc/tmp/` — вне периметра и там, где его не найти.
+            #
+            # Гард сюда не применяется намеренно: весь `.gc` защищён как
+            # операционный каталог, но этот путь не приходил от модели, значит
+            # инъекции взяться неоткуда. Исключение закреплено тестом.
+            try:
+                log_fd, allowed = _open_unique_log(
+                    str(project_gc_dir(context.launch_root) / "tmp")
+                )
+            except OSError as exc:
+                allowed = None
+                note = f"log not written ({exc.strerror or exc}); output discarded"
 
-        if allowed is not None:
+        # Только для пути, названного МОДЕЛЬЮ: путь по умолчанию уже открыт
+        # выше, атомарно и под своим уникальным именем. Без этого условия мы
+        # открывали бы его второй раз, теряя первый дескриптор.
+        if allowed is not None and log_fd is None:
             try:
                 os.makedirs(os.path.dirname(str(allowed)) or ".", exist_ok=True)
                 log_fd = os.open(str(allowed), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -480,38 +551,21 @@ Important Usage Rules:
             },
         )
 
-    async def _aconfirm_log_path(self, candidate: str, exc: "Exception") -> str:
-        """Путь вне периметра: спросить пользователя тем же вопросом, что и гард.
+    @enforce_write_guard(path_arg="path", blocked_result_factory=_guard_refusal_as_value)
+    async def _alog_write_refusal(self, path: str) -> "dict | None":
+        """Спросить гард записи про путь лога — и ничего не делать.
 
-        Возврат — пустая строка, если писать разрешили, иначе объяснение для
-        модели. Подтверждение ждётся В ПОТОКЕ: на event loop висят соседние
-        агенты и keep-alive MCP-сессий, и держать их ради вопроса нельзя.
+        Тело пустое намеренно: вся работа в декораторе. Дойти сюда — значит
+        «писать можно», и метод отдаёт ``None``. Если гард запретил, его
+        `blocked_result_factory` возвращает СЛОВАРЬ ошибки вместо результата
+        тула, и вызывающий читает причину.
+
+        Так фоновый лог получает ровно ту же политику, что обычная запись
+        файла: защищённые пути, периметр, аудит, память решений и ожидание
+        человека в потоке. Прежняя самодельная проверка знала только периметр,
+        и через `log_path` можно было дописать в AGENTS.md без вопроса.
         """
-        import asyncio
-
-        from gc_core.constants.tool_names import EXEC_COMMAND_NAME
-        from gc_core.security.path_policy import resolve_tool_context
-        # Приватный помощник берём намеренно: у вопроса о записи вне периметра
-        # должен быть ОДИН текст и одна память решений, а не второй такой же.
-        from gc_core.security.path_policy import _ask_user_confirmation_for_write
-
-        context = resolve_tool_context(self)
-        mode = (context.write_guard.mode or "deny").strip().lower()
-        if not context.write_guard.enabled or mode == "allow":
-            return ""
-        if mode != "ask":
-            return "log path is outside the project perimeter; output discarded"
-        confirmed = await asyncio.to_thread(
-            _ask_user_confirmation_for_write,
-            tool_name=EXEC_COMMAND_NAME,
-            path=candidate,
-            operation="write",
-            error=getattr(exc, "error", {"type": "write_guard_violation"}),
-            ctx=context.ctx,
-        )
-        if confirmed:
-            return ""
-        return "user declined writing the log outside the project; output discarded"
+        return None
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:
         """Отказ запуска — общий для обоих входов."""

@@ -104,6 +104,36 @@ async def test_without_a_log_the_child_is_not_blocked(tmp_path):
     )
 
 
+async def test_finished_background_children_leave_the_registry():
+    """Вышедший фоновый потомок снимается с учёта на следующем запуске.
+
+    Учёт нужен, чтобы дожать потомка: без ссылки он остаётся зомби до конца
+    жизни агента. Прежняя уборка смотрела на `returncode` asyncio-процесса и
+    была МЁРТВЫМ кодом: это поле выставляет наблюдатель того loop, на котором
+    процесс создан, а loop хода к тому времени закрыт — записи не удалялись
+    никогда, и за долгую сессию их копилось столько же, сколько запусков.
+
+    Заодно это проверяет, что фон больше не привязан к loop: состояние
+    процесса спрашивается синхронно, без всякого наблюдателя.
+    """
+    from gc_core.backends.local import _BACKGROUND_PROCS
+
+    backend = LocalFsBackend()
+    await backend.aspawn_background(f"{shlex.quote(sys.executable)} -c pass")
+    short_lived = set(_BACKGROUND_PROCS)
+    assert short_lived, "запущенный процесс не попал в учёт"
+
+    # Ждём выхода команды, НЕ трогая учтённые процессы: `poll()` сам выставляет
+    # `returncode`, и опроси мы их здесь — уборка, читающая только это поле,
+    # выглядела бы рабочей. Тест перестал бы ловить ту самую регрессию.
+    await asyncio.sleep(2.0)
+
+    await backend.aspawn_background(_child_command())
+    assert not (short_lived & _BACKGROUND_PROCS), (
+        "вышедшие процессы остались в учёте — уборка не работает"
+    )
+
+
 def test_background_child_survives_the_whole_agent_process(tmp_path):
     """Главное свойство: внук переживает ВЫХОД процесса агента.
 

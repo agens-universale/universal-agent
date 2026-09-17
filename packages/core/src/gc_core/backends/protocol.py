@@ -174,6 +174,17 @@ class CapabilitiesNotWarmedError(RuntimeError):
     """
 
 
+class BackgroundNotSupportedError(NotImplementedError):
+    """Фоновый запуск у бэкенда, который так не умеет.
+
+    Отдельный тип по той же причине, что и ``SyncExecNotSupportedError``: это
+    не «допишите бэкенд», а «у этой песочницы такой возможности нет, скажите
+    об этом модели честно». Раньше метода на порту не было вовсе, и вызов
+    через обёртку TUI падал с ``AttributeError`` — то есть сообщением об
+    отсутствующем атрибуте вместо ответа тула.
+    """
+
+
 class FsBackend(ABC):
     """Физический порт ввода-вывода. Файловые операции — КОРУТИНЫ.
 
@@ -205,8 +216,26 @@ class FsBackend(ABC):
     is_sandbox: bool = False
     # Backend-preferred default exec timeout; None → tool class default.
     default_exec_timeout: Optional[int] = None
+    # Умеет ли бэкенд отцепить команду в фон (см. `aspawn_background`).
+    # False по умолчанию: фон есть только там, где мы владеем процессами хоста.
+    supports_background: bool = False
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
+                                env: Optional[dict] = None,
+                                log_fd: Optional[int] = None) -> dict:
+        """Запустить команду фоном и НЕ ждать её: вернуть как минимум ``pid``.
+
+        Объявлено НА ПОРТУ намеренно, хотя умеет пока один бэкенд. Пока метод
+        жил только на `LocalFsBackend`, обёртка TUI (`TrackingFsBackend`) его
+        не видела, и фоновый режим в TUI падал с `AttributeError` — там, где
+        он нужнее всего. Теперь поверхность порта одна, и сторож паритета
+        обёртки ловит пропажу сразу.
+        """
+        raise BackgroundNotSupportedError(
+            f"{type(self).__name__} не умеет запускать команды фоном"
+        )
 
     # Кэш ответов проб. Заполняет ЕДИНСТВЕННЫЙ писатель —
     # ``awarm_capabilities``; подклассы могут задать ответы заранее через
