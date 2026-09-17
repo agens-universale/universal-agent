@@ -176,7 +176,7 @@ def enforce_command_guard(
                     fields=[("command", payload)],
                     ctx=ctx_obj,
                     decision_key=f"command:{payload}",
-                    )))
+                    ), on_interrupt=False))
                 if confirmed:
                     return (yield)
                 # ask not confirmed → instructive blocked result

@@ -236,7 +236,7 @@ def enforce_write_guard(
                             fields=[("path", candidate_path)],
                             ctx=context.ctx,
                             decision_key=f"write:{candidate_path}",
-                        )))
+                        ), on_interrupt=False))
                         if not _ok:
                             _err = {
                                 "type": "protected_path_denied",
@@ -300,7 +300,7 @@ def enforce_write_guard(
                         error=exc.error,
                         ctx=context.ctx,
                         decision_key=f"write:{candidate_path}",
-                    )))
+                    ), on_interrupt=False))
                     if confirmed:
                         audit_policy_decision(
                             context,

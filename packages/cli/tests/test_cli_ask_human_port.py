@@ -1,10 +1,13 @@
-"""Порт «спросить человека» у gc-cli: свой поток для stdin, Ctrl+C — отказ.
+"""Порт «спросить человека» у gc-cli: stdin читают только во время вопроса.
 
-Без порта ядро читало stdin само, через `asyncio.to_thread`, и это ломалось
-дважды: поток брался из пула `concurrent.futures`, который `asyncio.run` ждёт на
-выходе (прерванный прогон висел, пока в stdin не придёт строка), а SIGINT под
-`asyncio.run` отменяет главную задачу вместо `KeyboardInterrupt` внутри тула —
-ветка «прерывание» в `turn_ask_human` была мёртвой, и Ctrl+C ронял весь прогон.
+Первая редакция порта заводила демон-поток на каждый вопрос. Она чинила выход и
+Ctrl+C, но принесла свой дефект: отменить поток, сидящий в `readline`, нечем, и
+после Ctrl+C он забирал первую строку у следующего читателя — у следующего
+вопроса или у подтверждения `y/n` гарда.
+
+Поэтому главная проверка здесь — не «поток демонский», а «читателей не
+копится»: на POSIX их нет вовсе, а набранное к прерванному вопросу достаётся
+следующему, а не пропадает.
 """
 import ast
 import asyncio
@@ -23,7 +26,7 @@ READER_THREAD = "gc-cli-ask-human"
 
 
 class _BlockingStdin:
-    """stdin, который молчит: человек ещё не ответил."""
+    """stdin без `fileno()`: молчит и уводит порт на запасной путь."""
 
     def __init__(self, hold: float = 5.0):
         self._hold = hold
@@ -35,23 +38,121 @@ class _BlockingStdin:
         return iter(())
 
 
+class _PipeStdin:
+    """Настоящий stdin: файловый объект на трубе, с `fileno()`."""
+
+    def __init__(self):
+        r, w = os.pipe()
+        self._r, self.write_fd = r, w
+
+    def fileno(self) -> int:
+        return self._r
+
+    def send(self, text: str) -> None:
+        os.write(self.write_fd, text.encode("utf-8"))
+
+    def close_writer(self) -> None:
+        os.close(self.write_fd)
+
+
 def _reader_threads() -> list:
     return [t for t in threading.enumerate() if t.name == READER_THREAD]
 
 
-@pytest.mark.asyncio
-async def test_port_returns_what_the_human_typed(monkeypatch):
-    import io
+@pytest.fixture
+def pipe_stdin(monkeypatch):
+    import gc_cli.ask_human_port as port_mod
 
-    monkeypatch.setattr(sys, "stdin", io.StringIO("синий\n\n"))
+    # Буфер общий на процесс — между тестами его надо сбрасывать, иначе
+    # недочитанный хвост одного теста утечёт в следующий.
+    port_mod._PENDING.clear()
+    monkeypatch.setattr(port_mod, "_PARTIAL", "")
+    monkeypatch.setattr(port_mod, "_EOF", False)
+    fake = _PipeStdin()
+    monkeypatch.setattr(sys, "stdin", fake)
+    yield fake
+
+
+@pytest.mark.asyncio
+async def test_port_returns_what_the_human_typed(pipe_stdin):
     port = make_cli_ask_human_port()
+    pipe_stdin.send("синий\n\n")
 
     assert await asyncio.wait_for(port("любимый цвет?"), 5) == "синий"
 
 
 @pytest.mark.asyncio
-async def test_reader_runs_in_a_daemon_thread(monkeypatch):
-    """Поток-читатель не должен удерживать процесс на выходе."""
+async def test_no_reader_thread_on_posix(pipe_stdin):
+    """На POSIX потока-читателя нет вовсе — значит и осиротеть нечему."""
+    port = make_cli_ask_human_port()
+    task = asyncio.create_task(port("вопрос?"))
+    await asyncio.sleep(0.2)
+
+    assert _reader_threads() == [], "поток-читатель вернулся — вместе с ним вернётся R2.6"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdin):
+    """Главная регрессия R2.6: набранное не уходит осиротевшему читателю.
+
+    Человек прерывает первый вопрос и отвечает на второй. Ответ обязан достаться
+    ВТОРОМУ вопросу. В прежней редакции первую строку забирал поток, оставшийся
+    от первого вопроса, и агент получал пустоту.
+    """
+    if not hasattr(signal, "SIGINT"):
+        pytest.skip("платформа без SIGINT")
+    port = make_cli_ask_human_port()
+
+    async def _ctrl_c() -> None:
+        await asyncio.sleep(0.2)
+        os.kill(os.getpid(), signal.SIGINT)
+
+    fire = asyncio.create_task(_ctrl_c())
+    with pytest.raises(KeyboardInterrupt):
+        await asyncio.wait_for(port("первый вопрос?"), 5)
+    await fire
+
+    pipe_stdin.send("ответ-на-второй\n\n")
+    assert await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ-на-второй"
+
+
+@pytest.mark.asyncio
+async def test_a_batch_of_answers_is_split_between_questions(pipe_stdin):
+    """Пачка строк из трубы делится между вопросами, а не достаётся одному."""
+    port = make_cli_ask_human_port()
+    pipe_stdin.send("первый\n\nвторой\n\n")
+
+    assert await asyncio.wait_for(port("раз?"), 5) == "первый"
+    assert await asyncio.wait_for(port("два?"), 5) == "второй"
+
+
+@pytest.mark.asyncio
+async def test_closed_stdin_ends_the_answer(pipe_stdin):
+    """EOF — это пустой ответ, а не вечное ожидание."""
+    port = make_cli_ask_human_port()
+    pipe_stdin.close_writer()
+
+    assert await asyncio.wait_for(port("вопрос?"), 5) == ""
+
+
+@pytest.mark.asyncio
+async def test_signal_handler_is_restored(pipe_stdin):
+    """Перехват живёт только на время вопроса: дальше Ctrl+C снова общий."""
+    before = signal.getsignal(signal.SIGINT)
+    pipe_stdin.send("ответ\n\n")
+
+    await asyncio.wait_for(make_cli_ask_human_port()("вопрос?"), 5)
+
+    assert signal.getsignal(signal.SIGINT) is before
+
+
+@pytest.mark.asyncio
+async def test_stdin_without_fileno_falls_back_to_a_daemon_thread(monkeypatch):
+    """Windows и подменённый stdin: запасной путь остаётся, и он демонский."""
     monkeypatch.setattr(sys, "stdin", _BlockingStdin())
     port = make_cli_ask_human_port()
 
@@ -62,49 +163,12 @@ async def test_reader_runs_in_a_daemon_thread(monkeypatch):
         await asyncio.sleep(0.01)
 
     threads = _reader_threads()
-    assert threads, "поток чтения не поднялся"
-    assert all(t.daemon for t in threads), (
-        "поток чтения не daemon — интерпретатор будет ждать его на выходе"
-    )
+    assert threads, "запасной путь не поднял читателя"
+    assert all(t.daemon for t in threads), "читатель не daemon — задержит выход"
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-
-
-@pytest.mark.asyncio
-async def test_ctrl_c_during_the_question_interrupts_only_the_question(monkeypatch):
-    """SIGINT обязан стать `KeyboardInterrupt` ВНУТРИ порта.
-
-    Тогда его ловит `acall` тула и отдаёт агенту штатное «отвечать не стали».
-    Раньше сигнал отменял главную задачу, и падал весь прогон.
-    """
-    if not hasattr(signal, "SIGINT"):
-        pytest.skip("платформа без SIGINT")
-    monkeypatch.setattr(sys, "stdin", _BlockingStdin())
-    port = make_cli_ask_human_port()
-
-    async def _ctrl_c() -> None:
-        await asyncio.sleep(0.2)
-        os.kill(os.getpid(), signal.SIGINT)
-
-    fire = asyncio.create_task(_ctrl_c())
-    with pytest.raises(KeyboardInterrupt):
-        await asyncio.wait_for(port("вопрос?"), 5)
-    await fire
-
-
-@pytest.mark.asyncio
-async def test_signal_handler_is_restored(monkeypatch):
-    """Перехват живёт только на время вопроса: дальше Ctrl+C снова общий."""
-    import io
-
-    before = signal.getsignal(signal.SIGINT)
-    monkeypatch.setattr(sys, "stdin", io.StringIO("ответ\n\n"))
-
-    await asyncio.wait_for(make_cli_ask_human_port()("вопрос?"), 5)
-
-    assert signal.getsignal(signal.SIGINT) is before
 
 
 def test_cli_installs_the_port():
@@ -123,4 +187,7 @@ def test_cli_installs_the_port():
         if isinstance(n, ast.Assign)
         and any(getattr(t, "attr", None) == "ask_human" for t in n.targets)
     ]
-    assert installs, "gc-cli не ставит ctx.ask_human — Ctrl+C снова обрушит прогон"
+    assert len(installs) >= 2, (
+        "ctx.ask_human ставится не на всех входах CLI — в `--init` вопрос агента "
+        "снова пойдёт через input() в потоке пула"
+    )

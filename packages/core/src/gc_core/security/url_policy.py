@@ -169,7 +169,7 @@ def enforce_url_policy(
                     ],
                     ctx=context.ctx,
                     decision_key=f"url:{decision.url}",
-                )))
+                ), on_interrupt=False))
                 if confirmed:
                     audit_policy_decision(
                         context,

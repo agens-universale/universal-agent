@@ -418,7 +418,7 @@ def enforce_read_guard(
                         ],
                         ctx=context.ctx,
                         decision_key=f"read:{_rg_path}",
-                    )))
+                    ), on_interrupt=False))
                     if confirmed:
                         audit_policy_decision(
                             context,

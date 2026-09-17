@@ -483,6 +483,7 @@ def moderate_command_execution(
                         moderation_context,
                         decision,
                         tool_ctx,
+                        on_interrupt=False,
                     )
                 decision = decide_command_execution(
                     moderation_context.mode,
