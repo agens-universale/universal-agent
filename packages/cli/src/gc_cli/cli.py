@@ -361,6 +361,12 @@ async def _run_init_agents_md() -> int:
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
     ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
+    # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
+    # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
+    from gc_cli.ask_human_port import make_cli_ask_human_port
+
+    ctx.ask_human = make_cli_ask_human_port()
 
     from gc_core.utils.async_http import aclose_clients
 

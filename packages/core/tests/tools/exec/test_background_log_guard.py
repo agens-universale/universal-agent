@@ -36,15 +36,16 @@ def _tool(tmp_path, **write_guard):
 
 def test_log_outside_the_project_is_refused_and_the_model_is_told(tmp_path):
     """`mode=deny`: лог вне периметра не пишем, но команду запускаем."""
-    tool, _ = _tool(tmp_path, enabled=True, mode="deny")
+    tool, project = _tool(tmp_path, enabled=True, mode="deny")
     outside = tmp_path / "outside.log"
 
     res = json.loads(tool(command=_CMD, run_in_background=True, log_path=str(outside)))
 
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, "команду не запустили из-за лога"
-    assert res["background"]["log_path"] is None
-    assert res["background"]["note"], "отказ не сообщён модели — она пойдёт читать лог"
+    # Отказали в МЕСТЕ, а не в захвате: вывод уходит в наш служебный лог.
+    assert res["background"]["log_path"].startswith(str(project / ".gc" / "tmp"))
+    assert "refused" in res["background"]["note"], res["background"]
     assert not outside.exists(), "файл вне периметра всё-таки создан"
 
 
@@ -57,14 +58,14 @@ def test_ask_mode_honours_a_refusal(tmp_path, monkeypatch):
         return False
 
     monkeypatch.setattr(path_policy, "_ask_user_confirmation_for_write", _fake)
-    tool, _ = _tool(tmp_path, enabled=True, mode="ask")
+    tool, project = _tool(tmp_path, enabled=True, mode="ask")
     outside = tmp_path / "outside.log"
 
     res = json.loads(tool(command=_CMD, run_in_background=True, log_path=str(outside)))
 
     assert asked == [str(outside)], f"пользователя не спросили: {asked}"
-    assert res["background"]["log_path"] is None
-    assert "declined" in res["background"]["note"]
+    assert res["background"]["log_path"].startswith(str(project / ".gc" / "tmp"))
+    assert "refused" in res["background"]["note"], res["background"]
     assert not outside.exists()
 
 
@@ -136,8 +137,8 @@ def test_log_into_an_instruction_file_asks_and_reports_refusal(tmp_path, monkeyp
 
     assert asked, "защищённый путь прошёл без вопроса"
     assert res["ok"] is True and res["background"]["pid"] > 0, res
-    assert res["background"]["log_path"] is None
-    assert "log not written" in res["background"]["note"], res["background"]
+    assert res["background"]["log_path"].startswith(str(project / ".gc" / "tmp"))
+    assert "refused" in res["background"]["note"], res["background"]
     assert agents.read_text(encoding="utf-8") == "правила проекта\n", "файл правил изменён"
 
 
@@ -158,7 +159,9 @@ def test_log_into_the_service_dir_is_denied_without_asking(tmp_path, monkeypatch
     res = json.loads(tool(command=_CMD, run_in_background=True, log_path=str(config)))
 
     assert asked == [], "про операционный путь спрашивать нельзя — он просто запрещён"
-    assert res["ok"] is True and res["background"]["log_path"] is None, res
+    assert res["ok"] is True, res
+    assert res["background"]["log_path"].startswith(str(project / ".gc" / "tmp"))
+    assert "refused" in res["background"]["note"], res["background"]
     assert config.read_text(encoding="utf-8") == "agent: {}\n", "конфиг изменён"
 
 

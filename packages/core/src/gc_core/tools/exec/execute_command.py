@@ -484,12 +484,24 @@ Important Usage Rules:
             if refusal is None:
                 allowed = target
             else:
-                allowed = None
-                note = (
-                    f"log not written ({refusal.get('type')}: "
-                    f"{refusal.get('message')}); the command was started, "
-                    f"its output is discarded"
-                )
+                # Отказали в МЕСТЕ, а не в захвате вывода. Поэтому пишем в свой
+                # служебный лог: он выбран нами, а не моделью, значит инъекции
+                # взяться неоткуда, и модель получает то, что ей нужно, —
+                # читаемый лог. Терять вывод целиком незачем.
+                try:
+                    log_fd, allowed = _open_unique_log(
+                        str(project_gc_dir(context.launch_root) / "tmp")
+                    )
+                    note = (
+                        f"requested log path refused ({refusal.get('type')}: "
+                        f"{refusal.get('message')}); output goes to {allowed} instead"
+                    )
+                except OSError as exc:
+                    allowed = None
+                    note = (
+                        f"requested log path refused, and the default log could not "
+                        f"be opened ({exc.strerror or exc}); output is discarded"
+                    )
         else:
             # Путь по умолчанию выбираем МЫ, а не модель, и якорим к КОРНЮ
             # ПРОЕКТА: иначе `exec` с `cwd=/tmp` заводил бы лог в
