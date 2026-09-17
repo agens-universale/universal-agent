@@ -236,7 +236,7 @@ mcp:
   выключить (прокси отвергает разметку). Переопределяется на одну модель через
   `models.<alias>.backend.claude_prompt_cache`.
 - `agent.exec_timeout_sec` — дефолтный таймаут `execute_command` / `run_python_code`
-  (секунды), если модель не передала `timeout_seconds`. По умолчанию `120`. Для длинных
+  (секунды), если модель не передала `timeout`. По умолчанию `120`. Для длинных
   контейнерных сборок (Harbor) обычно поднимают до `600`.
 - `agent.harbor_exec_init` — инициализация окружения перед model-facing
   `execute_command` при `os_backend: harbor`. По умолчанию `null`: команда уходит в

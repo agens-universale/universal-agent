@@ -219,7 +219,7 @@ def test_execute_command_timeout_envelope_carries_partial_output(loop_in_thread)
     tool._config_dict = None
     bind_os_backend(tool, HarborBackend(env, loop_in_thread), config_dict={})
 
-    envelope = json.loads(tool(command="wget …", timeout_seconds=10))
+    envelope = json.loads(tool(command="wget …", timeout=10))
 
     assert envelope["timed_out"] is True
     assert envelope["error"]["type"] == "timeout"
@@ -237,7 +237,7 @@ def test_execute_command_maps_harbor_timeout_envelope(loop_in_thread):
     tool._config_dict = None
     bind_os_backend(tool, backend, config_dict={})
 
-    env = json.loads(tool(command="sleep 999", timeout_seconds=300))
+    env = json.loads(tool(command="sleep 999", timeout=300))
 
     assert env["ok"] is False
     assert env["timed_out"] is True
@@ -253,7 +253,7 @@ def test_execute_command_non_timeout_runtime_error_stays_execution_failed(loop_i
     tool._config_dict = None
     bind_os_backend(tool, backend, config_dict={})
 
-    env = json.loads(tool(command="true", timeout_seconds=30))
+    env = json.loads(tool(command="true", timeout=30))
 
     assert env["ok"] is False
     assert env["timed_out"] is False

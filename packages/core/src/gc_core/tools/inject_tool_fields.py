@@ -8,7 +8,7 @@ import copy
 import logging
 from typing import Any, Dict, List
 
-from gc_core.tools.schema_optional import mark_property_optional
+from gc_core.tools.schema_optional import X_SUPPRESS_OPTIONAL_HINT, mark_property_optional
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +101,12 @@ def inject_property_into_spec(
         props = {}
         params["properties"] = props
 
+    stamped = copy.deepcopy(property_schema)
+    # Required on the wire, omittable locally. Do not let the optional-field
+    # hint tell the model to skip a field we just put in required.
+    stamped[X_SUPPRESS_OPTIONAL_HINT] = True
     params["properties"] = {
-        field_name: copy.deepcopy(property_schema),
+        field_name: stamped,
         **props,
     }
 
@@ -117,9 +121,10 @@ def inject_property_into_spec(
             *[r for r in required if r != field_name],
         ]
 
-    # Injected field is required in the API schema (above) but omittable locally:
-    # the handler strips it before the tool runs, so rejecting a call that lacks it
-    # would punish the model for a contract we impose on ourselves.
+    # Required on the wire (above) but omittable locally: the handler strips the
+    # field before the tool runs, so a missing value must not fail the call.
+    # x-suppress-optional-hint keeps the omit/empty hint off this property —
+    # that hint would tell the model to skip a field we just required.
     mark_property_optional(params, field_name)
 
     return [field_name]
@@ -143,9 +148,11 @@ def _new_object_parameters_with_field(
     field_name: str,
     property_schema: Dict[str, Any],
 ) -> Dict[str, Any]:
+    stamped = copy.deepcopy(property_schema)
+    stamped[X_SUPPRESS_OPTIONAL_HINT] = True
     return {
         "type": "object",
-        "properties": {field_name: copy.deepcopy(property_schema)},
+        "properties": {field_name: stamped},
         "required": [field_name],
         "additionalProperties": False,
     }

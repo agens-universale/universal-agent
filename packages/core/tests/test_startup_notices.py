@@ -22,6 +22,36 @@ def test_stop_tools_all_valid_no_notice():
     assert "stop_tools_unknown" not in _codes(ns)
 
 
+def test_stop_tools_skills_names_known_only_from_registry():
+    # Без каталога сборки skills_* — не «вечно известные». С каталогом — не опечатка.
+    cfg = {"stop_tools": ["skills_list", "write_to_file"]}
+    bare = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
+    bare_stop = [n for n in bare if n.code == "stop_tools_unknown"]
+    assert len(bare_stop) == 1
+    assert "skills_list" in bare_stop[0].message
+
+    ns = collect_startup_notices(
+        cfg, _BUILTIN, None, is_tui=False,
+        known_tool_names={"skills_list", "skills_load"},
+    )
+    stop = [n for n in ns if n.code == "stop_tools_unknown"]
+    assert len(stop) == 1
+    assert "skills_list" not in stop[0].message
+    assert "write_to_file" in stop[0].message
+
+
+def test_stop_tools_registered_mcp_name_is_not_a_typo():
+    cfg = {"stop_tools": ["mcp_jira_search", "nope"]}
+    ns = collect_startup_notices(
+        cfg, _BUILTIN, None, is_tui=False,
+        known_tool_names={"mcp_jira_search", "fs_read_file"},
+    )
+    stop = [n for n in ns if n.code == "stop_tools_unknown"]
+    assert len(stop) == 1
+    assert "mcp_jira_search" not in stop[0].message
+    assert "nope" in stop[0].message
+
+
 def test_mcp_failed_from_status():
     cfg = {}
     mcp = {"office": {"status": "failed"}, "science": {"status": "connected"}}

@@ -55,7 +55,7 @@ agent:
   tool_output_inline_max_chars: 10000
   stored_tool_outputs_max_entries: 50
   inject_tool_fields:
-    reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
+    reason: "At most 10 words: why this call, what you expect."
 
 paths:
   agent_md_path: "../../packages/core/assets/prompts/demo_cli_agent.md"

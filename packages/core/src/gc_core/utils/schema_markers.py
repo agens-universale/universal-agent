@@ -1,8 +1,8 @@
 """Internal JSON Schema markers and their removal on the wire.
 
 Our tool schemas carry bookkeeping keys (``x-optional-keys``, ``x-openai-strict``,
-``x-preserve-empty-string``): the local validator reads them to decide which keys the
-model may omit. They are ours alone — the JSON Schema sent to a provider must stay
+``x-preserve-empty-string``, ``x-suppress-optional-hint``): the local validator reads
+them to decide which keys the model may omit. They are ours alone — the JSON Schema sent to a provider must stay
 standard. Leaf module on purpose: the transport layer must be able to import it
 without pulling in the tools package.
 """

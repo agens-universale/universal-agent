@@ -33,7 +33,7 @@ class ExecuteCommand(AbstractSimpleTool):
                         "type": "string",
                         "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary."
                     },
-                    "timeout_seconds": {
+                    "timeout": {
                         "type": "integer",
                         "description": (
                             f"Execution timeout in seconds. Default is {timeout_default} "
@@ -79,7 +79,7 @@ class ExecuteCommand(AbstractSimpleTool):
         timeout_default = exec_timeout_from_config_dict(config_dict)
         description = ('''Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -146,7 +146,7 @@ Important Usage Rules:
         self,
         error: dict,
         command: str,
-        timeout_seconds: int | None = None,
+        timeout: int | None = None,
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
         **kwargs,
@@ -167,7 +167,7 @@ Important Usage Rules:
     def __call__(
         self,
         command: str,
-        timeout_seconds: int | None = None,
+        timeout: int | None = None,
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
         **kwargs,
@@ -199,9 +199,9 @@ Important Usage Rules:
                 error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
             )
 
-        if timeout_seconds is None:
-            timeout_seconds = exec_timeout_from_config_dict(self._config_dict)
-        if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        if timeout is None:
+            timeout = exec_timeout_from_config_dict(self._config_dict)
+        if not isinstance(timeout, int) or timeout <= 0:
             return self._result(
                 ok=False,
                 command=command,
@@ -210,7 +210,7 @@ Important Usage Rules:
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "invalid_argument", "field": "timeout_seconds"},
+                error={"type": "invalid_argument", "field": "timeout"},
             )
 
 
@@ -305,7 +305,7 @@ Important Usage Rules:
 
         try:
             res = self._backend.exec(
-                command, cwd=cwd_used, timeout=timeout_seconds, env=env_sanitized or None
+                command, cwd=cwd_used, timeout=timeout, env=env_sanitized or None
             )
         except Exception as e:
             err = str(e).replace("\n", " ").strip()
@@ -339,7 +339,7 @@ Important Usage Rules:
                 timed_out=True,
                 stdout=stdout_stream,
                 stderr=stderr_stream,
-                error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
+                error={"type": "timeout", "message": f"Command timed out after {timeout} seconds"},
             )
 
         exit_code = res.return_code

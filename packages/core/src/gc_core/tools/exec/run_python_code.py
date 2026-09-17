@@ -46,7 +46,7 @@ class RunPythonCode(AbstractSimpleTool):
                             "(fed on standard input; no temp script file)."
                         ),
                     },
-                    "timeout_seconds": {
+                    "timeout": {
                         "type": "integer",
                         "description": (
                             f"Maximum execution time in seconds before the process is terminated. "
@@ -92,7 +92,7 @@ class RunPythonCode(AbstractSimpleTool):
         description = (
             '''Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
+Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
             + str(timeout_default)
             + '''}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
@@ -134,7 +134,7 @@ Usage:
         self,
         error: Dict[str, Any],
         code: str,
-        timeout_seconds: Optional[int] = None,
+        timeout: Optional[int] = None,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -153,7 +153,7 @@ Usage:
     def __call__(
         self,
         code: str,
-        timeout_seconds: Optional[int] = None,
+        timeout: Optional[int] = None,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -179,8 +179,8 @@ Usage:
             )
 
         effective_timeout = (
-            timeout_seconds
-            if timeout_seconds is not None
+            timeout
+            if timeout is not None
             else exec_timeout_from_config_dict(self._config_dict)
         )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
@@ -190,7 +190,7 @@ Usage:
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "invalid_argument", "field": "timeout_seconds"},
+                error={"type": "invalid_argument", "field": "timeout"},
             )
 
 

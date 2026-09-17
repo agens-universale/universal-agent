@@ -864,9 +864,11 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
         return real_clear(state)
 
     monkeypatch.setattr(pr, "clear_loop_detector", _spy_clear)
-    monkeypatch.setattr(
-        pr, "process_user_ask", lambda *a, **k: (_ for _ in ()).throw(SystemExit("stop-after-reject"))
-    )
+    def _stop_after_reject(*_a, **_k):
+        raise SystemExit("stop-after-reject")
+
+    monkeypatch.setattr(pr, "process_user_ask", _stop_after_reject)
+    monkeypatch.setattr(pr, "process_tool_outputs", _stop_after_reject)
 
     state = State(
         verbose=False,
