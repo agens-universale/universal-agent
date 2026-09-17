@@ -715,8 +715,10 @@ voice:
 endpoint_presets:
   - name: OpenRouter
     url: https://openrouter.ai/api/v1/chat/completions
-  - name: GigaCode
-    url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+  - name: Cloud.ru
+    url: https://foundation-models.api.cloud.ru/v1/chat/completions
+  - name: RouterAI
+    url: https://routerai.ru/api/v1/chat/completions
 
 # адрес STT-сервиса (/settings → «Голосовой ввод» → «Свой endpoint»)
 voice_endpoint_presets:

@@ -8,7 +8,6 @@ from gc_core.config_modules.root import AppConfig
 
 _EXPECTED = [
     ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions"),
-    ("GigaCode", "https://litellm-proxy.sberai-rnd.ru/v1/chat/completions"),
     ("Cloud.ru", "https://foundation-models.api.cloud.ru/v1/chat/completions"),
     ("RouterAI", "https://routerai.ru/api/v1/chat/completions"),
 ]
@@ -18,7 +17,7 @@ def test_default_presets_names_and_urls():
     """Порядок — часть контракта, а не оформление: поле адреса пусто только на
     первом экране мастера, и там курсор встаёт на первый пункт (field_list
     _pick_index). То есть первый пресет — это предложение по умолчанию тому, кто
-    ничего не набрал; дальше идут сберовские, затем прочие внешние."""
+    ничего не набрал; дальше идут прочие внешние."""
     assert [(p.name, p.url) for p in DEFAULT_ENDPOINT_PRESETS] == _EXPECTED
 
 
@@ -32,7 +31,7 @@ def test_default_presets_are_not_materialized_into_the_template():
     одном месте — в коде — и обновлялся вместе с версией. Развёрнутый блок
     впечатывался бы копией в конфиг каждому при первом запуске, и следующий
     добавленный провайдер до людей уже не доехал бы (живой случай 2026-08-17:
-    в песочнице осталось три пресета из пяти)."""
+    в песочнице осталось три пресета из четырёх)."""
     from gc_testkit.paths import ASSETS, REPO
     # Шаблон ядра уехал в packages/core/assets/, demo_config.yml остался
     # в корне репозитория — считать оба от __file__ больше нельзя.
