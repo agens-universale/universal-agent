@@ -248,6 +248,19 @@ async def get_run_status(system: str, task_id: str):
 
     run = agent_run_registry.get_status(system=sys_norm, task_id=task_norm)
     if run is None:
+        # Бронь проверяем ДО 404 и до `_completed`: пока строится контекст,
+        # прогона в реестре ещё нет, а под тем же ключом может лежать прошлый
+        # завершённый прогон с TTL 15 минут. Клиент, которому только что
+        # ответили `queued`, видел из-за этого 404 или чужой `completed`.
+        if agent_run_registry.is_reserved(system=sys_norm, task_id=task_norm):
+            return {
+                "status": "running",
+                "system": sys_norm,
+                "task_id": task_norm,
+                "thread_id": task_norm,
+                "started_at": None,
+                "last_activity_at": None,
+            }
         raise HTTPException(status_code=404, detail={"status": "not_found"})
 
     if not run.done:
@@ -429,7 +442,21 @@ async def events_webhook(request: Request):
         # вместе с накопленными сообщениями, и тогда здесь пусто; но сборка
         # контекста может отказать — и без этого ключ навсегда остался бы
         # «строящимся», а следующие вебхуки получали бы `queued` в пустоту.
-        agent_run_registry.release_reservation(system=system, task_id=task_id)
+        # Возврат НЕ выбрасываем. На успешном пути тут пусто (всё забрал
+        # `astart_if_absent`), но если сборка контекста упала или её сняли —
+        # здесь лежат сообщения, которым уже ответили `queued`. Молча потерять
+        # их значит соврать клиенту.
+        undelivered = agent_run_registry.release_reservation(
+            system=system, task_id=task_id
+        )
+        if undelivered:
+            agent_run_registry.carry_over(
+                system=system, task_id=task_id, messages=undelivered
+            )
+            logger.warning(
+                "webhook_messages_carried_over system=%s task_id=%s count=%d",
+                system, task_id, len(undelivered),
+            )
 
     return {
         "status": "started",

@@ -147,3 +147,107 @@ async def test_messages_arriving_during_the_build_are_not_lost_on_failure():
 
     pending = registry.release_reservation(system="s", task_id="t")
     assert [m["content"] for m in pending] == ["during"]
+
+
+# --- R2.5: возврат резерва нельзя выбрасывать -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_carried_over_messages_reach_the_next_run():
+    """Сборка упала — сообщения ждут следующего вебхука ПО ТОЙ ЖЕ задаче.
+
+    Им уже ответили `queued`. Выбросить их — соврать клиенту; утащить в чужой
+    прогон нельзя; поэтому они ждут своей задачи и уезжают агенту первыми.
+    """
+    registry = AgentRunRegistry()
+    registry.reserve(system="s", task_id="t")
+    registry.add_user_message(system="s", task_id="t",
+                              make_message=_make_message, content="во время сборки")
+
+    # Сборка упала: эндпоинт снимает резерв и откладывает недоставленное.
+    undelivered = registry.release_reservation(system="s", task_id="t")
+    registry.carry_over(system="s", task_id="t", messages=undelivered)
+
+    # Следующий вебхук по той же задаче.
+    registry.reserve(system="s", task_id="t")
+    executor = _Executor()
+    await registry.astart_if_absent(
+        system="s", task_id="t", executor_factory=lambda ctx: executor,
+        ctx=None, initial_user_message="следующее", thread_id="t",
+    )
+    await asyncio.sleep(0)
+
+    texts = [m["content"] if isinstance(m, dict) else m for m in executor.messages]
+    assert "во время сборки" in texts, (
+        f"сообщение, принятое как queued, пропало после отказа сборки: {texts}"
+    )
+
+    executor.stop_run()
+    run = registry.get_status(system="s", task_id="t")
+    if run is not None and run.thread is not None:
+        await run.thread
+
+
+def test_endpoint_does_not_discard_the_released_reservation():
+    """Эндпоинт обязан ИСПОЛЬЗОВАТЬ возврат `release_reservation`.
+
+    Проверка по коду, а не по реестру, и это не педантизм: тест выше работает с
+    реестром напрямую и останется зелёным, даже если сервер снова выбросит
+    возврат. Ровно так же устроен сторож порядка резерва выше.
+    """
+    import importlib.util
+
+    origin = importlib.util.find_spec("gc_server.server").origin
+    tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
+    webhook = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.AsyncFunctionDef) and "webhook" in n.name)
+
+    discarded = [
+        n.lineno for n in ast.walk(webhook)
+        if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
+        and getattr(n.value.func, "attr", None) == "release_reservation"
+    ]
+    assert not discarded, (
+        f"возврат release_reservation выброшен (строка {discarded}): сообщения, "
+        f"которым ответили queued, исчезнут при отказе сборки"
+    )
+
+
+# --- R2.7: статус во время сборки -------------------------------------------
+
+
+def test_registry_reports_a_live_reservation():
+    registry = AgentRunRegistry()
+    assert registry.is_reserved(system="s", task_id="t") is False
+    registry.reserve(system="s", task_id="t")
+    assert registry.is_reserved(system="s", task_id="t") is True
+    registry.release_reservation(system="s", task_id="t")
+    assert registry.is_reserved(system="s", task_id="t") is False
+
+
+def test_status_endpoint_checks_the_reservation_before_404():
+    """Пока идёт сборка, статус не 404 и не `completed` прошлого прогона.
+
+    Под тем же ключом в `_completed` может лежать прошлый прогон с TTL 15 минут,
+    поэтому проверка брони обязана стоять ДО обращения к нему и до 404.
+    """
+    import importlib.util
+
+    origin = importlib.util.find_spec("gc_server.server").origin
+    tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
+    status = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_run_status")
+
+    reserved_at = [n.lineno for n in ast.walk(status)
+                   if isinstance(n, ast.Call)
+                   and getattr(n.func, "attr", None) == "is_reserved"]
+    raises_at = [n.lineno for n in ast.walk(status) if isinstance(n, ast.Raise)]
+
+    assert reserved_at, (
+        "статус не спрашивает про бронь: клиент, получивший queued, увидит 404 "
+        "или статус прошлого прогона"
+    )
+    assert min(reserved_at) < max(raises_at), (
+        f"проверка брони (строка {min(reserved_at)}) стоит после отказа "
+        f"(строка {max(raises_at)})"
+    )

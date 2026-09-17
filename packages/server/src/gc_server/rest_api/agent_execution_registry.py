@@ -55,6 +55,11 @@ class AgentRunRegistry:
         #: Задачи, у которых контекст ещё строится: ключ → сообщения, пришедшие
         #: за это время. Резерв держит ключ занятым с ПЕРВОГО запроса.
         self._reservations: dict[str, list] = {}
+        #: Сообщения, которым уже ответили `queued`, а прогон так и не начался
+        #: (сборка контекста упала или её сняли). Выбрасывать их нельзя —
+        #: клиенту сказали «принято». Ждут следующего вебхука по ТОЙ ЖЕ задаче:
+        #: это тот же тред, а не чужой контекст.
+        self._carry_over: dict[str, list] = {}
         self._completed: dict[str, ActiveRun] = {}
         self._completed_ttl_s = 15 * 60
         self._completed_max = 500
@@ -114,6 +119,31 @@ class AgentRunRegistry:
         with self._lock:
             return self._reservations.pop(key, [])
 
+    def carry_over(self, *, system: str, task_id: str, messages: list) -> None:
+        """Отложить недоставленные сообщения до следующего вебхука по задаче.
+
+        Синхронно и без `await` намеренно: единственный вызывающий — `finally`
+        эндпоинта, а он исполняется в том числе под раскруткой `CancelledError`,
+        где любое ожидание было бы съедено вместе с отменой.
+        """
+        if not messages:
+            return
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            self._carry_over.setdefault(key, []).extend(messages)
+
+    def is_reserved(self, *, system: str, task_id: str) -> bool:
+        """Идёт ли сейчас сборка контекста по этой задаче.
+
+        Нужен статусу: пока бронь жива, прогона в `_runs` ещё нет, а в
+        `_completed` под тем же ключом может лежать ПРОШЛЫЙ прогон с TTL 15
+        минут. Без этой проверки клиент, получивший `queued`, видел 404 или
+        чужой `completed`.
+        """
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            return key in self._reservations
+
     async def astart_if_absent(
         self,
         *,
@@ -131,7 +161,13 @@ class AgentRunRegistry:
             # Резерв снимаем ВСЕГДА, даже если стартовать не будем: иначе ключ
             # остался бы «строящимся» навсегда, и следующие запросы получали бы
             # `queued` в пустоту.
-            queued_messages = self._reservations.pop(key, [])
+            # Сначала то, что осталось от прошлой неудавшейся сборки: этим
+            # клиентам ответили «принято» раньше всех, и их сообщения должны
+            # уехать агенту первыми.
+            queued_messages = [
+                *self._carry_over.pop(key, []),
+                *self._reservations.pop(key, []),
+            ]
             existing = self._runs.get(key)
             if existing is not None and not existing.done:
                 for message in queued_messages:
