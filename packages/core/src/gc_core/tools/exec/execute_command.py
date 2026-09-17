@@ -60,6 +60,7 @@ class ExecuteCommand(AbstractSimpleTool):
 
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = {
             "type": "function",
             "name": "exec_command",
@@ -73,12 +74,13 @@ class ExecuteCommand(AbstractSimpleTool):
                         "type": "string",
                         "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary."
                     },
-                    "timeout_seconds": {
+                    "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {DEFAULT_EXEC_TIMEOUT_SEC} "
+                            f"Execution timeout in seconds. Default is {timeout_default} "
                             "(agent.exec_timeout_sec)."
                         ),
+                        "default": timeout_default,
                         "minimum": 1,
                     },
                     "cwd": {
@@ -136,9 +138,10 @@ class ExecuteCommand(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = ('''Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(DEFAULT_EXEC_TIMEOUT_SEC) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -152,7 +155,7 @@ Usage:
   Appending `&` to a normal foreground command is NOT enough: such a command is killed
   on timeout and its output pipes close when the call returns.
 - On timeout the command is stopped and its work is lost. If it simply needs longer,
-  re-run it with a bigger `timeout_seconds`, or start it with `run_in_background: true`.
+  re-run it with a bigger `timeout`, or start it with `run_in_background: true`.
 - Don't remove or create any files or folders outside of project directory!
 - Avoid interactive commands (e.g., `vim`, `python` without args) — they will time out or fail.
 - This tool is essential for inspecting system state, verifying installations, or automating workflows.
@@ -195,7 +198,7 @@ Important Usage Rules:
         stderr=None,
         error: dict | None = None,
     ) -> str:
-        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        """Envelope с front-loaded preview; ``truncated`` только если поток обрезан."""
         return build_exec_envelope(
             tool=ExecuteCommand.registered_tool_name(),
             ok=ok,
@@ -212,7 +215,7 @@ Important Usage Rules:
         self,
         error: dict,
         command: str,
-        timeout_seconds: int | None = None,
+        timeout: int | None = None,
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
         **kwargs,
@@ -231,7 +234,7 @@ Important Usage Rules:
     async def _plan(
         self,
         command: str,
-        timeout_seconds: int | None,
+        timeout: int | None,
         cwd: str | None,
         env_vars: list[dict] | None,
     ) -> "tuple[str | None, dict]":
@@ -269,9 +272,9 @@ Important Usage Rules:
                 error={"type": "invalid_argument", "field": "command", "message": "Empty command"},
             ), {}
 
-        if timeout_seconds is None:
-            timeout_seconds = exec_timeout_from_config_dict(self._config_dict)
-        if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        if timeout is None:
+            timeout = exec_timeout_from_config_dict(self._config_dict)
+        if not isinstance(timeout, int) or timeout <= 0:
             return self._result(
                 ok=False,
                 command=command,
@@ -280,7 +283,7 @@ Important Usage Rules:
                 timed_out=False,
                 stdout="",
                 stderr="",
-                error={"type": "invalid_argument", "field": "timeout_seconds"},
+                error={"type": "invalid_argument", "field": "timeout"},
             ), {}
 
 
@@ -376,7 +379,7 @@ Important Usage Rules:
         return None, {
             "command": command,
             "cwd": cwd_used,
-            "timeout": timeout_seconds,
+            "timeout": timeout,
             "env": env_sanitized or None,
         }
 
@@ -385,7 +388,7 @@ Important Usage Rules:
     async def acall(
         self,
         command: str,
-        timeout_seconds: int | None = None,
+        timeout: int | None = None,
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
         run_in_background: bool = False,
@@ -410,7 +413,7 @@ Important Usage Rules:
         ``call``, поэтому здесь мы её и зовём — но в потоке, а не на loop, и
         только ради разбора. Сам запуск ждётся через ``await``.
         """
-        early, plan = await self._plan(command, timeout_seconds, cwd, env_vars)
+        early, plan = await self._plan(command, timeout, cwd, env_vars)
         if early is not None:
             return early
         if run_in_background:
@@ -597,7 +600,7 @@ Important Usage Rules:
         """Разобрать результат запуска. Общий для обоих входов."""
         command = plan["command"]
         cwd_used = plan["cwd"]
-        timeout_seconds = plan["timeout"]
+        timeout = plan["timeout"]
 
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
@@ -618,7 +621,7 @@ Important Usage Rules:
                 timed_out=True,
                 stdout=stdout_stream,
                 stderr=stderr_stream,
-                error={"type": "timeout", "message": f"Command timed out after {timeout_seconds} seconds"},
+                error={"type": "timeout", "message": f"Command timed out after {timeout} seconds"},
             )
 
         exit_code = res.return_code

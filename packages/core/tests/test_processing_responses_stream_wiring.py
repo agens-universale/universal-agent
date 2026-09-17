@@ -22,6 +22,7 @@ def _patch_policy(monkeypatch):
         cert=None,
         use_retry,
         retry_embedded_choice_errors=True,
+        salvage_reasoning=False,
         logger=None,
         on_delta=None,
         request_label=None,
@@ -31,6 +32,7 @@ def _patch_policy(monkeypatch):
         config_proxy=None,
     ):
         seen["on_delta"] = on_delta
+        seen["salvage_reasoning"] = salvage_reasoning
         return (
             {"choices": [{"message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"}]},
             {"max_tokens": initial_max_tokens},
@@ -102,3 +104,10 @@ def test_on_delta_none_when_stream_on_but_no_callback(monkeypatch, chat_state_ct
     ctx.on_stream_delta = None
     run_coro(pr._arequest_backend_canonical(messages, state, ctx))
     assert seen["on_delta"] is None
+
+
+def test_main_agent_funnel_salvages_reasoning(monkeypatch, chat_state_ctx):
+    seen = _patch_policy(monkeypatch)
+    ctx, state, messages = chat_state_ctx(stream=False)
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
+    assert seen["salvage_reasoning"] is True

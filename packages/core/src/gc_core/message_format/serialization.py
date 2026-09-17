@@ -112,7 +112,11 @@ def message_raw_payload_chars_for_trigger(
     tags: Sequence[str] = (),
     strip_think: bool = True,
 ) -> int:
-    """Оценка длины содержимого сообщения для порога суммаризации: без префиксов ``[role]``."""
+    """Оценка длины содержимого для порога суммаризации, без префиксов ``[role]``.
+
+    Assistant: видимая проза при ``strip_think``; think-only (salvage) — сырой
+    payload, он уходит в основной запрос.
+    """
     if not isinstance(message, dict):
         return 0
     msg_type = str(message.get("type") or "message")
@@ -125,7 +129,12 @@ def message_raw_payload_chars_for_trigger(
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        return len(project_assistant_text(raw_content, tags=tags, strip_think=strip_think))
+        projected = project_assistant_text(
+            raw_content, tags=tags, strip_think=strip_think
+        )
+        if projected:
+            return len(projected)
+        return len(_message_content_to_text(raw_content))
     return len(_message_content_to_text(raw_content))
 
 

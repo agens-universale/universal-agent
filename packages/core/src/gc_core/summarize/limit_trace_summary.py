@@ -139,7 +139,7 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     Args:
         state: State с .messages, .steps, .tool_calls, .max_steps.
         reason: "step_limit" | "tool_call_limit" | "token_limit".
-        ctx: RunContext (нужен config_dict и chat_completions_llm).
+        ctx: RunContext (нужен config_dict и auxiliary_llm).
 
     Returns:
         JSON-строка {"ok": false, "status", "message", "raw_trace_summary"}.
@@ -149,9 +149,9 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
 
     raw_summary = ""
     if _should_enable(config_dict):
-        max_tokens = getattr(getattr(ctx, "chat_completions_llm", None), "max_tokens", None)
+        max_tokens = getattr(getattr(ctx, "auxiliary_llm", None), "max_tokens", None)
         if not isinstance(max_tokens, int) or max_tokens < 1:
-            max_tokens = 8192
+            max_tokens = 24576
 
         try:
             prompt_template = _load_limit_summary_prompt()

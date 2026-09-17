@@ -10,8 +10,9 @@ _logger = logging.getLogger(__name__)
 DEFAULT_PROJECT_MEMORY_MAX_CHARS = 10_000
 DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS = 3_000
 DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES = 5
-# Roughly enough for compressed project_memory.md (append-overflow compaction).
-DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS = 4_000
+# Потолок ответа compaction (не квота). Запас под мысль модели при TUI-дефолте
+# без anti-thinking kwargs; фактический сжатый текст обычно сильно короче.
+DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS = 16_384
 
 
 class ProjectMemoryConfig(BaseModel):

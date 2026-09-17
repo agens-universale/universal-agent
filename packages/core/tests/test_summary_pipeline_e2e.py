@@ -29,7 +29,7 @@ def _ctx():
                 "last_dialog_step_message_max_chars": 5000,
             },
             "chat_completions_params": {
-                "llm": {
+                "auxiliary_llm": {
                     "max_tokens": 8192,
                     "completion_kwargs": {},
                 },

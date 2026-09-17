@@ -72,7 +72,7 @@ class AgentConfig(BaseModel):
     limit_project_metadata: bool = False
     tool_output_inline_max_chars: int = 20000
     stored_tool_outputs_max_entries: int = 50
-    # Таймаут execute_command / run_python_code, если модель не передала timeout_seconds.
+    # Таймаут execute_command / run_python_code, если модель не передала timeout.
     exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
     # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
     # L = head floor(L/2) + tail (L - floor(L/2)).

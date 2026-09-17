@@ -18,6 +18,7 @@ DROP:
 
 OUTPUT RULES:
 - Output ONLY the compressed markdown body. No preface, no explanation, no fences.
+- **No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary about how you compressed. Emit only the compacted markdown.
 - Preserve markdown structure (headings, lists) where it aids scanability.
 - Be terse. Use bullet points and short sentences.
 - Aim for roughly 30–60% of the input length unless the input is mostly noise (then go shorter).

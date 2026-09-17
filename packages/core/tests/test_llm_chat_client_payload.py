@@ -21,6 +21,7 @@ def _patch_policy(monkeypatch):
         payload = payload_factory(initial_max_tokens)
         captured["payload"] = payload
         captured["initial_max_tokens"] = initial_max_tokens
+        captured["kwargs"] = kwargs
         return {"choices": [{"message": {"content": "ok"}}]}, payload
 
     monkeypatch.setattr(
@@ -153,3 +154,17 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
     ))
 
     assert "tools" not in captured["payload"]
+
+
+def test_request_chat_completion_text_does_not_salvage_reasoning(monkeypatch):
+    captured = _patch_policy(monkeypatch)
+    ctx = SimpleNamespace(config_dict=_cfg(), logger=None)
+    state = SimpleNamespace(default_model="test-model")
+    run_coro(llm_chat_client.arequest_chat_completion_text(
+        ctx=ctx,
+        state=state,
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=10,
+        consumer="summary",
+    ))
+    assert captured["kwargs"]["salvage_reasoning"] is False

@@ -39,11 +39,14 @@ agent_kwargs:
         thinking: true
         reasoning_effort: high
       tool_choice: auto
-    chat_completions_params:
-      llm:
-        max_tokens: 8192                 # aux LLM: summary / intent-scope
-        judge_max_tokens: 10000          # finish-gate / command_moderation
-        completion_kwargs: {}
+    auxiliary_llm_params:
+      max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
+      judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
+      # Свои kwargs поверх агента; thinking выкл (у агента thinking: true).
+      completion_kwargs:
+        chat_template_kwargs:
+          thinking: false
+          reasoning_effort: none
 
     # --- cybergym level0 content ---
     chat_completions_special_instructions_path: "/opt/gc-harbor-adapters/prompts/cybergym_special_instructions_honest_level0.md"
@@ -83,13 +86,13 @@ agent_kwargs:
     server_tool_prefix: system
     limit_project_metadata: false
     model_steering: ""
-    exec_timeout_sec: 600                # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
+    exec_timeout_sec: 600                # дефолт timeout для exec_command / exec_python, если модель не передала
     tool_output_inline_max_chars: 20000  # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
     exec_output_capture_max_chars: 40000  # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
     exec_output_preview_edge_chars: 3000  # каждый край front-loaded preview длинного потока; 0 — без preview
     stored_tool_outputs_max_entries: 50  # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
     inject_tool_fields:                  # инжект синтетического поля в JSON Schema КАЖДОГО тула
-      reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
+      reason: "At most 10 words: why this call, what you expect."
     stop_tools: [turn_ask_human, project_memory,
                  fs_save_base64_file, exec_calculator,
                  exec_sleep, exec_python, exec_fetch_url,
@@ -114,7 +117,7 @@ agent_kwargs:
 
     # --- quality / memory / notices ---
     quality_gate_params:                 # размер трейс-дайджеста для finish-gate судьи (intent_guard/trace_digest.py)
-      max_dialogue_chars: 420000         # как summary.max_dialogue_chars (~131k ток); ответ судьи ограничен judge_max_tokens=10000
+      max_dialogue_chars: 420000         # как summary.max_dialogue_chars (~131k ток); ответ судьи ограничен judge_max_tokens
       max_message_chars: 8000
     working_memory_params:
       max_chars_goal: 2000

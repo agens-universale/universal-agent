@@ -167,11 +167,15 @@ summary:
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
 
-# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
-# strip_think: true (дефолт) — ризонинг в messages не класть.
-# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
-#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
-# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
+# tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
+# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
+#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
+#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
+#   Смешанный ход (think + проза) — в историю только проза.
+#   Из саммари, intent, судей и памяти <think> вырезается всегда.
+# strip_think: false — копировать скрытое поле мысли в историю как есть
+#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
   strip_think: true
   tags: []
@@ -324,8 +328,6 @@ pricing:
 # endpoint_presets:
 #   - name: OpenRouter
 #     url: https://openrouter.ai/api/v1/chat/completions
-#   - name: GigaCode
-#     url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
 #   - name: Cloud.ru
 #     url: https://foundation-models.api.cloud.ru/v1/chat/completions
 #   - name: RouterAI

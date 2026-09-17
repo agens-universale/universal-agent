@@ -40,7 +40,7 @@ def _make_config(trigger=100):
             "chat_completions_summary_trigger_chars": trigger,
         },
         "chat_completions_params": {
-            "llm": {
+            "auxiliary_llm": {
                 "max_tokens": 8192,
                 "completion_kwargs": {},
             },

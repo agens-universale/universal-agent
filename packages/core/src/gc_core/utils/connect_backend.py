@@ -164,13 +164,15 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     Ретраим только вероятно транзиентные ошибки:
     - сетевые ошибки/таймауты
     - HTTP 429 и 5xx
+    - HTTP 404: LLM-прокси отдаёт его, пока route модели нет после обрыва
+      туннеля (транзиентно); честный 404 просто ждёт retry-бюджет.
     - иногда рвётся стрим: ошибки парсинга/валидации
     """
     if isinstance(exc, HTTP_STATUS_ERRORS):
         status_code = http_status_code(exc)
         if status_code is None:
             return False
-        return status_code == 429 or status_code >= 500
+        return status_code in (404, 429) or status_code >= 500
 
     if isinstance(exc, HTTP_TRANSPORT_ERRORS):
         return True

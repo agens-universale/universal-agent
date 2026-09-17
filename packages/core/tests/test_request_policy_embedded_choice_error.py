@@ -129,6 +129,48 @@ def test_finish_reason_error_with_content_accepted(monkeypatch):
     assert res["choices"][0]["message"]["content"] == "partial"
 
 
+def test_finish_reason_error_with_whitespace_content_accepted(monkeypatch):
+    # «\n» — payload: не embedded-empty, не ретрай.
+    calls = _patch_transport(
+        monkeypatch,
+        lambda _n: {
+            "choices": [
+                {"finish_reason": "error", "message": {"content": "\n"}}
+            ]
+        },
+    )
+    res, _payload = _run_policy()
+    assert calls["n"] == 1
+    assert res["choices"][0]["message"]["content"] == "\n"
+
+
+def _finish_error_reasoning_only():
+    return {
+        "choices": [
+            {
+                "finish_reason": "error",
+                "message": {"reasoning": "search the leaderboard"},
+            }
+        ]
+    }
+
+
+def test_finish_reason_error_with_reasoning_is_embedded_without_salvage(monkeypatch):
+    # Служебная воронка: reasoning не content. Аборт провайдера — ошибка, не пустая сводка.
+    calls = _patch_transport(monkeypatch, lambda _n: _finish_error_reasoning_only())
+    with pytest.raises(EmbeddedChoiceError, match="finish_reason='error'"):
+        _run_policy()
+    assert calls["n"] > 1
+
+
+def test_finish_reason_error_with_reasoning_accepted_when_salvage(monkeypatch):
+    # Агентский цикл: reasoning-only salvage в <think>, не EmbeddedChoiceError.
+    calls = _patch_transport(monkeypatch, lambda _n: _finish_error_reasoning_only())
+    res, _payload = _run_policy(salvage_reasoning=True)
+    assert calls["n"] == 1
+    assert res["choices"][0]["message"]["reasoning"] == "search the leaderboard"
+
+
 def test_embedded_nonnumeric_code_not_retried(monkeypatch):
     """Нечисловой error.code (insufficient_quota/invalid_api_key) → status=None,
     повтором не чинится: один вызов, без пере-отправок промпта. В отличие от

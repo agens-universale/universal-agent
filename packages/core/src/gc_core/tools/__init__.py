@@ -8,10 +8,10 @@ import sys
 import logging
 from typing import Any, Dict, Iterable, Tuple, Optional
 
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, annotate_output_with_dropped_arguments, parse_and_validate_tool_arguments
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
-from gc_core.tools.registry import get_builtin_tools_data
+from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
 from gc_core.tools.skills.registry import SkillsRegistry
@@ -178,10 +178,11 @@ def apply_subagent_tools_filter(
     ``build_tools_data``. Фильтр в раннере пришлось бы дублировать, и два
     call-site'а обязаны были бы оставаться синхронными.
 
-    Применяется ПОСЛЕ подмешивания скиллов и MCP (иначе ``mcp_*`` было бы не
-    отфильтровать, как это происходит с глобальным ``stop_tools``) и ДО сборки
-    ``tools_spec`` — иначе модель увидела бы в схеме тул, который не сможет
-    вызвать.
+    Применяется ПОСЛЕ подмешивания скиллов и MCP, ПОСЛЕ глобального
+    ``stop_tools`` по слитому набору и ДО сборки ``tools_spec`` — иначе модель
+    увидела бы в схеме тул, который не сможет вызвать. Глобальный stop идёт
+    раньше: служебное ядро возвращается только если оно ещё есть во входящем
+    наборе, снятое им не восстанавливаем.
     """
     allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
     stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
@@ -265,6 +266,7 @@ async def abuild_tools_data(
     skills_registry: SkillsRegistry | None = None,
     logger: Any = None,
     tools_cache: Any = None,
+    registered_names: Optional[list] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """То же, что ``build_tools_data``, но дискавери ждётся без потока.
 
@@ -286,7 +288,7 @@ async def abuild_tools_data(
     )
     return _finish_tools_data(
         tools_data, mcp_tools_data, mcp_status, config_dict,
-        os_backend=os_backend, logger=logger,
+        os_backend=os_backend, logger=logger, registered_names=registered_names,
     )
 
 
@@ -298,6 +300,7 @@ def _finish_tools_data(
     *,
     os_backend: FsBackend | None,
     logger: Any,
+    registered_names: Optional[list] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
     """Досборка после дискавери: субагенты, фильтры, спеки. Ни сети, ни ожидания.
 
@@ -321,6 +324,12 @@ def _finish_tools_data(
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
 
+    # Каталог до вычитания: валидатор stop_tools сверяется с ним, а не с уже
+    # отфильтрованным словарём (снятый skills_list иначе снова «опечатка»).
+    if registered_names is not None:
+        registered_names[:] = list(tools_data)
+
+    tools_data = _apply_stop_tools(tools_data, config_dict)
     tools_data = apply_subagent_tools_filter(tools_data, config_dict, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
@@ -412,7 +421,7 @@ def _prepare_tool_call(
     tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
     ctx: Optional[Any] = None,
     **kwargs: Any,
-) -> "tuple[Any, Dict[str, Any]] | str":
+) -> "tuple[Any, Dict[str, Any], list[str]] | str":
     """
     Подготовить вызов тула: вернуть ``(тул, аргументы)`` либо готовую строку-ответ.
 
@@ -466,12 +475,14 @@ def _prepare_tool_call(
             return f"Subagent {tool_name}: missing state or run_agent_func"
         entry = tools_data_.get(tool_name) or {}
         tool_spec = entry.get("spec", {}) or {}
+        dropped_unknown: list[str] = []
         parsed_args = parse_and_validate_tool_arguments(
             tool_name=tool_name,
             arguments=arguments,
             tool_spec=tool_spec,
             allow_empty_for_empty_schema=False,
             tool_fabric=entry.get("tool_fabric"),
+            dropped_unknown=dropped_unknown,
         )
         prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
         if callable(prepare):
@@ -487,7 +498,7 @@ def _prepare_tool_call(
             arguments=parsed_args,
             run_agent_func=run_agent_func,
             parent_call_id=kwargs.get("call_id"),
-        ), {}
+        ), {}, dropped_unknown
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
     log = _fallback_logger
@@ -509,12 +520,14 @@ def _prepare_tool_call(
 
     # Определяем, ожидает ли инструмент пустую схему (нет параметров)
     spec = tools_data_[tool_name].get("spec", {}) or {}
+    dropped_unknown: list[str] = []
     arguments = parse_and_validate_tool_arguments(
         tool_name=tool_name,
         arguments=arguments,
         tool_spec=spec,
         allow_empty_for_empty_schema=True,
         tool_fabric=tool_fabric,
+        dropped_unknown=dropped_unknown,
     )
     entry = tools_data_[tool_name]
     prepare = getattr(tool_fabric, "prepare_args_before_strip", None)
@@ -535,7 +548,7 @@ def _prepare_tool_call(
     if config_dict:
         fabric_kwargs.setdefault("config_dict", config_dict)
     tool = tool_fabric(**fabric_kwargs)
-    return tool, arguments
+    return tool, arguments, dropped_unknown
 
 
 def _tool_failure_output(
@@ -608,7 +621,7 @@ async def aapply_tool(
     prepared = _prepare_tool_call(tool_name, arguments, tools_data_, ctx, **kwargs)
     if isinstance(prepared, str):
         return prepared
-    tool, args = prepared
+    tool, args, dropped = prepared
     acall = getattr(tool, "acall", None)
     if not callable(acall):
         # Жёстко, а не тихим уходом в поток: тул без `acall` — это ошибка
@@ -621,10 +634,16 @@ async def aapply_tool(
     try:
         res = await acall(**args)
     except Exception as e:  # noqa: BLE001
-        return _tool_failure_output(
-            e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
+        return annotate_output_with_dropped_arguments(
+            _tool_failure_output(
+                e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
+            ),
+            dropped,
         )
-    return _tool_result_to_text(res)
+    # Заметка об отброшенных аргументах — на ОБОИХ выходах, как на develop:
+    # модель обязана узнать, что часть переданных полей схема не приняла,
+    # независимо от того, отработал тул или упал.
+    return annotate_output_with_dropped_arguments(_tool_result_to_text(res), dropped)
 
 
 __all__ = [

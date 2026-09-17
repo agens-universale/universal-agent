@@ -84,6 +84,8 @@ def _stub_tools_modules() -> None:
     tools_pkg.tool_arguments_valid = lambda *_a, **_k: True
     tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.is_internal_tool_error_output = lambda _output: False
+    tools_pkg.is_unknown_tool_output = lambda _output: False
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
@@ -540,8 +542,11 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     ]
 
 
-def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch):
-    """Reject finish gate must not return finish_arguments; inject technical user feedback."""
+def test_run_agent_reject_continues_from_tool_output_without_technical_user(monkeypatch):
+    """Reject must not return finish_arguments and must not inject a user message.
+
+    The next loop step is the tool-output batch; the verdict lives in that output.
+    """
     validate_calls = {"n": 0}
 
     def _validate(**_kwargs):
@@ -572,17 +577,24 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
         as_coro(lambda **_kwargs: None),
     )
 
-    user_ask_batches: list[list] = []
+    output_batches: list[list] = []
 
-    def _stub_user_ask(in_messages, _state, _ctx):
-        user_ask_batches.append(list(in_messages))
-        return (
-            [_submit_solution_call(solution_type="direct_answer")],
-            "rid_retry",
-        )
+    def _stub_tool_outputs(in_messages, _state, _ctx):
+        output_batches.append(list(in_messages))
+        retry = _submit_solution_call(solution_type="direct_answer")
+        retry["call_id"] = "call_finish_retry"
+        retry["id"] = "fc_finish_retry"
+        return [retry], "rid_retry"
 
     monkeypatch.setattr(
-        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+        processing_module, "aprocess_tool_outputs", as_coro(_stub_tool_outputs)
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "aprocess_user_ask",
+        as_coro(lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("gate reject must not inject a user message")
+        )),
     )
 
     state = _make_state(max_steps=10)
@@ -600,15 +612,19 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
         "предыдущий ход",
         "спроси меня что нибудь",
     ]
-    assert len(user_ask_batches) == 1
-    assert len(user_ask_batches[0]) == 1
-    tech_content = str(user_ask_batches[0][0].get("content") or "")
-    assert "intent" in tech_content.lower()
-    assert "continue working" in tech_content.lower()
-    assert "<technical" in tech_content.lower()
-    assert any(
-        "quality gate" in str(m.get("content") or "").lower()
-        or "intent" in str(m.get("content") or "").lower()
+    assert len(output_batches) == 1
+    assert output_batches[0]
+    assert all(m.get("role") != "user" for m in output_batches[0])
+    finish_out = next(
+        m for m in output_batches[0]
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    )
+    payload = json.loads(finish_out["output"])
+    assert payload["ok"] is False
+    assert "fix_report" in payload["message"].lower()
+    assert "without repeating" in payload["message"].lower()
+    assert not any(
+        "finish gate:" in str(m.get("content") or "").lower()
         for m in state.messages
         if m.get("role") == "user"
     )

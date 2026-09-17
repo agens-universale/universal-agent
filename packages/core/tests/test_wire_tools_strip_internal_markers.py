@@ -1,6 +1,7 @@
 """Internal schema markers (x-*) must not reach the provider.
 
-``x-optional-keys`` / ``x-openai-strict`` / ``x-preserve-empty-string`` are our own
+``x-optional-keys`` / ``x-openai-strict`` / ``x-preserve-empty-string`` /
+``x-suppress-optional-hint`` are our own
 bookkeeping: the local validator reads them to decide which keys may be omitted. The
 JSON Schema that goes on the wire must stay standard — and tools_data must not be
 mutated by the transport, or the validator would lose the markers it depends on.

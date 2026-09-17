@@ -71,6 +71,38 @@ def _transfer(dst_text: str, src_text: str, src_key: str, dst_key: str) -> str:
     return dst_text[:d_start] + block + dst_text[d_block_end:]
 
 
+def _rename_legacy_keys_in_text(text: str) -> tuple[str, int]:
+    """Переименовать оставшиеся RENAMES-якоря в тексте (verbatim-секции вне шаблона)."""
+    count = 0
+    for old, new in sorted(compat.RENAMES.items(), key=lambda kv: -kv[0].count(".")):
+        try:
+            start, _end, _indent, _ = find_anchor(text, old)
+        except KeyError:
+            continue
+        line_end = text.find("\n", start)
+        if line_end < 0:
+            line_end = len(text)
+        line = text[start:line_end]
+        old_leaf = old.split(".")[-1]
+        new_leaf = new.split(".")[-1]
+        if f"{old_leaf}:" not in line:
+            continue
+        text = text[:start] + line.replace(f"{old_leaf}:", f"{new_leaf}:", 1) + text[line_end:]
+        count += 1
+    return text, count
+
+
+def _remap_paths_after_rename(user_paths: set, old: str, new: str) -> set:
+    """Переложить user-paths со старого префикса на новый (для _restore_template_keys)."""
+    out: set = set()
+    for up in user_paths:
+        if up == old or up.startswith(old + "."):
+            out.add(new + up[len(old):])
+        else:
+            out.add(up)
+    return out
+
+
 def _restore_template_keys(result: str, template_text: str, template_raw: Any,
                            user_paths: set, ancestor: str) -> str:
     """Вернуть в перенесённую секцию ключи шаблона, которых у юзера нет.
@@ -115,7 +147,13 @@ def needs_sync(user_text: str, template_text: str) -> bool:
     if new_in_tmpl:
         return True
     legacy = set(compat.RENAMES) | set(compat.REMOVED)
-    return bool(legacy & user_paths)
+    # RENAMES/REMOVED часто указывают на секцию (не лист); _user_paths отдаёт
+    # листья вроде chat_completions.llm.max_tokens — нужен prefix-match.
+    return any(
+        up == leg or up.startswith(leg + ".")
+        for leg in legacy
+        for up in user_paths
+    )
 
 
 def _validate_subtree(top_key: str, subtree: Any) -> bool:
@@ -249,9 +287,26 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
         parent_transferred = False
         for depth in range(len(parts) - 1, 0, -1):
             ancestor = ".".join(parts[:depth])
-            if _covered(ancestor) or ancestor in compat.RENAMES:
+            if _covered(ancestor):
                 parent_transferred = True
                 break
+            if ancestor in compat.RENAMES:
+                target = compat.RENAMES[ancestor]
+                try:
+                    result = _transfer(result, user_text, ancestor, target)
+                    transferred += 1
+                    renamed += 1
+                    done.append(ancestor)
+                    remapped = _remap_paths_after_rename(all_user_paths, ancestor, target)
+                    result = _restore_template_keys(
+                        result, template_text, template_raw, remapped, target
+                    )
+                    parent_transferred = True
+                    break
+                except KeyError:
+                    # Нового якоря нет в шаблоне — не глотаем секцию, идём к
+                    # другим предкам / verbatim (финальный rename-pass допишет имя).
+                    continue
             try:
                 result = _transfer(result, user_text, ancestor, ancestor)
                 transferred += 1
@@ -289,6 +344,10 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
         result += "\n" + "\n".join(extra_blocks)
         if not result.endswith("\n"):
             result += "\n"
+
+    # Verbatim-секции вне шаблона могли приехать со старым именем ключа.
+    result, legacy_renamed = _rename_legacy_keys_in_text(result)
+    renamed += legacy_renamed
 
     validate_config_text(result)
 

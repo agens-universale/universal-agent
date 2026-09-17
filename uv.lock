@@ -943,7 +943,7 @@ wheels = [
 
 [[package]]
 name = "gc-cli"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "gc-core" },
@@ -958,7 +958,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-core"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "certifi" },
@@ -991,7 +991,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-mcp"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "gc-core" },
@@ -1006,7 +1006,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-server"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/server" }
 dependencies = [
     { name = "fastapi" },
@@ -1029,7 +1029,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-testkit"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/testkit" }
 dependencies = [
     { name = "pytest" },
@@ -1040,7 +1040,7 @@ requires-dist = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "gc-tui"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/tui" }
 dependencies = [
     { name = "gc-core" },
@@ -1067,7 +1067,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-ua"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "gc-cli" },

@@ -16,7 +16,7 @@ def test_run_python_success_non_zero_and_timeout():
     assert ok["ok"] is True and ok["stdout"]["content"].rstrip("\n") == "ok"
     bad = json.loads(tool(code="import sys; sys.exit(3)"))
     assert bad["ok"] is False and bad["return_code"] == 3
-    timeout = json.loads(tool(code="import time; time.sleep(2)", timeout_seconds=1))
+    timeout = json.loads(tool(code="import time; time.sleep(2)", timeout=1))
     assert timeout["ok"] is False and timeout["timed_out"] is True
 
 

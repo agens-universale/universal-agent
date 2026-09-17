@@ -40,8 +40,8 @@ def test_short_output_is_whole_without_preview_or_refs():
     r = json.loads(_tool(ExecuteCommand, state=state)(command=_print_command(5)))
 
     assert r["ok"] is True
-    assert r["truncated"] is False
-    assert r["stdout"] == {"truncated": False, "content": "AAAAA", "total_chars": 5}
+    assert "truncated" not in r
+    assert r["stdout"] == {"content": "AAAAA", "total_chars": 5}
     assert "preview" not in r
     assert "stdout_output_ref" not in r and "stderr_output_ref" not in r
     assert "hint" not in r
@@ -57,9 +57,9 @@ def test_stream_over_two_edges_gets_preview_while_content_stays_whole():
         "total_chars": 50,
         "omitted_chars": 30,
     }
-    assert r["stdout"]["truncated"] is False
+    assert "truncated" not in r["stdout"]
     assert r["stdout"]["content"] == "A" * 50
-    assert r["truncated"] is False
+    assert "truncated" not in r
 
 
 def test_long_stream_is_head_tail_with_exact_counters():
@@ -90,7 +90,7 @@ def test_streams_are_independent():
     code = "import sys; sys.stdout.write('A'*5); sys.stderr.write('B'*500)"
     r = json.loads(_tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"'))
 
-    assert r["stdout"] == {"truncated": False, "content": "AAAAA", "total_chars": 5}
+    assert r["stdout"] == {"content": "AAAAA", "total_chars": 5}
     assert "stdout" not in r["preview"]
     assert r["preview"]["stderr"]["total_chars"] == 500
     assert r["stderr"]["truncated"] is True
@@ -104,7 +104,7 @@ def test_no_hidden_four_thousand_limit():
         )
     )
 
-    assert r["stdout"]["truncated"] is False
+    assert "truncated" not in r["stdout"]
     assert r["stdout"]["total_chars"] == 3500
     assert len(r["stdout"]["content"]) == 3500
 
@@ -113,7 +113,7 @@ def test_max_output_chars_argument_is_ignored():
     """Скрытого второго лимита нет: аргумент тулы больше ничего не режет."""
     r = json.loads(_tool(ExecuteCommand)(command=_print_command(80), max_output_chars=5))
 
-    assert r["stdout"]["truncated"] is False
+    assert "truncated" not in r["stdout"]
     assert r["stdout"]["total_chars"] == 80
 
 
@@ -137,7 +137,7 @@ def test_exec_python_max_output_chars_argument_is_ignored():
         _tool(RunPythonCode)(code="import sys; sys.stdout.write('A'*80)", max_output_chars=5)
     )
 
-    assert r["stdout"]["truncated"] is False
+    assert "truncated" not in r["stdout"]
     assert r["stdout"]["total_chars"] == 80
 
 
@@ -146,7 +146,7 @@ def test_timeout_returns_observed_edges():
         "import sys, time; sys.stdout.write('A'*500); sys.stdout.flush(); time.sleep(30)"
     )
     r = json.loads(
-        _tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"', timeout_seconds=1)
+        _tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"', timeout=1)
     )
 
     assert r["timed_out"] is True
@@ -187,4 +187,4 @@ async def test_backend_result_without_stream_structure_still_builds_envelope():
 
     r = json.loads(await tool.acall(command="x"))
     assert r["ok"] is True
-    assert r["stdout"] == {"truncated": False, "content": "hi", "total_chars": 2}
+    assert r["stdout"] == {"content": "hi", "total_chars": 2}

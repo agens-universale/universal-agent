@@ -32,7 +32,11 @@ CONFIGS = sorted(BENCH_DIR.glob("0*.yml"))
 #: `harbor`), и `load_config_ex` отвергает их как `extra_forbidden`. Список
 #: поимённый, а не «всё, что не 0*»: новый файл обязан попасть под сетку либо
 #: сюда — то есть решением, а не молча.
-NOT_AGENT_CONFIGS = {"bench_config.yml", "bench_config_dsv4_v0.2.3.yml"}
+NOT_AGENT_CONFIGS = {
+    "bench_config.yml",
+    "bench_config_dsv4_v0.2.3.yml",
+    "ua_qwen36_35b_pre_v0_3_0.yml",
+}
 
 
 def _markdown_paths(node, prefix=""):

@@ -2,8 +2,8 @@ from gc_tui.services.yaml_view import safe_yaml_dump, yaml_syntax_widget
 
 
 def test_safe_yaml_dump_tolerates_non_serializable_objects():
-    # Реальный app._config содержит pydantic-объект под chat_completions_llm,
-    # на котором yaml.safe_dump бросает RepresenterError. safe_yaml_dump не падает.
+    # Подстраховка: если в снимок конфига попал pydantic-объект,
+    # yaml.safe_dump бросает RepresenterError. safe_yaml_dump не падает.
     from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig
     cfg = {
         "a": 1,

@@ -249,6 +249,7 @@ async def _asend_chat_completion_text(
             cert=cert,
             use_retry=use_retry,
             retry_embedded_choice_errors=retry_embedded_choice_errors,
+            salvage_reasoning=False,
             logger=getattr(ctx, "logger", None),
             request_label=request_label,
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),

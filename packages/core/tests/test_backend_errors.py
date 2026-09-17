@@ -1,7 +1,23 @@
 import httpx
 import requests
 
-from gc_core.utils.backend_errors import EmbeddedChoiceError, is_auth_error, is_context_overflow_error, is_empty_completion, is_retriable_backend_error, normalize_finish_reason
+from gc_core.utils.backend_errors import (
+    EmbeddedChoiceError,
+    FINISH_KIND_BLOCKED,
+    FINISH_KIND_LENGTH,
+    FINISH_KIND_STOP,
+    FINISH_KIND_TOOL_CALLS,
+    FINISH_KIND_UNKNOWN,
+    classify_finish_kind,
+    finish_blocks_final,
+    finish_prevents_text_final,
+    has_payload,
+    is_auth_error,
+    is_context_overflow_error,
+    is_empty_completion,
+    is_retriable_backend_error,
+    normalize_finish_reason,
+)
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 
@@ -44,6 +60,36 @@ def test_not_empty_with_content():
 
 def test_not_empty_with_tool_calls():
     assert is_empty_completion(_resp(tool_calls=[{"id": "c1", "type": "function"}])) is False
+
+
+def test_not_empty_with_reasoning_content():
+    dct = _resp()
+    dct["choices"][0]["message"]["reasoning_content"] = "search the leaderboard"
+    assert is_empty_completion(dct) is False
+
+
+def test_not_empty_with_openrouter_reasoning_alias():
+    dct = _resp()
+    dct["choices"][0]["message"]["reasoning"] = "search the leaderboard"
+    assert is_empty_completion(dct) is False
+
+
+def test_empty_whitespace_reasoning_without_finish_is_empty():
+    dct = _resp()
+    dct["choices"][0]["message"]["reasoning_content"] = "  \n"
+    assert is_empty_completion(dct) is True
+
+
+def test_whitespace_content_is_payload_not_empty_stream():
+    # «\n» — состоявшийся ответ (bounce), не оборванный стрим.
+    assert has_payload({"content": "\n"}) is True
+    assert has_payload({"content": ""}) is False
+    assert has_payload({"content": None}) is False
+    assert has_payload({"tool_calls": [{"id": "c1"}]}) is True
+    assert has_payload({"reasoning_content": "think"}) is True
+    assert has_payload({"reasoning_content": "  \n"}) is False
+    assert is_empty_completion(_resp(content="\n")) is False
+    assert is_empty_completion(_resp(content="")) is True
 
 def test_not_empty_with_finish_reason():
     assert is_empty_completion(_resp(finish_reason="stop")) is False
@@ -237,20 +283,66 @@ def test_model_unavailable_ignores_embedded_without_http_status():
 
 
 def test_finish_known_accept():
-    for fr in ("stop", "tool_calls", "length"):
+    for fr, kind in (
+        ("stop", FINISH_KIND_STOP),
+        ("tool_calls", FINISH_KIND_TOOL_CALLS),
+        ("length", FINISH_KIND_LENGTH),
+    ):
         d = normalize_finish_reason(fr, has_content=True, has_tool_calls=False)
-        assert d.accept is True and d.unknown is False
+        assert d.accept is True and d.unknown is False and d.kind == kind
+
+
+def test_finish_blocked_known_accept_not_unknown():
+    for fr in ("content_filter", "refusal", "safety", "Content_Filter", "REFUSAL"):
+        d = normalize_finish_reason(fr, has_content=True, has_tool_calls=False)
+        assert d.accept is True and d.unknown is False and d.kind == FINISH_KIND_BLOCKED
+        assert finish_blocks_final(fr) is True
+
+
+def test_finish_blocked_empty_still_accepted_as_known():
+    # Известный blocked без payload — не «unknown empty discard», а known accept
+    # (конвертер может отдать пустой батч; цикл bounce по kind).
+    d = normalize_finish_reason("content_filter", has_content=False, has_tool_calls=False)
+    assert d.accept is True and d.unknown is False and d.kind == FINISH_KIND_BLOCKED
+
 
 def test_finish_unknown_with_content_accepts_flagged():
-    d = normalize_finish_reason("content_filter", has_content=True, has_tool_calls=False)
-    assert d.accept is True and d.unknown is True
+    d = normalize_finish_reason("eos", has_content=True, has_tool_calls=False)
+    assert d.accept is True and d.unknown is True and d.kind == FINISH_KIND_UNKNOWN
+    assert finish_blocks_final("eos") is False
+
 
 def test_finish_null_with_tool_calls_accepts_flagged():
     d = normalize_finish_reason(None, has_content=False, has_tool_calls=True)
-    assert d.accept is True and d.unknown is True
+    assert d.accept is True and d.unknown is True and d.kind == FINISH_KIND_UNKNOWN
+
 
 def test_finish_unknown_empty_rejects():
     d = normalize_finish_reason(None, has_content=False, has_tool_calls=False)
-    assert d.accept is False and d.unknown is True
+    assert d.accept is False and d.unknown is True and d.kind == FINISH_KIND_UNKNOWN
     d2 = normalize_finish_reason("eos", has_content=False, has_tool_calls=False)
-    assert d2.accept is False
+    assert d2.accept is False and d2.kind == FINISH_KIND_UNKNOWN
+
+
+def test_finish_null_with_reasoning_accepts_flagged():
+    d = normalize_finish_reason(
+        None, has_content=False, has_tool_calls=False, has_reasoning=True
+    )
+    assert d.accept is True and d.unknown is True and d.kind == FINISH_KIND_UNKNOWN
+
+
+def test_classify_finish_kind_and_blocks_final():
+    assert classify_finish_kind("stop") == FINISH_KIND_STOP
+    assert classify_finish_kind("length") == FINISH_KIND_LENGTH
+    assert classify_finish_kind("content_filter") == FINISH_KIND_BLOCKED
+    assert classify_finish_kind("refusal") == FINISH_KIND_BLOCKED
+    assert classify_finish_kind("safety") == FINISH_KIND_BLOCKED
+    assert classify_finish_kind(None) == FINISH_KIND_UNKNOWN
+    assert classify_finish_kind("  ") == FINISH_KIND_UNKNOWN
+    assert finish_blocks_final("stop") is False
+    assert finish_blocks_final("length") is False
+    assert finish_blocks_final(None) is False
+    assert finish_prevents_text_final("content_filter") is True
+    assert finish_prevents_text_final("length") is True
+    assert finish_prevents_text_final("stop") is False
+    assert finish_prevents_text_final(None) is False

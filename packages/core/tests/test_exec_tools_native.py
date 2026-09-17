@@ -159,7 +159,7 @@ async def test_command_reports_a_timeout_the_same_way():
     """Таймаут — общий путь разбора результата, а не отдельная ветка."""
     out = json.loads(
         await _cmd().acall(
-            command="python3 -c 'import time; time.sleep(5)'", timeout_seconds=1
+            command="python3 -c 'import time; time.sleep(5)'", timeout=1
         )
     )
 

@@ -26,10 +26,13 @@ from gc_core.backends.capture import CapturedStream
 
 
 def stream_to_json(stream: CapturedStream) -> dict:
-    """Расширенный канал: ``content`` для целого потока, ``head``/``tail`` для обрезанного."""
+    """Расширенный канал: ``content`` для целого потока, ``head``/``tail`` для обрезанного.
+
+    ``truncated`` пишется только при ``true``: у целого потока форма уже
+    однозначна по наличию ``content``, а ``false`` только шумит в токене.
+    """
     if not stream.truncated:
         return {
-            "truncated": False,
             "content": stream.content,
             "total_chars": stream.total_chars,
         }
@@ -120,7 +123,8 @@ def build_exec_envelope(
         envelope.update(head_fields)
     envelope[exit_code_key] = exit_code
     envelope["timed_out"] = timed_out
-    envelope["truncated"] = bool(stdout.truncated or stderr.truncated)
+    if stdout.truncated or stderr.truncated:
+        envelope["truncated"] = True
     envelope["error"] = error
     envelope.update(exec_channels_json(stdout, stderr, preview_edge_chars))
     return json.dumps(envelope, ensure_ascii=False)

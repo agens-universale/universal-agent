@@ -13,7 +13,11 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Tuple
 
 # {"старый.dotted.путь": "новый.dotted.путь"}
-RENAMES: Dict[str, str] = {}
+RENAMES: Dict[str, str] = {
+    # AliasChoices("auxiliary_llm", "llm") недостаточно: deep_merge user(llm)+project
+    # (auxiliary_llm) оставляет оба ключа → extra=forbid «Extra inputs are not permitted».
+    "chat_completions.llm": "chat_completions.auxiliary_llm",
+}
 # опциональное преобразование значения при переносе (смена формата/смысла)
 RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 # {"dotted.путь": "почему удалён"}

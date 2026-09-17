@@ -74,10 +74,10 @@ class FetchUrl(AbstractSimpleTool):
                         "type": "string",
                         "description": "Absolute URL to fetch (http or https).",
                     },
-                    "timeout_seconds": {
+                    "timeout": {
                         "type": "integer",
                         "description": (
-                            "Optional timeout for HTTP request in seconds. "
+                            "HTTP timeout in seconds. "
                             f"Default is {cls.timeout_seconds}."
                         ),
                     },
@@ -112,7 +112,7 @@ class FetchUrl(AbstractSimpleTool):
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return f"""Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
-Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}
+Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}
 
 Usage:
 - Use this tool when you need readable text from a web page.
@@ -473,7 +473,7 @@ Usage:
     async def acall(
         self,
         url: str,
-        timeout_seconds: Optional[int] = None,
+        timeout: Optional[int] = None,
         max_preview_chars: int = 1200,
         offset: int = 0,
         limit: Optional[int] = None,
@@ -489,10 +489,10 @@ Usage:
 
         _result = functools.partial(self._result, url=url)
 
-        if timeout_seconds is not None and not isinstance(timeout_seconds, int):
+        if timeout is not None and not isinstance(timeout, int):
             return _result(
                 ok=False,
-                error={"type": "invalid_argument", "field": "timeout_seconds"},
+                error={"type": "invalid_argument", "field": "timeout"},
             )
 
         if not isinstance(max_preview_chars, int) or max_preview_chars <= 0:
@@ -532,11 +532,11 @@ Usage:
                 error={"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."},
             )
 
-        effective_timeout = timeout_seconds or self.timeout_seconds
+        effective_timeout = timeout or self.timeout_seconds
         if effective_timeout <= 0:
             return _result(
                 ok=False,
-                error={"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."},
+                error={"type": "invalid_argument", "field": "timeout", "message": "timeout must be greater than 0."},
             )
 
         cache_key = self._cache_key(normalized_url, normalized_proxy)

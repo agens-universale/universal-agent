@@ -57,7 +57,7 @@ def test_skills_run_script_sets_script_ok_true_on_zero_exit(reg_with_scripts, tm
     assert payload["ok"] is True
     assert payload["script_ok"] is True
     assert payload["result"]["exit_code"] == 0
-    assert payload["result"]["truncated"] is False
+    assert "truncated" not in payload["result"]
     assert payload["result"]["stdout"]["content"].strip() == "done"
     assert "preview" not in payload["result"]
 

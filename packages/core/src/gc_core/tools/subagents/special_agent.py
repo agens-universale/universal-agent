@@ -2,8 +2,11 @@ from typing import Any, Dict
 
 from gc_core.config_modules.chat_completions import subagent_role_max_tokens_from_ctx
 from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX
+from gc_core.summarize.llm import (
+    arequest_auxiliary_completion_text,
+    auxiliary_llm_completion_kwargs,
+)
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
-from gc_core.utils.llm_chat_client import arequest_chat_completion_text
 
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -107,7 +110,8 @@ Return final report as result of tool call of finish tool
 Create prompt for role: {{role}}.
 Role description: {{role_description}}
 
-Write actual role prompt in format as in examples. Don't use tags <Example>, write just prompt text itself."""
+Write actual role prompt in format as in examples. Don't use tags <Example>, write just prompt text itself.
+**No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or meta commentary. Emit only the role prompt text."""
 
 
 class SpecialAgent(AbstractSubagent):
@@ -178,13 +182,14 @@ class SpecialAgent(AbstractSubagent):
     async def afinalize_role(self, ctx: Any, state: Any) -> None:
         """Нативная форма: LLM-вызов идёт на loop вызывающего, без потока.
 
-        Дефолт базового класса увёл бы синхронную версию в поток, а та пошла бы
-        — форма у роли одна, асинхронная.
+        Роль генерируется через aux chat/completions (профиль kwargs +
+        strip_think); зовётся runner'ом после сборки child-контекста — нужны
+        ``ctx.model_router`` и сетевые параметры для Bearer.
         """
         self.agent_role = await self._agenerate_role(ctx, state)
 
     def _role_request_kwargs(self, ctx: Any, state: Any) -> dict:
-        """Аргументы LLM-вызова генерации роли — один источник для обеих форм."""
+        """Аргументы aux-вызова генерации роли — один источник."""
         prompt = (
             _ROLE_GENERATE_PROMPT
             .replace("{{role}}", self.role)
@@ -200,12 +205,14 @@ class SpecialAgent(AbstractSubagent):
             "max_tokens": subagent_role_max_tokens_from_ctx(ctx),
             "consumer": f"{SUBAGENT_CONSUMER_PREFIX}{self.agent_name}",
             "request_label": "subagent_special_agent",
+            # Профиль aux-вызовов — с develop: без него роль шла бы мимо
+            # `auxiliary_llm` kwargs, которыми правятся все служебные вызовы.
+            "payload_overrides": auxiliary_llm_completion_kwargs(ctx),
         }
 
-
     async def _agenerate_role(self, ctx: Any, state: Any) -> str:
-        """Асинхронный двойник :meth:`_generate_role`."""
-        return await arequest_chat_completion_text(
+        """Роль генерируется aux-вызовом; форма одна — асинхронная."""
+        return await arequest_auxiliary_completion_text(
             **self._role_request_kwargs(ctx, state)
         )
 

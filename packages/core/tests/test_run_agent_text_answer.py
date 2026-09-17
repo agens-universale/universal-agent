@@ -4,7 +4,7 @@
 машинерия судейства (backend_api_mode == chat_completions) — от тоггла /gate
 (strict_turn_finish_validation, finish-gate) НЕ зависит."""
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 
 
 class _S:
@@ -215,3 +215,148 @@ def test_run_agent_judge_accept_returns_text(monkeypatch):
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     result = run_coro(pr.arun_agent(_text_msgs(), _state(), _run_ctx("judge")))
     assert result == "Привет! Чем помочь?"
+
+
+def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
+    """content_filter — отказ провайдера, не финальный текст; allow не принимает."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import CONTENT_FILTER_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
+
+    state = _state()
+    state.last_finish_reason = "content_filter"
+    result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx("allow")))
+    assert result == "ok"
+    assert captured["content"] == CONTENT_FILTER_BOUNCE_MESSAGE
+
+
+def test_run_agent_refusal_bounces_even_in_allow(monkeypatch):
+    """refusal/safety — тот же blocked-kind, не финал в allow."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import PROVIDER_BLOCKED_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
+
+    for blocked in ("refusal", "safety"):
+        captured.clear()
+        state = _state()
+        state.last_finish_reason = blocked
+        result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx("allow")))
+        assert result == "ok"
+        assert captured["content"] == PROVIDER_BLOCKED_BOUNCE_MESSAGE
+
+
+def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
+    """length без tool call — truncation nudge; allow тоже не принимает финалом."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import LENGTH_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        # Следующий ход — валидный финал; иначе deny снова bounce'ит «ok».
+        ctx.config_dict["text_answer_mode"] = "allow"
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
+
+    for mode in ("deny", "allow"):
+        captured.clear()
+        state = _state()
+        state.last_finish_reason = "length"
+        result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx(mode)))
+        assert result == "ok"
+        assert captured["content"] == LENGTH_BOUNCE_MESSAGE
+
+
+def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
+    """Пустой output после content_filter — тот же rewrite-надж, не «нет tool call»."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import CONTENT_FILTER_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
+
+    state = _state()
+    state.last_finish_reason = "content_filter"
+    result = run_coro(pr.arun_agent([], state, _run_ctx("allow")))
+    assert result == "ok"
+    assert captured["content"] == CONTENT_FILTER_BOUNCE_MESSAGE
+
+
+def test_run_agent_empty_batch_length_uses_truncation_nudge(monkeypatch):
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.no_tool_call_bounce import LENGTH_BOUNCE_MESSAGE
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+
+    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
+
+    state = _state()
+    state.last_finish_reason = "length"
+    result = run_coro(pr.arun_agent([], state, _run_ctx("allow")))
+    assert result == "ok"
+    assert captured["content"] == LENGTH_BOUNCE_MESSAGE

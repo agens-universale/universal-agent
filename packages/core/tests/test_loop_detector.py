@@ -885,11 +885,13 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
         return real_clear(state)
 
     monkeypatch.setattr(pr, "clear_loop_detector", _spy_clear)
-    monkeypatch.setattr(
-        pr,
-        "aprocess_user_ask",
-        as_coro(lambda *a, **k: (_ for _ in ()).throw(SystemExit("stop-after-reject"))),
-    )
+    def _stop_after_reject(*_a, **_k):
+        raise SystemExit("stop-after-reject")
+
+    # Обе точки, как на develop: гейт-reject не должен уходить ни в user_ask,
+    # ни в tool_outputs. Имена корутинные — синхронных у нас нет.
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_stop_after_reject))
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", as_coro(_stop_after_reject))
 
     state = State(
         verbose=False,

@@ -214,7 +214,7 @@ def _make_runner_config(tmp_path):
         "model": "test-model",
         "system_prompt_id": "test-prompt",
         "chat_completions_params": {
-            "llm": {"max_tokens": 8192, "completion_kwargs": {}},
+            "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
         },
     }
 

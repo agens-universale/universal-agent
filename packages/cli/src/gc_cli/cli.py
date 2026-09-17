@@ -491,6 +491,7 @@ async def arun_cli() -> int:
         all_builtin_tool_names(config_dict),
         getattr(ctx, "mcp_status", None),
         is_tui=False,
+        known_tool_names=getattr(ctx, "registered_tool_names", None),
         deprecated_keys_used=config_dict.get("deprecated_keys_used"),
         upgrade_info=_upgrade_info,
         compat_notices=config_dict.get("compat_notices"),
