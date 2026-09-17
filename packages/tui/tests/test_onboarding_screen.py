@@ -3339,9 +3339,21 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monk
 
     printed: list = []
     monkeypatch.setattr(wz, "_reload_config", lambda: {})
+    # Ридер отвечает URL только на ПЕРВЫЙ вопрос (адрес), дальше — Enter.
+    # Константа здесь не годится: шаг выбора модели трактует непустой
+    # несовпадающий ответ как новый запрос (см. `_ask_as_is`), и мастер честно
+    # переспрашивает — виток за витком. Раньше это сходило с рук случайно:
+    # список моделей не приходил, и шаг выбора не открывался вовсе. Autouse
+    # `_no_network_model_fetch` подаёт список — шаг открылся, и константный
+    # ридер положил процесс (4,3 ГБ печати, SIGKILL). Тесту выбор модели не
+    # нужен: он про то, что оба мастера называют записанное одними словами.
+    answers = iter(["https://h/v1/chat/completions"])
+
+    def _reader(prompt, secret):
+        return next(answers, "")
+
     wz.run({}, tmp_path / "nowhere.yml", review_all=False,
-           io=wz.WizardIO(reader=lambda p, s: "https://h/v1/chat/completions",
-                          printer=printed.append))
+           io=wz.WizardIO(reader=_reader, printer=printed.append))
     assert any(sentinel in line for line in printed)
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
