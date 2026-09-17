@@ -1057,17 +1057,22 @@ class SubagentRunner:
         parent_threads_dir = getattr(self._ctx, "threads_dir", None)
         parent_system_id = getattr(self._ctx, "system_id", None)
         parent_thread_id = getattr(self._ctx, "thread_id", None)
+        # Каталог в условие НЕ входит: адрес треда — это (system_id, thread_id),
+        # а у стороннего хранилища (база, память) `threads_dir` пуст законно.
+        # Прежнее требование уводило такого ребёнка в `clear_thread_identity`, и
+        # гейт `resolve_sidecar_identity`, который пустой каталог уже принимает,
+        # до решения даже не доходил: трасса субагента молча терялась.
         if (
-            isinstance(parent_threads_dir, str)
-            and parent_threads_dir.strip()
-            and isinstance(parent_system_id, str)
+            isinstance(parent_system_id, str)
             and parent_system_id.strip()
             and isinstance(parent_thread_id, str)
             and parent_thread_id.strip()
         ):
             bind_thread_identity(
                 child_ctx,
-                threads_dir=parent_threads_dir,
+                threads_dir=(
+                    parent_threads_dir if isinstance(parent_threads_dir, str) else ""
+                ),
                 system_id=parent_system_id,
                 thread_id=parent_thread_id,
             )

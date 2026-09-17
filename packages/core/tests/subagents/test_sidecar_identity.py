@@ -187,6 +187,112 @@ class TestChildCtxCopiesThreadIdentity:
         assert not child_progress_enabled(child)
 
 
+# --- N5: адрес треда не зависит от каталога ---------------------------------
+
+
+async def _child_ctx_of_parent_with(tmp_path, *, threads_dir: str):
+    """Настоящий `_build_child_ctx` над родителем с заданным каталогом тредов."""
+    from gc_core.states import SharedStateData, State
+    from gc_testkit.helpers.tool_ctx import local_ctx
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    state = State(
+        verbose=False,
+        model="m",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="p",
+        use_server_subagents=False,
+        chat_completions_system_prompt="s",
+        shared=SharedStateData(),
+    )
+    state.backend_api_mode = "chat_completions"
+
+    cfg = {
+        "save_logs": True,
+        "logs_dump_dir": str(tmp_path),
+        "use_local_subagents": True,
+        "backend_api_mode": "chat_completions",
+        "enabled_tools": [],
+        "skills_data_path": "",
+        "mcp_servers": [],
+        "model": "m",
+        "system_prompt_id": "p",
+        "chat_completions_params": {"llm": {"max_tokens": 128, "completion_kwargs": {}}},
+    }
+    parent = local_ctx(cfg)
+    parent.run_id = "p1"
+    parent.auth_connector = None
+    parent.logger = None
+    parent.logging_path = ""
+    parent.summary_trace_path = ""
+    parent.tools_data = {}
+    parent.tools_spec = []
+    parent.tools_description = []
+    parent.subagent_progress_sink = None
+    bind_thread_identity(
+        parent, threads_dir=threads_dir, system_id="cli", thread_id="task-9"
+    )
+    runner = SubagentRunner(parent, state, cfg)
+    runner._parent_call_id = "call_sub"
+    return await runner._build_child_ctx(tool_name="subagent_worker")
+
+
+async def test_child_keeps_the_thread_address_without_a_directory(tmp_path):
+    """У встраивающего с базой каталога нет — адрес треда обязан уцелеть.
+
+    Гейт `resolve_sidecar_identity` пустой каталог уже принимает, но до него
+    дело не доходило: `_build_child_ctx` требовал непустой `threads_dir`, иначе
+    звал `clear_thread_identity`. Ребёнок оставался без адреса, и все записи
+    трассы молча возвращали `None` — при полностью работающих субагентах.
+    """
+    child = await _child_ctx_of_parent_with(tmp_path, threads_dir="")
+
+    assert (child.system_id, child.thread_id) == ("cli", "task-9"), (
+        f"адрес треда стёрт из-за пустого каталога: "
+        f"{(child.system_id, child.thread_id)}"
+    )
+    assert resolve_sidecar_identity(child) is not None, (
+        "identity не собралась — трасса субагента не будет записана"
+    )
+
+
+async def test_child_still_loses_the_address_without_a_thread(tmp_path):
+    """Обратная половина: нет самого адреса — личность снимается, как и раньше."""
+    child = await _child_ctx_of_parent_with(tmp_path, threads_dir=str(tmp_path))
+    child.thread_id = None
+
+    assert resolve_sidecar_identity(child) is None
+
+
+async def test_no_store_and_no_directory_writes_nowhere(tmp_path, monkeypatch):
+    """Ни хранилища, ни каталога — тихий no-op, а не запись в текущий каталог.
+
+    `FileThreadStore("")` уводит запись в путь ОТНОСИТЕЛЬНО cwd процесса: та же
+    молчаливая запись мимо контракта, от которой уже уходили в компакции.
+    """
+    from gc_core.tools.subagents.sidecar import apersist_subagent_trace
+
+    monkeypatch.chdir(tmp_path)
+    ctx = SimpleNamespace(
+        parent_call_id="call-1",
+        run_id="child-1",
+        system_id="cli",
+        thread_id="t1",
+        thread_store=None,
+        threads_dir="",
+    )
+
+    written = await apersist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
+
+    assert written is None, "запись состоялась, хотя писать некуда"
+    assert list(tmp_path.iterdir()) == [], (
+        f"трасса ушла в текущий каталог процесса: {list(tmp_path.iterdir())}"
+    )
+
+
 # --- H7: трасса доезжает до нефайлового хранилища --------------------------
 
 
