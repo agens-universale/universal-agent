@@ -267,11 +267,10 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
     await beat
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
-    worst = max(gaps) if gaps else 0.0
-    assert worst < 0.15, (
-        f"цикл замирал на {worst * 1000:.0f} мс при хранилище с RTT 5 мс — "
-        "обращения идут блокирующе"
-    )
+    from gc_testkit import assert_loop_was_free
+
+    assert_loop_was_free(gaps, tick=0.01,
+                         label="хранилище с RTT 5 мс: ")
 
 
 async def test_broken_store_fails_loudly_at_wiring(tmp_path, monkeypatch):

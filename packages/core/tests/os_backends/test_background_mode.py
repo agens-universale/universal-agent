@@ -119,18 +119,17 @@ async def test_background_spawns_keep_the_loop_breathing():
     26–32 без неё), чтобы тест не мигал на нагруженной машине.
     """
     backend = LocalFsBackend()
-    spawns, tick, ceiling = 20, 0.005, 0.020
+    spawns, tick = 20, 0.005
 
     stop = asyncio.Event()
-    worst = 0.0
+    gaps: list = []
 
     async def pulse() -> None:
-        nonlocal worst
         previous = time.monotonic()
         while not stop.is_set():
             await asyncio.sleep(tick)
             now = time.monotonic()
-            worst = max(worst, now - previous - tick)
+            gaps.append(now - previous)
             previous = now
 
     beat = asyncio.ensure_future(pulse())
@@ -142,10 +141,10 @@ async def test_background_spawns_keep_the_loop_breathing():
         stop.set()
         await beat
 
-    assert worst < ceiling, (
-        f"{spawns} фоновых запусков держали loop {worst * 1000:.1f} мс при "
-        f"потолке {ceiling * 1000:.0f} мс — уступка потеряна"
-    )
+    from gc_testkit import assert_loop_was_free
+
+    assert_loop_was_free(gaps, tick=tick,
+                         label=f"{spawns} фоновых запусков: ")
 
 
 async def test_finished_background_children_leave_the_registry():

@@ -90,7 +90,9 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
 
     assert answer
     assert len(gaps) > 10, f"хартбит почти не тикал: {len(gaps)} тиков"
-    assert max(gaps) < 0.15, f"loop залипал на {max(gaps):.3f}с"
+    from gc_testkit import assert_loop_was_free
+
+    assert_loop_was_free(gaps, tick=0.01)
 
 
 async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
