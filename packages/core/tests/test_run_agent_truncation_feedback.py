@@ -31,6 +31,9 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
     def _fake_process_user_ask(messages, state, ctx):
         if not captured_feedback.get("backend_called"):
             captured_feedback["backend_called"] = True
+            # finish_reason первого ответа — тот, что тестируем для truncation-hint
+            # на WrongFunctionArgumentsException.
+            state.last_finish_reason = finish_reason
             return [{
                 "role": "assistant",
                 "type": "function_call",
@@ -38,6 +41,8 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
                 "name": "fs_write_file",
                 "arguments": '{"path": "/tmp/x.md", "content": "hello"}',
             }], "resp_1"
+        # Recovery-текст: length/blocked не принимаются как финал (finish_prevents_text_final).
+        state.last_finish_reason = "stop"
         return [{
             "role": "assistant",
             "type": "message",
@@ -54,7 +59,10 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
         )
 
     def _fake_make_feedback(content, technical_type=None, call_id=None):
-        captured_feedback["content"] = content
+        # Первый feedback (WrongFunctionArguments) — то, что проверяем; bounce'ы
+        # после recovery не должны его затирать.
+        if "content" not in captured_feedback:
+            captured_feedback["content"] = content
         return {"role": "user", "id": "m_tech", "content": content}
 
     monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
@@ -64,7 +72,6 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
     monkeypatch.setattr(pr, "maybe_record_final_answer_intent", lambda **_kw: None)
 
     state = _state()
-    state.last_finish_reason = finish_reason
     result = pr.run_agent(
         [{"role": "user", "content": "сделай", "id": "u1"}],
         state,

@@ -7,6 +7,10 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from gc_core.config_modules.chat_completions import (
+    DEFAULT_SUBAGENT_ROLE_MAX_TOKENS,
+    ChatCompletionsLlmConfig,
+)
 from gc_core.states import State, SharedStateData
 from gc_core.tools.subagents import special_agent as special_agent_module
 from gc_core.tools.subagents.special_agent import SpecialAgent
@@ -52,6 +56,7 @@ def _make_config(**overrides):
 def _make_ctx(cfg=None):
     return SimpleNamespace(
         config_dict=cfg or _make_config(),
+        auxiliary_llm=ChatCompletionsLlmConfig(),
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -97,7 +102,7 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "request_auxiliary_completion_text",
             return_value="Custom role",
         ):
             instance.finalize_role(_make_ctx(), _make_state())
@@ -118,7 +123,7 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "request_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
             instance.finalize_role(_make_ctx(), _make_state())
@@ -140,7 +145,7 @@ class TestFinalizeRole:
         ctx = _make_ctx()
         state = _make_state()
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "request_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
             instance.finalize_role(ctx, state)
@@ -159,12 +164,12 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "request_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
             instance.finalize_role(_make_ctx(), _make_state())
 
-        assert mock_call.call_args.kwargs["max_tokens"] == 4096
+        assert mock_call.call_args.kwargs["max_tokens"] == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
 
     def test_generate_role_failure_propagates(self):
         """If LLM call fails, finalize_role should raise."""
@@ -175,7 +180,7 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_chat_completion_text",
+            special_agent_module, "request_auxiliary_completion_text",
             side_effect=ConnectionError("Network error"),
         ):
             with pytest.raises(ConnectionError):
@@ -195,12 +200,18 @@ class TestSpecialAgentWithRunner:
 
         with (
             patch.object(
-                special_agent_module, "request_chat_completion_text",
+                special_agent_module, "request_auxiliary_completion_text",
                 return_value="You are a security auditor.",
             ),
             patch.object(
                 runner, "_build_child_ctx",
-                return_value=SimpleNamespace(logger=None, run_id="cr", is_tui=False),
+                return_value=SimpleNamespace(
+                    logger=None,
+                    run_id="cr",
+                    is_tui=False,
+                    auxiliary_llm=ChatCompletionsLlmConfig(),
+                    config_dict=cfg,
+                ),
             ),
         ):
             result = runner.run(
