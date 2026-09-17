@@ -187,6 +187,18 @@ async def acreate_run_context(
     #
     # Кому перенос нужен (фронтенд, знающий, что поиск будет) — зовёт
     # `backend.awarm_capabilities()` сам, вне горячего пути.
+    # Рабочий каталог окружения спрашиваем ЗДЕСЬ, до дискавери MCP: сборка
+    # рабочей области ниже синхронная, а синхронного `exec` у песочницы нет.
+    # До дискавери — чтобы на отказе не остаться с открытыми MCP-сессиями; на
+    # отказе освобождаем и логгер прогона, иначе он с открытым файлом доживёт
+    # до конца процесса.
+    try:
+        await aprime_backend_cwd(prep.backend, config_dict)
+    except BaseException:
+        from gc_core.utils.logging_module import release_run_logger
+
+        release_run_logger(prep.run_logger)
+        raise
     with use_owner(prep.mcp_session_owner):
         tools = await abuild_tools_data(
             config_dict,
@@ -196,10 +208,6 @@ async def acreate_run_context(
             logger=prep.run_logger,
             tools_cache=tools_cache,
         )
-    # Рабочий каталог песочницы спрашиваем у окружения ЗДЕСЬ, корутиной: сборка
-    # рабочей области ниже синхронная, а синхронного `exec` у Harbor нет —
-    # раньше отказ глотался, и корнем становился `/` вместо WORKDIR контейнера.
-    await aprime_backend_cwd(prep.backend)
     return _finish_run_context(
         config_dict, prep, tools,
         auth_connector=auth_connector, environment=environment,
