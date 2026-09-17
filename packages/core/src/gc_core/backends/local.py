@@ -354,6 +354,12 @@ class LocalFsBackend(FsBackend):
                 **spawn_kwargs,
             )
         _BACKGROUND_PROCS.add(proc)
+        # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
+        # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
+        # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
+        # прежнего asyncio-пути, который отдавал управление внутри себя. Одна
+        # уступка возвращает паритет (5–7 мс), а стоит она ничего.
+        await asyncio.sleep(0)
         return {"pid": proc.pid}
 
     def default_cwd(self) -> Optional[str]:

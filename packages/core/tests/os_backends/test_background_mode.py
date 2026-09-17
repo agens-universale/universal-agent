@@ -104,6 +104,50 @@ async def test_without_a_log_the_child_is_not_blocked(tmp_path):
     )
 
 
+async def test_background_spawns_keep_the_loop_breathing():
+    """Пачка фоновых запусков не держит loop одним куском.
+
+    `subprocess.Popen` не отдаёт управление сам, и на успешном пути
+    `aspawn_background` больше нет ни одного `await`. Без явной уступки двадцать
+    запусков подряд шли неразрывно: замерено 26–32 мс худшего разрыва против
+    3 мс у прежнего asyncio-пути, который уступал внутри себя. Дефект дожил до
+    замера именно потому, что разрыв loop на этом пути никто не мерил — тесты
+    проверяли, что процесс запустился и выжил, но не чем за это платит
+    приложение.
+
+    Порог 20 мс выбран между наблюдаемыми режимами (5–7 мс с уступкой против
+    26–32 без неё), чтобы тест не мигал на нагруженной машине.
+    """
+    backend = LocalFsBackend()
+    spawns, tick, ceiling = 20, 0.005, 0.020
+
+    stop = asyncio.Event()
+    worst = 0.0
+
+    async def pulse() -> None:
+        nonlocal worst
+        previous = time.monotonic()
+        while not stop.is_set():
+            await asyncio.sleep(tick)
+            now = time.monotonic()
+            worst = max(worst, now - previous - tick)
+            previous = now
+
+    beat = asyncio.ensure_future(pulse())
+    await asyncio.sleep(0.25)                  # дать пульсу устояться
+    try:
+        for _ in range(spawns):
+            await backend.aspawn_background("true")
+    finally:
+        stop.set()
+        await beat
+
+    assert worst < ceiling, (
+        f"{spawns} фоновых запусков держали loop {worst * 1000:.1f} мс при "
+        f"потолке {ceiling * 1000:.0f} мс — уступка потеряна"
+    )
+
+
 async def test_finished_background_children_leave_the_registry():
     """Вышедший фоновый потомок снимается с учёта на следующем запуске.
 
