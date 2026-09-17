@@ -184,14 +184,17 @@ async def test_teardown_finishes_even_when_the_caller_is_cancelled():
     # и то доигрывает в фоне. Ждём именно этого: смысл не в «успело до
     # возврата», а в «дошло до конца».
     for _ in range(50):
-        if closed:
+        if len(closed) == 3:
             break
         await asyncio.sleep(0.02)
 
-    # Первая закрылась под shield; остальные ОСТАЛИСЬ В РЕЕСТРЕ, а не пропали.
-    assert closed == ["a"], closed
-    left = [k for k in registry._sessions if k[0] == owner]
-    assert len(left) == 2, f"остаток потерян: {registry._sessions}"
+    # Первая закрылась под shield, остальные — дочисткой в пределах общего
+    # бюджета. Оставить их в реестре «до следующего сноса» нельзя: снос
+    # фильтрует по владельцу, а следующий прогон приходит с новым.
+    assert sorted(closed) == ["a", "b", "c"], closed
+    assert not [k for k in registry._sessions if k[0] == owner], (
+        f"остаток не закрыт: {registry._sessions}"
+    )
 
 
 async def test_teardown_closes_everything_when_not_cancelled():

@@ -74,6 +74,34 @@ def test_ownerless_session_arms_an_exit_hook(monkeypatch):
     assert registered[0] == registry.close_everything
 
 
+def test_an_owned_session_arms_the_exit_hook_too(monkeypatch):
+    """Подстраховка на выходе нужна и владельческой сессии.
+
+    Прежде хук ставился ТОЛЬКО на безвладельческом пути, и на этом же факте
+    держалось обоснование «остаток подождёт следующего сноса». Следующего
+    сноса у сервера и CLI нет: снос фильтрует по владельцу, а владелец каждый
+    раз новый. Значит у снятого прогона остаток не закрывал вообще никто.
+    """
+    import atexit
+
+    from gc_core.mcp_session_owner import reset_owner, set_owner
+    from gc_core.tools.connect_mcp import persistent_stdio as ps
+
+    registered: list = []
+    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+
+    registry = ps.PersistentStdioRegistry()
+    token = set_owner("owner-with-a-run")
+    try:
+        registry.get_or_create("srv", {"command": "true"})
+    finally:
+        reset_owner(token)
+
+    assert registered == [registry.close_everything], (
+        "у владельческой сессии нет подстраховки на выходе процесса"
+    )
+
+
 def test_exit_hook_is_armed_once(monkeypatch):
     """Хук ставится один раз, а не на каждую сессию."""
     import atexit

@@ -66,6 +66,12 @@ from gc_core.tools.connect_mcp.transport import (
     forget_stdio_reader,
 )
 
+#: Общий бюджет на дочистку остатка сессий, когда прогон сняли снаружи.
+#: Именно общий, а не на сессию: закрытие одной стоит до 7 с (SIGTERM →
+#: таймаут → SIGKILL) плюс до 10 с на ответ close-тула, и умножать это на число
+#: сессий значит держать уже снятый прогон десятки секунд.
+_CANCEL_DRAIN_BUDGET_SEC = 3.0
+
 
 def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
     """
@@ -552,15 +558,17 @@ class PersistentStdioRegistry:
     ) -> PersistentStdioSession:
         owner = current_owner()
         key = (owner, server_key)
-        if owner is None:
-            # Сессия без владельца: её не закроет ни один `arun`, потому что
-            # ни один прогон её не заводил (прямой `apply_tool`, `gc-mcp`).
-            # Докстрока `mcp_session_owner` обещала явный `close_everything()`,
-            # но такого вызова не было НИ В ОДНОМ пакете — сессия жила до конца
-            # процесса, а с ней и Chromium. Ставим хук на выход; при SIGKILL он
-            # не отработает, но это разница между «обычно закрываем» и
-            # «не закрываем никогда».
-            self._arm_exit_hook()
+        # Хук на выход ставим ВСЕГДА. Раньше — только для безвладельческих
+        # сессий: их не закроет ни один `arun`, потому что ни один прогон их не
+        # заводил (прямой `apply_tool`, `gc-mcp`), а обещанного докстрокой
+        # `mcp_session_owner` явного `close_everything()` не было НИ В ОДНОМ
+        # пакете. Но владельческой сессии подстраховка нужна ровно так же: её
+        # закрывает `aclose_all` из `finally` прогона, и если этот `finally`
+        # сняли, остаток не увидит никто — снос фильтрует по владельцу, а
+        # следующий прогон приходит с новым. Хук стоит один `atexit.register`
+        # на процесс; при SIGKILL не отработает, но это разница между «обычно
+        # закрываем» и «не закрываем никогда».
+        self._arm_exit_hook()
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
@@ -591,6 +599,34 @@ class PersistentStdioRegistry:
                     return self._sessions.pop(key)
         return None
 
+    async def _adrain_own_within_budget(self, budget: float) -> None:
+        """Дочистить свои сессии с ОБЩИМ бюджетом. Зовут под уже снятой задачей.
+
+        На что бюджета не хватило — НЕ снимаем с реестра: там остаток застанет
+        ``close_everything`` на выходе процесса. Поэтому бюджет проверяется ДО
+        снятия сессии, а не после.
+        """
+        deadline = time.monotonic() + budget
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return
+            session = self._take_one_own()
+            if session is None:
+                return
+            try:
+                # `shield` по той же причине, что и в `aclose_all`: закрытие
+                # обязано дойти до конца. По таймауту оно доигрывает в фоне;
+                # вернуть такую сессию в реестр нельзя — `close_everything`
+                # пошёл бы закрывать её вторым, параллельным заходом.
+                await asyncio.wait_for(asyncio.shield(session.aclose()), left)
+            except asyncio.CancelledError:
+                # Сняли ПОВТОРНО. Настаивать не на чем: исходную отмену
+                # вызывающий получит в любом случае, остальное доберёт выход.
+                return
+            except Exception:
+                pass
+
     def close_all(self) -> None:
         """Закрыть сессии текущего владельца. Синхронный вход."""
         for session in self._take_own():
@@ -611,18 +647,23 @@ class PersistentStdioRegistry:
         Отмена приходит из двух РАЗНЫХ мест, и поступать с ними надо
         по-разному; различаем по счётчику ``Task.cancelling()``:
 
-        * **сняли НАС** (счётчик вырос) — останавливаемся и пробрасываем.
-          Остаток остаётся В РЕЕСТРЕ: он видим следующему сносу и
-          ``close_everything``. Проглотить чужую отмену, чтобы доработать ещё
-          по 7 с на сессию, значит держать уже снятый прогон.
+        * **сняли НАС** (счётчик вырос) — дочищаем остаток с общим бюджетом
+          ``_CANCEL_DRAIN_BUDGET_SEC`` и пробрасываем отмену дальше. Глотать
+          её нельзя: вызывающий обязан узнать, что его сняли. Работать же без
+          ограничения нельзя тем более — это держит снятый прогон ещё по 7 с
+          на сессию.
         * **отменилась САМА сессия** — ``CancelledError`` прилетел из её
           ``aclose`` (обычно из anyio cancel scope). Тогда копим и закрываем
           остальные: прежний ``raise`` прямо из цикла гасил ровно одну, а
-          прочие оставались в реестре и ЖИВЫМИ. Подстраховки на выходе может
-          не быть вовсе — ``_arm_exit_hook`` ставится только на
-          безвладельческом пути, — а в долгоживущем сервере выход процесса и
-          не горизонт. Для playwright это значит, что Chromium переживает
-          агента.
+          прочие оставались в реестре и ЖИВЫМИ.
+
+        Почему остаток нельзя просто оставить в реестре «до следующего
+        сноса», как здесь было написано раньше: снос фильтрует по владельцу, а
+        следующий владелец другой. У сервера контекст новый на каждый вебхук,
+        у CLI прогон один; переиспользует владельца только TUI. Последняя
+        сетка — ``atexit``, и ради неё же хук теперь ставится всегда, а не
+        только на безвладельческом пути. Для playwright цена прежняя: Chromium
+        переживает агента.
         """
         task = asyncio.current_task()
         outer_cancels = task.cancelling() if task is not None else 0
@@ -639,7 +680,11 @@ class PersistentStdioRegistry:
                 await asyncio.shield(session.aclose())
             except asyncio.CancelledError as exc:
                 if task is not None and task.cancelling() > outer_cancels:
-                    raise                  # сняли нас: остаток — в реестре
+                    # Сняли нас: дочищаем остаток в пределах общего бюджета и
+                    # отдаём отмену наружу. Что не успели — ждёт выхода
+                    # процесса, хук на который теперь стоит всегда.
+                    await self._adrain_own_within_budget(_CANCEL_DRAIN_BUDGET_SEC)
+                    raise
                 cancelled = exc            # отменилась сессия: гасим остальные
             except Exception:
                 pass
