@@ -26,9 +26,9 @@ backend:
 
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
-  llm:
-    max_tokens: 8192
-    judge_max_tokens: 10000
+  auxiliary_llm:
+    max_tokens: 24576
+    judge_max_tokens: 24576
     completion_kwargs:
       reasoning_effort: none
 
@@ -51,6 +51,11 @@ agent:
   no_tool_call_max_count: 5
   strict_turn_finish_validation: true
   tool_output_inline_max_chars: 10000
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+  # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
+  exec_output_capture_max_chars: 40000
+  # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
+  exec_output_preview_edge_chars: 3000
   stored_tool_outputs_max_entries: 50
 
 logging:
@@ -93,15 +98,50 @@ summary:
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
 
-# Доп. strip-теги для for_model / aux LLM. <think> всегда on; extras — сюда.
+# tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
+# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
+#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
+#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
+#   Смешанный ход (think + проза) — в историю только проза.
+#   Из саммари, intent, судей и памяти <think> вырезается всегда.
+# strip_think: false — копировать скрытое поле мысли в историю как есть
+#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
+  strip_think: true
   tags: []
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.
-# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+# read — fs_read_file; mutate — apply/replace (не append).
 fs_tools:
   max_read_bytes: 8388608       # 8 MiB
   max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
+  # fs_find_in_files — search text inside files (path = file or directory).
+  # max_file_bytes is a UNIFIED cap (file & directory mode); not read/mutate limits.
+  # Candidate caps are per pattern_mode (scan automaton); over L(mode) → refuse.
+  find_in_files:
+    max_file_bytes: 16777216          # 16 MiB — single cap for file & dir mode
+    max_candidates_like: 500000       # like / query_mode=text
+    max_candidates_or_simple: 200000  # pure a|b|…
+    max_candidates_affix_or: 300000   # one (group) + pure prefix/suffix
+    max_candidates_complex: 50000     # no cheap prefilter
+    max_open_files_affix_or: 50000    # full-re opens budget (affix_or only)
+    content_workers_threshold: 20000  # N >= → 2 workers; else 1
+    max_exclude_dirs: 32
+    top_level_dirs_cap: 5
+    default_limit: 100                # limit if caller omits it
+    max_total_matches: 300            # hard ceiling: limit_eff = min(requested, 300)
+    exclude_dot_dirs: true            # nested '.' dirs (hard floor always on)
+    # Extra basenames only; hard floor always includes venv, __pycache__,
+    # node_modules, .git (clearing this list does not re-open them).
+    exclude_dir_names: []
+
+  # fs_find_files_by_name — search files by name/path/glob under a directory.
+  # Matches names and paths only; does NOT search file contents.
+  find_files_by_name:
+    default_max_matches: 100          # max_matches if caller omits it
+    hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
+    max_visited: 500000               # walk safety cap (not a caller argument)
 
 security:
   command_moderation:

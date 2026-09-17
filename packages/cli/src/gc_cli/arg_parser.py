@@ -1,0 +1,342 @@
+import argparse
+from typing import Any, Dict, List
+
+import yaml
+
+run_args = dict()
+extra_config_overrides: Dict[str, Any] = {}
+
+
+def _parse_bool_cli(raw: str) -> bool:
+    value = str(raw).strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise argparse.ArgumentTypeError("Ожидается true или false")
+
+
+def _coerce_value(raw: str) -> Any:
+    """
+    Преобразовать строковое значение из CLI к более подходящему типу.
+
+    Используем yaml.safe_load, чтобы поддержать числа, bool и т.п.
+    В случае неудачи или получения None возвращаем исходную строку.
+    """
+    try:
+        value = yaml.safe_load(raw)
+    except Exception:
+        return raw
+    return raw if value is None else value
+
+
+def _parse_unknown_args(args: List[str]) -> Dict[str, Any]:
+    """
+    Разобрать дополнительные аргументы вида:
+    --param value
+    --param=value
+    --flag
+
+    Возвращает словарь переопределений для config_dict.
+    """
+    overrides: Dict[str, Any] = {}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+
+        key_part = token[2:]
+        value: Any = True
+
+        if "=" in key_part:
+            key, raw_val = key_part.split("=", 1)
+            value = _coerce_value(raw_val)
+        else:
+            key = key_part
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                raw_val = args[i + 1]
+                value = _coerce_value(raw_val)
+                i += 1
+
+        if key:
+            overrides[key] = value
+
+        i += 1
+
+    return overrides
+
+
+parser = argparse.ArgumentParser(
+    description="CLI-агент для взаимодействия с AI-сервером",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog="""
+Примеры использования:
+  agent -q "напиши функцию сортировки списка"
+  agent --query "как оптимизировать этот код?" --verbose
+  agent -q "..." --model CodeChat --max_steps 50
+        """,
+)
+
+parser.add_argument(
+    "-q",
+    "--query",
+    type=str,
+    required=False,
+    help="Запрос к агенту (обязателен, кроме --init-config)",
+)
+
+parser.add_argument(
+    "--init-config",
+    action="store_true",
+    help="Создать ~/.gc/config.yml из шаблона и выйти (агент не запускается)",
+)
+
+parser.add_argument(
+    "--sync-config",
+    action="store_true",
+    dest="sync_config",
+    help="Обновить config.yml до текущей версии (новые поля, переименования; старый файл — в бэкап) и выйти",
+)
+
+parser.add_argument(
+    "--reset-config",
+    action="store_true",
+    dest="reset_config",
+    help=(
+        "Сбросить config.yml к актуальному пакетному умолчанию (интерактивное "
+        "y/N-подтверждение; старый файл — в бэкап; профили и сессионные "
+        "оверрайды не трогает) и выйти"
+    ),
+)
+
+parser.add_argument(
+    "--init",
+    action="store_true",
+    help="Сгенерировать AGENTS.md сканом репозитория и выйти (агент не запускается)",
+)
+
+parser.add_argument(
+    "--check-update",
+    action="store_true",
+    dest="check_update",
+    help="Проверить, доступна ли новая версия агента (без установки) и выйти",
+)
+
+parser.add_argument(
+    "--update",
+    action="store_true",
+    dest="update",
+    help="Обновить агента (detached: ждёт завершения текущего процесса, затем uv tool install) и выйти",
+)
+
+parser.add_argument(
+    "-v",
+    "--verbose",
+    action="store_true",
+    help="Выводить подробную информацию о запросе",
+)
+
+parser.add_argument(
+    "-T",
+    "--technical",
+    action="store_true",
+    dest="wrap_technical",
+    help='Обернуть запрос в теги <technical type="technical">…</technical>',
+)
+
+parser.add_argument(
+    "-s",
+    "--skill",
+    metavar="SKILL_NAME",
+    type=str,
+    default=None,
+    help=(
+        "Добавить техническое указание: решать запрос через skill с данным "
+        "именем; при отсутствии — похожее имя (опечатка), если описание "
+        "подходит к задаче; иначе сообщить об ошибке и остановиться"
+    ),
+)
+
+parser.add_argument(
+    "--config",
+    type=str,
+    help="Путь к кастомному конфигурационному файлу",
+)
+
+parser.add_argument(
+    "-t",
+    "--thread-id",
+    type=str,
+    help="Идентификатор треда для продолжения диалога",
+)
+
+parser.add_argument(
+    "-a",
+    "--auto-mcp",
+    action="store_true",
+    help=(
+        "Поднять HTTP/SSE MCP-daemon'ы из recommended_mcp/ перед запуском "
+        "(если каталог есть в cwd); по завершении gc-cli гасятся только "
+        "процессы, запущенные этим вызовом"
+    ),
+)
+
+parser.add_argument(
+    "-n",
+    "--new",
+    action="store_true",
+    help="Начать тред заново: удалить существующие данные треда (только с -t/--thread-id)",
+)
+
+write_guard_group = parser.add_mutually_exclusive_group()
+write_guard_group.add_argument(
+    "--write-guard",
+    type=_parse_bool_cli,
+    choices=[True, False],
+    help=(
+        "Включить/выключить write_guard (true|false): ограничение файловых "
+        "изменений launch_root и write_guard.extra_paths"
+    ),
+)
+write_guard_group.add_argument(
+    "--no-write-guard",
+    action="store_true",
+    help=(
+        "Явно отключить write_guard (эквивалент --write-guard false); "
+        "имеет приоритет над config.yml"
+    ),
+)
+
+parser.add_argument(
+    "--command-moderation",
+    choices=["allow", "ask", "deny"],
+    help=(
+        "Режим exec_command/exec_python: allow без judge, "
+        "ask с подтверждением опасного, deny блокирует опасное"
+    ),
+)
+
+read_guard_group = parser.add_mutually_exclusive_group()
+read_guard_group.add_argument(
+    "--read-guard",
+    type=_parse_bool_cli,
+    choices=[True, False],
+    help=(
+        "Включить/выключить read_guard (true|false): ограничение чтения файлов "
+        "по allowed_read_roots/denied_*"
+    ),
+)
+read_guard_group.add_argument(
+    "--no-read-guard",
+    action="store_true",
+    help=(
+        "Явно отключить read_guard (эквивалент --read-guard false); "
+        "имеет приоритет над config.yml"
+    ),
+)
+
+parser.add_argument(
+    "--read-guard-mode",
+    choices=["allow", "ask", "deny"],
+    help=(
+        "Режим read_guard: allow выполняет без проверок, "
+        "ask запрашивает подтверждение для подозрительного, deny блокирует"
+    ),
+)
+
+parser.add_argument(
+    "--profile",
+    type=str,
+    default=None,
+    help=(
+        "Активировать профиль <имя> поверх указателя profile: из config.yml "
+        "(~/.gc/profiles/ или <project>/.gc/profiles/)"
+    ),
+)
+
+parser.add_argument(
+    "--level",
+    choices=["light", "default", "max"],
+    default=None,
+    help="Активный уровень модели на этот запуск (перекрывает config.yml и профиль)",
+)
+
+parser.add_argument(
+    "--agentsmd-override",
+    action="store_true",
+    help=(
+        "Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив "
+        "глобальный и .gc/AGENTS.md слои"
+    ),
+)
+
+parser.add_argument(
+    # Оба написания — один и тот же параметр. Подчёркнутая форма объявлена
+    # намеренно: без неё она проваливалась бы в generic-механизм неизвестных
+    # `--param value`, а тот прогоняет значение через yaml.safe_load, и трейс
+    # `00123` тихо становился числом 83, `2026-07-27` — датой, `on` — True.
+    # Объявленный флаг с type=str берёт значение буквально.
+    "--trace-id",
+    "--trace_id",
+    type=str,
+    default=None,
+    dest="trace_id",
+    help=(
+        "Внешний trace_id для корреляции с оркестратором: попадает в имя лог-файла, "
+        "в записи логов, в заголовок к бэкенду модели и в MCP-заголовки. "
+        "Принимается в обоих написаниях (--trace-id и --trace_id). "
+        "Не задан — ничего не меняется"
+    ),
+)
+
+
+parsed_args, unknown_args = parser.parse_known_args()
+if (
+    not parsed_args.init_config
+    and not getattr(parsed_args, "init", False)
+    and not parsed_args.sync_config
+    and not getattr(parsed_args, "reset_config", False)
+    and not parsed_args.check_update
+    and not parsed_args.update
+    and not parsed_args.query
+):
+    parser.error(
+        "Нужен -q/--query "
+        "(или --init-config для конфига, --sync-config для обновления конфига, "
+        "--reset-config для сброса конфига, --init для AGENTS.md, "
+        "--check-update/--update для обновления агента)."
+    )
+if parsed_args.init_config and parsed_args.query:
+    parser.error("--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит.")
+if parsed_args.sync_config and parsed_args.query:
+    parser.error("--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит.")
+if parsed_args.reset_config and parsed_args.query:
+    parser.error("--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит.")
+if parsed_args.init_config and parsed_args.sync_config:
+    parser.error("--init-config и --sync-config нельзя вместе: используйте одно из двух.")
+if parsed_args.reset_config and parsed_args.sync_config:
+    parser.error("--reset-config и --sync-config нельзя вместе: используйте одно из двух.")
+if parsed_args.reset_config and parsed_args.init_config:
+    parser.error("--reset-config и --init-config нельзя вместе: используйте одно из двух.")
+if parsed_args.check_update and parsed_args.query:
+    parser.error("--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит.")
+if parsed_args.update and parsed_args.query:
+    parser.error("--update и -q/--query нельзя вместе: --update только запускает обновление и выходит.")
+if parsed_args.update and parsed_args.check_update:
+    parser.error("--update и --check-update нельзя вместе: используйте одно из двух.")
+if parsed_args.new and not parsed_args.thread_id:
+    parser.error("Аргумент -n/--new можно использовать только вместе с -t/--thread-id.")
+run_args = parsed_args
+extra_config_overrides = _parse_unknown_args(list(unknown_args))
+if parsed_args.level is not None:
+    extra_config_overrides["level"] = parsed_args.level
+
+
+if __name__ == "__main__":
+    print(run_args)
+    if extra_config_overrides:
+        print("Extra config overrides from CLI:")
+        for k, v in extra_config_overrides.items():
+            print(f"  {k} = {v!r}")

@@ -103,7 +103,7 @@ skills_list(pack="supercoder")
 
 В состав gc-cli встроены три пакета:
 
-- [`supercoder`](../skills/supercoder/README.md) — методологический набор
+- [`supercoder`](../packages/core/assets/skills/supercoder/README.md) — методологический набор
   (brainstorming, writing-plans, TDD, systematic-debugging, code-review
   discipline). Точка входа — `supercoder:using-supercoder`.
 - `codebase` — read-only-понимание кода: `project-overview` (карта

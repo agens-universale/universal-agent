@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-core"
+version = "0.3.1"
+description = "GigaCode Universal Agent — ядро агента (SDK): цикл, тулы, конфиг, безопасность, память, MCP-клиент"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0.3",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.0",
+    "requests[socks]",
+    "trafilatura",
+    "readability-lxml",
+    "jsonschema>=4.0.0",
+    "httpx[socks]>=0.27.0",
+    "httpx-sse>=0.4.0",
+    "mcp==1.26.0",
+    "chardet>=7.4.3",
+]
+
+# [project.scripts] здесь НЕТ и быть не должно: gc-core — библиотека. Команды
+# объявляют профили-приложения (cli/tui/server и мета), см. docs/packaging.md.
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gc_core"]
+
+# Ассеты кладутся ВНУТРЬ пакета — gc_core/assets/. Раньше они уезжали рядом с
+# ним, в корень site-packages, и дистрибутив занимал там четыре родовых имени
+# (prompts, skills, external, recommended_mcp) вместо одного. В Python 3 любой
+# каталог на sys.path — namespace-пакет, поэтому `import prompts` у
+# встраивающего приложения резолвился в НАШИ промпты (проверено в чистом venv).
+[tool.hatch.build.targets.wheel.force-include]
+"assets/prompts" = "gc_core/assets/prompts"
+"assets/skills" = "gc_core/assets/skills"
+"assets/config.default.yml" = "gc_core/assets/config.default.yml"
+
+[tool.pytest.ini_options]
+# Набор пакета гоняется отдельно: `cd packages/core && pytest`. Зелёный
+# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
+# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
+# импорт спокойно резолвится. Изоляцию доказывает статический сторож
+# tests/test_test_ownership.py — он смотрит на текст импортов.
+# Общая инфраструктура приезжает из gc-testkit.
+testpaths = ["tests"]
+asyncio_mode = "auto"

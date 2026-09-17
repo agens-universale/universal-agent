@@ -1,0 +1,31 @@
+# Bench 2x2 (3/4): summary OFF, subagents ON. Values verbatim from bench_configs/04_summary_subagents.yml.
+import_path: adapters.gc_cli_external:GcCliExternal
+model: openai/qwen_next_vanilla
+agent_kwargs:
+  gc_cli_config:
+    max_steps: 1000
+    no_tool_call_max_count: 5
+    use_server_subagents: false
+    use_local_subagents: true            # <-- 01/02 = false, 03/04 = true
+    subagent_max_steps: 100
+    subagent_finish_gate_max_iterations: 3
+    strict_turn_finish_validation: true
+    finish_gate_max_iterations: 10
+    stop_tools: [turn_ask_human, project_memory]
+    disable_skills: [supercoder, topic-research, complex-task-solver, science-article-creator, articles]
+    tool_output_inline_max_chars: 10000
+    stored_tool_outputs_max_entries: 50
+    inject_tool_fields:
+      reason: "At most 10 words: why this call, what you expect."
+    chat_completion_kwargs:
+      separate_reasoning: true
+      chat_template_kwargs: {enable_thinking: false}
+      tool_choice: auto
+polar:
+  model_served: qwen_next_vanilla
+  node_id: local-proxy-node
+harbor:
+  environment: docker
+  n_concurrent_trials: 1
+  agent_timeout_multiplier: 6.0
+  verifier_timeout_multiplier: 6.0

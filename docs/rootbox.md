@@ -10,11 +10,11 @@
 | `url_policy` | URL по схеме или `url_blacklist` (включая SSRF-подсети) | `fetch_url`, `simple_fetch_url`, `download_file` | `url_validation_failed`, `url_blocked_by_policy` |
 | `protected_paths` | запись/чтение `.gc` и инструкций; детерминированный command-guard на shell-команды | все write-тулы + `execute_command`, `run_python_code` | `protected_path_denied` |
 
-Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Safe-by-default-OFF**: каждый слой требует явный `enabled: true`, чтобы включиться — **кроме `protected_paths`, который включён по умолчанию** (`enabled: true` из коробки).
+Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Secure-by-default: все пять слоёв включены по умолчанию.** `enabled: true` стоит и в pydantic-дефолтах (`config_modules/security.py`), и в поставляемом `config.default.yml`. Чтобы слой выключить, нужен явный `enabled: false` — обратное утверждение («safe-by-default-OFF») в старых редакциях этого документа было неверным.
 
 ## `security.protected_paths` — floor-защита `.gc` (ON по умолчанию)
 
-Единственный слой, который **включён без явного `enabled: true`**. Это «пол» безопасности: работает поверх всех остальных слоёв и не отключается вместе с `write_guard`/`read_guard`/`command_moderation`.
+«Пол» безопасности: работает поверх всех остальных слоёв и не отключается вместе с `write_guard`/`read_guard`/`command_moderation`.
 
 ```yaml
 security:
@@ -37,7 +37,7 @@ security:
 
 Перед тем как команда уйдёт в subprocess, `execute_command` и `run_python_code` проходят через `command_guard` — детерминированный сканер токенов команды. Он ловит прямые обращения к protected-путям в тексте команды (например, `rm -rf .gc`) и блокирует их **до** запуска процесса. Это закрывает сценарий, при котором агент сам себе стирал `.gc` через `execute_command` (баг TSKBCKGRNDGNT-2).
 
-Обфускацию (`$(echo .gc)` и т.п.) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
+Обфускацию (`$(printf '.%s' gc)`, base64, переменные окружения) tripwire не ловит — второй рубеж там LLM-судья (`command_moderation`).
 
 Список protected-путей передаётся в prompt судьи как `never_touch_paths`; если судья недоступен — fail-closed (команда блокируется).
 
@@ -50,21 +50,23 @@ security:
 ```yaml
 security:
   command_moderation:
-    mode: allow                        # allow | ask | deny
+    enabled: true                      # дефолт; false полностью отключает судью
+    mode: ask                          # allow | ask | deny
     allowed_command_examples: []
   write_guard:
-    enabled: false                     # safe-by-default-OFF
+    enabled: true                      # дефолт
+    mode: ask
     extra_paths: []
   read_guard:
-    enabled: false
-    mode: deny                         # allow | ask | deny
+    enabled: true                      # дефолт
+    mode: ask                          # allow | ask | deny
     allowed_read_roots: []             # пусто → [launch_root]; ["*"] → allow-by-default
     allowed_read_paths: []             # exception-override над denied_*
     denied_read_paths: []
     denied_file_patterns: []           # fnmatch по basename
     denied_extensions: []              # точное совпадение расширения
   url_policy:
-    enabled: false
+    enabled: true                      # дефолт
     allowed_schemes: ["http", "https"]
     url_blacklist: []                  # exact host, glob host (*.example), или URL glob
 ```
@@ -81,9 +83,20 @@ security:
 
 `allowed_command_examples` — positive examples для LLM judge (ориентир безопасного профиля проекта, не строгий allowlist).
 
+**Запрет на обход.** Любой отказ уходит агенту с полем `error.guidance`: судья
+оценивает конкретную команду, а не намерение, и модель охотно переписывает
+заблокированное в эквивалент (`rm -rf X` → `rm X/* && rmdir X`). Поле несёт явный
+запрет повторять команду и запускать переписанный/раздробленный вариант.
+Формулировка одна на весь периметр — константа `NO_WORKAROUND_NOTICE`
+(`packages/core/src/gc_core/security/command_moderation.py`), её же переиспользует детерминированный
+command-guard защищённых путей.
+
+Это **смягчение, а не граница**: инструкция адресована модели и ничего не
+принуждает. Настоящей границей остаётся песочница — см. `docs/swarm.md`.
+
 ## `write_guard` — write-периметр
 
-Safe-by-default-OFF: включается только явным `enabled: true`. При включении ограничивает write-операции директорией `launch_root` + `extra_paths`. Относительные пути в `extra_paths` разрешаются от каталога `config.yml`.
+Включён по умолчанию; выключается явным `enabled: false`. Ограничивает write-операции директорией `launch_root` + `extra_paths`. Относительные пути в `extra_paths` разрешаются от каталога `config.yml`.
 
 ```yaml
 security:
@@ -247,7 +260,8 @@ security:
 
 ## CLI override'ы
 
-Любую секцию security можно переключить флагом без правки `config.yml`:
+Флаги есть не у всех секций. Полноценно переключаются из CLI только
+`write_guard` и `read_guard` — у них флаг меняет и `enabled`, и режим:
 
 ```bash
 # Полностью выключить write-периметр (опасно):
@@ -261,13 +275,25 @@ gc-cli -q "..." --read-guard false
 # Поменять режим read_guard без правки config:
 gc-cli -q "..." --read-guard-mode ask
 
-# Переключить command moderation:
-gc-cli -q "..." --command-moderation ask
-gc-cli -q "..." --command-moderation deny
-
 # Включить write_guard явно:
 gc-cli -q "..." --write-guard true
 ```
+
+**`--command-moderation` — исключение: он меняет только `mode`, но не
+`enabled`.** Если в конфиге стоит `security.command_moderation.enabled: false`,
+флаг молча ни на что не влияет — судья не запускается ни в каком режиме, и в
+логах не будет ни одного события:
+
+```bash
+# Работает, только если enabled уже true:
+gc-cli -q "..." --command-moderation deny
+
+# Включить сам слой можно generic-override'ом (заменяет секцию целиком,
+# поэтому allowed/denied_command_examples из конфига теряются):
+gc-cli -q "..." --command_moderation "{enabled: true, mode: deny}"
+```
+
+Секции `protected_paths` и `url_policy` из CLI не переключаются вовсе.
 
 Приоритет: **CLI override → `config.yml` → дефолт в коде**.
 
@@ -304,6 +330,7 @@ gc-cli -q "..." --write-guard true
 }
 
 // command_moderation fail-closed (judge offline, mode=deny)
+// (no command/code preview — model already has full args in the tool call)
 {
   "tool": "run_python_code",
   "ok": false,
@@ -311,7 +338,8 @@ gc-cli -q "..." --write-guard true
     "type": "unsafe_command_blocked",
     "mode": "deny",
     "reason": "Judge is unavailable; fail-closed policy blocks execution.",
-    "code_preview": "print(open('/etc/passwd').read()[:200])"
+    "guidance": "Do NOT retry the same command, and do NOT run a rewritten, split-up or otherwise equivalent command that reaches the same result …",
+    "risk_flags": []
   }
 }
 

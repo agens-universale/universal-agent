@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-testkit"
+version = "0.3.1"
+description = "Общая тестовая инфраструктура пакетов gc-* (только для разработки)"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest>=9.0.3",
+]
+
+# Плагин подключается автоматически всем, кто поставил gc-testkit: заглушка
+# пакета tools и сбрасывающие состояние autouse-фикстуры нужны каждому набору.
+[project.entry-points.pytest11]
+gc_testkit = "gc_testkit.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gc_testkit"]

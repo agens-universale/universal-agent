@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-cli"
+version = "0.3.1"
+description = "GigaCode Universal Agent — CLI-фронтенд (gc-cli)"
+requires-python = ">=3.11"
+dependencies = [
+    # Точный пин: версии всех манифестов обязаны совпадать, иначе можно собрать
+    # установку из разных коммитов.
+    "gc-core==0.3.1",
+    "gc-mcp==0.3.1",
+
+]
+
+# Команды объявляет КАЖДЫЙ профиль-приложение: uv tool install экспортирует в
+# PATH скрипты только запрошенного дистрибутива. Команда целится прямо в свой
+# пакет: шимы-охранники в ядре сняты 27.08.2026 — после разведения имён команд
+# «команда есть, а пакета нет» в здоровой установке не бывает.
+[project.scripts]
+# Только СВОЯ команда. Раньше профиль объявлял ещё gc-mcp/gc-mcp-install —
+# и два профиля не ставились рядом: uv не перезаписывает чужой симлинк, а
+# отказывает («Executables already exist»), а `uv tool uninstall` одного
+# профиля уносил gc-mcp у другого. Команды MCP объявляет их владелец —
+# дистрибутив gc-mcp, от которого этот профиль зависит жёстко.
+gc-cli = "gc_cli.cli:main"
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gc_cli"]
+
+[tool.pytest.ini_options]
+# Набор пакета гоняется отдельно: `cd packages/cli && pytest`. Зелёный
+# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
+# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
+# импорт спокойно резолвится. Изоляцию доказывает статический сторож
+# tests/test_test_ownership.py — он смотрит на текст импортов.
+# Общая инфраструктура приезжает из gc-testkit.
+testpaths = ["tests"]
+asyncio_mode = "auto"

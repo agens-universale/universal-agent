@@ -20,6 +20,63 @@
 # CLI args (--max_steps 999) — самые сильные, перебивают и global, и project.
 # ---------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------
+# Профили и уровни моделей: указатели на активный профиль/уровень.
+# Подробно — docs/configuration.md, раздел «Профили и уровни моделей».
+#
+# profile: "" — какой профиль активен ("" или отсутствие ключа → без профиля).
+# level: default — глобальный дефолт уровня: light | default | max (нет ключа → default).
+#
+# Оба ключа выставляются с ЧЕТЫРЁХ поверхностей (по возрастанию приоритета —
+# обычные правила config precedence):
+#   1) ключ в config.yml (user < managed config.local.yml < проектный .gc/config.yml);
+#   2) CLI: --profile <имя>, --level <уровень> (перебивает файлы для этого запуска);
+#   3) палитра TUI: /profiles <имя>, /level <уровень> (сессионный тоггл — перебивает
+#      файлы и CLI, переживает смену профиля/конфига до конца сессии);
+#   4) Settings TUI (витрина профилей/уровня) — записывает в проектный/базовый
+#      config.yml (та же позиция, что и ручная правка ключа выше).
+#
+# Контент выбранного профиля (секции models/slots/assign + любые обычные секции
+# как оверлей) мержится ПОВЕРХ всех файловых слоёв, но ПОД CLI и сессией.
+profile: ""
+level: default
+
+# -----------------------------------------------------------------------------
+# Секции моделей: models (реестр) / slots (уровни → алиас) / assign (привязки
+# потребителей) — ОБЫЧНЫЕ секции конфига, та же схема в config.yml и в профиле
+# (схема одна и та же). Полный документированный образец — demo_profile.yml (все семь
+# субагентов поимённо + все служебные потребители + auto_judge + оверлей-пример).
+# Ниже — короткая версия прямо в config.yml (профиль не обязателен для работы
+# реестра моделей).
+# -----------------------------------------------------------------------------
+# models:
+#   flash:                                  # алиас — язык slots/assign
+#     model: qwen/qwen-2.5-flash            # провайдерский id; опущен → id = алиас
+#     url: https://openrouter.ai/api/v1/chat/completions
+#     token: sk-or-...                      # адрес и токен — ПАРА: задан один →
+#                                            # задавайте и второй; "" = «без
+#                                            # авторизации»; нет обоих → пара
+#                                            # наследуется из backend
+#   glm-local:
+#     url: http://127.0.0.1:8014/v1/chat/completions
+#     token: ""                              # локальный сервер ключа не требует
+#     # model нет → провайдерский id = "glm-local"
+#   deepseek-max:
+#     model: deepseek/deepseek-chat-v3-0324
+#     url: https://api.provider.example/v1/chat/completions
+#     token: sk-...
+#
+# slots:                                    # уровни — УКАЗАТЕЛИ в models (не копии)
+#   light: flash                            # незаданный слот резолвится матрицей
+#   default: glm-local                      # фоллбэков соседних уровней
+#   max: deepseek-max
+#
+# assign:                                   # справа — уровень (индирекция через slots)
+#   finish_gate: light                      # ИЛИ алиас (жёсткий пин конкретной модели)
+#   subagents:
+#     subagent_planner: glm-local           # конкретный субагент — жёсткий пин алиасом
+#     "*": default                          # остальные субагенты — уровнем
+
 backend:
   # responses | chat_completions
   api_mode: chat_completions
@@ -31,6 +88,13 @@ backend:
   # false — типично для GigaCode и non-OpenAI; при true локальная валидация
   # принимает omit semantic optional (x-optional-keys).
   openai_strict_tools_schema: false
+  # Слать ли провайдеру поле function.strict в схемах тулов.
+  # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  send_tool_strict: true
+  # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
+  # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
+  # отвергает разметку; можно на одну модель: models.<alias>.backend).
+  # claude_prompt_cache: false
   # Vendor-specific параметры. Настраивайте под свой провайдер.
   chat_completion_kwargs:
     temperature: 0.7
@@ -63,6 +127,12 @@ backend:
   # cert_path: "/path/client.crt"
   # key_path:  "/path/client.key"
   use_retry: true
+  # Прокси (OpenRouter и т.п.) иногда возвращают ошибку внутри HTTP-200:
+  # choices[0].error, top-level {"error": {...}} или finish_reason="error" с
+  # пустым выбором (напр. 504 "Upstream idle timeout exceeded"). true —
+  # политика ретраев ловит такую ошибку как обычную HTTP-ошибку; false —
+  # ответ уходит наверх как есть (фаталит позже в конвертации). Дефолт true.
+  retry_embedded_choice_errors: true
   # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
   # При стриме лимит — на connect и на паузу между чанками, не на весь ответ.
   request_timeout_sec: 600
@@ -85,10 +155,14 @@ backend:
 
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
-  llm:
-    max_tokens: 8192
-    # Судьи (command_moderation, finish_gate / text_answer): запас под обязательный CoT/<think>.
-    judge_max_tokens: 10000
+  auxiliary_llm:
+    max_tokens: 24576
+    # Судьи (command_moderation, finish_gate / text_answer): запас под мысль,
+    # если бэкенд думает без явного enable_thinking (TUI не умеет гасить aux).
+    judge_max_tokens: 24576
+    # Генерация роли special_agent (subagent:subagent_special_agent) — одноразовый
+    # системный промпт; потолок с запасом под мысль модели.
+    subagent_role_max_tokens: 24576
     completion_kwargs:
       separate_reasoning: false
       chat_template_kwargs:
@@ -184,6 +258,8 @@ agent:
   # session_token_limit: 200000   # бюджет input+output токенов на один ран
   # max_tool_calls: 100           # макс. вызовов инструментов на один ран
   no_tool_call_max_count: 3
+  loop_detector:
+    enabled: true
   strict_turn_finish_validation: true
   # Finish gate (quality gate): макс. reject turn_finish за user turn / subagent run
   finish_gate_max_iterations: 10
@@ -191,13 +267,20 @@ agent:
   # finish_gate_use_rule_hints: false  # rule-layer без LLM — вне v1
   tool_output_inline_max_chars: 10000
   stored_tool_outputs_max_entries: 50
+  # Общий потолок внутренних exec-каналов бэкенда (символы): обход дерева в Harbor
+  # (find), нативный grep и MCP-carrier под os_backend. Превышение — fail-closed:
+  # walk_too_large для обхода, McpExecCarrierError для MCP-вызова.
+  walk_output_max_chars: 50000000
   # Дефолтный таймаут execute_command / run_python_code (сек), если модель
-  # не передала timeout_seconds. Harbor/длинные бенчи обычно ставят 600.
+  # не передала timeout. Harbor/длинные бенчи обычно ставят 600.
   exec_timeout_sec: 120
-  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec.
-  exec_output_capture_max_chars: 60000
+  # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
+  # L = голова floor(L/2) + настоящий хвост (L - floor(L/2)); середина отбрасывается.
+  exec_output_capture_max_chars: 40000
+  # Каждый край front-loaded preview длинного потока (P ≤ L - floor(L/2)); 0 — без preview.
+  exec_output_preview_edge_chars: 3000
   inject_tool_fields:
-    reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
+    reason: "At most 10 words: why this call, what you expect."
   # Имя HTTP-заголовка для внешнего trace_id (флаг gc-cli --trace-id или поле
   # trace_id в теле вебхука). Не задано — заголовок к модели называется
   # x_trace_id, заголовок к MCP-серверам — trace_id.
@@ -264,6 +347,14 @@ working_memory:
   max_chars_knowledge: 8000
   total_budget_chars: 20000
 
+# Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
+# напоминание. Есть незакрытые пункты — директивное «обнови список»; активного
+# плана нет (пусто ИЛИ всё закрыто) — мягкое «если задача того стоит, заведи»,
+# один раз за прогон. Счётчик переживает границу хода. 0 — политика выключена
+# целиком (тул остаётся, вся инициатива на модели).
+todo:
+  reminder_steps: 10
+
 # Technical hints о памяти (tool_usage_notice, long memory)
 tool_usage_notice:
   - tool_name: session_memory
@@ -274,16 +365,25 @@ project_memory:
   check_interval_messages: 5
   max_chars: 10000
   max_append_chars: 3000
+  # Лимит ответа LLM при append-overflow компакции project_memory.md.
+  compaction_max_tokens: 16384
 
-# Доп. strip-теги для for_model / aux LLM (summary, intent, judges, compaction).
-# <think> всегда on в коде и выключить нельзя; сюда — только extras.
-# Секция опциональна: без неё стрипается только think (non-greedy).
+# tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
+# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
+#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
+#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
+#   Смешанный ход (think + проза) — в историю только проза.
+#   Из саммари, intent, судей и памяти <think> вырезается всегда.
+# strip_think: false — копировать скрытое поле мысли в историю как есть
+#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
+  strip_think: true
   tags:
     - redacted_thinking
 
 # Intent scope: LLM post-hook после human-facing tools (только chat_completions).
-# tools: [] — выключить. Параметры LLM — chat_completions.llm.
+# tools: [] — выключить. Параметры LLM — chat_completions.auxiliary_llm.
 intent_scope:
   # tools.<name>.record:
   # - aggregated: хранить только текстовую сводку (без arguments/output полей)
@@ -322,10 +422,37 @@ summary:
   intent_log_preview_chars: 10000
 
 # Лимиты FS-тулов, которые поднимают файл целиком в память.
-# read — fs_read_file / fs_search_files; mutate — apply/replace (не append).
+# read — fs_read_file; mutate — apply/replace (не append).
 fs_tools:
   max_read_bytes: 8388608       # 8 MiB
   max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
+  # fs_find_in_files — search text inside files (path = file or directory).
+  # max_file_bytes is a UNIFIED cap (file & directory mode); not read/mutate limits.
+  # Candidate caps are per pattern_mode (scan automaton); over L(mode) → refuse.
+  find_in_files:
+    max_file_bytes: 16777216          # 16 MiB — single cap for file & dir mode
+    max_candidates_like: 500000       # like / query_mode=text
+    max_candidates_or_simple: 200000  # pure a|b|…
+    max_candidates_affix_or: 300000   # one (group) + pure prefix/suffix
+    max_candidates_complex: 50000     # no cheap prefilter
+    max_unfiltered_host_reads: 1000   # sandbox only: host reads without in-sandbox prefilter
+    max_open_files_affix_or: 50000    # full-re opens budget (affix_or only)
+    content_workers_threshold: 20000  # N >= → 2 workers; else 1
+    max_exclude_dirs: 32
+    top_level_dirs_cap: 5
+    default_limit: 100                # limit if caller omits it
+    max_total_matches: 300            # hard ceiling: limit_eff = min(requested, 300)
+    exclude_dot_dirs: true            # nested '.' dirs (hard floor always on)
+    # Extra basenames only; hard floor always includes venv, __pycache__,
+    # node_modules, .git (clearing this list does not re-open them).
+    exclude_dir_names: []
+
+  # fs_find_files_by_name — search files by name/path/glob under a directory.
+  # Matches names and paths only; does NOT search file contents.
+  find_files_by_name:
+    default_max_matches: 100          # max_matches if caller omits it
+    hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
+    max_visited: 500000               # walk safety cap (not a caller argument)
 
 security:
   # =========================================================================
@@ -527,11 +654,28 @@ mcp:
       # whitelist:
       #   enabled: true
       #   tools: [read_document, list_sheets]   # базовые имена из tools/list; [] = ноль тулов
+      # Loop detector для MCP выключен по умолчанию. Включить generic-профиль
+      # точечно (базовые имена) или на все тулы сервера:
+      # loop_control_tools: [read_document]
+      # loop_control_tools: all
     science:
       transport: stream_http
       url: http://127.0.0.1:8765/mcp
       server-name: science
       description: Unified scientific literature search across 10 public APIs
+      loop_control_tools: all
+      # Где исполняется протокол этого сервера. Ось независима от transport.
+      #   agent      — в процессе агента (дефолт, нынешнее поведение);
+      #   os_backend — в окружении, где работают тулы (контейнер задачи), через
+      #                FsBackend.exec. Нужно, когда сервер поднят рядом с задачей
+      #                и с хоста агента недостижим (сайдкар в docker-сети).
+      # На sandbox-бэкенде поддержаны только http / stream_http / stdio: для
+      # sse / stream_sse / stream_stdio нужна живая сессия, и это ошибка резолва,
+      # а не тихий откат на агента. Материалы TLS (client-cert, путь к CA в
+      # verify-ssl) с os_backend тоже ошибка — файлы в контейнер не копируются,
+      # допустим только verify-ssl: false. На локальном бэкенде значение
+      # игнорируется: сеть и PATH там те же, что у агента.
+      # execute_on: os_backend
       # HTTP-headers для MCP (для transport: http/sse и stream_http/stream_sse).
       # Удобно хранить секреты в ENV и подставлять через ${ENV:...}.
       #
@@ -554,6 +698,7 @@ mcp:
       command: ddgs-mcp
       server-name: duckduckgo
       description: Web and news search via DuckDuckGo (DDGS)
+      loop_control_tools: all
     # browser_playwright (опционально):
     #   transport: stream_stdio
     #   command: <путь npx из install.py>
@@ -566,7 +711,8 @@ mcp:
     request_timeout_sec: 600
 
 # Подсчёт токенов и стоимости прогона. Токены считаются всегда; цена показывается
-# только при enabled: true и наличии тарифа.
+# только при enabled: true и наличии ЛЮБОЙ цены — фактической от провайдера или
+# расчётной по тарифу.
 # - enabled / currency / per_tokens — глобальные;
 # - input/output/cache_read на верхнем уровне — ДЕФОЛТНЫЙ тариф (применяется к agent.model);
 #   для одной модели имя указывать не нужно;
@@ -578,6 +724,11 @@ pricing:
   enabled: false
   currency: "₽"
   per_tokens: 1000000          # ставки указаны за столько токенов
+  # Ставки нужны только провайдерам, которые не сообщают стоимость сами.
+  # OpenRouter и routerai.ru присылают фактическую цену в каждом ответе — тогда
+  # эта секция не используется. Валюта такой цены определяется по адресу вызова
+  # (домен .ru — рубли, остальное — доллары) и запоминается вместе с суммой:
+  # смена провайдера посреди диалога не переразмечает уже потраченное.
   # Дефолтный тариф под agent.model (имя модели указывать не нужно):
   # input: 59
   # output: 118
@@ -590,6 +741,31 @@ pricing:
   #     input: 0.05
   #     output: 0.15
 
+# Пресеты выпадающего списка в полях «Адрес API-сервера» (можно дополнять своими).
+# Пресеты адресов провайдеров — выпадающий список под полем «Адрес API-сервера».
+# Закомментировано намеренно: пока ключа тут нет, работает список из кода, и он
+# обновляется вместе с версией агента. Раскомментируете — ваш список перекроет
+# кодовый и с обновлениями меняться уже не будет.
+# endpoint_presets:
+#   - name: OpenRouter
+#     url: https://openrouter.ai/api/v1/chat/completions
+#   - name: Cloud.ru
+#     url: https://foundation-models.api.cloud.ru/v1/chat/completions
+#   - name: RouterAI
+#     url: https://routerai.ru/api/v1/chat/completions
+
+# Пресеты выпадающего списка в поле «URL» голосового ввода (можно дополнять своими).
+# Закомментировано намеренно — по той же причине, что и `endpoint_presets` выше:
+# пока ключа тут нет, работает список из кода и обновляется вместе с версией агента.
+# Раскомментируете — ваш список перекроет кодовый и с обновлениями меняться уже не будет.
+# voice_endpoint_presets:
+#   - name: OpenAI
+#     url: https://api.openai.com/v1/audio/transcriptions
+#   - name: Groq
+#     url: https://api.groq.com/openai/v1/audio/transcriptions
+#   - name: Mistral
+#     url: https://api.mistral.ai/v1/audio/transcriptions
+
 # Сборка мусора (gc.collect) — точки C1/C2/C3.
 # C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
 # C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.
@@ -597,3 +773,17 @@ pricing:
 # Явное значение перекрывает режимный default. Раскомментируйте, чтобы выключить C3.
 # gc:
 #   force_collect: false
+
+# Голосовой ввод в TUI (Ctrl+T). Зависимости ставятся вместе с агентом
+# (Linux дополнительно: системный libportaudio2).
+# Подходит любой /v1/audio/transcriptions-совместимый сервис.
+# Локальный приватный сервис одной командой: gc-voice install (см. инструкцию).
+# voice:
+#   provider: openai
+#   url: https://stt.example.com/v1/audio/transcriptions
+#   token: "sk-..."
+#   model: whisper-1
+#   language: ru
+#   max_seconds: 120
+#   timeout_seconds: 60
+#   verify-ssl: true

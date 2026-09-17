@@ -1,0 +1,170 @@
+# Bench 2x2 (2/4): summary ON, subagents OFF.
+# Профиль под тег v0.2.3 (868309d5, 2026-08-04). Не для HEAD.
+# Шаблон gc-cli External для config_bench (Hydra group agent_configs).
+# В config_bench: agent_profile.model_name: ${model_name}
+#
+# gc_cli_config — плоские ключи config_dict. Сборка:
+#   schema defaults < bench defaults адаптера < этот блок < runtime (url/model).
+# Здесь перечислены ВСЕ поведенческие ключи, чтобы слой схемы/bench не подмешивал
+# скрытых значений. Не пишем: completions_url, model (runtime), пути промптов и
+# skills_data_path (адаптер резолвит bundled prompts/skills и контейнерный skills root).
+#
+# Summary / quality_gate — из bench_config_final.yml (окно DeepSeek-V4-Flash @ 262144).
+# Остальное поведение — из bench_config_v0.2.3.yml, явно задекларировано.
+# Отличия реестра тулов v0.2.3 от HEAD: поиск — fs_search_files (не fs_find_in_files /
+# fs_find_files_by_name); session_todo нет. fs_search_files в stop_tools.
+model_name: ???
+import_path: adapters.gc_cli_external:GcCliExternal
+model: openai/${model_name}
+agent_kwargs:
+  skills_dir: /opt/gc/skills
+  gc_cli_config:
+    # --- backend ---
+    backend_api_mode: chat_completions
+    os_backend: harbor
+    chat_completions_max_tokens: 32768
+    chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
+    use_max_tokens_param: true
+    openai_strict_tools_schema: false
+    use_ssl: false
+    cert_path: null
+    key_path: null
+    use_retry: true
+    backend_request_timeout_sec: 600     # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
+    proxy: null
+    stream: false                        # TUI-only; CLI/harbor и так non-stream (on_delta нет)
+    chat_completion_headers: {}
+    chat_completion_kwargs:              # {} НЕ сбрасывает bench-слой (deep-merge dict)
+      chat_template_kwargs:
+        thinking: true
+        reasoning_effort: high
+      tool_choice: auto
+    auxiliary_llm_params:
+      max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
+      judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
+      # Свои kwargs поверх агента; thinking выкл (у агента thinking: true).
+      completion_kwargs:
+        chat_template_kwargs:
+          thinking: false
+          reasoning_effort: none
+
+    # --- cybergym level0 content ---
+    chat_completions_special_instructions_path: "/opt/gc-harbor-adapters/prompts/cybergym_special_instructions_honest_level0.md"
+    disable_skills:
+      - articles
+      - autonomous-benchmark-agent
+      - codebase
+      - complex-task-solver
+      - computer-use
+      - default-coworker
+      - science-article-creator
+      - skill-creator
+      - supercoder
+      - topic-research
+    use_local_subagents: ["worker"]           # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
+
+    # --- agent loop ---
+    system_prompt_id: v1
+    max_steps: 1000                      # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
+    no_tool_call_max_count: 1000         # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
+    max_unknown_tool_repeats: 1000
+    session_token_limit: null            # выкл
+    max_tool_calls: null                 # выкл
+    limit_trace_summary: false
+    use_server_subagents: false          # серверные субагенты (через REST) выключены
+    subagent_max_steps: 100              # лимит шагов одного субагента (действует только при включённых субагентах)
+    subagents_dir: null
+    subagents_max_count: 20
+    strict_turn_finish_validation: true  # строгая валидация turn_finish: финальный отчёт обязан пройти проверки, иначе агент дорабатывает
+    finish_gate_max_iterations: 10       # то же для основного агента: макс. кругов finish-гейта перед принятием ответа
+    subagent_finish_gate_max_iterations: 3  # сколько раз finish-гейт может завернуть финальный ответ субагента на доработку
+    client_name: mini_cli_pub_agent_1
+    x_cl_id: "12345"
+    trace_id_header_name: null
+    trace_header_enabled: false
+    verbose: false
+    server_tool_prefix: system
+    limit_project_metadata: false
+    model_steering: ""
+    exec_timeout_sec: 600                # дефолт timeout для exec_command / exec_python, если модель не передала
+    tool_output_inline_max_chars: 20000  # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
+    exec_output_capture_max_chars: 40000  # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
+    exec_output_preview_edge_chars: 3000  # каждый край front-loaded preview длинного потока; 0 — без preview
+    stored_tool_outputs_max_entries: 50  # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
+    inject_tool_fields:                  # инжект синтетического поля в JSON Schema КАЖДОГО тула
+      reason: "At most 10 words: why this call, what you expect."
+    stop_tools: [turn_ask_human, project_memory,
+                 fs_save_base64_file, exec_calculator,
+                 exec_sleep, exec_python, exec_fetch_url,
+                 turn_intermediate_reply, session_think,
+                 session_read_user_intent_log, fs_search_and_replace,
+                 fs_search_files, session_compact,
+                 download_file]       # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
+    # --- summary (под DeepSeek-V4-Flash @ vLLM --max-model-len 262144) ---
+    # Бюджет: 262144 ток - 32768 (генерация) - ~25k (system + tool specs + working memory)
+    # ≈ 204k ток истории ≈ 650k символов при ~3.2 симв/ток на коде и выводах терминала.
+    # Триггеры держим на ~50% окна: после срабатывания ход ещё дописывается.
+    summary_params:                      # компакция истории (работает только в chat_completions-режиме)
+      chat_completions_summary_trigger_chars: 420000   # объём диалога (символы), после которого запускается суммаризация (~131k ток)
+      chat_completions_summary_turn_end_trigger_chars: 340000  # порог компакции на границе хода (turn end, ~106k ток)
+      incremental_batch_chars: 420000    # сколько истории сжимается за одну инкрементальную суммаризацию; >= max_dialogue_chars => всегда один батч, значит работает и шаг memory suggestions
+      max_message_chars: 20000           # сообщение длиннее этого урезается перед подачей в суммаризатор
+      max_dialogue_chars: 420000         # жёсткий потолок хвоста диалога, уходящего суммаризатору (~125k ток + промпт влезают в окно)
+      last_dialog_steps_count: 5         # столько последних шагов держим несжатыми (свежий контекст); окно позволяет больше 3
+      last_dialog_step_message_max_chars: 6000  # лимит символов на сообщение в этих последних шагах
+      max_accumulated_summary_chars: 20000
+      intent_log_preview_chars: 10000
+
+    # --- quality / memory / notices ---
+    quality_gate_params:                 # размер трейс-дайджеста для finish-gate судьи (intent_guard/trace_digest.py)
+      max_dialogue_chars: 420000         # как summary.max_dialogue_chars (~131k ток); ответ судьи ограничен judge_max_tokens
+      max_message_chars: 8000
+    working_memory_params:
+      max_chars_goal: 2000
+      max_chars_constraints: 4000
+      max_chars_state: 6000
+      max_chars_knowledge: 8000
+      total_budget_chars: 20000
+    tool_usage_notice: []
+    intent_scope_params:
+      tools: {}
+
+    # --- security (bench: гарды OFF, иначе контейнерные пути режутся по ФС раннера) ---
+    command_moderation:
+      enabled: false
+      mode: allow
+    write_guard:
+      enabled: false
+    read_guard:
+      enabled: false
+    url_policy:
+      enabled: false
+    protected_paths:
+      enabled: false
+      extra: []
+
+    # --- fs / mcp / pricing / logging ---
+    fs_tools:
+      max_read_bytes: 8388608
+      max_mutate_bytes: 16777216
+    mcp-servers: {}
+    pricing:
+      enabled: false
+    save_logs: false
+    console_trace: false
+    logging_format: text
+    log_level: info
+    redact_secrets:
+      enabled: false
+    logging_params:
+      full_log_backend: false
+    strip_tags_projection:
+      tags: []
+polar:
+  model_served: ${model_name}
+  node_id: local-proxy-node
+harbor:
+  environment: docker
+  n_concurrent_trials: 1
+  agent_timeout_multiplier: 6.0
+  verifier_timeout_multiplier: 6.0

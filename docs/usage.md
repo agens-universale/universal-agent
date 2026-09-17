@@ -2,7 +2,7 @@
 
 # Установка и запуск
 
-После установки доступны две команды: **`gc-ua`** — основной режим с текстовым интерфейсом (TUI), **`gc-cli`** — разовые запросы одной строкой. Требуется Python ≥ 3.10 (`uv` подберёт сам).
+После установки доступны две команды: **`gc-ua`** — основной режим с текстовым интерфейсом (TUI), **`gc-cli`** — разовые запросы одной строкой. Требуется Python ≥ 3.11 (`uv` подберёт сам).
 
 > **Простой путь без клонирования** (в т.ч. для не-разработчика): пошаговая страница [docs/gc-ua-install.html](gc-ua-install.html) — установка одной командой, корпоративный флаг `--system-certs`, заполнение конфига. Ниже — установка для разработки и справка по ключам.
 
@@ -13,34 +13,88 @@
 В корне проекта выполните:
 
 ```bash
-uv sync                # зависимости (dev + test)
-uv tool install -e .   # gc-cli + gc-ua (TUI в зависимостях по умолчанию)
+uv sync                              # окружение разработки (dev + test)
+uv tool install -e packages/cli     # только ядро
+uv tool install -e .                 # полный агент
 ```
 
 > В корпоративной сети Сбера к командам `uv tool install` добавляйте `--system-certs` — иначе TLS-перехват ломает установку.
 
-### Минимальная установка gc-cli без TUI
+### Профили установки
 
-Для headless-серверов, где нужен только `gc-cli` (без `gc-ua` и `textual`/`rich`):
+Профиль — отдельный дистрибутив со своим пакетом (`packages/<профиль>/src/gc_*`). Код чужих
+профилей физически не попадает на диск.
+
+| Команда | Ядро | TUI | server |
+|---|---|---|---|
+| `gc-ua` | да | да | да |
+| `gc-cli` | да | — | — |
+| `gc-tui` | да | да | — |
+| `gc-server` | да | — | да |
 
 ```bash
-uv tool install -e . --excludes packaging/cli-only-excludes.txt
+uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui" --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 ```
 
-`pip install -e .` всегда тянет TUI-зависимости; для минимального runtime используйте `uv tool` с `--excludes`, как выше.
+Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
+корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
+описано в [docs/packaging.md](packaging.md).
+
+Полный профиль и любой листовой дистрибутив рядом не ставятся: `gc-ua`
+объявляет объединение команд листьев, и `uv` отвечает `error: Executables already
+exist`. Мета уже содержит всё, что даёт лист, так что ставить оба обычно незачем.
+Если всё-таки нужно — `uv tool install --force`; после этого на `gc-mcp`
+претендуют два инструмента, и `uv tool uninstall gc-mcp` унесёт команду у полного
+профиля, а не только у отдельного менеджера.
+
+Смена профиля — переустановка, нужен `--force`. `gc-ua --update` сохраняет
+текущий профиль: агент определяет его по метаданным установки и переустанавливает
+тем же дистрибутивом.
+
+Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
+`gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, полный `gc-ua` — все пять.
+Менеджер MCP — отдельный дистрибутив. `uv tool` не экспортирует команды
+зависимостей, поэтому у узкого профиля стоит штатный флаг:
+
+```bash
+uv tool install "gc-cli @ ...#subdirectory=packages/cli" --with-executables-from gc-mcp
+```
+
+Флаг резолвит `gc-mcp` из того же коммита (через `[tool.uv.sources]`), пишется в
+`uv-receipt.toml` и переживает `uv tool upgrade` — набирать его нужно один раз.
+
+Если профилей на машине несколько, флаг не годится: второй профиль столкнётся с
+первым на именах `gc-mcp*`. Тогда ставьте менеджер отдельным инструментом:
+
+```bash
+uv tool install "gc-mcp @ ...#subdirectory=packages/mcp"
+```
+
+Подробности в [упаковке](packaging.md#команды-каждый-дистрибутив-объявляет-только-свои).
 
 Проверка после установки: `uv sync` и `uv run pytest` — см. [Тесты](testing.md).
 
-### Классический путь через pip
+### Через pip — не работает
 
-```bash
-pip install -e .
+`pip install -e .` в чистом окружении падает:
+
+```
+ERROR: Could not find a version that satisfies the requirement gc-cli==0.3.0
 ```
 
-Для установки в конкретный интерпретатор Python (например 3.12):
+Причина не в опечатке и не чинится флагами. Корневой манифест — мета-пакет
+`gc-ua`, который точно пинит четыре листа (`gc-core==0.3.0` и остальные), а
+резолвятся они через `[tool.uv.sources] workspace = true`. Этой секции pip не
+понимает: он идёт искать листья на PyPI, где их нет и не будет — пакеты не
+публикуются, установка только из git.
+
+Ставьте через `uv` (см. выше). Для конкретного интерпретатора:
 
 ```bash
-python3.12 -m pip install -e .
+uv tool install --python 3.12 -e .
 ```
 
 Если при установке возникает ошибка, связанная с `distutils`, обновите pip:
@@ -51,7 +105,7 @@ python3.12 -m ensurepip --upgrade
 
 ## Конфиг при первом запуске
 
-При первом запуске `gc-ua`/`gc-cli` без `--config` создаётся пользовательский `config.yml` (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`), и агент **останавливается с подсказкой**: впишите `backend.completions_url`, токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Подробнее — [Конфигурация](configuration.md).
+При первом запуске `gc-ua`/`gc-cli` без `--config` создаётся пользовательский `config.yml` (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`). Дальше поверхности расходятся: `gc-ua` открывает **мастер настройки** (адрес, токен, модель, необязательный шаг лёгкой и максимальной моделей, MCP-серверы, голосовой ввод) и по завершении сразу стартует; `gc-cli` **останавливается с подсказкой**: впишите `backend.completions_url`, токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова — или пройдите тот же мастер командой `gc-cli --init-config`. Подробнее — [Конфигурация](configuration.md).
 
 ## MCP-серверы
 
@@ -65,7 +119,7 @@ gc-mcp remove duckduckgo_search    # удалить по имени
 gc-mcp remove --all                # снести все подключённые
 ```
 
-`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. В `gc-ua` HTTP/SSE MCP-daemon'ы для серверов из конфига поднимаются по умолчанию; в `gc-cli` — флаг `-a` / `--auto-mcp`. Отключить в TUI: `gc-ua --no-auto-mcp`. Подробнее — [`recommended_mcp/README.md`](../recommended_mcp/README.md).
+`gc-mcp remove` с флагом `--keep-package` только отключает сервер (un-wire), оставляя пакет в venv для быстрой повторной активации. В `gc-ua` HTTP/SSE MCP-daemon'ы для серверов из конфига поднимаются по умолчанию; в `gc-cli` — флаг `-a` / `--auto-mcp`. Отключить в TUI: `gc-ua --no-auto-mcp`. Подробнее — [`recommended_mcp/README.md`](../packages/mcp/src/recommended_mcp/README.md).
 
 ## Запуск
 
@@ -88,7 +142,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 
 ## Ключи запуска gc-cli
 
-**Ключи запуска gc-cli** (см. `src/arg_parser.py`):
+**Ключи запуска gc-cli** (см. `packages/cli/src/gc_cli/arg_parser.py`):
 
 | Ключ | Описание |
 |------|----------|
@@ -105,7 +159,11 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 | `--no-read-guard` | Явно отключить `read_guard` (эквивалент `--read-guard false`), приоритет над конфигом. |
 | `--read-guard-mode` | Режим `read_guard`: `allow` — без проверок, `ask` — подтверждение для подозрительного, `deny` — блокировка. |
 | `--command-moderation` | Режим для `execute_command` / `run_python_code`: `allow` — без judge, `ask` — подтверждение опасного, `deny` — блокировка опасного. |
-| `--instructions-overwrite` | Загружать только проектные слои инструкций (`AGENTS.md` + `.gc/AGENTS.md`), отбрасывая глобальный и shipped-слои. |
+| `--agentsmd-override` | Только TUI: оставить лишь корневой `AGENTS.md` (L3), отбросив shipped, глобальный `~/.gc/AGENTS.md` и `.gc/AGENTS.md`. Вне TUI слои не грузятся вовсе — агент говорит об этом на старте. |
+| `--profile` | Активировать профиль `<имя>` поверх указателя `profile:` из `config.yml` (`<проект>/.gc/profiles/` или `profiles/` рядом с базовым `config.yml` — Windows `~/.gc/profiles/`, Linux/macOS `~/.config/gc/profiles/`; при `--config` — каталог указанного файла). |
+| `--level` | Активный уровень модели на этот запуск: `light` / `default` / `max` (перекрывает `config.yml` и профиль). |
+| `-a`, `--auto-mcp` | Поднять HTTP/SSE MCP-демоны из `recommended_mcp/` перед запуском (если каталог есть в cwd); по завершении гасятся только процессы этого вызова. |
+| `--reset-config` | Сбросить `config.yml` к пакетному умолчанию (подтверждение `y/N`, старый файл — в бэкап; профили и сессионные оверрайды не трогает) и выйти. |
 | `--init-config` | Мастер настройки `~/.gc/config.yml`. В `gc-cli` — настроить и выйти; в `gc-ua` — по завершении запускается TUI. |
 | `--init` | Сгенерировать `AGENTS.md` сканом репозитория и выйти (агент не запускается). |
 | `--sync-config` | Обновить `config.yml` до текущей версии (новые поля, переименования; старый файл — в бэкап) и выйти. |
@@ -122,7 +180,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 |------|---------|----------|
 | L0 | shipped (`paths.agent_md_path`) | Встроенные инструкции дистрибутива. |
 | L1 | `~/.gc/AGENTS.md` | Персональные глобальные инструкции пользователя. |
-| L2 | `AGENTS.md` в корне проекта | Проектные инструкции (общие). |
-| L3 | `.gc/AGENTS.md` в проекте | Проектные инструкции (локальные, не для VCS). |
+| L2 | `.gc/AGENTS.md` в проекте | Проектные инструкции (локальные, не для VCS). |
+| L3 | `AGENTS.md` в корне проекта | Проектные инструкции (общие); самый узкий слой. |
 
-Сгенерировать `AGENTS.md` для текущего репозитория: `gc-cli --init` (сканирует структуру проекта и создаёт файл, агент не запускается). Флаг `--instructions-overwrite` оставляет только L2 + L3, отбрасывая shipped и глобальный слои.
+Сгенерировать `AGENTS.md` для текущего репозитория: `gc-cli --init` (сканирует структуру проекта и создаёт файл, агент не запускается). Флаг `--agentsmd-override` оставляет только L3 — корневой `AGENTS.md`, — отбрасывая shipped, глобальный и `.gc/AGENTS.md`.

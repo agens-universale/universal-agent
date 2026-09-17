@@ -4,19 +4,20 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - с API `v1/responses` (deprecated) 
 - или режимом `chat_completions` (активно поддерживается) с доступом к модели (chat/completions — openrouter, vllm и др.).
 
-**Требования:** Python 3.10 или новее.
+**Требования:** Python 3.11 или новее.
 
 ## Возможности
 
 - CLI-агент: запросы, инструменты, треды, скиллы.
 - Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
-- MCP: 6 транспортов, готовые рецепты в `recommended_mcp/`.
+- MCP: 6 транспортов, готовые рецепты в дистрибутиве `gc-mcp` (`packages/mcp/src/recommended_mcp/`).
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
-- Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 проект → L3 `.gc/AGENTS.md`) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
+- Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 `.gc/AGENTS.md` → L3 `AGENTS.md` в корне проекта) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
+- Профили и уровни моделей (`light`/`default`/`max`): реестр `models`/`slots`/`assign` в конфиге, переключаемые YAML-профили, CLI `--profile`/`--level`, палитра `/level`/`/profiles`.
 - Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.
 - Серверный режим: REST-обёртка на FastAPI.
 - Swarm-режим (только Linux): изолированные песочницы (bubblewrap).
-- Подсчёт токенов и стоимости прогона (с учётом prompt-кэша).
+- Подсчёт токенов и стоимости прогона: фактическая цена от провайдера, если он её сообщает (OpenRouter), иначе расчёт по тарифу; с учётом prompt-кэша.
 
 ## Связь с разработчиками и поддержка
 
@@ -30,33 +31,61 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 > 📄 **Наглядная инструкция по установке (HTML):** [docs/gc-ua-install.html](docs/gc-ua-install.html) — пошаговая страница, откройте локально в браузере.
 
-```bash
-uv tool install -e .   # gc-cli + gc-ua (TUI по умолчанию). При реинсталле добавьте --force
-gc-mcp install duckduckgo_search   # поставить один MCP + авто-подключить в ~/.gc/config.local.yml
-# gc-mcp install   # поставить все MCP из манифеста
-```
+Агент ставится профилями. Профиль — это отдельный дистрибутив, собираемый из
+своего пакета `packages/<профиль>/src/gc_*`: код чужих профилей на диск не попадает.
+
+| Команда установки | Что приезжает |
+|---|---|
+| `gc-ua` | полный агент: ядро + TUI + server |
+| `gc-cli` | только ядро (headless) |
+| `gc-tui` | ядро + TUI |
+| `gc-server` | ядро + FastAPI-режим и swarm |
 
 ```bash
-# установка без клонирования репо gc-cli + gc-ua (TUI по умолчанию)
-uv tool install "git+https://gitverse.ru/gigacode-ai/universal-agent"
-gc-mcp install   # MCP → ~/.local/share/gc/recommended_mcp/venv + авто-wire в ~/.gc/config.local.yml
-# Примечание: source-MCP (office/science/computer) устанавливаются напрямую из git-подкаталога репо
-# (pip install "git+...#subdirectory=external/<name>") — клонировать репо не нужно.
-# Требуется: git на PATH + доступ к сети.
+# полный агент — все шесть команд сразу
+uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
+
+# узкий профиль: своя команда + менеджер MCP одной строкой
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"       --with-executables-from gc-mcp
+uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"       --with-executables-from gc-mcp
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
+
+gc-mcp install duckduckgo_search   # один MCP + авто-подключение в ~/.gc/config.local.yml
+# gc-mcp install                   # все MCP из манифеста
 ```
+
+Хвост `#subdirectory=` у частичных профилей обязателен: uv читает из git только
+корневой `pyproject.toml`, а в корне лежит полный профиль. Подробно — в
+[docs/packaging.md](docs/packaging.md).
+
+> Каждый дистрибутив кладёт в PATH только свои команды: `gc-cli` → `gc-cli`,
+> `gc-tui` → `gc-ua` и `gc-voice`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp` и
+> `gc-mcp-install`; полный `gc-ua` — все шесть. `uv tool` не экспортирует команды зависимостей, поэтому у
+> узкого профиля стоит `--with-executables-from gc-mcp` — менеджер MCP при этом
+> приезжает из того же коммита. Смена профиля — переустановка, нужен `--force`.
+
+### Голосовой ввод
+
+`Ctrl+T` (или `/voice`) в TUI — диктовка: запись → распознавание → текст в поле ввода.
+
+Подключение — в мастере первого запуска или `/settings → Голосовой ввод`:
+- локальный приватный сервис одной командой (~0.9 ГБ на диске, без ключей и облаков; работает и в корп-сети);
+- или свой OpenAI-совместимый STT-endpoint (`url`, `token`, `model`).
+
+Ручной путь: `gc-voice install` / `gc-voice remove` (сервис поднимается сам при запуске `gc-ua`).
 
 После установки `gc-ua` / `gc-cli` работают **без `--config`**: при первом запуске конфиг создаётся сам (Windows — `~/.gc/config.yml`, macOS/Linux — `~/.config/gc/config.yml`).
 
-- **`gc-ua`** — первый запуск открывает **мастер настройки**: адрес сервера → токен → модель → MCP-серверы. По завершении настройки сохраняются, и агент сразу стартует.
+- **`gc-ua`** — первый запуск открывает **мастер настройки**: адрес сервера → токен → модель → лёгкая и максимальная модели (шаг необязательный) → MCP-серверы → голосовой ввод. Модель он записывает реестром (`models` + `slots.default`), так что уровни работают сразу. По завершении настройки сохраняются, и агент сразу стартует. Профилями мастер не управляет — они настраиваются в `/settings` (раздел «Профили»); если профиль уже активен, мастер об этом предупреждает.
 - **`gc-cli`** — печатает подсказку и выходит: впишите `backend.completions_url` и токен (`backend.chat_completion_headers.Authorization`), при необходимости `agent.model`, затем запустите снова. Пройти мастер: `gc-cli --init-config` (настроить и выйти).
 
 Поменять адрес, токен, модель, MCP или обновить агента потом можно прямо из TUI — команда `/settings`.
 
 > **Миграция с gc-cli-pub:** если ранее была установлена старая версия дистрибутива, сначала удалите её: `uv tool uninstall gc-cli-pub`, затем выполните установку выше.
 
-Headless-установка только `gc-cli` (без TUI): см. [docs/usage.md](docs/usage.md#минимальная-установка-gc-cli-без-tui).
+Как это устроено внутри: [docs/packaging.md](docs/packaging.md).
 
-Подробнее про MCP: [`recommended_mcp/README.md`](recommended_mcp/README.md).
+Подробнее про MCP: [`recommended_mcp/README.md`](packages/mcp/src/recommended_mcp/README.md).
 
 Запуск без графического режима
 ```bash
@@ -95,14 +124,50 @@ gc-ua
 10. **Ctrl+C** — стоп агента (если ничего не выделено). **Esc** — назад / выход.
 11. Перенос строки в поле — **Ctrl+J**. Агент спросил (`[asking]`) — ответ в том же поле + Enter. Опасная операция — баннер **Y** / **S** (на сессию) / **N**.
 
+## Профили и уровни моделей
+
+Секции `models` / `slots` / `assign` — реестр именованных моделей и привязки к уровням сложности задачи, задаются прямо в `config.yml` (или в профиле, см. ниже), на любом слое:
+
+- **light** — быстрая и дешёвая: простые задачи
+- **default** — основная рабочая: повседневные задачи
+- **max** — самая сильная: сложные задачи
+
+```yaml
+models:
+  glm-local:
+    url: http://127.0.0.1:8014/v1/chat/completions
+  flash:
+    model: qwen/qwen-2.5-flash
+    url: https://openrouter.ai/api/v1/chat/completions
+    token: sk-or-...
+slots:
+  default: glm-local
+  light: flash
+assign:
+  finish_gate: light   # привязка отдельного потребителя (субагенты, finish-gate и т.д.) к уровню/алиасу
+```
+
+Без этих секций (или с пустым `models: {}`) агент работает в легаси-режиме — модель берётся из плоских ключей `backend`/`agent.model`, как раньше.
+
+**Профили** — именованные YAML-оверлеи поверх `config.yml`: переключаемый набор моделей, гвардов и любых других секций. Имя профиля = имя файла (`~/.gc/profiles/work.yml` → `work`); ищутся в `<проект>/.gc/profiles/` (проектный корень, приоритет при тёзке) и в `profiles/` рядом с базовым конфигом. Активируется указателем `profile: <имя>` в `config.yml`, флагом CLI или сессионно (`/profiles`). Полный референс всех полей секций моделей и профиля — [`demo_profile.yml`](demo_profile.yml).
+
+- **CLI:** `gc-cli --profile <имя>` — активировать профиль на этот запуск; `--level light|default|max` — форсировать уровень на этот запуск. Легаси-флаги `--model`/`--completions_url` при активном реестре моделей отключают резолв секций `models`/`slots`/`assign` на этот запуск (остальные секции профиля, включая гварды, остаются в силе) — разовый обход без правки конфига.
+- **Палитра TUI:** `/level` — переключатель уровня на сессию (без пересборки; алиас `models`); `/profiles` — выбор активного профиля из списка найденных (пикер, не цикл); футер показывает действующую модель, а при переключении посреди хода — переход `текущая → следующая` со стрелкой.
+- **Settings → «Модели»** — реестр, уровни и привязки одним экраном: записи (`Enter` — изменить, `n` — добавить, `Del` — удалить), строки уровней и привязок с выбором значения из списка. Запись идёт в файл сразу; схему спрашивают у правимого файла, а ссылочную целостность — по стеку, который загрузит следующий старт (база → managed → project → активный профиль).
+- **Settings → «Профили»** — профили обоих корней (состав слотов, источник): `Space` — активировать, `Enter` — открыть редактор секций моделей профиля, `n` / `r` / `Del` — создать, переименовать, удалить (с бэкапом).
+- **Сброс:** `gc-cli --reset-config` — подменить `config.yml` пакетным шаблоном (бэкап рядом с конфигом: `backups/config.yml.bak-<ГГГГММДД-ЧЧММСС>`, хранятся последние 10), файлы профилей не трогает; то же действие есть в Settings → «Обновление».
+
 ## Документация
 
 - [Установка и запуск](docs/usage.md) — установка (uv/pip), запуск, ключи CLI.
-- [Тесты](docs/testing.md) — как запускать `tests/`, `external/*` и полный прогон.
+- [Упаковка и профили](docs/packaging.md) — как пять дистрибутивов собираются из одного репозитория, почему у частичных профилей `#subdirectory=`, как обновление сохраняет профиль.
+- [Тесты](docs/testing.md) — наборы при пакетах (`packages/*/tests`), общий тест-кит, `external/*`, полный прогон.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
+- [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
 - [Swarm-режим](docs/swarm.md) — изолированные bubblewrap-песочницы для каждой задачи, pipeline запроса, эндпоинты, AR-1..AR-9, troubleshooting.
 - [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
 - [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)
-- [Токены и стоимость](docs/usage_pricing.md) — подсчёт токенов по категориям, секция `pricing`, учёт prompt-кэша, хранение в meta треда.
+- [Разбиение на модули](docs/module-split.md) — зачем ядро стало SDK `gc_core`, границы пакетов, цена и итоги переезда.
+- [Токены и стоимость](docs/usage_pricing.md) — подсчёт токенов по категориям, фактическая цена провайдера против тарифа, секция `pricing`, учёт prompt-кэша, хранение в meta треда.
