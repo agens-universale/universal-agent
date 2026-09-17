@@ -39,11 +39,14 @@ agent_kwargs:
         thinking: true
         reasoning_effort: high
       tool_choice: auto
-    chat_completions_params:
-      llm:
-        max_tokens: 8192                 # aux LLM: summary / intent-scope
-        judge_max_tokens: 10000          # finish-gate / command_moderation
-        completion_kwargs: {}
+    auxiliary_llm_params:
+      max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
+      judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
+      # Свои kwargs поверх агента; thinking выкл (у агента thinking: true).
+      completion_kwargs:
+        chat_template_kwargs:
+          thinking: false
+          reasoning_effort: none
 
     # --- cybergym level0 content ---
     chat_completions_special_instructions_path: "/opt/gc-harbor-adapters/prompts/cybergym_special_instructions_honest_level0.md"
@@ -114,7 +117,7 @@ agent_kwargs:
 
     # --- quality / memory / notices ---
     quality_gate_params:                 # размер трейс-дайджеста для finish-gate судьи (intent_guard/trace_digest.py)
-      max_dialogue_chars: 420000         # как summary.max_dialogue_chars (~131k ток); ответ судьи ограничен judge_max_tokens=10000
+      max_dialogue_chars: 420000         # как summary.max_dialogue_chars (~131k ток); ответ судьи ограничен judge_max_tokens
       max_message_chars: 8000
     working_memory_params:
       max_chars_goal: 2000

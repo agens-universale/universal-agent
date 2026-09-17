@@ -1,4 +1,4 @@
-Evaluate this tool payload.
+Evaluate this tool payload. Reply with the JSON object only — no chain-of-thought, no `<think>`, no preamble.
 
 Context JSON:
 

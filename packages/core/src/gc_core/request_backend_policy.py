@@ -5,7 +5,11 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.utils.connect_backend import request_backend_chat_completions
-from gc_core.utils.backend_errors import EmbeddedChoiceError, is_retriable_backend_error
+from gc_core.utils.backend_errors import (
+    EmbeddedChoiceError,
+    has_payload,
+    is_retriable_backend_error,
+)
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
@@ -29,16 +33,23 @@ def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
     )
 
 
-def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
+def _raise_on_embedded_choice_error(
+    response: Dict[str, Any], *, salvage_reasoning: bool = False
+) -> None:
     """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200:
     choices[0].error = {code, message, metadata} (стиль OpenRouter, напр. 504
     "Upstream idle timeout"), top-level {"error": {...}} без choices, или
-    finish_reason="error" с пустым выбором (без content/tool_calls). Иначе такая
-    ошибка «успешно» проходит транспорт и фаталит позже в конвертации, уже за
-    retry-границей; вызывается до выхода из неё, поэтому получает тот же
-    ретрай-цикл, что и HTTP-ошибки.
-    finish_reason="error" С контентом не трогаем: его принимает permissive-путь
-    normalize_finish_reason (с warning).
+    finish_reason="error" с пустым выбором. Иначе такая ошибка «успешно»
+    проходит транспорт и фаталит позже в конвертации, уже за retry-границей;
+    вызывается до выхода из неё, поэтому получает тот же ретрай-цикл, что и
+    HTTP-ошибки.
+    finish_reason="error" С видимым content/tool_calls не трогаем: его принимает
+    permissive-путь normalize_finish_reason (с warning).
+
+    ``salvage_reasoning`` — только агентский цикл: reasoning-only при
+    finish_reason="error" не ошибка (salvage в ``<think>``). Служебная воронка
+    читает только content; обрывок мысли там — пустая строка без исключения,
+    поэтому reasoning payload'ом не считается.
 
     Top-level форма ({"error": {...}} без choices) иначе падает KeyError'ом в
     get_output_list (dct['choices']) за retry-границей; в стриме она уже
@@ -54,7 +65,10 @@ def _raise_on_embedded_choice_error(response: Dict[str, Any]) -> None:
         fr = ch0.get("finish_reason")
         if isinstance(fr, str) and fr.lower() == "error":
             msg = ch0.get("message") or {}
-            if not (msg.get("content") or msg.get("tool_calls")):
+            usable = has_payload(msg) if salvage_reasoning else bool(
+                msg.get("content") or msg.get("tool_calls")
+            )
+            if not usable:
                 raise EmbeddedChoiceError(
                     "provider returned finish_reason='error' with empty choice"
                 )
@@ -81,6 +95,7 @@ def request_chat_completions_with_policy(
     cert: Optional[Tuple[str, str]] = None,
     use_retry: bool,
     retry_embedded_choice_errors: bool = True,
+    salvage_reasoning: bool = False,
     logger: logging.Logger | None = None,
     on_delta=None,
     request_label: Optional[str] = None,
@@ -115,7 +130,9 @@ def request_chat_completions_with_policy(
             config_proxy=config_proxy,
         )
         if retry_embedded_choice_errors:
-            _raise_on_embedded_choice_error(response)
+            _raise_on_embedded_choice_error(
+                response, salvage_reasoning=salvage_reasoning
+            )
         return response, payload
 
     try:

@@ -2,8 +2,11 @@ from typing import Any, Dict
 
 from gc_core.config_modules.chat_completions import subagent_role_max_tokens_from_ctx
 from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX
+from gc_core.summarize.llm import (
+    auxiliary_llm_completion_kwargs,
+    request_auxiliary_completion_text,
+)
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
-from gc_core.utils.llm_chat_client import request_chat_completion_text
 
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -107,7 +110,8 @@ Return final report as result of tool call of finish tool
 Create prompt for role: {{role}}.
 Role description: {{role_description}}
 
-Write actual role prompt in format as in examples. Don't use tags <Example>, write just prompt text itself."""
+Write actual role prompt in format as in examples. Don't use tags <Example>, write just prompt text itself.
+**No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or meta commentary. Emit only the role prompt text."""
 
 
 class SpecialAgent(AbstractSubagent):
@@ -175,13 +179,13 @@ class SpecialAgent(AbstractSubagent):
         return cls(role, role_description, task, reason, model)
 
     def finalize_role(self, ctx: Any, state: Any) -> None:
-        """Генерирует системный промпт роли через общую воронку chat/completions
-        (``request_chat_completion_text``) — вызывается runner'ом после сборки
+        """Генерирует системный промпт роли через aux chat/completions
+        (kwargs профиля + strip_think) — вызывается runner'ом после сборки
         child-контекста (нужны ``ctx.model_router``/сетевые параметры для Bearer)."""
         self.agent_role = self._generate_role(ctx, state)
 
     def _generate_role(self, ctx: Any, state: Any) -> str:
-        """Генерирует системный промпт для роли через LLM-вызов chat/completions."""
+        """Генерирует системный промпт для роли через aux LLM-вызов."""
         prompt = (
             _ROLE_GENERATE_PROMPT
             .replace("{{role}}", self.role)
@@ -191,13 +195,14 @@ class SpecialAgent(AbstractSubagent):
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt},
         ]
-        return request_chat_completion_text(
+        return request_auxiliary_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
             max_tokens=subagent_role_max_tokens_from_ctx(ctx),
             consumer=f"{SUBAGENT_CONSUMER_PREFIX}{self.agent_name}",
             request_label="subagent_special_agent",
+            payload_overrides=auxiliary_llm_completion_kwargs(ctx),
         )
 
     def get_initial_data(self):

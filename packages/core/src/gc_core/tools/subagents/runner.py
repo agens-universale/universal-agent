@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from gc_core.bundled_assets import bundled_root
 from gc_core.trace_id import trace_id_from_config
 from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
-from gc_core.config_modules.chat_completions import chat_completions_llm_from_config_dict
+from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
 from gc_core.config_modules.intent_scope import intent_scope_from_config_dict
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.model_router import AliasCircuitOpenError, ModelRouter, SUBAGENT_CONSUMER_PREFIX
@@ -69,6 +69,7 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
 _CHILD_CONFIG_DEEP_COPY_KEYS = (
     "chat_completion_headers",
     "chat_completion_kwargs",
+    "auxiliary_llm_params",
     "models",
     "slots",
     "assign",
@@ -888,7 +889,7 @@ class SubagentRunner:
             logger=child_logger,
             logging_path=child_log_path,
             summary_trace_path=child_summary_trace_path,
-            chat_completions_llm=chat_completions_llm_from_config_dict(child_config),
+            auxiliary_llm=auxiliary_llm_from_config_dict(child_config),
             intent_scope=intent_scope_from_config_dict(child_config),
             tools_data=child_tools_data,
             tools_spec=child_tools_spec,

@@ -113,7 +113,7 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
     с dict-error рендерится как error, НЕ как финальный ответ, без краша."""
     out = json.dumps({
         "tool": "exec_command", "ok": False, "command": "rm -rf /",
-        "cwd": "/work", "exit_code": None, "timed_out": False, "truncated": False,
+        "cwd": "/work", "exit_code": None, "timed_out": False,
         "error": {"type": "unsafe_command_blocked", "mode": "deny",
                   "reason": "Judge is unavailable; fail-closed policy blocks execution.",
                   "risk_flags": []},

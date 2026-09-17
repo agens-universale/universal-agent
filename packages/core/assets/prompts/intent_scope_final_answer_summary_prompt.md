@@ -6,6 +6,7 @@ You receive:
 
 Rules:
 - Output **1–3 sentences** of plain text only (no lists, no markdown headings, no reasoning).
+- **No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary. Emit only the 1–3 sentence line (or empty).
 - Capture what the agent delivered / concluded / recommended — **only facts present** in final_answer.
 - Do not invent results, files, or claims not supported by final_answer.
 - Do not repeat prior_intent; summarize the final answer itself.

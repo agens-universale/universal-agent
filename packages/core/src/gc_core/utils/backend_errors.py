@@ -96,10 +96,44 @@ def is_retriable_backend_error(exc: BaseException) -> bool:
         return False
 
 
+def nonempty_reasoning_text(msg) -> str | None:
+    """Канон ``reasoning_content`` или алиас OpenRouter ``reasoning``.
+
+    Берём ОДНО из двух, не сумму — как стрим-ассемблер. Иначе нестрим
+    (бенч/CLI/server) теряет reasoning-only ответ, который TUI спасает.
+    Пробельный CoT → None; иначе возвращаем уже strip'нутый текст.
+    """
+    if not isinstance(msg, dict):
+        return None
+    for key in ("reasoning_content", "reasoning"):
+        value = msg.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+    return None
+
+
+def has_payload(msg) -> bool:
+    """True, если в message есть нагрузка: content, tool_calls или reasoning.
+
+    content — truthiness как у транспорта (пробел/перевод строки — не пустой
+    стрим: цикл bounce «нужна тула», не ретрай completion). Reasoning —
+    nonempty после strip: пустой CoT не salvage.
+    """
+    if not isinstance(msg, dict):
+        return False
+    if msg.get("content") or msg.get("tool_calls"):
+        return True
+    return nonempty_reasoning_text(msg) is not None
+
+
 def is_empty_completion(dct: dict) -> bool:
     """True, если ответ бэкенда генуинно пуст: нет content, нет tool_calls, нет
-    finish_reason, нет error (ни top-level, ни choice-level). Напр. оборванный
-    SSE-стрим, отдавший 0 токенов. Такой ответ → retriable (см. connect_backend)."""
+    reasoning_content, нет finish_reason, нет error (ни top-level, ни choice-level).
+    Напр. оборванный SSE-стрим, отдавший 0 токенов. Такой ответ → retriable
+    (см. connect_backend). Непустой reasoning — не пустой стрим (salvage, не ретрай).
+    Пробельный content — не пустой: payload есть, ретрай не нужен."""
     if not isinstance(dct, dict):
         return False
     if dct.get("error") is not None:
@@ -110,33 +144,90 @@ def is_empty_completion(dct: dict) -> bool:
     ch0 = choices[0] if isinstance(choices[0], dict) else {}
     if ch0.get("error") is not None or ch0.get("finish_reason"):
         return False
-    msg = ch0.get("message") or {}
-    if msg.get("content"):
-        return False
-    if msg.get("tool_calls"):
-        return False
-    return True
+    return not has_payload(ch0.get("message") or {})
+
+
+# Семантика finish_reason для транспорта (accept) и политики цикла (bounce/final).
+FINISH_KIND_STOP = "stop"
+FINISH_KIND_TOOL_CALLS = "tool_calls"
+FINISH_KIND_LENGTH = "length"
+FINISH_KIND_BLOCKED = "blocked"  # content_filter / refusal / safety
+FINISH_KIND_UNKNOWN = "unknown"
+
+# Известные значения OpenAI-совместимых API → kind. Ключи — lower-case.
+_KNOWN_FINISH_KINDS = {
+    "stop": FINISH_KIND_STOP,
+    "tool_calls": FINISH_KIND_TOOL_CALLS,
+    "length": FINISH_KIND_LENGTH,
+    "content_filter": FINISH_KIND_BLOCKED,
+    "refusal": FINISH_KIND_BLOCKED,
+    "safety": FINISH_KIND_BLOCKED,
+}
 
 
 class FinishDecision(NamedTuple):
-    accept: bool   # принять ответ (не крашиться/не ретраить)
+    accept: bool   # принять payload в историю (не крашиться/не ретраить транспорт)
     unknown: bool  # finish_reason незнакомый → залогировать warning
+    kind: str      # stop | tool_calls | length | blocked | unknown
 
 
-_KNOWN_FINISH_REASONS = frozenset({"stop", "tool_calls", "length"})
+def _finish_reason_key(finish_reason) -> str | None:
+    if not isinstance(finish_reason, str):
+        return None
+    key = finish_reason.strip().lower()
+    return key or None
 
 
-def normalize_finish_reason(finish_reason, *, has_content: bool, has_tool_calls: bool) -> FinishDecision:
+def classify_finish_kind(finish_reason) -> str:
+    """Одна классификация finish_reason для цикла агента и bounce-сообщений."""
+    key = _finish_reason_key(finish_reason)
+    if key is None:
+        return FINISH_KIND_UNKNOWN
+    return _KNOWN_FINISH_KINDS.get(key, FINISH_KIND_UNKNOWN)
+
+
+def finish_blocks_final(finish_reason) -> bool:
+    """Отказ провайдера: не принимать как финальный text answer (даже в allow)."""
+    return classify_finish_kind(finish_reason) == FINISH_KIND_BLOCKED
+
+
+def finish_prevents_text_final(finish_reason) -> bool:
+    """Не принимать prose как финал хода: blocked (отказ) или length (усечение).
+
+    Транспортный accept и запись в историю от этого не зависят — только
+    решение text_response в run_agent (даже при text_answer_mode=allow).
+    """
+    kind = classify_finish_kind(finish_reason)
+    return kind == FINISH_KIND_BLOCKED or kind == FINISH_KIND_LENGTH
+
+
+def normalize_finish_reason(
+    finish_reason,
+    *,
+    has_content: bool,
+    has_tool_calls: bool,
+    has_reasoning: bool = False,
+) -> FinishDecision:
     """Permissive-но-честная трактовка finish_reason (провайдер-агностично).
 
-    Известный {stop, tool_calls, length} → принять. Незнакомый/null + есть
-    content/tool_calls → принять как «stop», но пометить unknown (warning).
-    Незнакомый/null + пусто → не принять (генуинно непригодно → путь пустого)."""
-    if finish_reason in _KNOWN_FINISH_REASONS:
-        return FinishDecision(accept=True, unknown=False)
-    if has_content or has_tool_calls:
-        return FinishDecision(accept=True, unknown=True)
-    return FinishDecision(accept=False, unknown=True)
+    Известный stop/tool_calls/length/blocked → принять, unknown=False.
+    Незнакомый/null + есть content/tool_calls/reasoning → принять как payload,
+    но пометить unknown (warning). Незнакомый/null + пусто → не принять
+    (генуинно непригодно; конвертер отдаёт пустой батч → bounce, не
+    транспортный ретрай).
+
+    ``kind`` отделяет транспортный accept от политики цикла: blocked/length
+    всё равно попадают в историю (если есть текст), но не становятся финалом
+    (см. ``finish_prevents_text_final``).
+    """
+    key = _finish_reason_key(finish_reason)
+    if key is not None and key in _KNOWN_FINISH_KINDS:
+        return FinishDecision(
+            accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
+        )
+    if has_content or has_tool_calls or has_reasoning:
+        return FinishDecision(accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN)
+    return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)
 
 
 def is_model_unavailable_error(exc: BaseException) -> bool:

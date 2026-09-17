@@ -25,7 +25,7 @@
   тогда клиент отправит `Authorization: Bearer <token>` в запрос к `completions_url`.
   Опционально для OpenRouter поддерживаются заголовки `openrouter_http_referer`
   и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
-- `strip_tags_projection.strip_think` (по умолчанию `true`) удаляет reasoning из канонических `messages`; при `false` поле `reasoning_content` сохраняется и передаётся в следующий основной запрос, но по-прежнему исключается из summary, intent, judges, digest и memory.
+- `strip_tags_projection.strip_think` (по умолчанию `true`) не копирует скрытое поле мысли бэкенда (`reasoning_content`) в историю. Salvage `<think>` — только если кроме ризонинга ничего нет (нет прозы и нет тулов): тогда мысль кладётся в историю как `<think>…</think>` и в следующем запросе модель её снова видит. Смешанный ход (think + проза) в историю кладёт только прозу. Из саммари, intent, судей, дайджеста и памяти `<think>` вырезается всегда. При `false` скрытое поле копируется в историю как есть и уходит в следующий запрос, но из саммари, intent, судей, дайджеста и памяти по-прежнему исключается.
 - Для хранения истории тредов:
   - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
   - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
@@ -715,8 +715,10 @@ voice:
 endpoint_presets:
   - name: OpenRouter
     url: https://openrouter.ai/api/v1/chat/completions
-  - name: GigaCode
-    url: https://litellm-proxy.sberai-rnd.ru/v1/chat/completions
+  - name: Cloud.ru
+    url: https://foundation-models.api.cloud.ru/v1/chat/completions
+  - name: RouterAI
+    url: https://routerai.ru/api/v1/chat/completions
 
 # адрес STT-сервиса (/settings → «Голосовой ввод» → «Свой endpoint»)
 voice_endpoint_presets:

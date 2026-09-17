@@ -311,7 +311,7 @@ def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
         logger=None,
         auth_connector=None,
         is_tui=False,
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=500, judge_max_tokens=200, completion_kwargs={}
         ),
     )

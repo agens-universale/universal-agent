@@ -117,12 +117,70 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 ].endswith("prompts/chat_completions_memory_patch_replace.md")
             )
             self.assertNotIn("llm", cfg["summary_params"])
-            from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig
+            from gc_core.config_modules.chat_completions import (
+                ChatCompletionsLlmConfig,
+                auxiliary_llm_from_config_dict,
+            )
 
-            self.assertIsInstance(cfg["chat_completions_llm"], ChatCompletionsLlmConfig)
-            self.assertEqual(cfg["chat_completions_llm"].max_tokens, 8192)
-            self.assertEqual(cfg["chat_completions_llm"].judge_max_tokens, 10000)
-            self.assertEqual(cfg["chat_completions_llm"].completion_kwargs, {})
+            self.assertIsInstance(cfg["auxiliary_llm_params"], dict)
+            self.assertNotIn("chat_completions_llm", cfg)
+            aux = auxiliary_llm_from_config_dict(cfg)
+            self.assertIsInstance(aux, ChatCompletionsLlmConfig)
+            self.assertEqual(aux.max_tokens, 24576)
+            self.assertEqual(aux.judge_max_tokens, 24576)
+            self.assertEqual(aux.completion_kwargs, {})
+
+    def test_auxiliary_llm_loaded_from_yaml(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "chat_completions:\n"
+                    "  auxiliary_llm:\n"
+                    "    max_tokens: 4096\n"
+                    "    judge_max_tokens: 5000\n"
+                    "    completion_kwargs:\n"
+                    "      enable_thinking: false\n"
+                )
+            cfg = load_config(cfg_path)
+            from gc_core.config_modules.chat_completions import (
+                auxiliary_llm_from_config_dict,
+            )
+
+            self.assertEqual(cfg["auxiliary_llm_params"]["max_tokens"], 4096)
+            self.assertEqual(cfg["auxiliary_llm_params"]["judge_max_tokens"], 5000)
+            self.assertEqual(
+                cfg["auxiliary_llm_params"]["completion_kwargs"],
+                {"enable_thinking": False},
+            )
+            self.assertEqual(
+                cfg["chat_completions_params"]["auxiliary_llm"]["max_tokens"], 4096
+            )
+            aux = auxiliary_llm_from_config_dict(cfg)
+            self.assertEqual(aux.max_tokens, 4096)
+            self.assertEqual(aux.judge_max_tokens, 5000)
+            self.assertEqual(aux.completion_kwargs, {"enable_thinking": False})
+
+    def test_legacy_llm_alias_still_loads(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "chat_completions:\n"
+                    "  llm:\n"
+                    "    max_tokens: 1111\n"
+                )
+            cfg = load_config(cfg_path)
+            from gc_core.config_modules.chat_completions import (
+                auxiliary_llm_from_config_dict,
+            )
+
+            self.assertEqual(cfg["auxiliary_llm_params"]["max_tokens"], 1111)
+            self.assertEqual(auxiliary_llm_from_config_dict(cfg).max_tokens, 1111)
+            self.assertIn("auxiliary_llm", cfg["chat_completions_params"])
+            self.assertNotIn("llm", cfg["chat_completions_params"])
 
     def test_summary_params_normalization(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -333,6 +391,210 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             tools = cfg["intent_scope_params"]["tools"]
             self.assertEqual(tools["turn_ask_human"]["record"], "aggregated")
             self.assertEqual(tools["turn_finish"]["record"], "raw")
+
+    def test_auxiliary_llm_params_survives_deep_merge_over_schema_defaults(self):
+        """Бенч: overlay пишет auxiliary_llm_params — typed профиль не остаётся дефолтным."""
+        from gc_core.config import flatten_app_config
+        from gc_core.config_modules.chat_completions import (
+            auxiliary_llm_from_config_dict,
+        )
+        from gc_core.config_modules.merge import deep_merge
+        from gc_core.config_modules.root import AppConfig
+
+        base = flatten_app_config(AppConfig.model_validate({}))
+        self.assertIsInstance(base["auxiliary_llm_params"], dict)
+        self.assertNotIn("chat_completions_llm", base)
+
+        merged = deep_merge(
+            base,
+            {
+                "chat_completion_kwargs": {
+                    "chat_template_kwargs": {"enable_thinking": True},
+                },
+                "auxiliary_llm_params": {
+                    "max_tokens": 8192,
+                    "judge_max_tokens": 10000,
+                    "completion_kwargs": {
+                        "separate_reasoning": False,
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    },
+                },
+            },
+        )
+        aux = auxiliary_llm_from_config_dict(merged)
+        self.assertEqual(
+            aux.completion_kwargs,
+            {
+                "separate_reasoning": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        )
+        self.assertEqual(aux.max_tokens, 8192)
+
+    def test_stale_legacy_chat_completions_llm_object_ignored_when_params_present(self):
+        """Дефолтный объект-близнец не должен перебивать auxiliary_llm_params."""
+        from gc_core.config_modules.chat_completions import (
+            ChatCompletionsLlmConfig,
+            auxiliary_llm_from_config_dict,
+        )
+
+        cfg = {
+            "chat_completions_llm": ChatCompletionsLlmConfig(),  # = schema defaults
+            "auxiliary_llm_params": {
+                "completion_kwargs": {"enable_thinking": False},
+            },
+        }
+        aux = auxiliary_llm_from_config_dict(cfg)
+        self.assertEqual(aux.completion_kwargs, {"enable_thinking": False})
+
+    def test_legacy_nested_overlay_survives_when_flat_is_schema_default(self):
+        """Старый harbor-оверлей в chat_completions_params.auxiliary_llm не глохнет."""
+        from gc_core.config import flatten_app_config
+        from gc_core.config_modules.chat_completions import (
+            auxiliary_llm_from_config_dict,
+        )
+        from gc_core.config_modules.merge import deep_merge
+        from gc_core.config_modules.root import AppConfig
+
+        base = flatten_app_config(AppConfig.model_validate({}))
+        merged = deep_merge(
+            base,
+            {
+                "chat_completion_kwargs": {
+                    "chat_template_kwargs": {"enable_thinking": True},
+                },
+                "chat_completions_params": {
+                    "auxiliary_llm": {
+                        "max_tokens": 4096,
+                        "judge_max_tokens": 10000,
+                        "completion_kwargs": {
+                            "separate_reasoning": False,
+                            "chat_template_kwargs": {"enable_thinking": False},
+                        },
+                    }
+                },
+            },
+        )
+        # flat остаётся schema default после такого оверлея
+        self.assertEqual(merged["auxiliary_llm_params"]["completion_kwargs"], {})
+        self.assertEqual(merged["auxiliary_llm_params"]["max_tokens"], 24576)
+        aux = auxiliary_llm_from_config_dict(merged)
+        self.assertEqual(aux.max_tokens, 4096)
+        self.assertFalse(
+            aux.completion_kwargs.get("chat_template_kwargs", {}).get(
+                "enable_thinking", True
+            )
+        )
+
+    def test_flat_wins_over_diverged_nested_defaults(self):
+        """Канон flat побеждает устаревший nested dump после одностороннего merge."""
+        from gc_core.config_modules.chat_completions import (
+            auxiliary_llm_from_config_dict,
+        )
+
+        cfg = {
+            "chat_completions_params": {
+                "auxiliary_llm": {
+                    "completion_kwargs": {
+                        "chat_template_kwargs": {"enable_thinking": True},
+                    },
+                },
+            },
+            "auxiliary_llm_params": {
+                "completion_kwargs": {
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+            },
+        }
+        aux = auxiliary_llm_from_config_dict(cfg)
+        self.assertEqual(
+            aux.completion_kwargs,
+            {"chat_template_kwargs": {"enable_thinking": False}},
+        )
+
+    def test_empty_aux_overlay_does_not_inject_vendor_keys(self):
+        """Schema/default ``{}`` не шлёт chat_template_kwargs на OpenAI-like агента."""
+        from gc_core.config import flatten_app_config
+        from gc_core.config_modules.chat_completions import (
+            auxiliary_llm_from_config_dict,
+        )
+        from gc_core.config_modules.merge import deep_merge
+        from gc_core.config_modules.root import AppConfig
+        from gc_core.utils.llm_chat_client import _build_chat_completion_payload
+        from types import SimpleNamespace
+
+        base = flatten_app_config(AppConfig.model_validate({}))
+        merged = deep_merge(
+            base,
+            {
+                "chat_completion_kwargs": {
+                    "temperature": 1.0,
+                    "top_p": 1.0,
+                },
+                "auxiliary_llm_params": {
+                    "max_tokens": 8192,
+                    "judge_max_tokens": 10000,
+                    "completion_kwargs": {},
+                },
+            },
+        )
+        self.assertEqual(merged["auxiliary_llm_params"]["completion_kwargs"], {})
+        aux = auxiliary_llm_from_config_dict(merged)
+        self.assertEqual(aux.completion_kwargs, {})
+        payload = _build_chat_completion_payload(
+            ctx=SimpleNamespace(config_dict=merged, auxiliary_llm=aux),
+            state=SimpleNamespace(default_model="gpt-4o"),
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=100,
+            payload_overrides=dict(aux.completion_kwargs),
+        )
+        self.assertNotIn("chat_template_kwargs", payload)
+        self.assertNotIn("separate_reasoning", payload)
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertEqual(payload["temperature"], 1.0)
+
+    def test_dsv4_style_agent_thinking_does_not_leak_into_aux_payload(self):
+        """DeepSeek-style: aux overlay гасит thinking/reasoning_effort агента."""
+        from gc_core.config import flatten_app_config
+        from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
+        from gc_core.config_modules.merge import deep_merge
+        from gc_core.config_modules.root import AppConfig
+        from gc_core.utils.llm_chat_client import _build_chat_completion_payload
+        from types import SimpleNamespace
+
+        base = flatten_app_config(AppConfig.model_validate({}))
+        merged = deep_merge(
+            base,
+            {
+                "chat_completion_kwargs": {
+                    "chat_template_kwargs": {
+                        "thinking": True,
+                        "reasoning_effort": "high",
+                    },
+                    "tool_choice": "auto",
+                },
+                "auxiliary_llm_params": {
+                    "max_tokens": 8192,
+                    "judge_max_tokens": 10000,
+                    "completion_kwargs": {
+                        "chat_template_kwargs": {
+                            "thinking": False,
+                            "reasoning_effort": "none",
+                        },
+                    },
+                },
+            },
+        )
+        aux = auxiliary_llm_from_config_dict(merged)
+        payload = _build_chat_completion_payload(
+            ctx=SimpleNamespace(config_dict=merged),
+            state=SimpleNamespace(default_model="m"),
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=100,
+            payload_overrides=dict(aux.completion_kwargs),
+        )
+        self.assertEqual(payload["chat_template_kwargs"]["thinking"], False)
+        self.assertEqual(payload["chat_template_kwargs"]["reasoning_effort"], "none")
 
 if __name__ == "__main__":
     unittest.main()

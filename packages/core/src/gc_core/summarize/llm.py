@@ -8,25 +8,26 @@ from gc_core.message_projection import project_text_for_model
 from gc_core.utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
 
 
-def _require_chat_completions_llm(ctx: Any) -> Any:
-    chat_completions_llm = getattr(ctx, "chat_completions_llm", None)
-    if chat_completions_llm is None:
+def _require_auxiliary_llm(ctx: Any) -> Any:
+    auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
+    if auxiliary_llm is None:
         raise RuntimeError(
-            "RunContext.chat_completions_llm обязателен; создавайте контекст через create_run_context."
+            "RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context."
         )
-    return chat_completions_llm
+    return auxiliary_llm
 
 
 def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
     """
     Единый профиль chat/completions для вспомогательных LLM-вызовов:
-    thread summary, finish gate, intent scope (см. ``chat_completions.llm`` в config).
+    thread summary, finish gate, intent scope (flat: ``auxiliary_llm_params``;
+    YAML: ``chat_completions.auxiliary_llm``).
     """
-    chat_completions_llm = _require_chat_completions_llm(ctx)
-    completion_kwargs = getattr(chat_completions_llm, "completion_kwargs", None)
+    auxiliary_llm = _require_auxiliary_llm(ctx)
+    completion_kwargs = getattr(auxiliary_llm, "completion_kwargs", None)
     if not isinstance(completion_kwargs, dict):
         raise RuntimeError(
-            "RunContext.chat_completions_llm.completion_kwargs must be a dict"
+            "RunContext.auxiliary_llm.completion_kwargs must be a dict"
         )
     return dict(completion_kwargs)
 
@@ -35,12 +36,13 @@ def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
     """
     Лимит ответа для LLM-судей (command_moderation, finish gate / text_answer).
 
-    Читает ``chat_completions.llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
+    Читает ``auxiliary_llm_params.judge_max_tokens`` / YAML
+    ``chat_completions.auxiliary_llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
     """
     from gc_core.config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
 
-    chat_completions_llm = _require_chat_completions_llm(ctx)
-    value = getattr(chat_completions_llm, "judge_max_tokens", None)
+    auxiliary_llm = _require_auxiliary_llm(ctx)
+    value = getattr(auxiliary_llm, "judge_max_tokens", None)
     if isinstance(value, int) and value >= 1:
         return value
     return DEFAULT_JUDGE_MAX_TOKENS
@@ -105,11 +107,11 @@ def request_summary_text(
     effective_overrides = completion_kwargs
     if isinstance(payload_overrides, dict) and payload_overrides:
         effective_overrides = deep_merge(completion_kwargs, payload_overrides)
-    chat_completions_llm = getattr(ctx, "chat_completions_llm", None)
-    default_max_tokens = getattr(chat_completions_llm, "max_tokens", None)
+    auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
+    default_max_tokens = getattr(auxiliary_llm, "max_tokens", None)
     if not isinstance(default_max_tokens, int) or default_max_tokens < 1:
         raise RuntimeError(
-            "RunContext.chat_completions_llm.max_tokens must be a positive int"
+            "RunContext.auxiliary_llm.max_tokens must be a positive int"
         )
     return request_auxiliary_completion_text(
         ctx=ctx,

@@ -4,12 +4,11 @@
 Раньше ``SpecialAgent._generate_role`` строил HTTP-вызов вручную и никогда не
 прикладывал заголовок ``Authorization`` (латентный баг — генерация роли всегда
 уходила без Bearer). Теперь она идёт через
-``utils.llm_chat_client.request_chat_completion_text`` — тот же путь, что и
-любой другой служебный LLM-вызов (summary/finish_gate/judges/memory_compaction),
+``summarize.llm.request_auxiliary_completion_text`` (aux kwargs + strip_think),
 с заголовками из ``create_call_headers`` (auth_connector/resolved-модель).
 
-Заодно бюджет-хардкоды (special_agent: 4096, project_memory compaction: 4000)
-вынесены в конфиг с теми же дефолтами.
+Заодно бюджет-хардкоды (special_agent role draft, project_memory compaction)
+вынесены в конфиг.
 """
 import asyncio
 from types import SimpleNamespace
@@ -66,12 +65,29 @@ def _create_instance():
     )
 
 
+def _ctx(**overrides) -> SimpleNamespace:
+    base = dict(
+        config_dict={
+            "completions_url": "http://backend.local/v1/chat/completions",
+            "backend_request_timeout_sec": 600,
+            "backend_api_mode": "chat_completions",
+        },
+        auxiliary_llm=ChatCompletionsLlmConfig(),
+        auth_connector=None,
+        model_router=None,
+        logger=None,
+        is_tui=False,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 def test_default_budgets_match_prior_hardcodes():
-    """Числа дефолтов не меняются при переносе хардкодов в конфиг."""
-    assert DEFAULT_SUBAGENT_ROLE_MAX_TOKENS == 4096
-    assert ChatCompletionsLlmConfig().subagent_role_max_tokens == 4096
-    assert DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS == 4_000
-    assert ProjectMemoryConfig().compaction_max_tokens == 4_000
+    """Schema defaults для бюджетов aux/compaction."""
+    assert DEFAULT_SUBAGENT_ROLE_MAX_TOKENS == 24576
+    assert ChatCompletionsLlmConfig().subagent_role_max_tokens == 24576
+    assert DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS == 16_384
+    assert ProjectMemoryConfig().compaction_max_tokens == 16_384
 
 
 def test_special_agent_role_generation_attaches_bearer_header(monkeypatch):
@@ -89,16 +105,8 @@ def test_special_agent_role_generation_attaches_bearer_header(monkeypatch):
         llm_chat_client, "request_chat_completions_with_policy", _fake_policy
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
-        },
+    ctx = _ctx(
         auth_connector=SimpleNamespace(get_token=lambda: "secret-token"),
-        model_router=None,
-        logger=None,
-        is_tui=False,
     )
 
     instance = _create_instance()
@@ -131,16 +139,7 @@ def test_special_agent_role_generation_uses_subagent_usage_category(monkeypatch)
         llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-        },
-        auth_connector=None,
-        model_router=None,
-        logger=None,
-        is_tui=False,
-    )
+    ctx = _ctx()
     state = _state()
     state.usage = UsageAccount()
 
@@ -163,16 +162,7 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
     )
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-        },
-        auth_connector=None,
-        model_router=router,
-        logger=None,
-        is_tui=False,
-    )
+    ctx = _ctx(model_router=router)
 
     instance = _create_instance()
     instance.finalize_role(ctx, _state())
@@ -195,16 +185,7 @@ def test_special_agent_role_generation_uses_configured_max_tokens_default(monkey
         llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-        },
-        auth_connector=None,
-        model_router=None,
-        logger=None,
-        is_tui=False,
-    )
+    ctx = _ctx()
 
     instance = _create_instance()
     instance.finalize_role(ctx, _state())
@@ -227,16 +208,13 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
         llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
     )
 
-    ctx = SimpleNamespace(
+    ctx = _ctx(
         config_dict={
             "completions_url": "http://backend.local/v1/chat/completions",
             "backend_request_timeout_sec": 600,
-            "chat_completions_llm": ChatCompletionsLlmConfig(subagent_role_max_tokens=222),
+            "auxiliary_llm_params": {"subagent_role_max_tokens": 222},
         },
-        auth_connector=None,
-        model_router=None,
-        logger=None,
-        is_tui=False,
+        auxiliary_llm=ChatCompletionsLlmConfig(subagent_role_max_tokens=222),
     )
 
     instance = _create_instance()

@@ -357,7 +357,7 @@ def _router_ctx(**cfg_overrides):
     ctx = SimpleNamespace(
         config_dict=cfg,
         model_router=router,
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=500, judge_max_tokens=200, completion_kwargs={}
         ),
         logger=None,
@@ -554,7 +554,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
                 "last_dialog_step_message_max_chars": 5000,
             },
             "chat_completions_params": {
-                "llm": {"max_tokens": 8192, "completion_kwargs": {}},
+                "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
             },
         },
         logger=None,

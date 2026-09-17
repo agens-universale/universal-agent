@@ -26,9 +26,9 @@ backend:
 
 # Вспомогательные LLM (summary, finish gate, intent scope, judges).
 chat_completions:
-  llm:
-    max_tokens: 8192
-    judge_max_tokens: 10000
+  auxiliary_llm:
+    max_tokens: 24576
+    judge_max_tokens: 24576
     completion_kwargs:
       reasoning_effort: none
 
@@ -98,11 +98,15 @@ summary:
   last_dialog_steps_count: 4
   last_dialog_step_message_max_chars: 6000
 
-# tags — extra-теги, которые режут в derived (саммари, intent, digest…), не в messages.
-# strip_think: true (дефолт) — ризонинг в messages не класть.
-# strip_think: false — сохранить reasoning_content в messages как пришло с бэкенда
-#   и в следующем запросе отдать как есть. DeepSeek / часть strict-бэкендов → 400.
-# Трейс в бэкенд = то, что лежит в messages. Остальной state — без ризонинга всегда.
+# tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
+# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
+#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
+#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
+#   Смешанный ход (think + проза) — в историю только проза.
+#   Из саммари, intent, судей и памяти <think> вырезается всегда.
+# strip_think: false — копировать скрытое поле мысли в историю как есть
+#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
   strip_think: true
   tags: []

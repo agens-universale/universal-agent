@@ -63,7 +63,17 @@ from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text
+from gc_core.message_policy.no_tool_call_bounce import (
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
+    extract_last_assistant_text,
+    format_no_tool_call_bounce,
+)
+from gc_core.utils.backend_errors import (
+    FINISH_KIND_LENGTH,
+    classify_finish_kind,
+    finish_blocks_final,
+    finish_prevents_text_final,
+)
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
@@ -468,6 +478,7 @@ def _request_backend_canonical_once(
             cert=cert,
             use_retry=use_retry,
             retry_embedded_choice_errors=retry_embedded_choice_errors,
+            salvage_reasoning=True,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",
@@ -683,7 +694,7 @@ _TRUNCATED_ARGUMENTS_HINT = (
 def _attach_truncation_hint(exc: WrongFunctionArgumentsException, state: Any) -> None:
     """Дописать объяснение про усечение к фидбэку, не затирая подсказку самого
     тула (wrong_arguments_feedback_hint), которую положило место возбуждения."""
-    if getattr(state, "last_finish_reason", None) != "length":
+    if classify_finish_kind(getattr(state, "last_finish_reason", None)) != FINISH_KIND_LENGTH:
         return
     hints = [h for h in (getattr(exc, "extra_hint", None), _TRUNCATED_ARGUMENTS_HINT) if h]
     exc.extra_hint = "\n\n".join(hints)
@@ -1124,7 +1135,9 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    NO_TOOL_CALL_BOUNCE_MESSAGE,
+                    format_no_tool_call_bounce(
+                        finish_reason=getattr(state, "last_finish_reason", None)
+                    ),
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -1277,7 +1290,9 @@ def run_agent(
             tool_error_cnt += 1
             messages = [
                 _make_technical_feedback_user_message(
-                    NO_TOOL_CALL_BOUNCE_MESSAGE,
+                    format_no_tool_call_bounce(
+                        finish_reason=getattr(state, "last_finish_reason", None)
+                    ),
                     technical_type=TECHNICAL_TYPE_TECHNICAL,
                 )
             ]
@@ -1480,8 +1495,20 @@ def run_agent(
                     assistant_text = extract_last_assistant_text(
                         messages, tags=_proj_tags, strip_think=True
                     )
-                    decision = should_return_text_answer(ctx, state, assistant_text)
-                    if decision.accept:
+                    last_finish = getattr(state, "last_finish_reason", None)
+                    bounce_msg = format_no_tool_call_bounce(finish_reason=last_finish)
+                    # blocked / length — не финал даже в allow: отказ провайдера
+                    # или усечение (обрезок тулы/ответа). Иначе allow принимает
+                    # мусор и крутит до no_tool_call_max_count / сдаёт ход.
+                    # Payload уже в state/jsonl; reject → bounce, не discard.
+                    if finish_prevents_text_final(last_finish):
+                        decision_accept = False
+                        decision_reject_feedback = None
+                    else:
+                        decision = should_return_text_answer(ctx, state, assistant_text)
+                        decision_accept = decision.accept
+                        decision_reject_feedback = decision.reject_feedback
+                    if decision_accept:
                         # Финальная проза принята → TUI-индикатор «✓ завершаю…»
                         # на время записи/саммари/flush (mark_finalizing пишет
                         # runtime.finalizing в meta; снимаем строго в finally).
@@ -1508,8 +1535,19 @@ def run_agent(
                         return assistant_text
                     # === reject ===
                     tool_error_cnt += 1
-                    if decision.reject_feedback is not None:      # judge-reject c причиной
-                        bounce_msg = decision.reject_feedback
+                    if decision_reject_feedback is not None:      # judge-reject c причиной
+                        bounce_msg = decision_reject_feedback
+                    elif finish_blocks_final(last_finish):
+                        run_logger.warning(
+                            "Provider blocked the completion (%s); "
+                            "requesting a rephrased attempt",
+                            last_finish,
+                        )
+                    elif classify_finish_kind(last_finish) == FINISH_KIND_LENGTH:
+                        run_logger.warning(
+                            "Agent response truncated (finish_reason=length); "
+                            "requesting a shorter tool call"
+                        )
                     else:                                         # deny / пусто / нет гейта / ошибка
                         run_logger.warning(
                             "Agent returned text response without tool call, requesting tool call"

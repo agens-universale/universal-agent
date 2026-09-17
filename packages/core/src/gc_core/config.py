@@ -330,7 +330,10 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "download": app_cfg.security.download.model_dump(),
         "summary_params": app_cfg.summary.model_dump(),
         "chat_completions_params": app_cfg.chat_completions.model_dump(),
-        "chat_completions_llm": app_cfg.chat_completions.llm,
+        # Плоский dict рядом с chat_completion_kwargs: deep_merge (бенч/project)
+        # обновляет его; живой pydantic-объект сюда не кладём — иначе early-return
+        # в auxiliary_llm_from_config_dict игнорирует overlay.
+        "auxiliary_llm_params": app_cfg.chat_completions.auxiliary_llm.model_dump(),
         "quality_gate_params": app_cfg.quality_gate.model_dump(),
         # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
         "working_memory": app_cfg.working_memory,

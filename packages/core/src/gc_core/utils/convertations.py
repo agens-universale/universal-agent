@@ -1,9 +1,16 @@
-import json
+from __future__ import annotations
+
 import hashlib
+import json
+import re
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
-from gc_core.utils.backend_errors import normalize_finish_reason
+from gc_core.utils.backend_errors import (
+    FINISH_KIND_LENGTH,
+    nonempty_reasoning_text,
+    normalize_finish_reason,
+)
 
 _MAX_BACKEND_LOG_CHARS = 8000
 
@@ -61,10 +68,67 @@ def get_md5_hash(obj):
     return hashlib.md5(s.encode('utf-8')).hexdigest()
 
 
+# Только закрытая пара, нежадно. Незакрытый ``<think>`` в прозе не трогаем
+# (иначе «Use the <think> tag carefully.» → «Use the»).
+_THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _visible_prose_without_think(text: str) -> str:
+    """Проза после вырезания закрытых ``<think>…</think>``. Без импорта projection."""
+    if not isinstance(text, str) or not text:
+        return ""
+    return _THINK_CLOSED_RE.sub("", text).strip()
+
+
+def _canon_content_text(content, *, persist_reasoning: bool):
+    """В канон: think выбрасывается, если есть проза и конфиг его не хранит.
+
+    Salvage ``<think>`` — только reasoning-only (нет прозы и нет тулов).
+    ``persist_reasoning`` (YAML ``strip_think: false``) — content as-is.
+    """
+    if persist_reasoning or not isinstance(content, str):
+        return content
+    prose = _visible_prose_without_think(content)
+    if prose and prose != content.strip():
+        return prose
+    return content
+
+
+def _nonempty_content(content):
+    """Строковый content после strip; пробельный → None. Не-строки as-is."""
+    if content is None:
+        return None
+    if isinstance(content, str):
+        return content.strip() or None
+    return content
+
+
+def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
+    item = {
+        "id": "msg_" + get_md5_hash(dct_choice),
+        "type": "message",
+        "status": "completed",
+        "content": [{
+            "type": "output_text",
+            "annotations": [],
+            "logprobs": [],
+            "text": text,
+        }],
+        "role": role,
+    }
+    if reasoning is not None:
+        item["reasoning_content"] = reasoning
+    return item
+
+
 def get_output_list(dct, logger_override=None, *, persist_reasoning_content=False):
     """Transforms chat completion 'choices' into a standardized response 'output' list.
 
     ``reasoning_content`` копируется в канон только при ``persist_reasoning_content``.
+    Reasoning-only без tools и без прозы (дефолтный strip) salvage в ``<think>…</think>``.
+    Смешанный ход (think + проза): при strip think в канон не кладётся, остаётся проза.
+    Tools + think-only content при strip: message не эмитим (только function_call).
+    Совсем пустой choice — пустой output (цикл bounce), не ValueError.
     """
     output_list = []
     for dct_choice in dct['choices']:
@@ -79,67 +143,92 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             )
         fr = dct_choice.get("finish_reason")
         msg_obj = dct_choice.get("message") or {}
+        # Пробельный content/reasoning схлопываем до пустоты; дальше — те же ветки.
+        content = _nonempty_content(msg_obj.get("content"))
+        reasoning_text = nonempty_reasoning_text(msg_obj)
+        has_tools = bool(msg_obj.get("tool_calls"))
+        # Три флага независимы: не схлопывать в has_payload.
+        # Иначе unknown finish + reasoning-only снова станет empty batch,
+        # если has_payload сузят до content/tools.
         _decision = normalize_finish_reason(
             fr,
-            has_content=bool(msg_obj.get("content")),
-            has_tool_calls=bool(msg_obj.get("tool_calls")),
+            has_content=bool(content),
+            has_tool_calls=has_tools,
+            has_reasoning=reasoning_text is not None,
         )
         if not _decision.accept:
+            # Нет полезной нагрузки и неизвестный finish — не транспортный
+            # ValueError: пустой батч, цикл сам bounce. Choice error уже выше.
             if logger_override is not None:
                 logger_override.error(
-                    "Empty/unusable chat/completions response (finish_reason=%r, "
-                    "no content/tool_calls): payload=%s",
+                    "Empty choice discarded (unknown/empty finish_reason=%r): payload=%s",
                     fr, _safe_json_for_log(dct),
                 )
-            raise ValueError(
-                f"Backend returned empty/unusable response (finish_reason={fr!r})"
-            )
+            continue
         if _decision.unknown and logger_override is not None:
             logger_override.warning(
-                "Unknown finish_reason=%r accepted permissively (content/tool_calls "
-                "present): payload=%s",
+                "Unknown finish_reason=%r accepted permissively "
+                "(content/tool_calls/reasoning present): payload=%s",
                 fr, _safe_json_for_log(dct),
             )
-        if fr == "length" and logger_override is not None:
+        if _decision.kind == FINISH_KIND_LENGTH and logger_override is not None:
             logger_override.warning(
                 "chat/completions choice finished with length (output may be truncated; "
                 "tool JSON may be incomplete). payload=%s",
                 _safe_json_for_log(dct),
             )
 
-        # Message-item: есть проза, либо persist_reasoning_content и есть
-        # reasoning_content при content=None — носитель CoT на tool-only такте.
-        # Пустой message без ризонинга не плодим.
-        content = msg_obj.get("content")
-        reasoning = None
-        if persist_reasoning_content:
-            reasoning = msg_obj.get("reasoning_content")
-        if content is not None or reasoning is not None:
-            id_choice = get_md5_hash(dct_choice)
-            item = {
-                "id": "msg_" + id_choice,
-                "type": "message",
-                "status": "completed",
-                "content": [{
-                    "type": "output_text",
-                    "annotations": [],
-                    "logprobs": [],
-                    "text": "" if content is None else content
-                }],
-                "role": msg_obj.get("role")
-            }
-            if reasoning is not None:
-                item["reasoning_content"] = reasoning
-            output_list.append(item)
+        persist_field = reasoning_text if persist_reasoning_content else None
 
-        # --- FIX 2: Generate a unique ID for each tool call ---
+        text_out = None
+        item_reasoning = persist_field if persist_reasoning_content else None
+        if has_tools:
+            # Случай A: tools. Salvage не трогает. CoT в историю — только persist.
+            # Think-only inline content при strip не эмитим (как reasoning_content).
+            if persist_reasoning_content:
+                if content is not None or item_reasoning is not None:
+                    raw = "" if content is None else content
+                    text_out = _canon_content_text(raw, persist_reasoning=True)
+            elif content is not None:
+                if isinstance(content, str):
+                    prose = _visible_prose_without_think(content)
+                    if prose:
+                        text_out = _canon_content_text(
+                            content, persist_reasoning=False
+                        )
+                else:
+                    text_out = content
+        elif content:
+            # Think + проза при strip — только проза; think-only content — as-is.
+            text_out = _canon_content_text(
+                content, persist_reasoning=persist_reasoning_content
+            )
+        elif reasoning_text is not None:
+            if persist_reasoning_content:
+                text_out = "" if content is None else content
+            else:
+                # Литеральный </think> внутри мысли иначе закрывает обёртку
+                # раньше времени: нежадный strip оставляет хвост как прозу.
+                body = re.sub(r"</think>", "", reasoning_text, flags=re.IGNORECASE)
+                text_out = f"<think>{body}</think>"
+                item_reasoning = None
 
-        if dct_choice['message'].get("tool_calls", None) is not None:
-            for tool_call_dict in dct_choice['message']['tool_calls']:
+        if text_out is not None:
+            output_list.append(
+                _canonical_message_item(
+                    dct_choice,
+                    text=text_out,
+                    role=msg_obj.get("role"),
+                    reasoning=item_reasoning,
+                )
+            )
+
+        tool_calls = msg_obj.get("tool_calls")
+        if tool_calls is not None:
+            for tool_call_dict in tool_calls:
                 if tool_call_dict['type'] != 'function':
                     raise ValueError("Unknown logic")
 
-                # Generate a unique hash for THIS specific tool call
                 id_tool_call = get_md5_hash(tool_call_dict)
 
                 output_list.append({
@@ -147,7 +236,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
                     "call_id": tool_call_dict['id'],
                     "name": tool_call_dict['function']['name'],
                     "type": "function_call",
-                    "id": "fc_" + id_tool_call,  # Use the new unique ID
+                    "id": "fc_" + id_tool_call,
                     "status": "completed"
                 })
 

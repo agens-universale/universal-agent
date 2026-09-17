@@ -6,9 +6,9 @@ from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
 
 
-def test_auxiliary_llm_completion_kwargs_matches_chat_completions_llm():
+def test_auxiliary_llm_completion_kwargs_matches_auxiliary_llm():
     ctx = SimpleNamespace(
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             completion_kwargs={"reasoning_effort": "none"},
         )
     )
@@ -17,9 +17,9 @@ def test_auxiliary_llm_completion_kwargs_matches_chat_completions_llm():
     }
 
 
-def test_auxiliary_llm_judge_max_tokens_from_chat_completions_llm():
+def test_auxiliary_llm_judge_max_tokens_from_auxiliary_llm():
     ctx = SimpleNamespace(
-        chat_completions_llm=SimpleNamespace(judge_max_tokens=12345)
+        auxiliary_llm=SimpleNamespace(judge_max_tokens=12345)
     )
     assert summary_llm.auxiliary_llm_judge_max_tokens(ctx) == 12345
 
@@ -27,11 +27,11 @@ def test_auxiliary_llm_judge_max_tokens_from_chat_completions_llm():
 def test_auxiliary_llm_judge_max_tokens_falls_back_to_default():
     from gc_core.config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
 
-    ctx = SimpleNamespace(chat_completions_llm=SimpleNamespace())
+    ctx = SimpleNamespace(auxiliary_llm=SimpleNamespace())
     assert summary_llm.auxiliary_llm_judge_max_tokens(ctx) == DEFAULT_JUDGE_MAX_TOKENS
 
 
-def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
+def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
     captured = {}
 
     def _fake_request(*, max_tokens=None, payload_overrides=None, **kwargs):
@@ -42,7 +42,7 @@ def test_request_summary_text_uses_ctx_chat_completions_llm(monkeypatch):
     monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
 
     ctx = SimpleNamespace(
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=7777,
             completion_kwargs={"reasoning_effort": "none"},
         ),
@@ -72,7 +72,7 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
     monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_request)
 
     ctx = SimpleNamespace(
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={"reasoning_effort": "none"},
         ),
@@ -92,8 +92,8 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
     }
 
 
-def test_request_summary_text_requires_chat_completions_llm_on_ctx():
-    with pytest.raises(RuntimeError, match="chat_completions_llm"):
+def test_request_summary_text_requires_auxiliary_llm_on_ctx():
+    with pytest.raises(RuntimeError, match="auxiliary_llm"):
         summary_llm.request_summary_text(
             ctx=SimpleNamespace(config_dict={}),
             state=SimpleNamespace(default_model="m"),

@@ -45,7 +45,7 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
 
     ctx = SimpleNamespace(
         logger=object(),
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={},
         ),
@@ -116,7 +116,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     ctx = SimpleNamespace(
         logger=object(),
         config_dict=loaded,
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={},
         ),
@@ -205,7 +205,7 @@ def test_aux_always_strips_think_even_when_config_disables_it(tmp_path, monkeypa
     ctx = SimpleNamespace(
         logger=object(),
         config_dict=loaded,
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={},
         ),

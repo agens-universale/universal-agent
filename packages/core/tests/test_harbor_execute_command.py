@@ -37,8 +37,9 @@ def test_envelope_shape_matches_base_contract():
     b = _RecordingFakeBackend(stdout="hi", rc=0)
     env = json.loads(_tool(b)(command="echo hi"))
     # Same fields the base prompt_description advertises:
-    for k in ("tool", "ok", "command", "cwd", "exit_code", "timed_out", "truncated", "error", "stdout", "stderr"):
+    for k in ("tool", "ok", "command", "cwd", "exit_code", "timed_out", "error", "stdout", "stderr"):
         assert k in env, k
+    assert "truncated" not in env
     assert env["exit_code"] == 0 and env["ok"] is True and env["timed_out"] is False
 
 

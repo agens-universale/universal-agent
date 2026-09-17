@@ -16,7 +16,7 @@ _HINT = "провайдеры · печать — фильтр/свой адре
 _PRESETS = [
     EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions"),
     EndpointPreset(name="Cloud.ru", url="https://foundation-models.api.cloud.ru/v1/chat/completions"),
-    EndpointPreset(name="GigaCode", url="https://litellm-proxy.sberai-rnd.ru/v1/chat/completions"),
+    EndpointPreset(name="RouterAI", url="https://routerai.ru/api/v1/chat/completions"),
 ]
 
 

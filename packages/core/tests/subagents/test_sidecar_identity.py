@@ -137,7 +137,7 @@ class TestChildCtxCopiesThreadIdentity:
             "model": "m",
             "system_prompt_id": "p",
             "chat_completions_params": {
-                "llm": {"max_tokens": 128, "completion_kwargs": {}},
+                "auxiliary_llm": {"max_tokens": 128, "completion_kwargs": {}},
             },
         }
         parent = local_ctx(cfg)

@@ -28,7 +28,7 @@ def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_sec = exec_timeout_from_config_dict(config_dict)
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = {
             "type": "function",
             "name": "exec_python",
@@ -49,10 +49,10 @@ class RunPythonCode(AbstractSimpleTool):
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Timeout in seconds before the process is terminated. "
-                            f"Default is {timeout_sec}."
+                            f"Maximum execution time in seconds before the process is terminated. "
+                            f"Default is {timeout_default} (agent.exec_timeout_sec)."
                         ),
-                        "default": timeout_sec,
+                        "default": timeout_default,
                         "minimum": 1,
                     },
                     "cwd": {
@@ -88,12 +88,12 @@ class RunPythonCode(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_sec = exec_timeout_from_config_dict(config_dict)
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = (
             '''Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout": {"type": "integer", "description": "Timeout in seconds.", "default": '''
-            + str(timeout_sec)
+Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
+            + str(timeout_default)
             + '''}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:
@@ -117,7 +117,7 @@ Usage:
         stderr=None,
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        """Envelope с front-loaded preview; ``truncated`` только если поток обрезан."""
         return build_exec_envelope(
             tool=RunPythonCode.registered_tool_name(),
             ok=ok,
