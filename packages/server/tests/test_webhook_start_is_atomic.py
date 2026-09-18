@@ -14,10 +14,8 @@
 Всё проверяется через настоящий эндпоинт и настоящий реестр. Подменены только
 сборка контекста (её держит заслонка теста) и сам агент.
 """
-import ast
 import asyncio
 import json
-import pathlib
 from types import SimpleNamespace
 
 import httpx
@@ -235,42 +233,32 @@ def test_failed_context_build_releases_the_key():
 
     assert registry.reserve(system="s", task_id="t") is True
 
-
-# --- R2.7: статус во время сборки -------------------------------------------
-
-
-def test_registry_reports_a_live_reservation():
-    registry = AgentRunRegistry()
-    assert registry.is_reserved(system="s", task_id="t") is False
-    registry.reserve(system="s", task_id="t")
-    assert registry.is_reserved(system="s", task_id="t") is True
-    registry.release_reservation(system="s", task_id="t")
-    assert registry.is_reserved(system="s", task_id="t") is False
+# --- статус во время сборки -------------------------------------------------
 
 
-def test_status_endpoint_checks_the_reservation_before_404():
-    """Пока идёт сборка, статус не 404 и не `completed` прошлого прогона.
+async def test_status_during_the_build_is_running_not_the_previous_result(harness):
+    """Пока строится контекст, статус — `running`, а не итог прошлого прогона.
 
-    Под тем же ключом в `_completed` может лежать прошлый прогон с TTL 15 минут,
-    поэтому проверка брони обязана стоять ДО обращения к нему и до 404.
+    Бронь выдаётся ровно тогда, когда прошлый прогон закончился, а его запись
+    живёт в `_completed` ещё 15 минут. Клиент, которому только что ответили
+    `queued`, видел `completed` и `result` ЧУЖОГО прогона.
     """
-    import importlib.util
-
-    origin = importlib.util.find_spec("gc_server.server").origin
-    tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
-    status = next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_run_status")
-
-    reserved_at = [n.lineno for n in ast.walk(status)
-                   if isinstance(n, ast.Call)
-                   and getattr(n.func, "attr", None) == "is_reserved"]
-    raises_at = [n.lineno for n in ast.walk(status) if isinstance(n, ast.Raise)]
-
-    assert reserved_at, (
-        "статус не спрашивает про бронь: клиент, получивший queued, увидит 404 "
-        "или статус прошлого прогона"
+    registry = harness.registry
+    previous = await registry.astart_if_absent(
+        system="s", task_id="t", executor_factory=_Agent,
+        ctx=SimpleNamespace(logger=None), initial_user_message="прошлый",
     )
-    assert min(reserved_at) < max(raises_at), (
-        f"проверка брони (строка {min(reserved_at)}) стоит после отказа "
-        f"(строка {max(raises_at)})"
+    await _within(previous.thread)
+
+    async with _client() as client:
+        assert (await client.get("/runs/s/t")).json()["status"] == "completed"
+        assert registry.reserve(system="s", task_id="t") is True
+        during = (await client.get("/runs/s/t")).json()
+        registry.release_reservation(system="s", task_id="t")
+        after = (await client.get("/runs/s/t")).json()
+
+    assert during["status"] == "running", (
+        f"во время сборки статус {during['status']!r} — это итог прошлого прогона"
     )
+    assert "result" not in during
+    assert after["status"] == "completed"

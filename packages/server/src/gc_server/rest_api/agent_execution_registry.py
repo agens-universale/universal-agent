@@ -93,14 +93,35 @@ class AgentRunRegistry:
         for i in range(max(0, overflow)):
             self._completed.pop(items[i][0], None)
 
+    def _get_status_locked(self, key: str) -> Optional[ActiveRun]:
+        run = self._runs.get(key)
+        if run is not None:
+            return run
+        self._cleanup_completed_locked()
+        return self._completed.get(key)
+
     def get_status(self, *, system: str, task_id: str) -> Optional[ActiveRun]:
         key = _make_registry_key(system, task_id)
         with self._lock:
-            run = self._runs.get(key)
-            if run is not None:
-                return run
-            self._cleanup_completed_locked()
-            return self._completed.get(key)
+            return self._get_status_locked(key)
+
+    def get_status_snapshot(
+        self, *, system: str, task_id: str
+    ) -> tuple[bool, Optional[ActiveRun]]:
+        """Статус задачи для клиента одним снимком: (строится ли контекст, прогон).
+
+        Бронь проверяется ПЕРВОЙ и под тем же замком, что и записи прогонов.
+        Бронь выдаётся ровно тогда, когда прошлый прогон закончился, а его
+        запись живёт в `_completed` ещё 15 минут: спроси эндпоинт сначала
+        прогон, а бронь потом — клиент, которому только что ответили `queued`,
+        получал `completed` и `result` ПРОШЛОГО прогона. Две отдельные
+        проверки к тому же видели бы реестр в разные моменты.
+        """
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            if key in self._reservations:
+                return True, None
+            return False, self._get_status_locked(key)
 
     def reserve(self, *, system: str, task_id: str) -> bool:
         """Занять ключ задачи ДО сборки контекста. False — ключ уже занят.
@@ -152,18 +173,6 @@ class AgentRunRegistry:
             build_done = self._reservations.get(key)
         if build_done is not None:
             await build_done.wait()
-
-    def is_reserved(self, *, system: str, task_id: str) -> bool:
-        """Идёт ли сейчас сборка контекста по этой задаче.
-
-        Нужен статусу: пока бронь жива, прогона в `_runs` ещё нет, а в
-        `_completed` под тем же ключом может лежать ПРОШЛЫЙ прогон с TTL 15
-        минут. Без этой проверки клиент, получивший `queued`, видел 404 или
-        чужой `completed`.
-        """
-        key = _make_registry_key(system, task_id)
-        with self._lock:
-            return key in self._reservations
 
     async def astart_if_absent(
         self,

@@ -246,21 +246,23 @@ async def get_run_status(system: str, task_id: str):
             detail={"status": "error", "payload": "system and task_id are required"},
         )
 
-    run = agent_run_registry.get_status(system=sys_norm, task_id=task_norm)
+    # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
+    # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
+    # завершённый с TTL 15 минут. Клиент, которому только что ответили
+    # `queued`, иначе видел 404 или `completed` с результатом прошлого прогона.
+    building, run = agent_run_registry.get_status_snapshot(
+        system=sys_norm, task_id=task_norm
+    )
+    if building:
+        return {
+            "status": "running",
+            "system": sys_norm,
+            "task_id": task_norm,
+            "thread_id": task_norm,
+            "started_at": None,
+            "last_activity_at": None,
+        }
     if run is None:
-        # Бронь проверяем ДО 404 и до `_completed`: пока строится контекст,
-        # прогона в реестре ещё нет, а под тем же ключом может лежать прошлый
-        # завершённый прогон с TTL 15 минут. Клиент, которому только что
-        # ответили `queued`, видел из-за этого 404 или чужой `completed`.
-        if agent_run_registry.is_reserved(system=sys_norm, task_id=task_norm):
-            return {
-                "status": "running",
-                "system": sys_norm,
-                "task_id": task_norm,
-                "thread_id": task_norm,
-                "started_at": None,
-                "last_activity_at": None,
-            }
         raise HTTPException(status_code=404, detail={"status": "not_found"})
 
     if not run.done:
