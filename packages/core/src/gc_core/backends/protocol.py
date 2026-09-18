@@ -223,9 +223,11 @@ class FsBackend(ABC):
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
     async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None,
-                                log_fd: Optional[int] = None) -> dict:
+                                env: Optional[dict] = None) -> dict:
         """Запустить команду фоном и НЕ ждать её: вернуть как минимум ``pid``.
+
+        Вывод команды не сохраняется: у фонового процесса не должно быть ни
+        одной трубы к нам, иначе он погибает вместе с читателем.
 
         Объявлено НА ПОРТУ намеренно, хотя умеет пока один бэкенд. Пока метод
         жил только на `LocalFsBackend`, обёртка TUI (`TrackingFsBackend`) его

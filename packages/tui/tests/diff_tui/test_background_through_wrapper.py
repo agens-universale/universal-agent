@@ -22,44 +22,48 @@ from gc_tui.diff_tui.tracking import TrackingFsBackend
 
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
+#: Вывод фона уходит в нулевое устройство, поэтому жизнь потомка видна только по
+#: его СОБСТВЕННОМУ файлу (путь — первым аргументом).
 _CHILD = (
     "import sys, time\n"
-    "for i in range(6):\n"
-    "    print('tick', i, flush=True)\n"
-    "    time.sleep(0.1)\n"
+    "with open(sys.argv[1], 'a', encoding='utf-8') as ticks:\n"
+    "    for i in range(6):\n"
+    "        print('tick', i, flush=True)\n"
+    "        print('tick', i, file=ticks, flush=True)\n"
+    "        time.sleep(0.1)\n"
 )
 
 
-def _command() -> str:
-    return f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)}"
+def _command(ticks) -> str:
+    return (
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} "
+        f"{shlex.quote(str(ticks))}"
+    )
 
 
 def test_background_works_through_the_tui_wrapper(tmp_path):
-    """Сквозной путь: тула → обёртка TUI → бэкенд. Процесс запущен, лог пишется."""
+    """Сквозной путь: тула → обёртка TUI → бэкенд. Процесс запущен и работает."""
     project = tmp_path / "proj"
     project.mkdir()
+    ticks = tmp_path / "ticks.log"
     tool = with_local_ctx(ExecuteCommand, config_dict={"launch_root": str(project)})
     ctx = tool._ctx
     ctx.os_backend = TrackingFsBackend(ctx.os_backend, ctx)
 
-    res = json.loads(tool(command=_command(), run_in_background=True))
+    res = json.loads(tool(command=_command(ticks), run_in_background=True))
 
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, res
-    log_path = res["background"]["log_path"]
-    assert log_path is not None and log_path.startswith(str(project / ".gc" / "tmp"))
+    assert res["background"]["output"] == "not captured", res["background"]
 
     deadline = time.monotonic() + 15
     text = ""
     while time.monotonic() < deadline:
-        try:
-            text = open(log_path, encoding="utf-8").read()
-        except FileNotFoundError:
-            text = ""
+        text = ticks.read_text(encoding="utf-8") if ticks.exists() else ""
         if text.count("tick") >= 6:
             break
         time.sleep(0.1)
-    assert text.count("tick") == 6, f"через обёртку вывод не доехал: {text!r}"
+    assert text.count("tick") == 6, f"через обёртку потомок не отработал: {text!r}"
 
 
 def test_wrapper_reports_the_inner_capability(tmp_path):

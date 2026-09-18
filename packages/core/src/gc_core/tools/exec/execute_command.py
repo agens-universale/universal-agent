@@ -1,8 +1,6 @@
 from gc_core.backends.async_protocol import aexec_port
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import json
-import os
-import time
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
@@ -10,45 +8,7 @@ from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_con
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
-from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
-
-
-def _open_unique_log(directory: str) -> "tuple[int, str]":
-    """Открыть СВОЙ лог, а не чужой: имя уникально, создание атомарно.
-
-    Имя было `bg-<время до секунды>.log`, и два фоновых запуска в одной пачке
-    вызовов — скажем, фронтенд и бэкенд — получали один путь. Их вывод
-    перемешивался в одном файле, хотя обеим моделям сказано «читай свой лог».
-
-    `O_EXCL` здесь важнее случайного суффикса: он и делает «занять имя»
-    атомарным. `mkstemp` не подошёл бы — он не умеет `O_APPEND`, а дозапись
-    нужна, потому что дескриптор наследует потомок.
-    """
-    import errno
-    import secrets
-
-    os.makedirs(directory, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND
-    for _ in range(8):
-        path = os.path.join(directory, f"bg-{stamp}-{secrets.token_hex(4)}.log")
-        try:
-            return os.open(path, flags, 0o600), path
-        except FileExistsError:
-            continue
-    raise OSError(errno.EEXIST, "no free background log name", directory)
-
-
-def _guard_refusal_as_value(error: dict) -> dict:
-    """Отказ гарда — ЗНАЧЕНИЕ, а не готовый ответ тула.
-
-    `enforce_write_guard` по умолчанию собирает из ошибки envelope тула и
-    возвращает его наружу. Для лога это неверно: отказ в логе НЕ отменяет
-    запуск команды, он лишь означает «вывод девать некуда». Поэтому забираем
-    словарь ошибки себе и вкладываем причину в `note` фонового ответа.
-    """
-    return error
 
 
 class ExecuteCommand(AbstractSimpleTool):
@@ -112,20 +72,13 @@ class ExecuteCommand(AbstractSimpleTool):
                         "description": (
                             "Start the command detached and return immediately, without waiting "
                             "for it to finish. Use this for anything long-lived: dev servers, "
-                            "watchers, `npm run dev`, `uvicorn`. The reply carries the pid and the "
-                            "log path instead of the output. A command started WITHOUT this flag "
+                            "watchers, `npm run dev`, `uvicorn`. The command keeps running after "
+                            "the agent exits. Its output is NOT captured — the reply carries only "
+                            "the pid. Check that it works by probing it (e.g. request its port); "
+                            "if it does not come up, run it in the foreground with a short "
+                            "timeout to see the error. A command started WITHOUT this flag "
                             "does not outlive the call — appending `&` to it is not enough, "
                             "because its output pipes close when the call returns."
-                        ),
-                    },
-                    "log_path": {
-                        "type": "string",
-                        "description": (
-                            "Where to write the background command's output. Defaults to a file "
-                            "under .gc/tmp/ inside the project. Only used together with "
-                            "run_in_background. A path outside the project requires the user's "
-                            "confirmation; if writing is refused the command still starts, but its "
-                            "output is discarded — the reply says so explicitly."
                         ),
                     },
                 },
@@ -151,7 +104,9 @@ Usage:
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
 - Long-lived commands (dev servers, watchers, `npm run dev`, `uvicorn`) MUST be started
   with `run_in_background: true`. They then keep running after this call returns and
-  after the agent itself exits, and you read their output from the returned log path.
+  after the agent itself exits. Their output is NOT captured: check that such a command
+  works by probing it (e.g. request its port), and if it does not come up, run it in the
+  foreground with a short `timeout` to see the error.
   Appending `&` to a normal foreground command is NOT enough: such a command is killed
   on timeout and its output pipes close when the call returns.
 - On timeout the command is stopped and its work is lost. If it simply needs longer,
@@ -392,7 +347,6 @@ Important Usage Rules:
         cwd: str | None = None,
         env_vars: list[dict] | None = None,
         run_in_background: bool = False,
-        log_path: str | None = None,
         **kwargs,
     ) -> str:
         """Нативный вход: процесс через ``asyncio.create_subprocess_shell``.
@@ -417,7 +371,7 @@ Important Usage Rules:
         if early is not None:
             return early
         if run_in_background:
-            return await self._abackground(plan, log_path)
+            return await self._abackground(plan)
         try:
             res = await aexec_port(self._backend).aexec(
                 plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
@@ -427,30 +381,27 @@ Important Usage Rules:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)
 
-    async def _abackground(self, plan: dict, log_path: str | None) -> str:
-        """Запустить и НЕ ждать: отдать pid и путь к логу.
+    async def _abackground(self, plan: dict) -> str:
+        """Запустить и НЕ ждать: отдать pid.
 
         Два случая разведены намеренно. Команда переднего плана живёт секунды,
         её вывод нужен сейчас, и переживать вызов она не должна. Долгоживущая —
-        наоборот: ждать её нельзя, а её вывод приходит часами, поэтому он идёт
-        в ФАЙЛ, который не зависит от того, жив ли читатель. Ровно поэтому фон
-        переживает и конец хода, и выход самого агента: файлу всё равно, кто
-        его открыл.
+        наоборот: ждать её нельзя, и никакой связи с нами у неё быть не должно.
+        Труба такой связью была: пропадал читатель — и сервис, поднятый агентом,
+        погибал вместе с ним. Поэтому вывод фона уходит в нулевое устройство, и
+        процесс переживает и конец хода, и выход самого агента.
 
-        Лог открываем ЗДЕСЬ, а не в бэкенде: решение принимает гард записи, а
-        он живёт на слое тулы. Бэкенд получает готовый дескриптор либо ничего.
+        Лога нет намеренно. Прежде вывод шёл в файл, и оба варианта упирались в
+        гарды: `log_path` называла модель — тул становился примитивом записи, и
+        путь гнали через гард записи с вопросами и откатами; свой лог лежал в
+        `.gc/tmp`, а весь `.gc` закрыт на чтение — модель не могла прочитать то,
+        что ей велели читать. Поэтому ответ прямо говорит, что вывода не будет.
         """
-        from gc_core.config_modules.env_vars import project_gc_dir
-        from gc_core.security.path_policy import resolve_tool_context
-
         cwd_used = plan["cwd"]
-        log_fd: int | None = None
-        note = ""
 
-        # Отказ ДО всего остального: если бэкенд не умеет фон, не создаём ни
-        # лога, ни процесса. Раньше метода на порту не было, и вызов через
-        # обёртку TUI падал `AttributeError` — в единственном месте, где
-        # фоновый режим и нужен.
+        # Отказ ДО запуска: если бэкенд не умеет фон, процесса не будет.
+        # Раньше метода на порту не было, и вызов через обёртку TUI падал
+        # `AttributeError` — в единственном месте, где фоновый режим и нужен.
         if not getattr(self._backend, "supports_background", False):
             return self._result(
                 ok=False,
@@ -470,86 +421,13 @@ Important Usage Rules:
             )
 
         try:
-            context = resolve_tool_context(self)
-        except Exception as exc:                      # контекст не собрался
-            return self._exec_failed(plan, exc)
-
-        if log_path:
-            # Путь называет МОДЕЛЬ, значит он обязан пройти ровно тот же гард,
-            # что и запись файловым тулом: периметр — лишь половина политики,
-            # защищённые пути (AGENTS.md — спросить, `.gc` и конфиг — запретить)
-            # живут только в `enforce_write_guard`. Без этого фоновый лог был
-            # примитивом записи в файл, который агент читает как свои правила.
-            target = os.path.abspath(
-                os.path.join(cwd_used or context.launch_root, log_path)
-            )
-            refusal = await self._alog_write_refusal(path=target)
-            if refusal is None:
-                allowed = target
-            else:
-                # Отказали в МЕСТЕ, а не в захвате вывода. Поэтому пишем в свой
-                # служебный лог: он выбран нами, а не моделью, значит инъекции
-                # взяться неоткуда, и модель получает то, что ей нужно, —
-                # читаемый лог. Терять вывод целиком незачем.
-                try:
-                    log_fd, allowed = _open_unique_log(
-                        str(project_gc_dir(context.launch_root) / "tmp")
-                    )
-                    note = (
-                        f"requested log path refused ({refusal.get('type')}: "
-                        f"{refusal.get('message')}); output goes to {allowed} instead"
-                    )
-                except OSError as exc:
-                    allowed = None
-                    note = (
-                        f"requested log path refused, and the default log could not "
-                        f"be opened ({exc.strerror or exc}); output is discarded"
-                    )
-        else:
-            # Путь по умолчанию выбираем МЫ, а не модель, и якорим к КОРНЮ
-            # ПРОЕКТА: иначе `exec` с `cwd=/tmp` заводил бы лог в
-            # `/tmp/.gc/tmp/` — вне периметра и там, где его не найти.
-            #
-            # Гард сюда не применяется намеренно: весь `.gc` защищён как
-            # операционный каталог, но этот путь не приходил от модели, значит
-            # инъекции взяться неоткуда. Исключение закреплено тестом.
-            try:
-                log_fd, allowed = _open_unique_log(
-                    str(project_gc_dir(context.launch_root) / "tmp")
-                )
-            except OSError as exc:
-                allowed = None
-                note = f"log not written ({exc.strerror or exc}); output discarded"
-
-        # Только для пути, названного МОДЕЛЬЮ: путь по умолчанию уже открыт
-        # выше, атомарно и под своим уникальным именем. Без этого условия мы
-        # открывали бы его второй раз, теряя первый дескриптор.
-        if allowed is not None and log_fd is None:
-            try:
-                os.makedirs(os.path.dirname(str(allowed)) or ".", exist_ok=True)
-                log_fd = os.open(str(allowed), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            except OSError as exc:
-                # Молчаливый откат — худшее, что тут можно сделать: модель пойдёт
-                # читать лог, которого нет, и начнёт строить догадки.
-                allowed = None
-                note = f"log not written ({exc.strerror or exc}); output discarded"
-
-        try:
             started = await self._backend.aspawn_background(
-                plan["command"], cwd=cwd_used, env=plan["env"], log_fd=log_fd,
+                plan["command"], cwd=cwd_used, env=plan["env"],
             )
         except Exception as exc:
             return self._exec_failed(plan, exc)
-        finally:
-            if log_fd is not None:
-                try:
-                    os.close(log_fd)          # копия потомка своя
-                except OSError:
-                    pass
 
-        background = {"pid": started.get("pid"), "log_path": str(allowed) if allowed else None}
-        if note:
-            background["note"] = note
+        background = {"pid": started.get("pid"), "output": "not captured"}
         return build_exec_envelope(
             tool=ExecuteCommand.registered_tool_name(),
             ok=True,
@@ -565,22 +443,6 @@ Important Usage Rules:
                 "background": background,
             },
         )
-
-    @enforce_write_guard(path_arg="path", blocked_result_factory=_guard_refusal_as_value)
-    async def _alog_write_refusal(self, path: str) -> "dict | None":
-        """Спросить гард записи про путь лога — и ничего не делать.
-
-        Тело пустое намеренно: вся работа в декораторе. Дойти сюда — значит
-        «писать можно», и метод отдаёт ``None``. Если гард запретил, его
-        `blocked_result_factory` возвращает СЛОВАРЬ ошибки вместо результата
-        тула, и вызывающий читает причину.
-
-        Так фоновый лог получает ровно ту же политику, что обычная запись
-        файла: защищённые пути, периметр, аудит, память решений и ожидание
-        человека в потоке. Прежняя самодельная проверка знала только периметр,
-        и через `log_path` можно было дописать в AGENTS.md без вопроса.
-        """
-        return None
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:
         """Отказ запуска — общий для обоих входов."""

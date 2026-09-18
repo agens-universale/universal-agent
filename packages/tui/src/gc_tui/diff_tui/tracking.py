@@ -127,7 +127,7 @@ class TrackingFsBackend:
         self.supports_background = bool(getattr(inner, "supports_background", False))
 
     async def aspawn_background(self, command: str, *, cwd: Any = None,
-                                env: Any = None, log_fd: Any = None) -> dict:
+                                env: Any = None) -> dict:
         """Фоновый запуск проксируем как есть, без дельты diff-журнала.
 
         Журнал снимает изменения ВОКРУГ вызова, а этот возвращается мгновенно:
@@ -135,9 +135,7 @@ class TrackingFsBackend:
         напишет позже, журнал не увидит — показать их можно было бы только
         опросом, которого у журнала нет. Это осознанная граница, а не пропуск.
         """
-        return await self._inner.aspawn_background(
-            command, cwd=cwd, env=env, log_fd=log_fd,
-        )
+        return await self._inner.aspawn_background(command, cwd=cwd, env=env)
 
     @property
     def exec_output_capture_max_chars(self) -> int:

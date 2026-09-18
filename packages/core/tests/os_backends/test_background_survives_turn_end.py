@@ -6,9 +6,11 @@
 агент говорит «готово», а порт не отвечает.
 
 Теперь долгоживущая команда запускается ОТДЕЛЬНЫМ режимом, и труб у неё нет
-вовсе: вывод идёт в файл, открытый вызывающим. Поэтому конец хода ей ничем не
-грозит — здесь это и проверяется, честным выходом из `asyncio.run` со сборкой
-мусора после него.
+вовсе: все её потоки смотрят в нулевое устройство. Поэтому конец хода ей ничем
+не грозит — здесь это и проверяется, честным выходом из `asyncio.run` со сборкой
+мусора после него. Потомок пишет каждый тик в stdout и stderr (труба без
+читателя убила бы его на следующей записи) и в свой файл — по нему и видно, что
+он жив.
 
 Заметим, что прежняя редакция теста гоняла обычный `aexec` с `&` на конце. Это
 поведение мы сознательно больше не обещаем: у команды переднего плана труба
@@ -24,23 +26,23 @@ from gc_core.backends.local import LocalFsBackend
 
 
 def test_background_writer_survives_the_end_of_the_turn(tmp_path):
-    log = tmp_path / "child.log"
+    log = tmp_path / "ticks.log"
     child = (
         "import sys, time\n"
-        "for i in range(20):\n"
-        "    print('tick', i, flush=True)\n"
-        "    time.sleep(0.1)\n"
+        "with open(sys.argv[1], 'a', encoding='utf-8') as ticks:\n"
+        "    for i in range(20):\n"
+        "        print('tick', i, flush=True)\n"
+        "        print('tick', i, file=sys.stderr, flush=True)\n"
+        "        print('tick', i, file=ticks, flush=True)\n"
+        "        time.sleep(0.1)\n"
     )
-    cmd = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)}"
+    cmd = (
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} "
+        f"{shlex.quote(str(log))}"
+    )
 
     async def turn():
-        import os
-
-        fd = os.open(str(log), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        try:
-            started = await LocalFsBackend().aspawn_background(cmd, log_fd=fd)
-        finally:
-            os.close(fd)
+        started = await LocalFsBackend().aspawn_background(cmd)
         assert started["pid"] > 0
 
     asyncio.run(turn())        # конец хода: loop закрыт, его задачи отменены

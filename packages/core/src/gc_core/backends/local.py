@@ -312,30 +312,35 @@ class LocalFsBackend(FsBackend):
         )
 
     async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None,
-                                log_fd: Optional[int] = None) -> dict:
+                                env: Optional[dict] = None) -> dict:
         """Запустить команду и НЕ ждать её: отдать pid сразу.
 
         Здесь нет ни труб, ни чтения, ни таймаута, и в этом весь смысл. Труба
         требует живого читателя: как только он исчезает — кончился ход, вышел
         процесс агента, — потомок получает EPIPE или встаёт на заполненном
-        буфере. Долгоживущему процессу читатель не нужен вовсе, поэтому его
-        вывод идёт в файл, открытый ВЫЗЫВАЮЩИМ (решение принимает гард записи,
-        а он живёт на слое тулы), либо не идёт никуда.
+        буфере. Поэтому все три потока смотрят в нулевое устройство: запись
+        туда не кончается ошибкой и не встаёт никогда. Лога нет намеренно —
+        почему, сказано у `ExecuteCommand._abackground`.
 
-        Своя сессия обязательна: без неё потомок остался бы в нашей группе
-        процессов и получал бы адресованные нам сигналы.
+        Отцепление от нас обязательно — см. `_background_detach_kwargs`: без
+        него потомок получал бы адресованные нам сигналы и события консоли.
         """
         import subprocess
 
         from gc_core.utils.win_console import preserve_console_mode
 
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
-        sink = log_fd if log_fd is not None else subprocess.DEVNULL
-        # stderr — туда же, куда stdout: у фоновой команды разделять потоки
-        # некому, а один лог читается человеком и моделью как одна лента.
-        err_sink = subprocess.STDOUT if log_fd is not None else subprocess.DEVNULL
-        spawn_kwargs = {"start_new_session": True} if os.name != "nt" else {}
+        # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
+        # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
+        # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
+        # прежнего asyncio-пути, который отдавал управление внутри себя. Одна
+        # уступка возвращает паритет (5–7 мс), а стоит она ничего.
+        #
+        # Стоит она ДО запуска, а не после: это единственная точка, где вызов
+        # можно отменить. Будь она после `Popen`, отмена на ней бросала бы уже
+        # живой процесс, чей pid так и не дошёл до модели, — ни найти, ни
+        # остановить. До запуска отмена честная: процесса ещё нет.
+        await asyncio.sleep(0)
         _reap_finished_background()
         with preserve_console_mode():
             # `Popen`, а НЕ `asyncio.create_subprocess_shell`. Асинхронный
@@ -348,18 +353,13 @@ class LocalFsBackend(FsBackend):
             proc = subprocess.Popen(                       # noqa: S602 — shell намеренно
                 command,
                 shell=True,
-                stdout=sink, stderr=err_sink,
                 stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 cwd=cwd, env=merged_env,
-                **spawn_kwargs,
+                **_background_detach_kwargs(),
             )
         _BACKGROUND_PROCS.add(proc)
-        # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
-        # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
-        # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
-        # прежнего asyncio-пути, который отдавал управление внутри себя. Одна
-        # уступка возвращает паритет (5–7 мс), а стоит она ничего.
-        await asyncio.sleep(0)
         return {"pid": proc.pid}
 
     def default_cwd(self) -> Optional[str]:
@@ -372,7 +372,7 @@ class LocalFsBackend(FsBackend):
 # возврат к прежнему, а разделение двух разных случаев: команда переднего плана
 # живёт секунды-минуты, её вывод нужен сейчас, и переживать нас она не должна.
 # Долгоживущая запускается отдельным фоновым режимом, где вывод уходит в
-# именованный лог, а труб нет вовсе.
+# нулевое устройство, а труб нет вовсе.
 #
 # У трубы есть то, чего нет у файла: обратное давление. Читать её ОБЯЗАТЕЛЬНО —
 # полный буфер останавливает запись в потомке, — и каждое чтение это `await`,
@@ -419,6 +419,45 @@ def _reap_finished_background() -> None:
                 _BACKGROUND_PROCS.discard(proc)
         except Exception:                      # noqa: BLE001 — учёт не критичен
             _BACKGROUND_PROCS.discard(proc)
+
+
+def _background_detach_kwargs(os_name: str = os.name) -> dict:
+    """Как отцепить фоновый процесс от агента: на POSIX — сессия, на Windows — консоль.
+
+    На POSIX хватает своей сессии: закрытие терминала (SIGHUP) и Ctrl+C
+    (SIGINT) достаются сессии и группе агента, а потомок уже вне их.
+
+    На Windows сессий нет, а события консоли — Ctrl+C, Ctrl+Break, закрытие
+    окна — система рассылает ВСЕМ процессам, подключённым к консоли. Без флагов
+    потомок наследует консоль агента: выход агента его не трогает, но закрытие
+    окна терминала или Ctrl+C в нём — в gc-cli или позже в оболочке — убивают и
+    его. `CREATE_NO_WINDOW` даёт потомку СВОЮ консоль без окна; внуки `cmd`
+    (node, python) наследуют её же, и окна не всплывают. Заодно потомок не
+    может тронуть режим НАШЕЙ консоли — ради этого стоит `preserve_console_mode`.
+    `CREATE_NEW_PROCESS_GROUP` один закрыл бы только Ctrl+C; он здесь ради
+    единообразия со «своей группой» в `process_supervisor` и `persistent_stdio`.
+
+    Чего здесь нет — и почему:
+      * `DETACHED_PROCESS` — консоли нет вовсе, и каждый консольный внук `cmd`
+        открывает своё ВИДИМОЕ окно; апдейтер на это наступал (у него в `cmd`
+        без консоли не отработали `tasklist`/`find`/`ping`);
+      * `CREATE_NEW_CONSOLE` — своя консоль, но с видимым окном на каждый запуск;
+      * `CREATE_BREAKAWAY_FROM_JOB` — если job запрещает выход, `CreateProcess`
+        падает и команда не стартует вовсе (libuv его не ставит ровно поэтому).
+        Он и не нужен: job трамплина uv (`gc-ua.exe`) настроен с
+        `SILENT_BREAKAWAY_OK`, и процессы, запущенные питоном, покидают его сами.
+
+    Значения флагов — запасные через `getattr`: константы `subprocess` есть
+    только на Windows, а проверять выбор нужно и там, где его не исполнить.
+    """
+    if os_name != "nt":
+        return {"start_new_session": True}
+    import subprocess
+
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200),
+    }
 
 
 # --- асинхронный запуск процесса (async-переезд, Задача 18) -----------------
