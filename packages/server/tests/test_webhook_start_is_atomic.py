@@ -24,6 +24,7 @@ import httpx
 import pytest
 
 from gc_server import server
+from gc_server.rest_api import agent_execution_registry as registry_module
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
 
 #: Потолок любого ожидания в тестах. Сломанная бронь даёт не красный тест, а
@@ -266,6 +267,39 @@ async def test_status_during_the_build_is_running_not_the_previous_result(harnes
     assert after["status"] == "completed"
 
 
+async def test_status_during_the_build_carries_the_reservation_time(
+    harness, monkeypatch
+):
+    """«Строится» отдаёт время брони, а не null.
+
+    Прогона во время сборки ещё нет, и оба времени были null: зависшая сборка
+    для сторожа по `last_activity_at` не старела никогда. Часы реестра
+    подменены, чтобы «время брони» нельзя было спутать с «сейчас».
+    """
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(
+        registry_module, "time", SimpleNamespace(time=lambda: clock.now)
+    )
+    gate, entered = asyncio.Event(), asyncio.Event()
+    harness.plan[:] = [{"entered": entered, "gate": gate}]
+
+    async with _client() as client:
+        first = asyncio.create_task(_post(client, "первый"))
+        try:
+            await _within(entered.wait())
+            clock.now = 150.0
+            during = (await client.get("/runs/s/t")).json()
+        finally:
+            gate.set()
+        await _within(first)
+    await _settle(harness.registry)
+
+    assert during["status"] == "running"
+    assert (during["started_at"], during["last_activity_at"]) == (100.0, 100.0), (
+        f"статус сборки не несёт времени брони: {during}"
+    )
+
+
 # --- потолок ожидания чужой сборки -----------------------------------------
 
 #: Потолок в тестах. Заметно меньше запаса ожидания ниже, чтобы «ответил по
@@ -319,7 +353,9 @@ async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(
     assert second.status_code == 503, second.text
     assert second.json()["detail"]["status"] == "error", second.text
     assert waited >= _CEILING_SEC, f"503 раньше потолка: через {waited:.2f} с"
-    assert building, "потолок ожидания сломал бронь: сборка ещё идёт, а ключ свободен"
+    assert building is not None, (
+        "потолок ожидания сломал бронь: сборка ещё идёт, а ключ свободен"
+    )
     assert first.status_code == 200 and first.json()["status"] == "started"
     assert harness.builds == 1
     await _settle(harness.registry)

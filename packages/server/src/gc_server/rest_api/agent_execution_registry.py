@@ -29,6 +29,26 @@ def _make_registry_key(system: str, task_id: str) -> str:
 
 
 @dataclass
+class _Reservation:
+    """Бронь ключа задачи на время сборки контекста."""
+
+    #: Сборка закончилась — любым исходом.
+    #:
+    #: `asyncio.Event`, а не общий `Future`: ждущих бывает несколько, и
+    #: отмена одного из них (клиент отвалился, сервер гасят, вышел потолок
+    #: ожидания) отменила бы общий `Future` и разбудила остальных исключением,
+    #: а у `Event` каждый ждёт на своём. Исход сборки ждущим не нужен — они
+    #: смотрят реестр заново; а `Event.set()` повторяем и не требует забрать
+    #: результат. Создаётся, ждётся и выставляется на loop сервера: все
+    #: эндпоинты асинхронные.
+    done: asyncio.Event
+    #: Когда бронь взята. Прогона во время сборки ещё нет, и статус «строится»
+    #: отдаёт это время в `started_at` и `last_activity_at` — иначе оба были
+    #: null, и зависшая сборка для сторожа по активности не старела никогда.
+    taken_at: float
+
+
+@dataclass
 class ActiveRun:
     key: str
     system: str
@@ -69,22 +89,13 @@ class AgentRunRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._runs: dict[str, ActiveRun] = {}
-        #: Задачи, у которых контекст ещё строится: ключ → событие «сборка
-        #: закончилась». Бронь держит ключ занятым с ПЕРВОГО запроса. Сообщений
-        #: она не копит: вебхук, упёршийся в бронь, ждёт событие и проходит
-        #: путь заново (см. `await_build`). Прежняя бронь со списком сообщений
-        #: при отказе сборки откладывала их до следующего вебхука задачи —
-        #: без срока, без потолка и без гарантии, что такой вебхук вообще будет.
-        #:
-        #: `asyncio.Event`, а не общий `Future`: ждущих бывает несколько, и
-        #: отмена одного из них (клиент отвалился, сервер гасят, вышел потолок
-        #: ожидания) отменила бы общий `Future` и разбудила остальных
-        #: исключением, а у `Event` каждый ждёт на своём. Исход сборки ждущим
-        #: не нужен — они смотрят реестр заново; а `Event.set()` повторяем и
-        #: не требует забрать результат.
-        #: Создаётся, ждётся и выставляется на loop сервера: все эндпоинты
-        #: асинхронные.
-        self._reservations: dict[str, asyncio.Event] = {}
+        #: Задачи, у которых контекст ещё строится: ключ → бронь. Бронь держит
+        #: ключ занятым с ПЕРВОГО запроса. Сообщений она не копит: вебхук,
+        #: упёршийся в бронь, ждёт конца сборки и проходит путь заново (см.
+        #: `await_build`). Прежняя бронь со списком сообщений при отказе сборки
+        #: откладывала их до следующего вебхука задачи — без срока, без потолка
+        #: и без гарантии, что такой вебхук вообще будет.
+        self._reservations: dict[str, _Reservation] = {}
         self._completed: dict[str, ActiveRun] = {}
         self._completed_ttl_s = 15 * 60
         self._completed_max = 500
@@ -125,8 +136,10 @@ class AgentRunRegistry:
 
     def get_status_snapshot(
         self, *, system: str, task_id: str
-    ) -> tuple[bool, Optional[ActiveRun]]:
-        """Статус задачи для клиента одним снимком: (строится ли контекст, прогон).
+    ) -> tuple[Optional[float], Optional[ActiveRun]]:
+        """Статус задачи для клиента одним снимком: (с каких пор строится контекст, прогон).
+
+        Первое — время брони, если контекст задачи сейчас строится, иначе None.
 
         Бронь проверяется ПЕРВОЙ и под тем же замком, что и записи прогонов.
         Бронь выдаётся ровно тогда, когда прошлый прогон закончился, а его
@@ -137,9 +150,10 @@ class AgentRunRegistry:
         """
         key = _make_registry_key(system, task_id)
         with self._lock:
-            if key in self._reservations:
-                return True, None
-            return False, self._get_status_locked(key)
+            reservation = self._reservations.get(key)
+            if reservation is not None:
+                return reservation.taken_at, None
+            return None, self._get_status_locked(key)
 
     def reserve(self, *, system: str, task_id: str) -> bool:
         """Занять ключ задачи ДО сборки контекста. False — ключ уже занят.
@@ -159,7 +173,9 @@ class AgentRunRegistry:
             run = self._runs.get(key)
             if (run is not None and not run.done) or key in self._reservations:
                 return False
-            self._reservations[key] = asyncio.Event()
+            self._reservations[key] = _Reservation(
+                done=asyncio.Event(), taken_at=time.time()
+            )
             return True
 
     def release_reservation(self, *, system: str, task_id: str) -> None:
@@ -173,9 +189,9 @@ class AgentRunRegistry:
         """
         key = _make_registry_key(system, task_id)
         with self._lock:
-            build_done = self._reservations.pop(key, None)
-        if build_done is not None:
-            build_done.set()
+            reservation = self._reservations.pop(key, None)
+        if reservation is not None:
+            reservation.done.set()
 
     async def await_build(self, *, system: str, task_id: str) -> None:
         """Дождаться конца чужой сборки контекста по задаче — любого исхода.
@@ -192,9 +208,9 @@ class AgentRunRegistry:
         """
         key = _make_registry_key(system, task_id)
         with self._lock:
-            build_done = self._reservations.get(key)
-        if build_done is not None:
-            await build_done.wait()
+            reservation = self._reservations.get(key)
+        if reservation is not None:
+            await reservation.done.wait()
 
     async def astart_if_absent(
         self,
@@ -257,12 +273,20 @@ class AgentRunRegistry:
                             in_flight = tail
                             stopped = run_ref is not None and run_ref.stop_requested
                             replay = bool(tail) and not stopped
-                            if not replay:
-                                if run_ref is not None:
+                            if run_ref is not None:
+                                # Конец хода — активность прогона, а при хвосте
+                                # это ещё и начало следующего. Иначе на всё
+                                # время хвостового хода сторож по активности
+                                # видел время последнего вебхука.
+                                run_ref.last_activity_at = time.time()
+                                if not replay:
                                     run_ref.done = True
+                                    # Итог прогона задачи — ответ последнего хода:
+                                    # хвостовой ход идёт по тому же треду и
+                                    # отвечает с учётом всего, что было до него.
                                     run_ref.result = result
-                                    run_ref.last_activity_at = time.time()
-                                    run_ref.finished_at = time.time()
+                                    run_ref.finished_at = run_ref.last_activity_at
+                            if not replay:
                                 dropped, ending = tail, "stopped"
                         if not replay:
                             break

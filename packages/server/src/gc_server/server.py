@@ -251,17 +251,19 @@ async def get_run_status(system: str, task_id: str):
     # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
     # завершённый с TTL 15 минут. Клиент, которому только что ответили
     # `queued`, иначе видел 404 или `completed` с результатом прошлого прогона.
-    building, run = agent_run_registry.get_status_snapshot(
+    building_since, run = agent_run_registry.get_status_snapshot(
         system=sys_norm, task_id=task_norm
     )
-    if building:
+    if building_since is not None:
         return {
             "status": "running",
             "system": sys_norm,
             "task_id": task_norm,
             "thread_id": task_norm,
-            "started_at": None,
-            "last_activity_at": None,
+            # Прогона ещё нет, поэтому оба времени — от брони. С null зависшая
+            # сборка для сторожа по `last_activity_at` не старела никогда.
+            "started_at": building_since,
+            "last_activity_at": building_since,
         }
     if run is None:
         raise HTTPException(status_code=404, detail={"status": "not_found"})

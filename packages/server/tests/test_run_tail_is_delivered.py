@@ -16,8 +16,11 @@ import importlib
 import logging
 import types
 
+import httpx
 import pytest
 
+from gc_server import server
+from gc_server.rest_api import agent_execution_registry as registry_module
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
 
 #: Потолок любого ожидания: зависший прогон должен дать красный тест, а не
@@ -50,15 +53,18 @@ async def env(monkeypatch, tmp_path):
 
     ae = importlib.import_module("gc_core.agent_executor")
     monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
-    h = types.SimpleNamespace(batches=[], teardown_steps=[], fail=False)
+    # `turn_steps`: номер хода → шаг теста внутри цикла агента этого хода.
+    h = types.SimpleNamespace(batches=[], teardown_steps=[], turn_steps={}, fail=False)
 
     async def _loop(messages, state, ctx, **kw):
-        h.batches.append(
-            [m.get("content") if isinstance(m, dict) else m for m in messages]
-        )
+        batch = [m.get("content") if isinstance(m, dict) else m for m in messages]
+        h.batches.append(batch)
+        step = h.turn_steps.get(len(h.batches))
+        if step is not None:
+            await step()
         if h.fail:
             raise RuntimeError("модель недоступна")
-        return {"finished": True}
+        return {"finished": True, "batch": batch}
 
     original_teardown = ae._aclose_mcp_and_release
 
@@ -240,3 +246,53 @@ async def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
         f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
     )
     assert run.cancelled is (ending == "cancelled")
+
+
+async def test_tail_turn_moves_last_activity(env, monkeypatch):
+    """Хвостовой ход двигает `last_activity_at`, как и любой ход прогона.
+
+    Время активности двигали старт, принятое сообщение и конец прогона, а ход,
+    доигрывающий хвост, — нет: пока он шёл, сторож по активности видел время
+    последнего вебхука и мог счесть живой прогон зависшим. Часы реестра
+    подменены, чтобы начало хвостового хода нельзя было спутать ни с приходом
+    сообщения, ни с концом прогона.
+    """
+    clock = types.SimpleNamespace(now=100.0)
+    monkeypatch.setattr(
+        registry_module, "time", types.SimpleNamespace(time=lambda: clock.now)
+    )
+    monkeypatch.setattr(server, "agent_run_registry", env.registry)
+    in_tail, release_tail = asyncio.Event(), asyncio.Event()
+
+    async def _message_then_teardown_goes_on():
+        clock.now = 200.0
+        env.registry.add_user_message(
+            system="s", task_id="t", make_message=_msg, content="вдогонку"
+        )
+        clock.now = 300.0
+
+    async def _tail_turn():
+        in_tail.set()
+        await release_tail.wait()
+
+    env.teardown_steps.append(_message_then_teardown_goes_on)
+    env.turn_steps[2] = _tail_turn
+    transport = httpx.ASGITransport(app=server.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        run = await _start(env)
+        try:
+            await _within(in_tail.wait())
+            clock.now = 400.0
+            during = (await client.get("/runs/s/t")).json()
+        finally:
+            release_tail.set()
+        await _within(run.thread)
+        after = (await client.get("/runs/s/t")).json()
+
+    assert during["status"] == "running"
+    assert during["last_activity_at"] == 300.0, (
+        f"хвостовой ход идёт, а активность стоит на приходе сообщения: {during}"
+    )
+    assert after["status"] == "completed"
+    # Итог прогона задачи — ответ его ПОСЛЕДНЕГО хода.
+    assert after["result"]["batch"] == ["вдогонку"], after
