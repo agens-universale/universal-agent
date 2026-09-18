@@ -27,6 +27,7 @@ import time
 import pytest
 
 from gc_core.aio import AsyncAgent
+from gc_testkit import LoopPulse
 
 from parity_harness import (
     ScriptedBackend,
@@ -165,70 +166,12 @@ async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
 
 
 # --- S-2: цикл не залипает во время компакции ------------------------------
-
-class _Pulse:
-    """Пульс на loop: тикает каждые ``STEP`` и запоминает разрывы.
-
-    Разрыв — это время, на которое loop НЕ вернулся к пульсу. Его источников
-    два: занятость самого loop (то, что мы проверяем) и занятость машины (то,
-    что нас не касается). Разделить их абсолютным порогом нельзя — под полным
-    прогоном набора планировщик ОС не возвращает управление за 10 мс, сколько
-    бы loop ни был свободен. Поэтому порог здесь не абсолютный, а относительно
-    базы, снятой тем же пульсом в том же прогоне.
-    """
-
-    STEP = 0.01
-
-    def __init__(self) -> None:
-        self.gaps: list[float] = []
-        self._stop = asyncio.Event()
-        self._task: asyncio.Task | None = None
-
-    async def __aenter__(self) -> "_Pulse":
-        self._task = asyncio.create_task(self._beat())
-        # Ждём первый тик. Иначе замер начинается до старта пульса и меряет не
-        # свободу цикла, а то, успел ли он вообще стартовать.
-        while not self.gaps:
-            await asyncio.sleep(self.STEP / 2)
-        self.gaps.clear()
-        return self
-
-    async def __aexit__(self, *_exc) -> None:
-        self._stop.set()
-        await self._task
-
-    async def _beat(self) -> None:
-        prev = time.monotonic()
-        while not self._stop.is_set():
-            await asyncio.sleep(self.STEP)
-            now = time.monotonic()
-            self.gaps.append(now - prev)
-            prev = now
-
-    def p95(self) -> float:
-        """Только для диагностики в сообщении об ошибке, НЕ критерий.
-
-        Здоровый хвост рядом с разъехавшимся максимумом — это и есть картина
-        «цикл отняли один раз надолго»; критерием процентиль здесь быть не может
-        (см. докстринг ``test_loop_stays_responsive_during_compaction``).
-        """
-        assert self.gaps, "пульс не тикал вовсе"
-        ordered = sorted(self.gaps)
-        return ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
-
-    def worst(self) -> float:
-        assert self.gaps, "пульс не тикал вовсе"
-        return max(self.gaps)
-
-    def report(self) -> str:
-        import statistics
-
-        return (
-            f"p95 {self.p95() * 1000:.0f} мс, "
-            f"медиана {statistics.median(self.gaps) * 1000:.0f} мс, "
-            f"максимум {self.worst() * 1000:.0f} мс, тиков {len(self.gaps)}"
-        )
-
+#
+# Пульс — общий прогретый ``gc_testkit.LoopPulse``: им же меряют
+# ``test_acceptance_non_blocking`` и приёмка чужого хранилища. Разрыв пульса
+# складывается из занятости loop (её и проверяем) и занятости машины (она нас
+# не касается). Поэтому порог здесь не абсолютный, а относительно базы, снятой
+# тем же пульсом в том же прогоне.
 
 #: Во сколько раз худший разрыв ВО ВРЕМЯ компакции может быть хуже базы. Запас
 #: грубый намеренно: ловим не микросекунды, а отнятый цикл.
@@ -252,12 +195,14 @@ async def test_the_pulse_actually_sees_a_frozen_loop():
     ``time.sleep`` прямо в корутине, — и пульс ОБЯЗАН это заметить.
 
     Тот же приём, что на стенде приёмки (``~/gc-core-acceptance/control.py``),
-    только дешёвый: одна заморозка вместо живого прогона.
+    только дешёвый: одна заморозка вместо живого прогона. Измеритель общий
+    (``gc_testkit.LoopPulse``), так что контроль здесь один на все приёмочные
+    замеры отзывчивости.
     """
-    async with _Pulse() as pulse:
-        await asyncio.sleep(_Pulse.STEP * 3)
+    async with LoopPulse() as pulse:
+        await asyncio.sleep(pulse.step * 3)
         time.sleep(_CONTROL_FREEZE)          # заморозка loop, не await
-        await asyncio.sleep(_Pulse.STEP * 3)
+        await asyncio.sleep(pulse.step * 3)
 
     # Сравниваем с СОБСТВЕННОЙ медианой того же окна, а не с нулём. Первая
     # редакция требовала `worst >= 0.8 * freeze` — и это проходило само собой
@@ -325,10 +270,10 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
     from gc_testkit import quiet_gc_for_loop_timing
 
     with quiet_gc_for_loop_timing():
-        async with _Pulse() as baseline:
+        async with LoopPulse() as baseline:
             await asyncio.sleep(0.3)
 
-        async with _Pulse() as during:
+        async with LoopPulse() as during:
             async with await AsyncAgent.create(cfg) as agent:
                 await agent.run("сделай что-нибудь", thread_id="t-s2")
 

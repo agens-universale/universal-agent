@@ -16,7 +16,6 @@
 цикл, тулы, финализатор и судья finish-gate — настоящие.
 """
 import asyncio
-import time
 
 import pytest
 
@@ -222,14 +221,18 @@ async def test_native_async_store_is_awaited_not_adapted(tmp_path, monkeypatch):
 async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypatch):
     """Медленное АСИНХРОННОЕ хранилище не морозит цикл.
 
-    Ради этого и заводился нативный путь. Закон, выведенный из кода и
-    подтверждённый замером: у блокирующего хранилища максимальный лаг ≈
-    ``11 × RTT + 29 мс`` (25 обращений за прогон укладываются в три блока
-    подряд — 11, 11 и 3). При 10 мс на вызов бюджет в 150 мс пробит.
+    Ради этого и заводился нативный путь. Замер прогретым пульсом на ходах
+    этого файла, но с настоящим ``exec_sleep``: у синхронного, блокирующего
+    хранилища 25 обращений за прогон ложатся в два куска без уступки — 11 и
+    14 обращений. При RTT 5 мс это разрывы около 85 и 100 мс; потолок в 150 мс
+    их пропускает, отвергает правило «не больше одного пропуска». При 10 мс
+    пробит и потолок — около 185 мс.
 
-    Здесь RTT = 5 мс: блокирующее хранилище дало бы ≈ 84 мс, нативно
-    ожидаемое — единицы миллисекунд. Порог взят с запасом, чтобы тест не
-    мигал на загруженной машине, но разница между путями на порядок больше.
+    Здесь RTT = 5 мс, и нативно ожидаемое хранилище держит разрывы у шага
+    пульса: худший 12 мс, пропусков ноль. Проверено подменой: ``time.sleep``
+    вместо ``await asyncio.sleep`` в этом хранилище сливает весь прогон в
+    один разрыв около 180 мс (тулы здесь заглушены, других уступок нет) —
+    тест красный.
     """
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
@@ -248,33 +251,20 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
             locals()[f"a{_n}"] = _make(_n)
         del _make, _n, _NAMES
 
-    gaps: list = []
-    stop = asyncio.Event()
-
-    async def heartbeat():
-        prev = time.monotonic()
-        while not stop.is_set():
-            await asyncio.sleep(0.01)
-            now = time.monotonic()
-            gaps.append(now - prev)
-            prev = now
-
-    from gc_testkit import quiet_gc_for_loop_timing
+    from gc_testkit import LoopPulse, assert_loop_was_free, quiet_gc_for_loop_timing
 
     store = SlowAsyncStore()
     # Сборщик глушится на окне: тест судит НАТИВНОСТЬ ожидания хранилища, а
     # пауза поколения 2 на куче набора (180–220 мс) кратно больше бюджета.
+    # Пульс прогрет и тикает ДО сборки агента: иначе синхронный кусок сборки
+    # до её первой уступки в замер не попадал бы.
     with quiet_gc_for_loop_timing():
-        beat = asyncio.create_task(heartbeat())
-        async with await AsyncAgent.create(cfg, thread_store=store) as agent:
-            await agent.run("сделай что-нибудь", thread_id="t-sdk")
-        stop.set()
-        await beat
+        async with LoopPulse() as pulse:
+            async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+                await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
-    from gc_testkit import assert_loop_was_free
-
-    assert_loop_was_free(gaps, tick=0.01,
+    assert_loop_was_free(pulse.gaps, tick=pulse.step,
                          label="хранилище с RTT 5 мс: ")
 
 
