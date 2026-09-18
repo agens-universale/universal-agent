@@ -1,10 +1,18 @@
-"""Снос процессов долгоживущего stdio MCP-сервера: вся группа, а не лидер.
+"""Снос процессов долгоживущего stdio MCP-сервера: после него в группе никого.
 
-Сервер запускается лидером собственной группы (``start_new_session``), и
-тяжёлое у него обычно в ДЕТЯХ: @playwright/mcp — это node, а Chromium под ним
-живёт в той же группе и SIGTERM игнорирует. Снос смотрел только на лидера:
-его смерть засчитывалась за смерть всех, уже мёртвого лидера снос и вовсе
-пропускал, а подмена упавшего сервера новым не трогала детей старого.
+Два свойства одного обещания.
+
+* **Снос ждёт группу, а не лидера.** Сервер запускается лидером собственной
+  группы (``start_new_session``), и тяжёлое у него обычно в ДЕТЯХ:
+  @playwright/mcp — это node, а Chromium под ним живёт в той же группе и
+  SIGTERM игнорирует. Снос смотрел только на лидера: его смерть засчитывалась
+  за смерть всех, уже мёртвого лидера снос и вовсе пропускал, а подмена
+  упавшего сервера новым не трогала детей старого.
+* **Прерванное закрытие добивает группу сразу.** Закрытие глухого к SIGTERM
+  сервера — это ожидание graceful-таймаута перед SIGKILL. Отмена или таймаут
+  посреди ожидания обрывали эскалацию, и SIGKILL не уходил никогда, а процесс
+  к этому моменту уже отцеплен от сессии и сессия — от реестра: хук на выход
+  его не видит.
 
 Двойник сервера здесь НАСТОЯЩИЙ процесс, запущенный продовым
 ``_spawn_detached_stdio_process``: свойство звучит как «после сноса в группе
@@ -15,6 +23,7 @@
 
 Всё, что тест запустил, добивает фикстура ``reaper`` в любом исходе.
 """
+import asyncio
 import json
 import os
 import signal
@@ -24,7 +33,9 @@ import time
 
 import pytest
 
+from gc_core.mcp_session_owner import use_owner
 from gc_core.tools.connect_mcp import persistent_stdio as ps
+from gc_testkit.paths import package_src_dirs
 
 pytestmark = pytest.mark.skipif(
     os.name != "posix", reason="группы процессов и killpg есть только на POSIX"
@@ -143,7 +154,7 @@ def _group_alive(pgid: int) -> bool:
 
 
 def _group_gone_within(pgid: int, timeout: float) -> bool:
-    """Опустела ли группа за ``timeout``. Внуков пожинает init — ему нужны миг."""
+    """Опустела ли группа за ``timeout``. Внуков пожинает init — ему нужен миг."""
     deadline = time.monotonic() + timeout
     while _group_alive(pgid):
         if time.monotonic() >= deadline:
@@ -283,3 +294,159 @@ def test_a_crashed_server_is_replaced_without_leaving_its_group(tmp_path, reaper
         )
     finally:
         session.close()
+
+
+# --- прерванное закрытие добивает группу сразу -------------------------------
+
+
+def _started_session(tmp_path, reaper: list, **cfg_kw) -> ps.PersistentStdioSession:
+    """Сессия с поднятым сервером — продовым путём, через первый вызов."""
+    session = ps.PersistentStdioSession(_cfg(tmp_path, **cfg_kw))
+    session.call("tools/list", {}, 10.0)
+    reaper.append(session._proc)
+    return session
+
+
+async def _until_leader_signalled(tmp_path, timeout: float = 10.0) -> None:
+    """Дождаться, что SIGTERM дошёл до лидера: закрытие уже ждёт после него."""
+    mark = tmp_path / "signals.log"
+    deadline = time.monotonic() + timeout
+    while "leader TERM" not in (mark.read_text(encoding="utf-8") if mark.exists() else ""):
+        if time.monotonic() >= deadline:
+            raise AssertionError("SIGTERM до лидера так и не дошёл")
+        await asyncio.sleep(0.02)
+
+
+def _dead_within(proc: subprocess.Popen, timeout: float) -> bool:
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+#: Сколько даём на «добит сразу». Граница по другую сторону — graceful-таймаут
+#: закрытия, 5 с: столько процесс прожил бы, дойди эскалация до SIGKILL сама.
+_AT_ONCE_SEC = 1.5
+
+
+async def test_a_cancelled_close_kills_the_group_at_once(tmp_path, reaper):
+    """Отмена посреди закрытия — SIGKILL группе сразу, а не никогда."""
+    session = _started_session(tmp_path, reaper, child_on_term="ignore")
+    proc = session._proc
+
+    closing = asyncio.create_task(session.aclose())
+    await _until_leader_signalled(tmp_path)
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+
+    assert _dead_within(proc, _AT_ONCE_SEC), (
+        "лидер жив после прерванного закрытия: эскалация оборвалась, SIGKILL не ушёл"
+    )
+    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), (
+        "потомок жив после прерванного закрытия"
+    )
+
+
+async def test_a_timed_out_close_kills_the_group_at_once(tmp_path, reaper):
+    """То же для таймаута вызывающего: ``wait_for`` вокруг закрытия — обычное дело."""
+    session = _started_session(tmp_path, reaper, child_on_term="ignore")
+    proc = session._proc
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(session.aclose(), 0.5)
+
+    assert _dead_within(proc, _AT_ONCE_SEC), "лидер жив после закрытия, снятого по таймауту"
+    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), (
+        "потомок жив после закрытия, снятого по таймауту"
+    )
+
+
+async def test_the_drain_does_not_abandon_a_session_it_took(tmp_path, reaper):
+    """Дочистка сняла сессию с реестра и не уложилась в бюджет — процесс добит.
+
+    Бюджет дочистки общий, 3 с, а закрытие глухого к SIGTERM сервера — 5 с до
+    SIGKILL. ``wait_for`` по таймауту оставлял такое закрытие доигрывать в
+    фоне под ``shield``, а фон на выходе ``asyncio.run`` снимается отменой —
+    и эскалация обрывалась там же. Сессия к этому моменту снята с реестра, и
+    хук на выход её не видит.
+    """
+    registry = ps.PersistentStdioRegistry()
+    session = _started_session(tmp_path, reaper, child_on_term="ignore")
+    proc = session._proc
+    registry._sessions[("drain-owner", "srv")] = session
+
+    with use_owner("drain-owner"):
+        await registry._adrain_own_within_budget(0.5)
+
+    assert registry._sessions == {}, "проверка пустая: дочистка сессию не взяла"
+    assert _dead_within(proc, _AT_ONCE_SEC), (
+        "сессия снята с реестра, бюджет вышел, а её процесс жив — его больше не "
+        "увидит никто, включая хук на выход"
+    )
+    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), "потомок сессии пережил дочистку"
+
+
+#: «Агент» для сценария ревью целиком: две глухие к SIGTERM сессии, снос
+#: снимают снаружи посреди закрытия первой, а бюджет дочистки меньше, чем
+#: закрытие второй. После этого агент просто выходит.
+_AGENT = r'''
+import asyncio, json, sys
+from pathlib import Path
+
+from gc_core.mcp_session_owner import use_owner
+from gc_core.tools.connect_mcp import persistent_stdio as ps
+
+ps._CANCEL_DRAIN_BUDGET_SEC = 0.5
+cfg = json.loads(sys.argv[1])
+mark = Path(cfg["env"]["GC_TEST_MARK"])
+
+
+async def main():
+    registry = ps.PersistentStdioRegistry.instance()
+    with use_owner("agent"):
+        for name in ("first", "second"):
+            registry.get_or_create(name, cfg).call("tools/list", {}, 10.0)
+        teardown = asyncio.create_task(registry.aclose_all())
+        while "leader TERM" not in (mark.read_text() if mark.exists() else ""):
+            await asyncio.sleep(0.02)
+        teardown.cancel()
+        try:
+            await teardown
+        except asyncio.CancelledError:
+            pass
+
+
+asyncio.run(main())
+'''
+
+
+def test_no_server_survives_the_agent_after_an_interrupted_teardown(tmp_path, reaper):
+    """Сценарий ревью целиком, в настоящем процессе агента.
+
+    Первая сессия закрывается под ``shield`` и доигрывает в фоне, вторая
+    попадает в дочистку и в бюджет не укладывается. Агент выходит, и
+    ``asyncio.run`` снимает оставшиеся закрытия отменой. Раньше после этого
+    жили ВСЕ глухие к SIGTERM серверы (ревью: «живы 2 из 3»): эскалация
+    обрывалась, из реестра они уже сняты, и хук на выход их не видел.
+    """
+    env = dict(os.environ)
+    # Исходники рабочей копии: без них агент взял бы установленную копию
+    # gc_core и проверял бы не тот код.
+    src_dirs = [str(d) for d in package_src_dirs()]
+    env["PYTHONPATH"] = os.pathsep.join(
+        src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
+    cfg = _cfg(tmp_path, child_on_term="ignore")
+
+    done = subprocess.run(
+        [sys.executable, "-c", _AGENT, json.dumps(cfg)],
+        env=env, capture_output=True, text=True, timeout=60,
+    )
+
+    assert done.returncode == 0, done.stderr
+    rows = _rows(tmp_path)
+    assert len(rows) == 2, f"проверка пустая: агент поднял не два сервера: {rows}"
+    survivors = [row for row in rows if not _group_gone_within(row["leader"], 2.0)]
+    assert survivors == [], f"после выхода агента живы серверы с потомками: {survivors}"
