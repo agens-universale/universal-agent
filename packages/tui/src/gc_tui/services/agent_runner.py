@@ -1,8 +1,9 @@
 """AgentRunner — обёртка AgentExecutor в daemon Thread (§3 спеки).
 
 Бэкенд-агностична: принимает любой объект с методами
-.run(messages, *, thread_id, start_new_thread, system, ...),
-.stop_run(), .add_message(message).
+.arun(messages, *, thread_id, start_new_thread, system, ...),
+.stop_run(), .add_message(message) и, если есть,
+.take_undelivered_messages() — хвост прогона доигрывается отдельным ходом.
 """
 from __future__ import annotations
 
@@ -63,6 +64,24 @@ def _run_agent(executor, a, *, thread_id, start_new_thread, system) -> None:
     asyncio.run(_body())
 
 
+def _take_tail(executor) -> list:
+    """Хвост прогона: отдано исполнителю, а до агента не дошло.
+
+    Подробности — `AgentExecutor.take_undelivered_messages`. Исполнитель без
+    этого метода хвоста не отдаёт — доигрывать нечего.
+    """
+    take = getattr(executor, "take_undelivered_messages", None)
+    return list(take()) if take is not None else []
+
+
+def _tail_batch(messages: list) -> dict:
+    """Сообщения очереди → аргументы `_run_agent` для отдельного хода."""
+    from gc_core.agent_executor import undelivered_as_arun_args
+
+    texts, extra = undelivered_as_arun_args(messages)
+    return {"msgs": texts, **extra}
+
+
 async def _compact_body(executor, thread_id: str, system: "str | None") -> None:
     """Форс-сжатие со своим loop — и с той же уборкой, что у прогона.
 
@@ -102,6 +121,15 @@ class AgentRunner:
         self._on_complete = on_complete
         self._stdin_queue: "queue.Queue[str]" = queue.Queue()
         self._prebuild_messages: list[dict] = []
+        #: Прогон ещё принимает сообщения в свою очередь. Ставится при запуске
+        #: воркера и снимается им под `_lock` в том же шаге, где он убедился,
+        #: что хвоста нет (`_close_or_take_tail`). Сообщение либо ляжет в
+        #: очередь до этой проверки и будет доиграно, либо увидит закрытый
+        #: прогон и уйдёт своим ходом (`add_message`) — третьего нет.
+        self._accepting = False
+        #: Тред и система последнего прогона: в них доигрывается сообщение,
+        #: опоздавшее к закрытию.
+        self._last_target: Optional[tuple[str, str]] = None
         self._stop_requested = False
         # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
         # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
@@ -307,44 +335,115 @@ class AgentRunner:
         display_query / skill_loaded — чистые display-поля; передаются в executor.run
         параллельными списками (технический хвост получает None)."""
         with self._lock:
-            if self._thread is not None and self._thread.is_alive():
+            if self._busy_locked():
                 return False
             self._stop_requested = False
-            self._thread_kind = "run"
-
-            def _target() -> None:
-                with redirect_stdin(self._stdin_queue):
-                    try:
-                        # Сборка executor (incl. MCP-дискавери) — здесь, в worker-потоке,
-                        # чтобы не блокировать UI-поток (см. get_runner).
-                        executor = self._ensure_executor()
-                        for m in self._prebuild_messages:
-                            executor.add_message(m)
-                        self._prebuild_messages.clear()
-                        if self._stop_requested:
-                            return
-                        a = self._run_args(
-                            query=query, technical=technical, message_id=message_id,
-                            display_query=display_query, skill_loaded=skill_loaded,
-                        )
-                        _run_agent(executor, a, thread_id=thread_id,
-                                   start_new_thread=start_new_thread, system=system)
-                        outcome = getattr(executor, "last_terminal_outcome", None)
-                        if self._on_complete is not None:
-                            try:
-                                self._on_complete(outcome)
-                            except Exception:
-                                pass
-                    except Exception as exc:
-                        self._emit_error(exc)
-                    finally:
-                        self._worker_exit()
-
-            t = threading.Thread(target=_target, name="gc-ua-agent", daemon=True)
-            self._thread = t
-            self._workers += 1
+            t = self._spawn_run_locked(
+                self._run_args(
+                    query=query, technical=technical, message_id=message_id,
+                    display_query=display_query, skill_loaded=skill_loaded,
+                ),
+                thread_id=thread_id, start_new_thread=start_new_thread, system=system,
+            )
         t.start()
         return True
+
+    def _busy_locked(self) -> bool:
+        """Занят ли воркер. Звать под `_lock`.
+
+        Прогон занят, пока принимает сообщения: закрывшись, его поток лишь
+        дорабатывает `_worker_exit`, и следующему прогону он не мешает. Иная
+        работа (`/compact`) занята, пока жив её поток.
+        """
+        if self._accepting:
+            return True
+        t = self._thread
+        return t is not None and t.is_alive() and self._thread_kind != "run"
+
+    def _spawn_run_locked(
+        self, batch: dict, *, thread_id: str, start_new_thread: bool, system: str
+    ) -> threading.Thread:
+        """Завести воркер прогона. Звать под `_lock`; запускает вызывающий."""
+        self._thread_kind = "run"
+        self._accepting = True
+        self._last_target = (thread_id, system)
+        t = threading.Thread(
+            target=self._run_worker,
+            args=(batch, thread_id, start_new_thread, system),
+            name="gc-ua-agent", daemon=True,
+        )
+        self._thread = t
+        self._workers += 1
+        return t
+
+    def _run_worker(
+        self, batch: dict, thread_id: str, start_new_thread: bool, system: str
+    ) -> None:
+        executor = None
+        # Закрыл ли ЭТОТ воркер свой прогон. Закрытый прогон трогать больше
+        # нельзя: сразу после закрытия `add_message` вправе завести следующий
+        # воркер, и `_accepting` уже его.
+        closed = False
+        with redirect_stdin(self._stdin_queue):
+            try:
+                # Сборка executor (incl. MCP-дискавери) — здесь, в worker-потоке,
+                # чтобы не блокировать UI-поток (см. get_runner). Буфер льём под
+                # `_lock`: `add_message` решает «в буфер или в executor» под ним
+                # же, и сообщение не проскочит между переливом и очисткой.
+                executor = self._ensure_executor()
+                with self._lock:
+                    for m in self._prebuild_messages:
+                        executor.add_message(m)
+                    self._prebuild_messages.clear()
+                if self._stop_requested:
+                    return
+                _run_agent(executor, batch, thread_id=thread_id,
+                           start_new_thread=start_new_thread, system=system)
+                while True:
+                    outcome = getattr(executor, "last_terminal_outcome", None)
+                    if self._on_complete is not None:
+                        try:
+                            self._on_complete(outcome)
+                        except Exception:
+                            pass
+                    tail = self._close_or_take_tail(executor)
+                    if not tail:
+                        closed = True
+                        break
+                    # Хвост — набранное после последнего забора очереди циклом,
+                    # пока прогон сохранял тред и сносил MCP. Доигрываем его
+                    # отдельным ходом того же треда: иначе executor (он в TUI
+                    # один на сессию) отдал бы его СЛЕДУЮЩЕМУ запросу
+                    # пользователя, позади этого запроса и одним с ним батчем.
+                    _run_agent(executor, _tail_batch(tail), thread_id=thread_id,
+                               start_new_thread=False, system=system)
+            except Exception as exc:
+                self._emit_error(exc)
+            finally:
+                if not closed:
+                    # Мимо закрытия — ошибка или стоп до старта прогона. Хвост
+                    # не доигрываем: реплики упавшего хода UI уже пометил
+                    # неотправленными (`_mark_pending_failed`).
+                    self._close_or_take_tail(executor, replay=False)
+                self._worker_exit()
+
+    def _close_or_take_tail(self, executor, *, replay: bool = True) -> list:
+        """Хвост, который надо доиграть, — или закрыть прогон, если доигрывать нечего.
+
+        Проверка и закрытие — один шаг под `_lock`, как и решение в
+        `add_message`: сообщение не может ни проскочить между ними, ни лечь в
+        очередь, которую уже никто не прочтёт. Остановленный прогон хвост не
+        доигрывает (это отменило бы стоп), но и дальше его не отдаёт: иначе
+        хвост уехал бы в следующий запрос пользователя.
+        """
+        with self._lock:
+            tail = _take_tail(executor)
+            if replay and tail and not (self._stop_requested or self._marked_stopped):
+                return tail
+            self._accepting = False
+        if tail:
+            _log.warning("хвост прогона не доигран (стоп или ошибка): %d сообщ.", len(tail))
+        return []
 
     def stop(self) -> None:
         """Кооперативная остановка — флаг на executor; run сам выйдет.
@@ -399,13 +498,31 @@ class AgentRunner:
         release_run_logger(getattr(ctx, "logger", None))
 
     def add_message(self, message: dict) -> None:
-        # executor может ещё строиться — тогда буферизуем; worker-поток дольёт
-        # сообщения сразу после сборки, до запуска run.
-        ex = self._executor
-        if ex is not None:
-            ex.add_message(message)
-        else:
-            self._prebuild_messages.append(message)
+        with self._lock:
+            ex = self._executor
+            if ex is None:
+                # executor может ещё строиться — тогда буферизуем; worker-поток
+                # дольёт сообщения сразу после сборки, до запуска run.
+                self._prebuild_messages.append(message)
+                return
+            target = self._last_target
+            # Занятый воркер — это и идущий прогон (сообщение уйдёт в его
+            # очередь), и `/compact`: ход рядом с ним шёл бы параллельно сжатию
+            # на том же executor и треде.
+            if (self._busy_locked() or target is None
+                    or self._stop_requested or self._marked_stopped):
+                ex.add_message(message)
+                return
+            # Прогон уже закрылся: UI спросил `is_running()` до закрытия, а
+            # сообщение отдал после. В очереди executor'а оно дождалось бы
+            # только следующего запроса пользователя и ушло бы позади него —
+            # поэтому отдельный ход в том же треде, сразу.
+            thread_id, system = target
+            t = self._spawn_run_locked(
+                _tail_batch([message]),
+                thread_id=thread_id, start_new_thread=False, system=system,
+            )
+        t.start()
 
     def is_child_input_active(self) -> bool:
         """Ждёт ли ввод субагент ЭТОГО прогона.

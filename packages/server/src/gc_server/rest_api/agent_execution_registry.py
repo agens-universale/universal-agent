@@ -1,8 +1,21 @@
 import asyncio
+import logging
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+
+def _take_tail(executor: Any) -> list:
+    """Хвост прогона: отдано исполнителю, а до агента не дошло.
+
+    Подробности — `AgentExecutor.take_undelivered_messages`. Исполнитель без
+    этого метода хвоста не отдаёт — доигрывать нечего.
+    """
+    take = getattr(executor, "take_undelivered_messages", None)
+    return list(take()) if take is not None else []
 
 
 def _make_registry_key(system: str, task_id: str) -> str:
@@ -39,6 +52,10 @@ class ActiveRun:
     #: завершения сервера — раньше ``except BaseException`` записывал отмену
     #: в ``error`` и репортил прогон упавшим.
     cancelled: bool = False
+    #: Прогон остановили через `stop`. Флаг реестра, а не только исполнителя:
+    #: остановленный прогон не доигрывает хвост, а `stop_run` между ходами
+    #: попадает в state уже закончившегося хода и сам ничего не остановит.
+    stop_requested: bool = False
 
 
 class AgentRunRegistry:
@@ -201,19 +218,46 @@ class AgentRunRegistry:
 
             async def _runner() -> None:
                 nonlocal run_ref
+                messages: list = [initial_user_message]
+                run_kwargs: dict = {}
+                # Хвост, который доставить уже некуда, и чем кончился прогон.
+                dropped: list = []
+                ending = ""
                 try:
-                    result = await executor.arun(
-                        [initial_user_message],
-                        thread_id=thread_id,
-                        system=system,
-                        verbose=verbose,
-                    )
-                    with self._lock:
-                        if run_ref is not None:
-                            run_ref.done = True
-                            run_ref.result = result
-                            run_ref.last_activity_at = time.time()
-                            run_ref.finished_at = time.time()
+                    while True:
+                        result = await executor.arun(
+                            messages,
+                            thread_id=thread_id,
+                            system=system,
+                            verbose=verbose,
+                            **run_kwargs,
+                        )
+                        # Хвост — легшее в очередь после последнего забора её
+                        # циклом: пока прогон сохранял тред и сносил MCP, он был
+                        # «жив», и вебхуки получали `queued`. Забрать хвост и
+                        # объявить прогон законченным — ОДИН шаг под замком и
+                        # без единого `await`: `add_user_message` смотрит `done`
+                        # под тем же замком, так что сообщение либо попадёт в
+                        # хвост, либо увидит `done` и уйдёт новым прогоном.
+                        with self._lock:
+                            tail = _take_tail(executor)
+                            stopped = run_ref is not None and run_ref.stop_requested
+                            replay = bool(tail) and not stopped
+                            if not replay:
+                                if run_ref is not None:
+                                    run_ref.done = True
+                                    run_ref.result = result
+                                    run_ref.last_activity_at = time.time()
+                                    run_ref.finished_at = time.time()
+                                dropped, ending = tail, "stopped"
+                        if not replay:
+                            break
+                        # Доигрываем хвост отдельным ходом того же исполнителя
+                        # по тому же треду: на следующий старт сервер строит
+                        # НОВЫЙ исполнитель, и оставленное в этом пропало бы.
+                        from gc_core.agent_executor import undelivered_as_arun_args
+
+                        messages, run_kwargs = undelivered_as_arun_args(tail)
                 except asyncio.CancelledError:
                     # Отмена — не отказ прогона. Так выглядит остановка uvicorn
                     # и явная отмена таски; помечать это как failed значит
@@ -226,6 +270,7 @@ class AgentRunRegistry:
                             run_ref.cancelled = True
                             run_ref.last_activity_at = time.time()
                             run_ref.finished_at = time.time()
+                        dropped, ending = _take_tail(executor), "cancelled"
                     raise
                 except BaseException as e:  # noqa: BLE001
                     with self._lock:
@@ -234,6 +279,7 @@ class AgentRunRegistry:
                             run_ref.error = e
                             run_ref.last_activity_at = time.time()
                             run_ref.finished_at = time.time()
+                        dropped, ending = _take_tail(executor), "failed"
                 finally:
                     with self._lock:
                         current = self._runs.get(key)
@@ -242,6 +288,22 @@ class AgentRunRegistry:
                         if run_ref is not None:
                             self._completed[key] = run_ref
                             self._cleanup_completed_locked()
+                    if dropped:
+                        # Хвост остановленного, упавшего или снятого прогона не
+                        # доигрываем: это отменило бы остановку или спрятало
+                        # отказ за статусом следующего хода. Потеря таких
+                        # сообщений — часть исхода прогона, но не молчаливая.
+                        logger.warning(
+                            "run_tail_dropped system=%s task_id=%s ending=%s count=%d",
+                            system, task_id, ending, len(dropped),
+                            extra={
+                                "event": "run_tail_dropped",
+                                "system": system,
+                                "task_id": task_id,
+                                "ending": ending,
+                                "count": len(dropped),
+                            },
+                        )
                     # Логгер прогона `logging` держит до конца процесса, а
                     # сервер ведёт прогоны без счёта: без этого каждый запрос
                     # оставлял по логгеру с открытым файлом.
@@ -285,8 +347,10 @@ class AgentRunRegistry:
                 # а не копится здесь.
                 return False
             run.last_activity_at = time.time()
-
-        run.executor.add_message(make_message(content))
+            # Кладём под замком: прогон объявляется законченным под ним же и
+            # только при пустом хвосте. Сообщение либо ляжет в очередь до этой
+            # проверки и будет доиграно, либо увидит `done` — третьего нет.
+            run.executor.add_message(make_message(content))
         return True
 
     def stop(self, *, system: str, task_id: str) -> bool:
@@ -295,6 +359,7 @@ class AgentRunRegistry:
             run = self._runs.get(key)
             if run is None or run.done:
                 return False
+            run.stop_requested = True
         run.executor.stop_run()
         return True
 
