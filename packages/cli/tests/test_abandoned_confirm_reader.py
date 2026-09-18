@@ -21,7 +21,6 @@ pty = pytest.importorskip("pty")
 from gc_cli.ask_human_port import make_cli_ask_human_port
 from gc_core.security.confirm_port import CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER
 from gc_core.security.path_policy import prompt_user_confirmation_choice
-from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
 _THREAD = "test-abandoned-yn"
 _ALLOWED = (CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER)
@@ -29,6 +28,14 @@ _ALLOWED = (CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER)
 
 def _ask_yes_no():
     """Подтверждение гарда — в своём потоке, как его и ждёт гард."""
+    # В момент вызова, а не на уровне модуля. В полном прогоне тест-кит
+    # (`ensure_real_tools_package`) выселяет пакет `gc_core.tools` и грузит его
+    # заново, а подтверждение берёт метку «брошен» своим ленивым импортом — уже
+    # из нового экземпляра. Взятый при сборке `run_abandonable_in` ставил бы
+    # метку в старом, брошенный поток её не видел и забирал чужую строку: тест
+    # краснел в полном прогоне, хотя код верен.
+    from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
+
     return asyncio.ensure_future(run_abandonable_in(
         threading.BoundedSemaphore(1), prompt_user_confirmation_choice,
         title="Запись", fields=[("path", "/etc/SECRET")], question="Разрешить?",
