@@ -475,6 +475,7 @@ def prompt_user_confirmation_choice(
     # Same mnemonic as TUI; Esc/timeout only exist in TUI runner — omit here.
     lines.append(f"{CONFIRM_CHOICE_HINT}: ")
     try:
+        _drop_typed_ahead()
         print("\n".join(lines), file=sys.stderr, end="")
         sys.stderr.flush()
         answer = _read_confirmation_line()
@@ -490,6 +491,19 @@ def prompt_user_confirmation_choice(
 #: Шаг опроса stdin в ответе на `y/n`. Идёт в рабочем потоке гарда, loop не
 #: держит; 50 мс человеку незаметны.
 _CONFIRM_POLL_SEC = 0.05
+
+
+def _drop_typed_ahead() -> None:
+    """Выбросить набранное ДО вопроса: `y/n` отвечает только ввод после него.
+
+    Иначе разрешение выдавало бы то, что человек напечатал, пока агент работал,
+    или строка, начатая для вопроса агента, который потом сняли по Ctrl+C.
+    """
+    from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd
+
+    fd = pollable_stdin_fd()
+    if fd is not None:
+        discard_unread(fd)
 
 
 def _read_confirmation_line() -> str | None:

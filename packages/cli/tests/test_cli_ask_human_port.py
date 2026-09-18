@@ -6,8 +6,8 @@ Ctrl+C, но принесла свой дефект: отменить поток
 вопроса или у подтверждения `y/n` гарда.
 
 Поэтому главная проверка здесь — не «поток демонский», а «читателей не
-копится»: на POSIX их нет вовсе, а набранное к прерванному вопросу достаётся
-следующему, а не пропадает.
+копится»: на POSIX их нет вовсе, и набранное после прерывания достаётся
+следующему вопросу, а не осиротевшему читателю.
 """
 import ast
 import asyncio
@@ -144,13 +144,71 @@ async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdi
         await asyncio.sleep(0.2)
         os.kill(os.getpid(), signal.SIGINT)
 
-    fire = asyncio.create_task(_ctrl_c())
-    with pytest.raises(KeyboardInterrupt):
-        await asyncio.wait_for(port("первый вопрос?"), 5)
-    await fire
+    # Страховка вместо обработчика asyncio: если перехват сломается, сигнал
+    # запишется здесь, и тест покраснеет своим ассертом, а не оборвёт весь
+    # прогон pytest через `KeyboardInterrupt` из обработчика раннера.
+    caught: list = []
+    previous = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, lambda *_: caught.append(True))
+    try:
+        fire = asyncio.create_task(_ctrl_c())
+        with pytest.raises(KeyboardInterrupt):
+            await asyncio.wait_for(port("первый вопрос?"), 5)
+        await fire
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert caught == [], "Ctrl+C ушёл мимо перехвата вопроса"
 
     pipe_stdin.send("ответ-на-второй\n\n")
     assert await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ-на-второй"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["ctrl_c", "cancel"])
+async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
+    pipe_stdin, how,
+):
+    """Недописанный ответ к снятому вопросу не приклеивается к следующему.
+
+    Человек начал отвечать и передумал — нажал Ctrl+C, или прогон отменили.
+    Набранное уже прочитано в общий буфер, и без сброса оно стало бы началом
+    ответа на СЛЕДУЮЩИЙ вопрос.
+    """
+    if how == "ctrl_c" and not hasattr(signal, "SIGINT"):
+        pytest.skip("платформа без SIGINT")
+    port = make_cli_ask_human_port()
+    pipe_stdin.send("черновик\n")
+
+    # Страховка ставится ДО вопроса: вопрос запоминает её как прежний
+    # обработчик, а поставленная после — перебила бы сам перехват.
+    caught: list = []
+    previous = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, lambda *_: caught.append(True))
+    try:
+        if how == "ctrl_c":
+            async def _ctrl_c() -> None:
+                await asyncio.sleep(0.2)           # черновик уже в буфере
+                os.kill(os.getpid(), signal.SIGINT)
+
+            # Вопрос ждём прямо в тесте, а не отдельной задачей: из задачи
+            # `KeyboardInterrupt` asyncio пробрасывает сквозь loop, и он обрывает
+            # весь прогон pytest, а не попадает в `pytest.raises`.
+            fire = asyncio.ensure_future(_ctrl_c())
+            with pytest.raises(KeyboardInterrupt):
+                await asyncio.wait_for(port("первый вопрос?"), 5)
+            await fire
+        else:
+            first = asyncio.ensure_future(port("первый вопрос?"))
+            await asyncio.sleep(0.2)               # черновик уже в буфере
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    assert caught == [], "Ctrl+C ушёл мимо перехвата вопроса"
+
+    pipe_stdin.send("ответ\n\n")
+    assert await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ"
 
 
 @pytest.mark.asyncio

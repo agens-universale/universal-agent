@@ -31,7 +31,7 @@ import threading
 from typing import Any, Callable
 
 from gc_core.utils.sigint_waits import intercept_sigint
-from gc_core.utils.stdin_lines import pollable_stdin_fd, take_answer
+from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd, take_answer
 
 #: Шаг опроса. Человек печатает секундами, 50 мс незаметны, а loop свободен.
 #: Опрос сохранён СОЗНАТЕЛЬНО, а не по инерции: на Windows Proactor-loop может
@@ -84,13 +84,20 @@ def make_cli_ask_human_port() -> Callable[[str], Any]:
 
         # Ctrl+C на вопросе — отказ отвечать, а не отмена прогона.
         with intercept_sigint(_on_sigint):
-            while True:
-                if interrupted:
-                    raise KeyboardInterrupt
-                answer = take_answer(fd)
-                if answer is not None:
-                    return answer
-                await asyncio.sleep(_POLL_SEC)
+            try:
+                while True:
+                    if interrupted:
+                        raise KeyboardInterrupt
+                    answer = take_answer(fd)
+                    if answer is not None:
+                        return answer
+                    await asyncio.sleep(_POLL_SEC)
+            except BaseException:
+                # Вопрос снят — Ctrl+C или отмена прогона. Набранное к нему уже
+                # лежит в общем буфере, и следующим читателем может оказаться
+                # подтверждение гарда: оно ответило бы этой строкой за человека.
+                discard_unread(fd)
+                raise
 
     return _ask
 
