@@ -14,10 +14,8 @@
 (``backends/local.py:220-230``). То есть подмена не меняет реализацию, а
 убирает с пути поток и лишний event loop.
 """
-import asyncio
 import json
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -75,26 +73,25 @@ async def test_loop_stays_responsive_while_the_script_runs(skill_with_script):
     Именно это отличает нативный запуск от синхронного вызова на loop. Поток
     из пула дал бы тот же результат — поэтому рядом стоит проверка на потоки.
     """
-    gaps: list = []
-    stop = asyncio.Event()
+    from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
-    async def pulse() -> None:
-        prev = time.monotonic()
-        while not stop.is_set():
-            await asyncio.sleep(TICK)
-            now = time.monotonic()
-            gaps.append(now - prev)
-            prev = now
+    # Сборщик глушится на окне: порог абсолютный, а пауза поколения 2 на куче
+    # полного набора (180–220 мс) — большая часть бюджета, и тест судил бы
+    # её, а не запуск скрипта.
+    #
+    # Пульс прогретый и общий. Собственный ставился в очередь прямо перед
+    # `await acall` и не видел ничего, что тул делает до первой уступки: 0,4 с
+    # сна в начале `acall` тест пропускал — проверено подменой.
+    with quiet_gc_for_loop_timing():
+        async with LoopPulse(step=TICK) as pulse:
+            await _tool(skill_with_script).acall(
+                skill_id="sleeper", script_name="nap.py"
+            )
 
-    beat = asyncio.create_task(pulse())
-    await _tool(skill_with_script).acall(skill_id="sleeper", script_name="nap.py")
-    stop.set()
-    await beat
-
-    assert len(gaps) > 10, f"пульс почти не тикал: {len(gaps)} тиков"
-    assert max(gaps) < SCRIPT_SLEEP / 2, (
-        f"loop залипал на {max(gaps):.3f}с, пока шёл скрипт — "
-        "запуск не асинхронный"
+    assert len(pulse.gaps) > 10, f"пульс почти не тикал: {len(pulse.gaps)} тиков"
+    assert pulse.worst() < SCRIPT_SLEEP / 2, (
+        f"loop залипал на {pulse.worst():.3f}с, пока шёл скрипт — "
+        f"запуск не асинхронный ({pulse.report()})"
     )
 
 

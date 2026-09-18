@@ -52,6 +52,12 @@ class LoopPulse:
 
     Последний разрыв снимается после выхода работы из окна: ``__aexit__``
     дожидается очередного тика, так что хвост работы тоже в замере.
+
+    Оба свойства сторожит контроль измерителя
+    ``test_the_pulse_actually_sees_a_frozen_loop`` в
+    ``test_acceptance_summary_async``: заморозка стоит до первой уступки, в
+    середине окна и перед самым выходом. Без прогрева краснеет случай
+    ``head``, без ожидания последнего тика — ``tail``.
     """
 
     STEP = 0.01
@@ -80,10 +86,14 @@ class LoopPulse:
         import asyncio
         import time
 
-        prev = time.monotonic()
+        # perf_counter, а не monotonic: на Windows под 3.12 monotonic — это
+        # GetTickCount64 с шагом 15,6 мс, и разрыв квантовался бы на полтора
+        # шага пульса. На macOS и Linux это одни и те же часы. Половина
+        # собственных пульсов, переведённых сюда, мерила именно perf_counter.
+        prev = time.perf_counter()
         while not self._stop.is_set():
             await asyncio.sleep(self.step)
-            now = time.monotonic()
+            now = time.perf_counter()
             self.gaps.append(now - prev)
             prev = now
 

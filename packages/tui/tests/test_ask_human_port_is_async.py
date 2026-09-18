@@ -63,39 +63,33 @@ def test_wired_port_on_ctx_is_the_coroutine_one():
 
 async def test_loop_keeps_ticking_while_the_human_thinks():
     """Свойство, а не форма: соседняя корутина тикает во время ожидания."""
+    from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
+
     runner = AgentRunner(executor=_Ex())
-
-    gaps: list[float] = []
-    stop = asyncio.Event()
-
-    async def _pulse() -> None:
-        prev = time.perf_counter()
-        while not stop.is_set():
-            await asyncio.sleep(0.01)
-            now = time.perf_counter()
-            gaps.append(now - prev)
-            prev = now
-
-    from gc_testkit import quiet_gc_for_loop_timing
 
     # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
     # (180–220 мс) больше порога, и тест судил бы её, а не порт.
+    #
+    # Пульс прогретый и общий. Собственный видел начало порта только потому,
+    # что его задачу создавали РАНЬШЕ задачи порта и loop запускал их по
+    # очереди: 0,2 с сна в начале `_read_stdin_answer` тест замечал, но
+    # держалось это на порядке двух строк, который ничто не сторожит. Прогрев
+    # делает это свойством измерителя.
     with quiet_gc_for_loop_timing():
-        beat = asyncio.create_task(_pulse())
-        asker = asyncio.create_task(runner._read_stdin_answer("как дела?"))
+        async with LoopPulse() as pulse:
+            asker = asyncio.create_task(runner._read_stdin_answer("как дела?"))
 
-        await asyncio.sleep(0.3)                   # человек «думает»
-        runner._stdin_queue.put("хорошо\n")
-        runner._stdin_queue.put("\n")
+            await asyncio.sleep(0.3)                   # человек «думает»
+            runner._stdin_queue.put("хорошо\n")
+            runner._stdin_queue.put("\n")
 
-        answer = await asyncio.wait_for(asker, 5)
-        stop.set()
-        await beat
+            answer = await asyncio.wait_for(asker, 5)
 
     assert answer == "хорошо", answer
-    assert len(gaps) > 10, f"пульс почти не тикал: {len(gaps)}"
-    assert max(gaps) < 0.1, (
-        f"loop залипал на {max(gaps) * 1000:.0f} мс — порт снова блокирующий"
+    assert len(pulse.gaps) > 10, f"пульс почти не тикал: {len(pulse.gaps)}"
+    assert pulse.worst() < 0.1, (
+        f"loop залипал на {pulse.worst() * 1000:.0f} мс — порт снова блокирующий "
+        f"({pulse.report()})"
     )
 
 

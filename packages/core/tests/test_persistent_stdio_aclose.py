@@ -18,7 +18,6 @@ terminate → ожидание до 5 с → killpg → ещё до 2 с. Пря
 Форма повторяет уже принятую в ``stream_client._PersistentSessionManager``:
 синхронный ``close_all`` рядом с ``aclose_all``.
 """
-import asyncio
 import subprocess
 import sys
 import time
@@ -91,30 +90,23 @@ async def test_aterminate_escalates_to_kill_for_a_stubborn_process(stubborn):
 
 async def test_loop_stays_free_while_waiting_for_a_stubborn_process(stubborn):
     """Главная проверка: ждём опросом, а не потоком и не блокировкой loop."""
-    gaps: list = []
-    stop = asyncio.Event()
-
-    async def pulse() -> None:
-        prev = time.perf_counter()
-        while not stop.is_set():
-            await asyncio.sleep(0.01)
-            now = time.perf_counter()
-            gaps.append(now - prev)
-            prev = now
-
-    from gc_testkit import quiet_gc_for_loop_timing
+    from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
     # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
     # (180–220 мс) больше порога, и тест судил бы её, а не ожидание процесса.
+    #
+    # Пульс прогретый и общий. Собственный ставился в очередь прямо перед
+    # `await _aterminate_process_tree` и не видел ничего, что снос делает до
+    # первой уступки, — сигнал группе и первую проверку: 0,2 с сна в начале
+    # сноса тест пропускал — проверено подменой.
     with quiet_gc_for_loop_timing():
-        beat = asyncio.create_task(pulse())
-        await ps._aterminate_process_tree(stubborn, graceful_timeout=0.5)
-        stop.set()
-        await beat
+        async with LoopPulse() as pulse:
+            await ps._aterminate_process_tree(stubborn, graceful_timeout=0.5)
 
-    assert len(gaps) > 20, f"пульс почти не тикал: {len(gaps)}"
-    assert max(gaps) < 0.15, (
-        f"loop залипал на {max(gaps):.3f}с — ожидание процесса всё ещё блокирующее"
+    assert len(pulse.gaps) > 20, f"пульс почти не тикал: {len(pulse.gaps)}"
+    assert pulse.worst() < 0.15, (
+        f"loop залипал на {pulse.worst():.3f}с — ожидание процесса всё ещё "
+        f"блокирующее ({pulse.report()})"
     )
 
 

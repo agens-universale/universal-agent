@@ -96,34 +96,24 @@ def costly_walk(monkeypatch):
 
 
 async def _worst_gap_while(coro):
-    """Худший разрыв пульса, пока идёт *coro*.
+    """Худший разрыв прогретого пульса, пока идёт *coro*.
 
     Максимум, а не сумма: сумма скрыла бы одну длинную заморозку среди
     множества нормальных тиков — а заморозка и есть то, что мы ищем.
+
+    Пульс общий и прогретый: собственный ставился в очередь прямо перед
+    ``await coro`` и не видел ничего, что тул делает до первой уступки, —
+    разбор аргументов, гард чтения и первый кусок обхода. 0,2 с сна в начале
+    ``ListFiles.acall`` тест пропускал — проверено подменой.
     """
-    gaps = []
-    stop = asyncio.Event()
-
-    async def _pulse():
-        prev = time.perf_counter()
-        while not stop.is_set():
-            await asyncio.sleep(_PULSE_SEC)
-            now = time.perf_counter()
-            gaps.append(now - prev)
-            prev = now
-
     # Сборщик глушится на окне: замерено, что в полном наборе паузы поколения 2
     # дают 180–220 мс каждая, а тест меряет обход, а не сборку мусора.
-    from gc_testkit import quiet_gc_for_loop_timing
+    from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
     with quiet_gc_for_loop_timing():
-        beat = asyncio.create_task(_pulse())
-        try:
+        async with LoopPulse(step=_PULSE_SEC) as pulse:
             result = await coro
-        finally:
-            stop.set()
-            await beat
-    return result, (max(gaps) if gaps else 0.0), len(gaps)
+    return result, pulse.worst(), len(pulse.gaps)
 
 
 async def test_list_files_lets_the_loop_breathe(big_tree, python_walk, costly_walk):

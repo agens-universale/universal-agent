@@ -23,9 +23,7 @@ exec: дедлайн процесса, лимит на дожатие дрена
 вывод (`echo`), либо намеренно МЕДЛЕННЫЙ писатель (`test_async_exec.py`,
 300 КиБ за 6 с) — ровно тот случай, где дефекта не видно.
 """
-import asyncio
 import sys
-import time
 
 from gc_core.backends.local import LocalFsBackend
 
@@ -35,7 +33,7 @@ from gc_core.backends.local import LocalFsBackend
 #: становится той болезнью, которую стережёт.
 _FLOOD_MIB = 200
 
-#: Шаг соседней корутины и потолок разрыва между её тиками.
+#: Шаг пульса и потолок разрыва СВЕРХ шага: сам шаг — не залипание.
 _TICK_SEC = 0.01
 _MAX_GAP_SEC = 0.05
 
@@ -52,35 +50,24 @@ def _flood_argv(mib: int) -> list:
     return [sys.executable, "-c", code]
 
 
-async def _worst_loop_gap(stop: asyncio.Event) -> float:
-    """Сосед по loop: максимальный разрыв между собственными тиками."""
-    worst = 0.0
-    previous = time.monotonic()
-    while not stop.is_set():
-        await asyncio.sleep(_TICK_SEC)
-        now = time.monotonic()
-        worst = max(worst, now - previous - _TICK_SEC)
-        previous = now
-    return worst
-
-
 async def test_a_fast_writer_does_not_freeze_the_loop():
     """Соседняя корутина продолжает получать управление во время залива."""
-    from gc_testkit import quiet_gc_for_loop_timing
+    from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
     backend = LocalFsBackend()
-    stop = asyncio.Event()
     # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
     # (180–220 мс) кратно больше потолка, и тест судил бы её, а не дренаж.
+    #
+    # Пульс прогретый и общий. Собственный ставился в очередь прямо перед
+    # `await aexec_argv` и брал первую отметку уже после того, как запуск
+    # дошёл до первой уступки: 0,2 с сна в начале `aexec_argv` тест не видел —
+    # проверено подменой.
     with quiet_gc_for_loop_timing():
-        watcher = asyncio.ensure_future(_worst_loop_gap(stop))
-        try:
+        async with LoopPulse(step=_TICK_SEC) as pulse:
             res = await backend.aexec_argv(_flood_argv(_FLOOD_MIB), timeout=60)
-            assert res.return_code == 0, res.return_code
-        finally:
-            stop.set()
 
-        worst = await watcher
+    assert res.return_code == 0, res.return_code
+    worst = pulse.worst() - _TICK_SEC
     assert worst < _MAX_GAP_SEC, (
         f"loop стоял {worst:.2f} с при потолке {_MAX_GAP_SEC} с — пока команда "
         f"писала, соседние задачи управления не получали"
