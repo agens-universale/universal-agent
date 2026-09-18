@@ -192,40 +192,77 @@ async def acreate_run_context(
     # `backend.awarm_capabilities()` сам, вне горячего пути.
     # Рабочий каталог окружения спрашиваем ЗДЕСЬ, до дискавери MCP: сборка
     # рабочей области ниже синхронная, а синхронного `exec` у песочницы нет.
-    # До дискавери — чтобы на отказе не остаться с открытыми MCP-сессиями; на
-    # отказе освобождаем и логгер прогона, иначе он с открытым файлом доживёт
-    # до конца процесса.
+    # До дискавери — чтобы его отказ не застал открытых MCP-сессий.
+    #
+    # Страховка — на ВСЁ после подготовки, а не на один прогрев. Логгер
+    # прогона уже создан и держит открытый файл, а дискавери поднимает
+    # stdio-серверы под токеном владельца этого контекста. Обычный отказ
+    # дискавери исключения не бросает (сервер помечается недоступным), но
+    # отмена посреди неё и исключение сборки после неё раньше шли мимо:
+    # логгер доживал до конца процесса, сервер (браузер) — до `atexit`.
+    # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
+    # которому он принадлежит, так и не появилось.
     try:
         await aprime_backend_cwd(prep.backend, config_dict)
-    except BaseException:
+        # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
+        # успешно снятый тул снова считается опечаткой. Способность пришла с
+        # develop, у нас её не было; тело, которое список заполняет, слилось
+        # автоматически — без самого списка оно осталось бы мёртвым кодом.
+        registered: list[str] = []
+        with use_owner(prep.mcp_session_owner):
+            tools = await abuild_tools_data(
+                config_dict,
+                on_progress=on_progress,
+                os_backend=prep.backend,
+                skills_registry=prep.skills_registry,
+                logger=prep.run_logger,
+                tools_cache=tools_cache,
+                registered_names=registered,
+            )
+        return _finish_run_context(
+            config_dict, prep, tools,
+            registered_names=registered,
+            auth_connector=auth_connector, environment=environment,
+            on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
+            is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
+            level_provider=level_provider, circuit_breaker=circuit_breaker,
+            force_legacy=force_legacy,
+        )
+    except BaseException as exc:
         from gc_core.utils.logging_module import release_run_logger
 
-        release_run_logger(prep.run_logger)
+        try:
+            # Закрытую корутину (`GeneratorExit`) ждать уже нельзя: `await`
+            # здесь кончился бы «coroutine ignored GeneratorExit». Тогда
+            # серверы доберёт хук на выход, а логгер отдаём в любом случае.
+            if not isinstance(exc, GeneratorExit):
+                await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
+        finally:
+            release_run_logger(prep.run_logger)
         raise
-    # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
-    # успешно снятый тул снова считается опечаткой. Способность пришла с
-    # develop, у нас её не было; тело, которое список заполняет, слилось
-    # автоматически — без самого списка оно осталось бы мёртвым кодом.
-    registered: list[str] = []
-    with use_owner(prep.mcp_session_owner):
-        tools = await abuild_tools_data(
-            config_dict,
-            on_progress=on_progress,
-            os_backend=prep.backend,
-            skills_registry=prep.skills_registry,
-            logger=prep.run_logger,
-            tools_cache=tools_cache,
-            registered_names=registered,
-        )
-    return _finish_run_context(
-        config_dict, prep, tools,
-        registered_names=registered,
-        auth_connector=auth_connector, environment=environment,
-        on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-        is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
-        level_provider=level_provider, circuit_breaker=circuit_breaker,
-        force_legacy=force_legacy,
-    )
+
+
+async def _aclose_owned_mcp_sessions(owner: str) -> None:
+    """Закрыть MCP-сессии, поднятые под владельцем несостоявшегося контекста.
+
+    Закрывается долгоживущий stdio, и этого достаточно: других живых сессий
+    дискавери не оставляет. Stream-транспорты спрашивают список тулов
+    одноразовой сессией, а долгоживущую заводит только вызов тула — до него
+    сборка не доходит.
+
+    Не ``_aclose_mcp_and_release`` из исполнителя, хотя по сути то же самое.
+    Тот держит реестр, связанный при импорте ``agent_executor``, а дискавери
+    берёт клиента лениво, в момент вызова. Реестр здесь берётся так же — и
+    потому гарантированно тот, куда дискавери положила сессии. Это не
+    теория: тест-кит перезагружает ``gc_core.tools.*`` после тестов, и с
+    помощником исполнителя проверка этого места краснела уже на втором тесте
+    файла — закрывался реестр другой копии модуля. К тому же сборка контекста
+    лежит ниже исполнителя, и тянуть его наверх ради отказа незачем.
+    """
+    from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+
+    with use_owner(owner):
+        await PersistentStdioRegistry.instance().aclose_all()
 
 
 @dataclass
