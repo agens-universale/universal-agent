@@ -493,6 +493,15 @@ def prompt_user_confirmation_choice(
 _CONFIRM_POLL_SEC = 0.05
 
 
+def _polling_console() -> Any:
+    """Консоль Windows для опроса нажатий — модуль `msvcrt`; вне Windows ``None``."""
+    if os.name != "nt":
+        return None
+    import msvcrt
+
+    return msvcrt
+
+
 def _drop_typed_ahead() -> None:
     """Выбросить набранное ДО вопроса: `y/n` отвечает только ввод после него.
 
@@ -504,6 +513,11 @@ def _drop_typed_ahead() -> None:
     fd = pollable_stdin_fd()
     if fd is not None:
         discard_unread(fd)
+        return
+    console = _polling_console()
+    if console is not None:
+        while console.kbhit():
+            console.getwch()
 
 
 def _read_confirmation_line() -> str | None:
@@ -515,9 +529,10 @@ def _read_confirmation_line() -> str | None:
     для следующего вопроса. Опрос же видит, что вызов брошен, и уходит, не
     трогая чужую строку.
 
-    Windows и stdin без `fileno()` — прежнее `input()`: `select` там неприменим.
-    Брошенный вызов на этом пути строку унести ещё может, но решения по ней не
-    запишет — это отсекает `request_confirm`.
+    На Windows `select` к консоли неприменим — там опрос нажатий `msvcrt`, с тем
+    же уходом брошенного вызова. Прежнее `input()` осталось только для stdin без
+    `fileno()` вне Windows (подменённого): брошенный вызов строку там унести
+    ещё может, но решения по ней не запишет — это отсекает `request_confirm`.
     """
     # Lazy: security → tools/utils на module load ломает import graph.
     from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
@@ -525,6 +540,9 @@ def _read_confirmation_line() -> str | None:
 
     fd = pollable_stdin_fd()
     if fd is None:
+        console = _polling_console()
+        if console is not None:
+            return _read_console_line(console, give_up=current_call_abandoned)
         return input().strip()
     while True:
         if current_call_abandoned():
@@ -533,6 +551,42 @@ def _read_confirmation_line() -> str | None:
         if line is not None:
             return line.strip()
         time.sleep(_CONFIRM_POLL_SEC)
+
+
+def _read_console_line(console: Any, *, give_up: Callable[[], bool]) -> str | None:
+    """Строка с консоли Windows опросом нажатий; ``None`` — вопрос бросили.
+
+    `kbhit` не блокирует, поэтому брошенный вызов замечает метку и уходит, не
+    взяв ни одного нажатия, — в отличие от `input()`, который остался бы в
+    чтении. `getwch` набранное не показывает, эхо печатаем сами. Backspace
+    стирает; стрелки и F-клавиши приходят двумя кодами (префикс и код клавиши)
+    и пропускаются целиком. Ctrl+Z в начале строки — конец ввода, как у
+    `input()` на Windows.
+    """
+    chars: list[str] = []
+    while True:
+        if give_up():
+            return None
+        if not console.kbhit():
+            time.sleep(_CONFIRM_POLL_SEC)
+            continue
+        key = console.getwch()
+        if key in ("\x00", "\xe0"):
+            console.getwch()
+        elif key in ("\r", "\n"):
+            console.putwch("\r")
+            console.putwch("\n")
+            return "".join(chars).strip()
+        elif key == "\x1a" and not chars:
+            raise EOFError
+        elif key == "\x08":
+            if chars:
+                chars.pop()
+                for ch in "\x08 \x08":
+                    console.putwch(ch)
+        elif key.isprintable():
+            chars.append(key)
+            console.putwch(key)
 
 
 def prompt_user_confirmation(
