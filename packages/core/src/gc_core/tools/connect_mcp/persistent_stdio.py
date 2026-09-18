@@ -57,6 +57,7 @@ import threading
 import time
 
 from gc_core.mcp_session_owner import current_owner
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
@@ -123,20 +124,90 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
 #: Шаг опроса при асинхронном ожидании смерти процесса. Компромисс: реже —
 #: закрытие тянется дольше нужного, чаще — лишние пробуждения loop на пустом
 #: месте. При graceful-таймауте 5 с это до сотни проверок, каждая — один
-#: ``waitpid(WNOHANG)``.
+#: ``waitpid(WNOHANG)`` и один ``killpg(pgid, 0)``.
 _POLL_STEP_SEC = 0.05
 
 
-async def _await_exit(proc: subprocess.Popen, timeout: float) -> bool:
-    """Дождаться смерти процесса опросом. ``True`` — успел, ``False`` — таймаут.
+def _pgid_of(proc: subprocess.Popen) -> Optional[int]:
+    """Группа сервера. ``None`` — групп в POSIX-смысле нет (Windows).
 
-    Замена ``proc.wait(timeout)``, которая не занимает ни поток, ни loop:
-    ``poll()`` — неблокирующий ``waitpid(WNOHANG)``, а пауза между проверками
-    отдаёт управление циклу.
+    Это ``proc.pid``, а не ``os.getpgid``: сервер запущен лидером своей
+    сессии (``start_new_session``), и номер группы равен его pid. Спрашивать
+    ``getpgid`` поздно — после смерти лидера он падает, а группа (его дети)
+    в этот момент ещё жива и как раз нужна.
+    """
+    return proc.pid if os.name == "posix" else None
+
+
+def _signal_group(pgid: int, sig: int) -> bool:
+    """Сигнал группе. ``False`` — группы нет: в ней не осталось никого.
+
+    ``pgid`` ≤ 1 отвергается сразу: ``killpg(0, …)`` бьёт СВОЮ группу, а
+    ``killpg(-1, …)`` на macOS становится ``kill(1, …)``. У настоящего
+    процесса такого pid не бывает — только у двойника в тесте.
+    """
+    if pgid <= 1:
+        return False
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _group_alive(pgid: int) -> bool:
+    """Есть ли в группе ещё кто-нибудь, живой или не пожатый."""
+    try:
+        return _signal_group(pgid, 0)
+    except PermissionError:
+        return True                    # кто-то есть, но сигналить ему нам нельзя
+
+
+def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> bool:
+    """Сигнал всему дереву сервера: группе, а без неё — хотя бы лидеру.
+
+    ``False`` — бить некого: группы нет, лидер мёртв. Не бросает никогда:
+    отказ сигнала не повод бросать снос на полпути.
+    """
+    if pgid is not None:
+        try:
+            if _signal_group(pgid, signal.SIGKILL if kill else signal.SIGTERM):
+                return True
+        except OSError:
+            pass                       # группа недоступна (EPERM) — остаётся лидер
+    try:
+        if proc.poll() is not None:
+            return False
+        # Лидер жив, а группы с его номером нет или она недоступна: он не
+        # лидер своей группы (запущен в обход `_spawn_detached_stdio_process`).
+        # Бьём хотя бы его.
+        if kill:
+            proc.kill()
+        else:
+            proc.terminate()
+    except Exception:
+        pass
+    return True
+
+
+async def _await_exit(
+    proc: subprocess.Popen, timeout: float, pgid: Optional[int] = None
+) -> bool:
+    """Дождаться смерти процесса, а с ``pgid`` — и всей его группы.
+
+    ``True`` — успел, ``False`` — таймаут. Замена ``proc.wait(timeout)``,
+    которая не занимает ни поток, ни loop: ``poll()`` — неблокирующий
+    ``waitpid(WNOHANG)``, ``killpg(pgid, 0)`` — мгновенный системный вызов,
+    а пауза между проверками отдаёт управление циклу.
+
+    Порядок проверок несущий: сначала лидер, потом группа. Лидер — наш прямой
+    ребёнок, и пока ``poll()`` его не пожал, он зомби и числится в группе:
+    без этого ``killpg`` не ответил бы «никого» никогда, и каждый снос стоил
+    бы полный таймаут.
     """
     deadline = time.monotonic() + timeout
     while True:
-        if proc.poll() is not None:
+        if proc.poll() is not None and (pgid is None or not _group_alive(pgid)):
             return True
         if time.monotonic() >= deadline:
             return False
@@ -160,36 +231,35 @@ async def _aterminate_process_tree(
     Эскалация: SIGTERM по группе → graceful-таймаут → SIGKILL по группе.
     Терять её нельзя — сервер, игнорирующий SIGTERM (Chromium под
     @playwright/mcp), иначе переживёт агента.
+
+    Ждём ГРУППУ, а не лидера. Лидер — сам MCP-сервер, а тяжёлое у него в
+    детях: node под @playwright/mcp по SIGTERM выходит сразу, Chromium в той
+    же группе SIGTERM игнорирует. Пока ожидание смотрело на один
+    ``proc.poll()``, смерть лидера засчитывалась за смерть всех, и SIGKILL
+    группе не уходил никогда; уже мёртвого лидера снос и вовсе пропускал, не
+    тронув группу. Теперь группа мёртвого лидера получает тот же порядок:
+    SIGTERM (послушная сирота уйдёт сразу, а не по таймауту), опрос
+    ``killpg(pgid, 0)`` до «никого» в пределах того же graceful-таймаута,
+    затем SIGKILL.
+
+    Это только POSIX. На Windows групп в этом смысле нет:
+    ``CREATE_NEW_PROCESS_GROUP`` — группа для консольных событий, её не
+    опросить и не убить целиком, а дети мёртвого лидера не видны ни
+    ``terminate``, ни ``kill``. Там снос по-прежнему ждёт одного лидера, и
+    его дети могут пережить агента — ограничение платформы, которое снимает
+    только Job Object.
     """
-    if proc.poll() is not None:
+    pgid = _pgid_of(proc)
+    if not _signal_tree(proc, pgid, kill=False):
         return
-    pid = proc.pid
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        else:
-            proc.terminate()
-    except ProcessLookupError:
-        return
-    except Exception:
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-    try:
-        if await _await_exit(proc, graceful_timeout):
+        if await _await_exit(proc, graceful_timeout, pgid):
             return
     except Exception:
         return
+    _signal_tree(proc, pgid, kill=True)
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-        else:
-            proc.kill()
-    except Exception:
-        pass
-    try:
-        await _await_exit(proc, 2.0)
+        await _await_exit(proc, 2.0, pgid)
     except Exception:
         pass
 
@@ -218,15 +288,23 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
-            try:
-                self._proc.wait(timeout=0.1)
-            except Exception:
-                pass
+            dead = self._proc
+            self._proc = None
             # И его читателя: реестр ключуется по id трубы, а запись мёртвого
             # процесса иначе оставалась там навсегда. Сервер, который падает
             # и перезапускается, копил бы их без предела.
-            forget_stdio_reader(getattr(self._proc, "stdout", None))
-            self._proc = None
+            forget_stdio_reader(getattr(dead, "stdout", None))
+            # И его группу: лидер мёртв, а дети его пережили — Chromium
+            # упавшего @playwright/mcp остаётся сиротой, а новый сервер
+            # поднимет второй. Снос тот же, что при закрытии (он же и пожнёт
+            # лидера); дольше мгновения он идёт, только если сироты глухи к
+            # SIGTERM. Loop'а здесь нет — `call` ходит через брошенный поток, —
+            # поэтому свой, как у `close`; `run_coro_blocking` переживёт и
+            # вызов с живого loop.
+            try:
+                run_coro_blocking(_aterminate_process_tree(dead, graceful_timeout=5.0))
+            except Exception:
+                pass
 
         self._proc = _spawn_detached_stdio_process(self._server_cfg)
         self._next_id = 2
