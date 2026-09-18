@@ -334,6 +334,14 @@ class HarborBackend(FsBackend):
         res = await self.aexec(
             detached, cwd=cwd, env=env, timeout=_BACKGROUND_SPAWN_TIMEOUT_SEC,
         )
+        if getattr(res, "timed_out", False):
+            # Не «pid не сообщён»: оболочка не вернулась вовсе, а команда могла и
+            # стартовать. Перезапуск вслепую поднял бы второй экземпляр сервиса.
+            raise RuntimeError(
+                f"background command start timed out after "
+                f"{_BACKGROUND_SPAWN_TIMEOUT_SEC} s: the container shell did not "
+                "return, the command may or may not be running"
+            )
         # Последняя строка: профиль оболочки печатает в stdout раньше нас.
         lines = (getattr(res, "stdout", "") or "").strip().splitlines()
         try:
