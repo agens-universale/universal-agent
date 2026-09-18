@@ -384,6 +384,14 @@ class AgentRunner:
         # нельзя: сразу после закрытия `add_message` вправе завести следующий
         # воркер, и `_accepting` уже его.
         closed = False
+        # Хвост, взятый у исполнителя и ещё не доставленный: его несёт
+        # следующий ход. Исполнитель его уже не вернёт — для него это аргументы
+        # хода, а не очередь. Умрёт ход, который его несёт, — даже в сетапе, до
+        # цикла, — хвост потерян вместе с остальным. Доставлен он, когда этот
+        # ход закончился: тогда место занимает следующий взятый хвост.
+        in_flight: list = []
+        # Чем кончится прогон, если мимо закрытия. Непредвиденное — отказ.
+        ending = "failed"
         with redirect_stdin(self._stdin_queue):
             try:
                 # Сборка executor (incl. MCP-дискавери) — здесь, в worker-потоке,
@@ -396,6 +404,7 @@ class AgentRunner:
                         executor.add_message(m)
                     self._prebuild_messages.clear()
                 if self._stop_requested:
+                    ending = "stopped"
                     return
                 _run_agent(executor, batch, thread_id=thread_id,
                            start_new_thread=start_new_thread, system=system)
@@ -407,6 +416,8 @@ class AgentRunner:
                         except Exception:
                             pass
                     tail = self._close_or_take_tail(executor)
+                    # С этой строки хвост — только здесь.
+                    in_flight = tail
                     if not tail:
                         closed = True
                         break
@@ -419,15 +430,22 @@ class AgentRunner:
                                start_new_thread=False, system=system)
             except Exception as exc:
                 self._emit_error(exc)
+            except asyncio.CancelledError:
+                # Отмена выходит из `asyncio.run` хода и завершает поток, как и
+                # раньше; здесь только помечаем исход для хвоста.
+                ending = "cancelled"
+                raise
             finally:
                 if not closed:
-                    # Мимо закрытия — ошибка или стоп до старта прогона. Хвост
-                    # не доигрываем: реплики упавшего хода UI уже пометил
+                    # Мимо закрытия — ошибка, отмена или стоп до старта прогона.
+                    # Хвост не доигрываем: реплики упавшего хода UI уже пометил
                     # неотправленными (`_mark_pending_failed`).
-                    self._close_or_take_tail(executor, replay=False)
+                    self._close_or_take_tail(executor, ending=ending, lost=in_flight)
                 self._worker_exit()
 
-    def _close_or_take_tail(self, executor, *, replay: bool = True) -> list:
+    def _close_or_take_tail(
+        self, executor, *, ending: str = "", lost: list | tuple = ()
+    ) -> list:
         """Хвост, который надо доиграть, — или закрыть прогон, если доигрывать нечего.
 
         Проверка и закрытие — один шаг под `_lock`, как и решение в
@@ -435,14 +453,35 @@ class AgentRunner:
         очередь, которую уже никто не прочтёт. Остановленный прогон хвост не
         доигрывает (это отменило бы стоп), но и дальше его не отдаёт: иначе
         хвост уехал бы в следующий запрос пользователя.
+
+        ``ending`` — прогон кончился мимо закрытия (``failed``, ``cancelled``,
+        ``stopped``): тогда хвост не доигрывается. ``lost`` — батч хвоста, с
+        которым умер ход; `_take_tail` его уже не вернёт, поэтому в потерю он
+        идёт отсюда.
         """
         with self._lock:
             tail = _take_tail(executor)
-            if replay and tail and not (self._stop_requested or self._marked_stopped):
+            stopped = self._stop_requested or self._marked_stopped
+            if not ending and tail and not stopped:
                 return tail
             self._accepting = False
-        if tail:
-            _log.warning("хвост прогона не доигран (стоп или ошибка): %d сообщ.", len(tail))
+            target = self._last_target
+        dropped = [*lost, *tail]
+        if dropped:
+            # Потеря — часть исхода прогона, но не молчаливая: то же событие,
+            # что у сервера.
+            thread_id, system = target or (None, None)
+            _log.warning(
+                "run_tail_dropped thread_id=%s ending=%s count=%d",
+                thread_id, ending or "stopped", len(dropped),
+                extra={
+                    "event": "run_tail_dropped",
+                    "thread_id": thread_id,
+                    "system": system,
+                    "ending": ending or "stopped",
+                    "count": len(dropped),
+                },
+            )
         return []
 
     def stop(self) -> None:

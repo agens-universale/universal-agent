@@ -225,6 +225,13 @@ class AgentRunRegistry:
                 nonlocal run_ref
                 messages: list = [initial_user_message]
                 run_kwargs: dict = {}
+                # Хвост, взятый у исполнителя и ещё не доставленный: его несёт
+                # следующий ход. Исполнитель его уже не вернёт — для него это
+                # аргументы `arun`, а не очередь. Умрёт ход, который его несёт, —
+                # даже в сетапе, до цикла, — хвост потерян, и считать его надо
+                # здесь. Доставлен он, когда этот ход закончился: тогда место
+                # занимает следующий взятый хвост.
+                in_flight: list = []
                 # Хвост, который доставить уже некуда, и чем кончился прогон.
                 dropped: list = []
                 ending = ""
@@ -246,6 +253,8 @@ class AgentRunRegistry:
                         # хвост, либо увидит `done` и уйдёт новым прогоном.
                         with self._lock:
                             tail = _take_tail(executor)
+                            # С этой строки хвост — только здесь.
+                            in_flight = tail
                             stopped = run_ref is not None and run_ref.stop_requested
                             replay = bool(tail) and not stopped
                             if not replay:
@@ -275,7 +284,8 @@ class AgentRunRegistry:
                             run_ref.cancelled = True
                             run_ref.last_activity_at = time.time()
                             run_ref.finished_at = time.time()
-                        dropped, ending = _take_tail(executor), "cancelled"
+                        dropped = [*in_flight, *_take_tail(executor)]
+                        ending = "cancelled"
                     raise
                 except BaseException as e:  # noqa: BLE001
                     with self._lock:
@@ -284,7 +294,8 @@ class AgentRunRegistry:
                             run_ref.error = e
                             run_ref.last_activity_at = time.time()
                             run_ref.finished_at = time.time()
-                        dropped, ending = _take_tail(executor), "failed"
+                        dropped = [*in_flight, *_take_tail(executor)]
+                        ending = "failed"
                 finally:
                     with self._lock:
                         current = self._runs.get(key)
@@ -298,6 +309,7 @@ class AgentRunRegistry:
                         # доигрываем: это отменило бы остановку или спрятало
                         # отказ за статусом следующего хода. Потеря таких
                         # сообщений — часть исхода прогона, но не молчаливая.
+                        # В счёт входит и батч хвоста, с которым умер ход.
                         logger.warning(
                             "run_tail_dropped system=%s task_id=%s ending=%s count=%d",
                             system, task_id, ending, len(dropped),

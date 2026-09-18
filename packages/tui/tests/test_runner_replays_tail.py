@@ -11,6 +11,8 @@ TUI держит один исполнитель на сессию. Сообще
 """
 import asyncio
 import importlib
+import logging
+import threading
 import types
 
 import pytest
@@ -130,6 +132,69 @@ def test_stopped_run_neither_replays_its_tail_nor_passes_it_on(env):
     assert env.batches == [["первый"], ["второй"]], (
         f"хвост остановленного хода доигран или уехал дальше: {env.batches}"
     )
+
+
+def _dropped(caplog) -> list:
+    return [
+        (r.ending, r.count)
+        for r in caplog.records
+        if getattr(r, "event", None) == "run_tail_dropped"
+    ]
+
+
+@pytest.mark.parametrize("ending", ["failed", "cancelled"])
+def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
+    env, monkeypatch, caplog, ending
+):
+    """Хвост, отданный повторному ходу, не исчезает без следа, если ход умер в сетапе.
+
+    Для исполнителя батч хвоста — аргументы хода, а не очередь: снять хвост
+    заново после падения значило получить пустоту. На экране реплика уже
+    висела отправленной, так что её потеря обязана остаться в логе — с
+    исходом и числом.
+
+    Умирает здесь второй хвостовой ход, на чтении треда. Первый хвост
+    доставлен и в потерю не входит.
+    """
+    ae = importlib.import_module("gc_core.agent_executor")
+    real_session = ae.ThreadSession
+    reads: list = []
+
+    async def _read_thread(**kw):
+        reads.append(kw["thread_id"])
+        if len(reads) == 3:
+            if ending == "failed":
+                raise OSError("тред не читается")
+            raise asyncio.CancelledError()
+        return await real_session.afrom_config(**kw)
+
+    monkeypatch.setattr(
+        ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
+    )
+    # Отмена выходит из `asyncio.run` рабочего потока и завершает поток, как и
+    # до правки: раннер её не глушит. Перехватываем, чтобы отличить от
+    # постороннего исключения.
+    thread_errors: list = []
+    monkeypatch.setattr(
+        threading, "excepthook", lambda args: thread_errors.append(args.exc_type)
+    )
+    runner = AgentRunner(executor=env.executor)
+    env.teardown_steps += [
+        lambda: runner.add_message(_user("хвост-1")),
+        lambda: runner.add_message(_user("хвост-2")),
+    ]
+
+    with caplog.at_level(logging.WARNING):
+        assert runner.start(query="первый", thread_id="t", start_new_thread=True)
+        _finish(runner)
+
+    assert env.batches == [["первый"], ["хвост-1"]], (
+        f"ход с вторым хвостом дошёл до цикла — тест ничего не проверил: {env.batches}"
+    )
+    assert _dropped(caplog) == [(ending, 1)], (
+        f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
+    )
+    assert thread_errors == ([asyncio.CancelledError] if ending == "cancelled" else [])
 
 
 def test_message_during_compaction_does_not_start_a_parallel_run():

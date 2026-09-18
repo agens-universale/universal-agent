@@ -11,6 +11,7 @@
 ровно в окне сноса).
 """
 import asyncio
+import contextlib
 import importlib
 import logging
 import types
@@ -173,3 +174,69 @@ async def test_stopped_or_failed_run_does_not_replay_its_tail(env, caplog, endin
     assert env.batches == [["первый"]], f"хвост доигран после {ending}: {env.batches}"
     assert "run_tail_dropped" in caplog.text, "сообщение, принятое как queued, исчезло молча"
     assert (run.error is not None) is (ending == "failure")
+
+
+def _dropped(caplog) -> list:
+    return [
+        (r.ending, r.count)
+        for r in caplog.records
+        if getattr(r, "event", None) == "run_tail_dropped"
+    ]
+
+
+@pytest.mark.parametrize("ending", ["failed", "cancelled"])
+async def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
+    env, monkeypatch, caplog, ending
+):
+    """Хвост, отданный повторному ходу, не исчезает без следа, если ход умер в сетапе.
+
+    Для исполнителя батч хвоста — аргументы `arun`, а не очередь: снять хвост
+    заново после падения значило получить пустоту. Клиенту на эти сообщения
+    уже ответили `queued`, так что потеря обязана остаться в логе — с исходом
+    и числом, как у хвоста остановленного прогона.
+
+    Умирает здесь второй хвостовой ход, на чтении треда: падает или висит,
+    пока прогон не снимут. Первый хвост доставлен и в потерю не входит.
+    """
+    ae = importlib.import_module("gc_core.agent_executor")
+    real_session = ae.ThreadSession
+    reads: list = []
+    in_setup = asyncio.Event()
+
+    async def _read_thread(**kw):
+        reads.append(kw["thread_id"])
+        if len(reads) == 3:
+            if ending == "failed":
+                raise OSError("тред не читается")
+            in_setup.set()
+            await asyncio.Event().wait()
+        return await real_session.afrom_config(**kw)
+
+    monkeypatch.setattr(
+        ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
+    )
+
+    def _message(text: str):
+        async def _step():
+            env.registry.add_user_message(
+                system="s", task_id="t", make_message=_msg, content=text
+            )
+
+        return _step
+
+    env.teardown_steps += [_message("хвост-1"), _message("хвост-2")]
+    with caplog.at_level(logging.WARNING):
+        run = await _start(env)
+        if ending == "cancelled":
+            await _within(in_setup.wait())
+            run.thread.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _within(run.thread)
+
+    assert env.batches == [["первый"], ["хвост-1"]], (
+        f"ход с вторым хвостом дошёл до цикла — тест ничего не проверил: {env.batches}"
+    )
+    assert _dropped(caplog) == [(ending, 1)], (
+        f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
+    )
+    assert run.cancelled is (ending == "cancelled")
