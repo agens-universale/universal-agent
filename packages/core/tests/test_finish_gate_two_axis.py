@@ -89,12 +89,35 @@ def _stub_tools_modules() -> None:
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
+    return tools_pkg
+
+
+def _unbind_stub(module, stub, real) -> None:
+    """Вернуть модулю настоящие объекты вместо ВСЕХ, что он взял у заглушки.
+
+    Одного ``aapply_tool`` мало. Если ``processing_responses`` впервые
+    импортируется здесь, его ``from gc_core.tools import (...)`` связывает под
+    заглушкой весь список, и ``is_unknown_tool_output`` навсегда остаётся
+    «всегда False»: у следующих тестов счётчик неизвестных тулов молча стоит на
+    нуле. Так падал ``test_loop_detector``, шедший после этого файла, — и
+    проходил в одиночку.
+
+    Ищем по тождеству с объектами заглушки, а не по списку имён: список
+    разойдётся с импортом ядра на первом же новом имени (прежние приехали с
+    develop — см. выше), а тождество видит и новые имена, и алиасы.
+    """
+    stubbed = [(name, obj) for name, obj in vars(stub).items()
+               if not name.startswith("__")]
+    for name, value in list(vars(module).items()):
+        for stub_name, stub_obj in stubbed:
+            if value is stub_obj:
+                setattr(module, name, getattr(real, stub_name))
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_processing_responses():
     global processing_module, arun_agent, State
-    _stub_tools_modules()
+    stub_tools = _stub_tools_modules()
     from gc_core import processing_responses as pm
     from gc_core.processing_responses import arun_agent as ra
     from gc_core.states import State as St
@@ -107,17 +130,17 @@ def _load_processing_responses():
     # sys.modules, а `processing_responses.aapply_tool` оставался заглушкой на
     # весь остаток прогона — и `test_parity_smoke` падал пятью тестами, проходя
     # при этом в одиночку.
-    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
+    pm.aapply_tool = stub_tools.aapply_tool
     yield
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    # Сохранить «прежнее» значение до yield нельзя: к этому моменту оно уже
-    # заглушка — pm импортирован после подмены. Настоящую функцию берём
+    # Сохранить «прежние» значения до yield нельзя: к этому моменту они уже
+    # заглушка — pm импортирован после подмены. Настоящие объекты берём
     # переимпортом уже очищенного пакета.
     import gc_core.tools as real_tools
 
-    pm.aapply_tool = real_tools.aapply_tool
+    _unbind_stub(pm, stub_tools, real_tools)
 
 
 def _make_state(*, max_steps: int = 5, parent_state_id=None):
