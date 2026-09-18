@@ -450,3 +450,27 @@ def test_no_server_survives_the_agent_after_an_interrupted_teardown(tmp_path, re
     assert len(rows) == 2, f"проверка пустая: агент поднял не два сервера: {rows}"
     survivors = [row for row in rows if not _group_gone_within(row["leader"], 2.0)]
     assert survivors == [], f"после выхода агента живы серверы с потомками: {survivors}"
+
+
+# --- синхронное закрытие из-под живого loop ----------------------------------
+
+
+async def test_a_sync_close_under_a_running_loop_still_kills_the_group(tmp_path, reaper):
+    """``close_everything`` из ``finally`` встраивающего — это живой loop.
+
+    Докстрока реестра так и советует: гасить сессии в своём ``finally``, а там
+    обычно работает loop. Синхронный ``close`` заводил собственный
+    ``asyncio.run``, тот бросал «cannot be called from a running event loop»,
+    общий ``except`` ошибку глушил — сессия снята с реестра, а её процесс жив,
+    и подобрать его больше некому.
+    """
+    registry = ps.PersistentStdioRegistry()
+    session = _started_session(tmp_path, reaper, leader_on_term="exit", child_on_term="exit")
+    proc = session._proc
+    registry._sessions[("embedder", "srv")] = session
+
+    registry.close_everything()                  # синхронно, прямо на loop теста
+
+    assert registry._sessions == {}, "проверка пустая: закрытие сессию не взяло"
+    assert _dead_within(proc, _AT_ONCE_SEC), "сессия снята с реестра, а её процесс жив"
+    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), "потомок сессии пережил закрытие"
