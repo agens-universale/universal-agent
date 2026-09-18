@@ -83,6 +83,9 @@ async def test_background_launch_returns_at_once(tmp_path):
     elapsed = time.monotonic() - started
 
     assert isinstance(res.get("pid"), int) and res["pid"] > 0, res
+    assert "exit_code" in res and res["exit_code"] is None, (
+        f"живая команда должна прийти без кода выхода: {res}"
+    )
     assert elapsed < 0.5, (
         f"фоновый запуск ждал {elapsed:.2f} с — он не должен ждать вовсе "
         f"(потомок живёт {CHILD_TICKS * 0.1:.0f} с)"
@@ -183,6 +186,10 @@ def test_windows_child_gets_its_own_hidden_console():
     flags = _background_detach_kwargs("nt")["creationflags"]
 
     assert flags & 0x08000000, "нет CREATE_NO_WINDOW: потомок умрёт вместе с окном агента"
+    assert flags & 0x00000200, (
+        "нет CREATE_NEW_PROCESS_GROUP: потомок вне своей группы, в отличие от "
+        "process_supervisor и persistent_stdio"
+    )
     assert not flags & 0x00000008, "DETACHED_PROCESS: консольные внуки cmd откроют окна"
     assert not flags & 0x00000010, "CREATE_NEW_CONSOLE: у каждой фоновой команды своё окно"
     assert not flags & 0x01000000, (
@@ -331,6 +338,112 @@ async def test_cancelled_launch_does_not_lose_a_started_process():
     )
 
 
+async def test_a_command_that_fails_at_once_reports_its_exit_code(monkeypatch):
+    """Команда, упавшая сразу, — не «запущена»: бэкенд отдаёт её код выхода.
+
+    Опечатка в имени, несуществующий файл — такая команда умирает за
+    миллисекунды, а ответ говорил `ok: true` и давал pid мёртвого процесса.
+    Модель шла проверять порт сервиса, которого нет.
+    """
+    # Запас на медленную машину: `exit 3` выходит за миллисекунды, но под полным
+    # набором тестов старт процесса бывает долгим.
+    monkeypatch.setattr(local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 1.0, raising=False)
+
+    res = await LocalFsBackend().aspawn_background("exit 3")
+
+    assert res.get("exit_code") == 3, res
+    assert not any(p.pid == res["pid"] for p in local_backend._BACKGROUND_PROCS), (
+        "вышедшая команда осталась в учёте живых"
+    )
+
+
+def _group_gone_within(pgid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+        time.sleep(0.02)
+    return False
+
+
+async def test_a_launch_cancelled_after_the_start_leaves_no_process(monkeypatch):
+    """Отмена, пришедшая уже после запуска, гасит запущенное.
+
+    После `Popen` запуск ещё ждёт мгновенного отказа команды. Отмена на этом
+    ожидании бросила бы живой процесс, чей pid не дошёл до модели, — ни найти,
+    ни остановить. Поэтому такой процесс гасится вместе со своей группой.
+    """
+    monkeypatch.setattr(local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 5.0, raising=False)
+    spawned: list = []
+    real_popen = subprocess.Popen
+
+    def _recording_popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        spawned.append(proc)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", _recording_popen)
+    sleeper = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+
+    task = asyncio.ensure_future(LocalFsBackend().aspawn_background(sleeper))
+    try:
+        while not spawned:                    # процесс уже запущен
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        proc = spawned[0]
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pytest.fail("отмена после запуска оставила процесс жить, а его pid потерян")
+        if os.name == "posix":
+            assert _group_gone_within(proc.pid, 2.0), "потомки команды пережили отмену"
+    finally:
+        for proc in spawned:                  # в любом исходе сирот не оставляем
+            local_backend._BACKGROUND_PROCS.discard(proc)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+
+async def test_the_launch_asks_for_the_null_device_on_every_platform(monkeypatch):
+    """Сторож без платформенной оговорки: все три потока — `DEVNULL`.
+
+    Проверка по самому потомку (выше) на Windows не идёт — `NUL` через
+    `samestat` не сверить, — а вернуть трубу или лог можно и там. Здесь
+    смотрим, ЧТО бэкенд просит у `Popen`, и это одинаково на любой платформе.
+    """
+    seen: dict = {}
+
+    class _Popen:
+        pid = 4242
+
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(subprocess, "Popen", _Popen)
+    before = set(local_backend._BACKGROUND_PROCS)
+    try:
+        await LocalFsBackend().aspawn_background("serve")
+    finally:
+        for proc in set(local_backend._BACKGROUND_PROCS) - before:
+            local_backend._BACKGROUND_PROCS.discard(proc)
+
+    streams = (seen.get("stdin"), seen.get("stdout"), seen.get("stderr"))
+    assert streams == (subprocess.DEVNULL,) * 3, (
+        f"потоки фоновой команды не в нулевом устройстве: {streams}"
+    )
+
+
 async def test_finished_background_children_leave_the_registry(tmp_path):
     """Вышедший фоновый потомок снимается с учёта на следующем запуске.
 
@@ -346,8 +459,14 @@ async def test_finished_background_children_leave_the_registry(tmp_path):
     from gc_core.backends.local import _BACKGROUND_PROCS
 
     backend = LocalFsBackend()
-    await backend.aspawn_background(f"{shlex.quote(sys.executable)} -c pass")
-    short_lived = set(_BACKGROUND_PROCS)
+    # Учёт общий на процесс: берём только свою запись, чужие живут по-своему.
+    before = set(_BACKGROUND_PROCS)
+    # Живёт дольше проверки мгновенного отказа: вышедшую за неё команду запуск
+    # дожимает сам, и в учёт она не попадает вовсе.
+    await backend.aspawn_background(
+        f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(0.5)')}"
+    )
+    short_lived = set(_BACKGROUND_PROCS) - before
     assert short_lived, "запущенный процесс не попал в учёт"
 
     # Ждём выхода команды, НЕ трогая учтённые процессы: `poll()` сам выставляет

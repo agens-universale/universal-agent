@@ -74,9 +74,12 @@ class ExecuteCommand(AbstractSimpleTool):
                             "for it to finish. Use this for anything long-lived: dev servers, "
                             "watchers, `npm run dev`, `uvicorn`. The command keeps running after "
                             "the agent exits. Its output is NOT captured — the reply carries only "
-                            "the pid. Check that it works by probing it (e.g. request its port); "
-                            "if it does not come up, run it in the foreground with a short "
-                            "timeout to see the error. A command started WITHOUT this flag "
+                            "the pid. Check that it works by probing it (e.g. request its port). "
+                            "If it does not come up, find out why with a short diagnostic run "
+                            "in the foreground (small `timeout`): a failing start prints its "
+                            "error and exits, one that keeps running is stopped at the timeout. "
+                            "That run is only for reading the error — the service itself is "
+                            "still started with this flag. A command started WITHOUT this flag "
                             "does not outlive the call — appending `&` to it is not enough, "
                             "because its output pipes close when the call returns."
                         ),
@@ -94,7 +97,7 @@ class ExecuteCommand(AbstractSimpleTool):
         timeout_default = exec_timeout_from_config_dict(config_dict)
         description = ('''Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return the pid at once; for long-lived commands. Output is not captured."}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -105,8 +108,10 @@ Usage:
 - Long-lived commands (dev servers, watchers, `npm run dev`, `uvicorn`) MUST be started
   with `run_in_background: true`. They then keep running after this call returns and
   after the agent itself exits. Their output is NOT captured: check that such a command
-  works by probing it (e.g. request its port), and if it does not come up, run it in the
-  foreground with a short `timeout` to see the error.
+  works by probing it (e.g. request its port). If it does not come up, find out why with
+  a short diagnostic run in the foreground (small `timeout`): a failing start prints its
+  error and exits, one that keeps running is stopped at the timeout. That run is only for
+  reading the error — the service itself is still started in the background.
   Appending `&` to a normal foreground command is NOT enough: such a command is killed
   on timeout and its output pipes close when the call returns.
 - On timeout the command is stopped and its work is lost. If it simply needs longer,
@@ -427,11 +432,38 @@ Important Usage Rules:
         except Exception as exc:
             return self._exec_failed(plan, exc)
 
+        # Команда могла не прожить и мгновения (бэкенд, который это проверяет,
+        # отдаёт её код). Упавшая — не «запущена»: иначе опечатка выглядела бы
+        # сервисом, и модель шла бы проверять его порт.
+        exit_code = started.get("exit_code")
+        if exit_code not in (None, 0):
+            return self._result(
+                ok=False,
+                command=plan["command"],
+                cwd=cwd_used or "",
+                exit_code=exit_code,
+                timed_out=False,
+                stdout="",
+                stderr="",
+                error={
+                    "type": "background_exited",
+                    "message": (
+                        f"The command exited right after start with exit code {exit_code}: "
+                        "nothing is running in the background. Its output is not captured — "
+                        "run it in the foreground with a short `timeout` to see the error."
+                    ),
+                },
+            )
         background = {"pid": started.get("pid"), "output": "not captured"}
+        if exit_code == 0:
+            background["note"] = (
+                "The command exited with code 0 right after start. Unless it detached "
+                "a process of its own (a daemon), nothing of it is running now."
+            )
         return build_exec_envelope(
             tool=ExecuteCommand.registered_tool_name(),
             ok=True,
-            exit_code=None,
+            exit_code=exit_code,
             timed_out=False,
             stdout=as_captured_stream(""),
             stderr=as_captured_stream(""),

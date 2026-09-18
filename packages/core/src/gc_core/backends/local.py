@@ -359,8 +359,20 @@ class LocalFsBackend(FsBackend):
                 cwd=cwd, env=merged_env,
                 **_background_detach_kwargs(),
             )
-        _BACKGROUND_PROCS.add(proc)
-        return {"pid": proc.pid}
+        # Команда, упавшая сразу (опечатка в имени, нет файла), — не «запущена».
+        # Без этой проверки ответ говорил `ok` и давал pid мёртвого процесса, и
+        # модель шла проверять порт сервиса, которого нет.
+        try:
+            await asyncio.sleep(_BACKGROUND_EARLY_EXIT_SEC)
+        except BaseException:
+            # Отмена ПОСЛЕ запуска: pid до вызывающего уже не дойдёт, найти
+            # процесс будет некому — гасим его сами.
+            _kill_background_now(proc)
+            raise
+        exit_code = proc.poll()
+        if exit_code is None:
+            _BACKGROUND_PROCS.add(proc)
+        return {"pid": proc.pid, "exit_code": exit_code}
 
     def default_cwd(self) -> Optional[str]:
         return os.getcwd()
@@ -403,6 +415,28 @@ _KILL_EXIT_GRACE_SEC = 1.0
 #: остаются зомби до конца жизни агента — своя сессия не делает процесс чужим,
 #: он остаётся нашим ПРЯМЫМ потомком. Выметаем на следующем запуске.
 _BACKGROUND_PROCS: set = set()
+
+#: Сколько фоновый запуск ждёт мгновенного отказа команды. Ловит опечатки и
+#: «нет такого файла» — такие команды умирают за миллисекунды; живой сервис это
+#: стоит одну паузу на запуск, а не на каждый ход.
+_BACKGROUND_EARLY_EXIT_SEC = 0.1
+
+
+def _kill_background_now(proc: Any) -> None:
+    """Убить только что запущенный фоновый процесс вместе с его группой.
+
+    Не ждёт: вызывается на отмене, а убитого дожмёт учёт при следующем запуске.
+    На Windows групп в этом смысле нет — гасится сам `cmd`, его дети могут
+    уцелеть; окно здесь — доли секунды после запуска.
+    """
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)        # своя сессия: pgid == pid
+        else:
+            proc.kill()
+    except OSError:
+        pass
+    _BACKGROUND_PROCS.add(proc)
 
 
 def _reap_finished_background() -> None:
