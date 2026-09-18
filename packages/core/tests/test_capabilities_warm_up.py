@@ -78,16 +78,21 @@ async def test_awarm_capabilities_does_not_block_the_loop():
                 gaps.append(now - prev)
                 prev = now
 
-        beat = asyncio.create_task(pulse())
-        while not gaps:
-            await asyncio.sleep(0.005)
-        gaps.clear()
+        from gc_testkit import quiet_gc_for_loop_timing
 
-        started = time.perf_counter()
-        await backend.awarm_capabilities()
-        elapsed = time.perf_counter() - started
-        stop.set()
-        await beat
+        # Сборщик глушится на окне замера: пауза поколения 2 на куче полного
+        # набора (180–220 мс) больше порога, и тест судил бы её, а не прогрев.
+        with quiet_gc_for_loop_timing():
+            beat = asyncio.create_task(pulse())
+            while not gaps:
+                await asyncio.sleep(0.005)
+            gaps.clear()
+
+            started = time.perf_counter()
+            await backend.awarm_capabilities()
+            elapsed = time.perf_counter() - started
+            stop.set()
+            await beat
 
         assert backend._has_grep_cache is not None
         assert elapsed >= probe_delay, (

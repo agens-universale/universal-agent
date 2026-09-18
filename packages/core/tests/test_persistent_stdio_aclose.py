@@ -102,10 +102,15 @@ async def test_loop_stays_free_while_waiting_for_a_stubborn_process(stubborn):
             gaps.append(now - prev)
             prev = now
 
-    beat = asyncio.create_task(pulse())
-    await ps._aterminate_process_tree(stubborn, graceful_timeout=0.5)
-    stop.set()
-    await beat
+    from gc_testkit import quiet_gc_for_loop_timing
+
+    # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
+    # (180–220 мс) больше порога, и тест судил бы её, а не ожидание процесса.
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(pulse())
+        await ps._aterminate_process_tree(stubborn, graceful_timeout=0.5)
+        stop.set()
+        await beat
 
     assert len(gaps) > 20, f"пульс почти не тикал: {len(gaps)}"
     assert max(gaps) < 0.15, (

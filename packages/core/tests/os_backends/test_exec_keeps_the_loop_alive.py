@@ -66,16 +66,21 @@ async def _worst_loop_gap(stop: asyncio.Event) -> float:
 
 async def test_a_fast_writer_does_not_freeze_the_loop():
     """Соседняя корутина продолжает получать управление во время залива."""
+    from gc_testkit import quiet_gc_for_loop_timing
+
     backend = LocalFsBackend()
     stop = asyncio.Event()
-    watcher = asyncio.ensure_future(_worst_loop_gap(stop))
-    try:
-        res = await backend.aexec_argv(_flood_argv(_FLOOD_MIB), timeout=60)
-        assert res.return_code == 0, res.return_code
-    finally:
-        stop.set()
+    # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
+    # (180–220 мс) кратно больше потолка, и тест судил бы её, а не дренаж.
+    with quiet_gc_for_loop_timing():
+        watcher = asyncio.ensure_future(_worst_loop_gap(stop))
+        try:
+            res = await backend.aexec_argv(_flood_argv(_FLOOD_MIB), timeout=60)
+            assert res.return_code == 0, res.return_code
+        finally:
+            stop.set()
 
-    worst = await watcher
+        worst = await watcher
     assert worst < _MAX_GAP_SEC, (
         f"loop стоял {worst:.2f} с при потолке {_MAX_GAP_SEC} с — пока команда "
         f"писала, соседние задачи управления не получали"

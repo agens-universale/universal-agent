@@ -76,16 +76,21 @@ async def test_loop_keeps_ticking_while_the_human_thinks():
             gaps.append(now - prev)
             prev = now
 
-    beat = asyncio.create_task(_pulse())
-    asker = asyncio.create_task(runner._read_stdin_answer("как дела?"))
+    from gc_testkit import quiet_gc_for_loop_timing
 
-    await asyncio.sleep(0.3)                   # человек «думает»
-    runner._stdin_queue.put("хорошо\n")
-    runner._stdin_queue.put("\n")
+    # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
+    # (180–220 мс) больше порога, и тест судил бы её, а не порт.
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(_pulse())
+        asker = asyncio.create_task(runner._read_stdin_answer("как дела?"))
 
-    answer = await asyncio.wait_for(asker, 5)
-    stop.set()
-    await beat
+        await asyncio.sleep(0.3)                   # человек «думает»
+        runner._stdin_queue.put("хорошо\n")
+        runner._stdin_queue.put("\n")
+
+        answer = await asyncio.wait_for(asker, 5)
+        stop.set()
+        await beat
 
     assert answer == "хорошо", answer
     assert len(gaps) > 10, f"пульс почти не тикал: {len(gaps)}"
