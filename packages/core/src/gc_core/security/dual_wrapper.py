@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
-import signal
 from typing import Any, Callable, Generator
 import threading
 
@@ -173,13 +172,19 @@ async def _await_off_loop(request: "OffLoop", *, on_abandoned: Callable[[], None
     Перехват НАРОЧНО узкий и временный: он живёт только пока ждут человека и
     только если вызывающий сам об этом попросил. Ставить его на всякое
     ожидание нельзя — тогда Ctrl+C во время работы гарда перестал бы прерывать
-    прогон, а это единственный способ остановить агента.
+    прогон, а это единственный способ остановить агента. Обработчик общий на
+    процесс (`intercept_sigint`): ожидания на одном loop выходят не в порядке
+    входа, и своё «запомнить и вернуть» у каждого затирало обработчик соседа.
 
-    Поток, сидящий в чтении, при перехвате бросается: у ``run_abandonable_in``
+    Поток, сидящий в ожидании, при перехвате бросается: у ``run_abandonable_in``
     это штатное состояние (демон-поток, доставка в закрытый future молча
-    отбрасывается). Красть строку у следующего читателя ему больше нечем —
-    stdin в CLI читают только во время вопроса.
+    отбрасывается). Но брошенное подтверждение живо и могло бы доиграть до
+    конца по строке, набранной уже для следующего вопроса. Поэтому оно само
+    спрашивает `current_call_abandoned`: читатель `y/n` уходит, не трогая
+    чужую строку, а `request_confirm` не пишет решение брошенного вопроса.
     """
+    from gc_core.utils.sigint_waits import intercept_sigint
+
     coro = _off_loop(request.fn, *request.args, on_abandoned=on_abandoned)
     if request.on_interrupt is _NO_INTERRUPT:
         return await coro
@@ -188,34 +193,21 @@ async def _await_off_loop(request: "OffLoop", *, on_abandoned: Callable[[], None
     task = asyncio.ensure_future(coro)
     interrupted = loop.create_future()
 
-    def _on_sigint(_signum: Any, _frame: Any) -> None:
+    def _on_sigint() -> None:
         loop.call_soon_threadsafe(
             lambda: interrupted.done() or interrupted.set_result(True)
         )
 
-    previous: Any = None
-    armed = False
-    if threading.current_thread() is threading.main_thread():
-        try:
-            previous = signal.getsignal(signal.SIGINT)
-            signal.signal(signal.SIGINT, _on_sigint)
-            armed = True
-        except (ValueError, OSError, AttributeError):
-            armed = False
     try:
-        done, _ = await asyncio.wait(
-            {task, interrupted}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if task in done:
-            return task.result()
-        task.cancel()                      # человека ждать больше не нужно
-        return request.on_interrupt
+        with intercept_sigint(_on_sigint):
+            done, _ = await asyncio.wait(
+                {task, interrupted}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in done:
+                return task.result()
+            task.cancel()                  # человека ждать больше не нужно
+            return request.on_interrupt
     finally:
-        if armed:
-            try:
-                signal.signal(signal.SIGINT, previous)
-            except (ValueError, OSError):
-                pass
         if not interrupted.done():
             interrupted.cancel()
 

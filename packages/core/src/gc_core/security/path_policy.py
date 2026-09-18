@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
+import time
 from typing import Any, Callable, Iterable
 
 from gc_core.trace_id import trace_id_from_config
@@ -476,12 +477,48 @@ def prompt_user_confirmation_choice(
     try:
         print("\n".join(lines), file=sys.stderr, end="")
         sys.stderr.flush()
-        answer = input().strip()
+        answer = _read_confirmation_line()
     except EOFError:
         return CONFIRM_DENY_REMEMBER
     except KeyboardInterrupt:
         return CONFIRM_DENY_ONCE
+    if answer is None:
+        return CONFIRM_DENY_ONCE
     return normalize_confirm_key(answer)
+
+
+#: Шаг опроса stdin в ответе на `y/n`. Идёт в рабочем потоке гарда, loop не
+#: держит; 50 мс человеку незаметны.
+_CONFIRM_POLL_SEC = 0.05
+
+
+def _read_confirmation_line() -> str | None:
+    """Строка ответа на `y/n`; ``None`` — вопрос бросили, отвечать больше некому.
+
+    Читаем тем же читателем, что и вопросы агента (`gc_core.utils.stdin_lines`),
+    а не `input()`. Подтверждение ждёт в рабочем потоке гарда, и после Ctrl+C
+    его бросают: `input()` остался бы в `read()` и забрал строку, набранную уже
+    для следующего вопроса. Опрос же видит, что вызов брошен, и уходит, не
+    трогая чужую строку.
+
+    Windows и stdin без `fileno()` — прежнее `input()`: `select` там неприменим.
+    Брошенный вызов на этом пути строку унести ещё может, но решения по ней не
+    запишет — это отсекает `request_confirm`.
+    """
+    # Lazy: security → tools/utils на module load ломает import graph.
+    from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
+    from gc_core.utils.stdin_lines import pollable_stdin_fd, take_line
+
+    fd = pollable_stdin_fd()
+    if fd is None:
+        return input().strip()
+    while True:
+        if current_call_abandoned():
+            return None
+        line = take_line(fd, give_up=current_call_abandoned)
+        if line is not None:
+            return line.strip()
+        time.sleep(_CONFIRM_POLL_SEC)
 
 
 def prompt_user_confirmation(

@@ -55,22 +55,55 @@ class _PipeStdin:
         os.close(self.write_fd)
 
 
+class _PtyStdin:
+    """stdin — ведомая сторона pty: терминал, как у человека за клавиатурой."""
+
+    def __init__(self):
+        import pty
+
+        self.master, self._slave = pty.openpty()
+
+    def fileno(self) -> int:
+        return self._slave
+
+    def type(self, text: str) -> None:
+        os.write(self.master, text.encode("utf-8"))
+
+    def close(self) -> None:
+        os.close(self.master)
+        os.close(self._slave)
+
+
 def _reader_threads() -> list:
     return [t for t in threading.enumerate() if t.name == READER_THREAD]
 
 
+def _fresh_reader(monkeypatch) -> None:
+    """Буфер общий на процесс — между тестами его надо сбрасывать, иначе
+    недочитанный хвост одного теста утечёт в следующий."""
+    import gc_core.utils.stdin_lines as reader
+
+    reader._PENDING.clear()
+    monkeypatch.setattr(reader, "_PARTIAL", "")
+    monkeypatch.setattr(reader, "_EOF", False)
+
+
 @pytest.fixture
 def pipe_stdin(monkeypatch):
-    import gc_cli.ask_human_port as port_mod
-
-    # Буфер общий на процесс — между тестами его надо сбрасывать, иначе
-    # недочитанный хвост одного теста утечёт в следующий.
-    port_mod._PENDING.clear()
-    monkeypatch.setattr(port_mod, "_PARTIAL", "")
-    monkeypatch.setattr(port_mod, "_EOF", False)
+    _fresh_reader(monkeypatch)
     fake = _PipeStdin()
     monkeypatch.setattr(sys, "stdin", fake)
     yield fake
+
+
+@pytest.fixture
+def pty_stdin(monkeypatch):
+    pytest.importorskip("pty")
+    _fresh_reader(monkeypatch)
+    fake = _PtyStdin()
+    monkeypatch.setattr(sys, "stdin", fake)
+    yield fake
+    fake.close()
 
 
 @pytest.mark.asyncio
@@ -137,6 +170,57 @@ async def test_closed_stdin_ends_the_answer(pipe_stdin):
     pipe_stdin.close_writer()
 
     assert await asyncio.wait_for(port("вопрос?"), 5) == ""
+
+
+@pytest.mark.asyncio
+async def test_a_last_line_without_newline_is_still_the_answer(pipe_stdin):
+    """`printf 'abc'` — ответ «abc»: хвост без перевода строки не теряется."""
+    port = make_cli_ask_human_port()
+    pipe_stdin.send("abc")
+    pipe_stdin.close_writer()
+
+    assert await asyncio.wait_for(port("вопрос?"), 5) == "abc"
+
+
+@pytest.mark.asyncio
+async def test_ctrl_d_ends_only_the_current_answer(pty_stdin):
+    """Ctrl+D закончил один ответ — следующий вопрос снова ждёт человека.
+
+    Терминальный конец ввода разовый: после Ctrl+D печатать можно дальше. А Ctrl+D
+    — документированный способ закончить ответ. Липкий признак превращал весь
+    дальнейший диалог в мгновенные пустые ответы. Проверяется на pty: у трубы
+    конец ввода навсегда, и разовость на ней не увидеть.
+    """
+    port = make_cli_ask_human_port()
+    pty_stdin.type("l1\n\x04")                 # строка и Ctrl+D в начале следующей
+    assert await asyncio.wait_for(port("первый?"), 5) == "l1"
+
+    second = asyncio.ensure_future(port("второй?"))
+    await asyncio.sleep(0.3)
+    assert not second.done(), f"второй вопрос ответил сам: {second.result()!r}"
+    pty_stdin.type("ответ-2\n\n")
+    assert await asyncio.wait_for(second, 5) == "ответ-2"
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_path_leaves_ctrl_c_alone(monkeypatch):
+    """Там, где читает поток, перехвата Ctrl+C нет.
+
+    Поток-читатель прервать нечем: перехвати мы Ctrl+C, он остался бы в `read()`
+    и забрал строку у следующего вопроса. Без перехвата Ctrl+C снимает прогон —
+    так было до перехвата, и это честнее, чем кража ответа.
+    """
+    monkeypatch.setattr(sys, "stdin", _BlockingStdin())
+    before = signal.getsignal(signal.SIGINT)
+
+    task = asyncio.create_task(make_cli_ask_human_port()("вопрос?"))
+    await asyncio.sleep(0.2)
+    during = signal.getsignal(signal.SIGINT)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert during is before, "на запасном пути поставлен перехват Ctrl+C"
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import threading
 
@@ -34,6 +35,24 @@ _slots = threading.BoundedSemaphore(_MAX_WORKERS)
 
 
 logger = logging.getLogger(__name__)
+
+#: Как потоку спросить, не бросили ли вызов, ради которого он работает. Вне
+#: `run_abandonable_in` — «нет».
+_ABANDONED: "contextvars.ContextVar[Callable[[], bool]]" = contextvars.ContextVar(
+    "gc_call_abandoned", default=lambda: False
+)
+
+
+def current_call_abandoned() -> bool:
+    """Брошен ли вызов, в потоке которого исполняется код.
+
+    Для большинства работ «бросили» значит лишь «результат никому не нужен». Но
+    у ожидания человека после отказа ждать остаются ПОСЛЕДСТВИЯ: брошенное по
+    Ctrl+C подтверждение дождалось бы строки, набранной уже для следующего
+    вопроса, и записало бы решение в память разрешений по чужому нажатию. Тело
+    спрашивает этот признак, чтобы не доигрывать то, что вызывающий бросил.
+    """
+    return _ABANDONED.get()()
 
 
 async def run_abandonable_in(
@@ -84,10 +103,16 @@ async def run_abandonable_in(
         """Ждать результат уже некому: вызывающего сняли или loop закрыт."""
         return future.cancelled() or loop.is_closed()
 
+    def _marked() -> Any:
+        # Признак ставится ВНУТРИ снимка контекста: он виден только этому
+        # вызову и его потоку, а не соседним вызовам с тем же снимком.
+        _ABANDONED.set(_abandoned)
+        return fn(*args, **kwargs)
+
     def _target() -> None:
         with slots:
             try:
-                result = ctx_snapshot.run(fn, *args, **kwargs)
+                result = ctx_snapshot.run(_marked)
             except BaseException as exc:  # noqa: BLE001 — переносим как есть
                 _deliver(future.set_exception, exc)
             else:
@@ -117,4 +142,4 @@ async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) 
     return await run_abandonable_in(_slots, fn, *args, **kwargs)
 
 
-__all__ = ["run_abandonable", "run_abandonable_in"]
+__all__ = ["current_call_abandoned", "run_abandonable", "run_abandonable_in"]

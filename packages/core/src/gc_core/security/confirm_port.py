@@ -158,12 +158,22 @@ def request_confirm(
     *, title: str, question: str, fields: list[tuple[str, object]], ctx: Any,
     decision_key: str | None = None,
 ) -> bool:
+    # Lazy: security → tools на module load ломает import graph.
+    from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
+
     store = getattr(ctx, "permission_store", None)
     if store is not None and decision_key is not None:
         cached = store.decision_for(decision_key)
         if cached is not None:
             return cached
+    if current_call_abandoned():
+        return False
     choice = _ask_choice(ctx, title=title, question=question, fields=fields)
+    if current_call_abandoned():
+        # Вопрос бросили (Ctrl+C), пока человек думал: ответ, если он и пришёл,
+        # набран уже для ДРУГОГО вопроса. Записать его — значит выдать
+        # разрешение на путь, в котором человек только что отказал.
+        return False
     allow = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
     if store is not None and decision_key is not None:
         # 2×2 record matrix: (allow, session) per choice.
