@@ -49,6 +49,13 @@ agent.send({"role": "user", "content": "стоп, сначала линтер"})
 agent.stop()                                                      # кооперативная остановка
 ```
 
+Сообщение, отданное `send`, пока ход уже закрывается (сохраняет тред, закрывает
+MCP-сессии), в этот ход не попадает: цикл свою очередь уже прочитал. Такой хвост
+`run` доигрывает сам — отдельным ходом по тому же треду, пока хвост не
+опустеет, — и возвращает ответ **последнего** хода; ответы прежних лежат в
+истории треда. После `stop()`, отказа или отмены хвост не доигрывается, а
+пишется в лог событием `run_tail_dropped` (`ending`, `count`).
+
 Полный рабочий пример — [`packages/core/examples/async_embed.py`](../packages/core/examples/async_embed.py).
 
 ## Без фасада
@@ -62,6 +69,12 @@ from gc_core.run_context import acreate_run_context
 ctx = await acreate_run_context(config, on_stream_delta=my_sink)
 answer = await AgentExecutor(ctx).arun(["привет"], thread_id="t1", system="sdk")
 ```
+
+Хвост здесь — забота вызывающего: после `arun` заберите его
+`take_undelivered_messages()` и, если он не пуст, доиграйте ещё одним `arun` того
+же исполнителя (аргументы соберёт `undelivered_as_arun_args`, плюс
+`start_new_thread=False`). Иначе отданное на излёте хода уйдёт следующему вызову
+позади его запроса — или не дойдёт вовсе.
 
 ## Как называются точки входа
 
