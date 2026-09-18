@@ -48,6 +48,10 @@ from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
 #: угодно; сам ответ приходит за миллисекунды.
 _CWD_PRIME_TIMEOUT_SEC = 20
 
+#: Потолок на запуск фоновой команды. Сам запуск — это `exec`, который только
+#: отцепляет команду и печатает pid, ответ приходит за доли секунды.
+_BACKGROUND_SPAWN_TIMEOUT_SEC = 30
+
 _BASHRC_EXEC_INIT = """\
 PS1=${PS1-dummy}
 . /etc/profile >/dev/null 2>&1 || true
@@ -119,6 +123,8 @@ class HarborBackend(FsBackend):
     # владельца и без потока.
     # Дефолт берётся из agent.exec_timeout_sec (harbor bench_defaults → 600).
     default_exec_timeout = None
+    #: Фон умеем: команда отцепляется в самом контейнере (см. `aspawn_background`).
+    supports_background = True
 
     def __init__(
         self,
@@ -299,6 +305,45 @@ class HarborBackend(FsBackend):
             capture_max_chars=capture_max_chars,
             exec_init=self.exec_init,
         )
+
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
+                                env: Optional[dict] = None) -> dict:
+        """Запустить команду в контейнере фоном и отдать её pid.
+
+        Пока фона у Harbor не было, промпт велел модели поднимать сервисы через
+        `run_in_background`, а тул отказывал; `&` в обычной команде не спасал —
+        трубы вызова закрывались вместе с ним. Здесь команда отцепляется в самом
+        контейнере: `setsid` уводит её из сессии exec, `nohup` снимает SIGHUP,
+        а все три потока смотрят в /dev/null — ни одной трубы к окружению,
+        которое держит exec. Вывод не сохраняется, как и у локального бэкенда.
+
+        Канал модельный (`aexec`): инициализация окружения (bashrc), `env` и
+        `cwd` те же, что у переднего плана, и внутренний `bash -c` их
+        наследует. В неинтерактивном bash фоновое задание не лидер группы,
+        поэтому `setsid` не форкается, и `$!` — pid самой команды после цепочки
+        exec'ов setsid → nohup → bash. Где `setsid` нет, остаётся `nohup`:
+        exec без терминала SIGHUP при выходе не рассылает.
+        """
+        quoted = shlex.quote(command)
+        detached = (
+            "if command -v setsid >/dev/null 2>&1; then "
+            f"setsid nohup bash -c {quoted} </dev/null >/dev/null 2>&1 & "
+            f"else nohup bash -c {quoted} </dev/null >/dev/null 2>&1 & fi; "
+            "echo $!"
+        )
+        res = await self.aexec(
+            detached, cwd=cwd, env=env, timeout=_BACKGROUND_SPAWN_TIMEOUT_SEC,
+        )
+        # Последняя строка: профиль оболочки печатает в stdout раньше нас.
+        lines = (getattr(res, "stdout", "") or "").strip().splitlines()
+        try:
+            return {"pid": int(lines[-1])}
+        except (IndexError, ValueError):
+            raise RuntimeError(
+                "background command did not report its pid: "
+                f"exit={getattr(res, 'return_code', None)} "
+                f"stderr={(getattr(res, 'stderr', '') or '').strip()[:200]!r}"
+            ) from None
 
     async def aexec_raw(
         self,

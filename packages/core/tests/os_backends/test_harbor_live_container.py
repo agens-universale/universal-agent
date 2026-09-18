@@ -146,6 +146,50 @@ async def test_read_and_write_go_through_the_container(backend):
     assert await backend.is_file("/app/written.txt") is True
 
 
+async def _state(backend, pid: int) -> str:
+    """Состояние процесса по `/proc`, а не по `kill -0`: тот считает живым зомби."""
+    res = await backend.aexec_raw(f"cut -d' ' -f3 /proc/{pid}/stat 2>/dev/null || echo gone")
+    return res.stdout.strip()
+
+
+async def test_a_background_command_outlives_its_exec_call(backend):
+    """Фон в контейнере переживает свой exec, а pid в ответе — сама команда.
+
+    Пока у Harbor фона не было, промпт велел модели запускать сервисы через
+    `run_in_background`, а тул отказывал; `&` в обычной команде не спасал —
+    трубы вызова закрывались вместе с ним.
+    """
+    started = await backend.aspawn_background("sleep 30")
+    pid = started["pid"]
+
+    assert await _state(backend, pid) in {"S", "R"}, "фоновый процесс не пережил свой exec"
+    # Поле 6 в /proc/<pid>/stat — сессия. Своя сессия (sid == pid) — это `setsid`:
+    # сигналы и конец exec-сессии фона не касаются.
+    sid = await backend.aexec_raw(f"cut -d' ' -f6 /proc/{pid}/stat")
+    assert sid.stdout.strip() == str(pid), f"фон остался в сессии exec: sid={sid.stdout!r}"
+    cmdline = await backend.aexec_raw(f"tr '\\0' ' ' < /proc/{pid}/cmdline")
+    assert "sleep 30" in cmdline.stdout, f"pid в ответе — не сама команда: {cmdline.stdout!r}"
+    streams = await backend.aexec_raw(f"readlink /proc/{pid}/fd/0 /proc/{pid}/fd/1 /proc/{pid}/fd/2")
+    assert streams.stdout.split() == ["/dev/null"] * 3, (
+        f"потоки фона смотрят не в /dev/null: {streams.stdout!r}"
+    )
+
+
+async def test_a_background_command_gets_the_same_shell_as_the_foreground(backend):
+    """Профиль оболочки, переменные и рабочий каталог — как у переднего плана."""
+    await backend.aspawn_background(
+        "echo \"$GC_LIVE|$GC_BG|$(pwd)\" > /app/bg.txt",
+        cwd="/tmp", env={"GC_BG": "from-env"},
+    )
+
+    for _ in range(50):
+        got = await backend.aexec_raw("cat /app/bg.txt 2>/dev/null")
+        if got.stdout.strip():
+            break
+        await asyncio.sleep(0.1)
+    assert got.stdout.strip() == f"{BASHRC_MARK}|from-env|/tmp", got.stdout
+
+
 async def test_model_channel_reads_bashrc_and_raw_channel_does_not(backend):
     """Два канала: модельный `exec` читает профиль, внутренний — нет.
 
