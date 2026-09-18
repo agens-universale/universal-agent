@@ -360,70 +360,68 @@ async def events_webhook(request: Request):
             "id": generate_message_id_func("m"),
         }
 
-    if agent_run_registry.add_user_message(
-        system=system,
-        task_id=task_id,
-        make_message=_make_user_message,
-        content=message_str,
-    ):
-        if trace_id:
-            # Единственное место в дизайне, где trace может быть легитимно
-            # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
-            # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
-            # потери есть именованное событие, а не молчание.
-            logger.warning(
-                "trace_id_ignored: trace_id=%s system=%s task_id=%s",
-                trace_id,
-                system,
-                task_id,
-                extra={
-                    "event": "trace_id_ignored",
-                    "system": system,
-                    "task_id": task_id,
-                    "trace_id": trace_id,
-                },
-            )
-        return {
-            "status": "queued",
-            "payload": payload,
-            "system": system,
-            "task_id": task_id,
-        }
-
-    # Ключ занимаем ДО первого await: сборка контекста ниже идёт с дискавери
-    # MCP по сети, и без резерва второй вебхук на ту же задачу успевал
-    # проскочить проверку занятости выше.
-    if not agent_run_registry.reserve(system=system, task_id=task_id):
-        agent_run_registry.add_user_message(
+    # Путь проходится заново после каждой чужой сборки контекста: пока она
+    # шла, прогон мог стартовать — тогда сообщение уходит в него, — а мог и не
+    # стартовать, если сборка упала; тогда строим сами. Откладывать сообщение
+    # «до следующего вебхука» нельзя: следующего может не быть вовсе.
+    while True:
+        if agent_run_registry.add_user_message(
             system=system,
             task_id=task_id,
             make_message=_make_user_message,
             content=message_str,
-        )
-        return {
-            "status": "queued",
-            "payload": payload,
-            "system": system,
-            "task_id": task_id,
-        }
+        ):
+            if trace_id:
+                # Единственное место в дизайне, где trace может быть легитимно
+                # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
+                # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
+                # потери есть именованное событие, а не молчание.
+                logger.warning(
+                    "trace_id_ignored: trace_id=%s system=%s task_id=%s",
+                    trace_id,
+                    system,
+                    task_id,
+                    extra={
+                        "event": "trace_id_ignored",
+                        "system": system,
+                        "task_id": task_id,
+                        "trace_id": trace_id,
+                    },
+                )
+            return {
+                "status": "queued",
+                "payload": payload,
+                "system": system,
+                "task_id": task_id,
+            }
 
-    config_dict = dict(BASE_AGENT_CONFIG)
-    if trace_id:
-        # Shallow copy достаточно: значение — скаляр. Мутировать
-        # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
-        config_dict["trace_id"] = trace_id
-    auth_connector = build_auth_connector(config_dict)
-    # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх непустого
-    # реестра моделей — тот же контракт, что CLI --model (agent_overrides перекрывают
-    # config.yml так же, как CLI-аргументы).
-    force_legacy = cli_forces_legacy_model(config_dict)
-    if force_legacy:
-        logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
-    # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
-    # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на всё
-    # это время, а с переездом прогоны стали тасками на общем loop, поэтому
-    # заморозка била разом по всем эндпоинтам и всем идущим прогонам.
+        # Ключ занимаем ДО первого await: сборка контекста ниже идёт с
+        # дискавери MCP по сети, и без брони второй вебхук на ту же задачу
+        # успевал проскочить проверку занятости выше.
+        if agent_run_registry.reserve(system=system, task_id=task_id):
+            break
+        # Контекст этой задачи строит другой вебхук — ждём конца его сборки.
+        await agent_run_registry.await_build(system=system, task_id=task_id)
+
+    # Всё, что может упасть после взятия брони, — внутри `try`: бронь, не
+    # снятая из-за исключения до него, навсегда усыпила бы вебхуки задачи.
     try:
+        config_dict = dict(BASE_AGENT_CONFIG)
+        if trace_id:
+            # Shallow copy достаточно: значение — скаляр. Мутировать
+            # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
+            config_dict["trace_id"] = trace_id
+        auth_connector = build_auth_connector(config_dict)
+        # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх
+        # непустого реестра моделей — тот же контракт, что CLI --model
+        # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
+        force_legacy = cli_forces_legacy_model(config_dict)
+        if force_legacy:
+            logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
+        # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
+        # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на
+        # всё это время, а с переездом прогоны стали тасками на общем loop,
+        # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
         ctx = await acreate_run_context(
             config_dict, auth_connector=auth_connector, force_legacy=force_legacy
         )
@@ -438,25 +436,10 @@ async def events_webhook(request: Request):
             verbose=None,
         )
     finally:
-        # Снять резерв в ЛЮБОМ исходе. Обычно его забирает `astart_if_absent`
-        # вместе с накопленными сообщениями, и тогда здесь пусто; но сборка
-        # контекста может отказать — и без этого ключ навсегда остался бы
-        # «строящимся», а следующие вебхуки получали бы `queued` в пустоту.
-        # Возврат НЕ выбрасываем. На успешном пути тут пусто (всё забрал
-        # `astart_if_absent`), но если сборка контекста упала или её сняли —
-        # здесь лежат сообщения, которым уже ответили `queued`. Молча потерять
-        # их значит соврать клиенту.
-        undelivered = agent_run_registry.release_reservation(
-            system=system, task_id=task_id
-        )
-        if undelivered:
-            agent_run_registry.carry_over(
-                system=system, task_id=task_id, messages=undelivered
-            )
-            logger.warning(
-                "webhook_messages_carried_over system=%s task_id=%s count=%d",
-                system, task_id, len(undelivered),
-            )
+        # Снять бронь в ЛЮБОМ исходе — это и будит ждущих. Прогон стартовал —
+        # они уйдут в него; сборка упала или её сняли — первый из них построит
+        # свой контекст. Без снятия ключ навсегда остался бы «строящимся».
+        agent_run_registry.release_reservation(system=system, task_id=task_id)
 
     return {
         "status": "started",

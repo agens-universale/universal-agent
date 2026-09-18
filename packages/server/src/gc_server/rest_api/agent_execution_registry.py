@@ -52,14 +52,21 @@ class AgentRunRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._runs: dict[str, ActiveRun] = {}
-        #: Задачи, у которых контекст ещё строится: ключ → сообщения, пришедшие
-        #: за это время. Резерв держит ключ занятым с ПЕРВОГО запроса.
-        self._reservations: dict[str, list] = {}
-        #: Сообщения, которым уже ответили `queued`, а прогон так и не начался
-        #: (сборка контекста упала или её сняли). Выбрасывать их нельзя —
-        #: клиенту сказали «принято». Ждут следующего вебхука по ТОЙ ЖЕ задаче:
-        #: это тот же тред, а не чужой контекст.
-        self._carry_over: dict[str, list] = {}
+        #: Задачи, у которых контекст ещё строится: ключ → событие «сборка
+        #: закончилась». Бронь держит ключ занятым с ПЕРВОГО запроса. Сообщений
+        #: она не копит: вебхук, упёршийся в бронь, ждёт событие и проходит
+        #: путь заново (см. `await_build`). Прежняя бронь со списком сообщений
+        #: при отказе сборки откладывала их до следующего вебхука задачи —
+        #: без срока, без потолка и без гарантии, что такой вебхук вообще будет.
+        #:
+        #: `asyncio.Event`, а не общий `Future`: ждущих бывает несколько, и
+        #: отмена одного из них (клиент отвалился, сервер гасят) отменила бы
+        #: общий `Future` и разбудила остальных исключением, а у `Event` каждый
+        #: ждёт на своём. Исход сборки ждущим не нужен — они смотрят реестр
+        #: заново; а `Event.set()` повторяем и не требует забрать результат.
+        #: Создаётся, ждётся и выставляется на loop сервера: все эндпоинты
+        #: асинхронные.
+        self._reservations: dict[str, asyncio.Event] = {}
         self._completed: dict[str, ActiveRun] = {}
         self._completed_ttl_s = 15 * 60
         self._completed_max = 500
@@ -104,33 +111,47 @@ class AgentRunRegistry:
         `started`, а сообщение второго до агента не доходило. Контекст
         проигравшего оставался висеть — с логгером и MCP-сессиями, которые
         некому закрыть.
+
+        Взявший бронь обязан снять её `release_reservation` при любом исходе
+        сборки: этим он будит тех, кто ждёт её в `await_build`.
         """
         key = _make_registry_key(system, task_id)
         with self._lock:
             run = self._runs.get(key)
             if (run is not None and not run.done) or key in self._reservations:
                 return False
-            self._reservations[key] = []
+            self._reservations[key] = asyncio.Event()
             return True
 
-    def release_reservation(self, *, system: str, task_id: str) -> list:
-        """Снять резерв (сборка не удалась) и вернуть накопленные сообщения."""
-        key = _make_registry_key(system, task_id)
-        with self._lock:
-            return self._reservations.pop(key, [])
+    def release_reservation(self, *, system: str, task_id: str) -> None:
+        """Снять бронь и разбудить ждущих — при ЛЮБОМ исходе сборки.
 
-    def carry_over(self, *, system: str, task_id: str, messages: list) -> None:
-        """Отложить недоставленные сообщения до следующего вебхука по задаче.
-
-        Синхронно и без `await` намеренно: единственный вызывающий — `finally`
-        эндпоинта, а он исполняется в том числе под раскруткой `CancelledError`,
-        где любое ожидание было бы съедено вместе с отменой.
+        Снимает только владелец брони, один раз, из `finally` своей сборки:
+        новую бронь по ключу можно взять лишь после этого, так что чужую здесь
+        снять нельзя. Синхронно и без `await` намеренно: `finally` исполняется
+        и под раскруткой `CancelledError`, где ожидание съелось бы вместе с
+        отменой, а ждущие остались бы спать навсегда.
         """
-        if not messages:
-            return
         key = _make_registry_key(system, task_id)
         with self._lock:
-            self._carry_over.setdefault(key, []).extend(messages)
+            build_done = self._reservations.pop(key, None)
+        if build_done is not None:
+            build_done.set()
+
+    async def await_build(self, *, system: str, task_id: str) -> None:
+        """Дождаться конца чужой сборки контекста по задаче — любого исхода.
+
+        После пробуждения вызывающий проходит путь заново: прогон стартовал —
+        его сообщение уходит в прогон (`queued`); сборка упала — вызывающий
+        берёт бронь и строит сам. Ждущие просыпаются в порядке ожидания — в
+        нём же их сообщения и уходят агенту, после стартового сообщения
+        строившего. Брони нет — сборка уже закончилась, ждать нечего.
+        """
+        key = _make_registry_key(system, task_id)
+        with self._lock:
+            build_done = self._reservations.get(key)
+        if build_done is not None:
+            await build_done.wait()
 
     def is_reserved(self, *, system: str, task_id: str) -> bool:
         """Идёт ли сейчас сборка контекста по этой задаче.
@@ -158,28 +179,14 @@ class AgentRunRegistry:
         key = _make_registry_key(system, task_id)
         with self._lock:
             self._cleanup_completed_locked()
-            # Резерв снимаем ВСЕГДА, даже если стартовать не будем: иначе ключ
-            # остался бы «строящимся» навсегда, и следующие запросы получали бы
-            # `queued` в пустоту.
-            # Сначала то, что осталось от прошлой неудавшейся сборки: этим
-            # клиентам ответили «принято» раньше всех, и их сообщения должны
-            # уехать агенту первыми.
-            queued_messages = [
-                *self._carry_over.pop(key, []),
-                *self._reservations.pop(key, []),
-            ]
+            # Бронь здесь не трогаем: её снимает владелец в `finally` сборки,
+            # и ждущие просыпаются уже при зарегистрированном прогоне — их
+            # сообщения уходят в него через `add_user_message`.
             existing = self._runs.get(key)
             if existing is not None and not existing.done:
-                for message in queued_messages:
-                    existing.executor.add_message(message)
                 return existing
 
             executor = executor_factory(ctx)
-            # Сообщения, пришедшие пока строился контекст, отдаём ДО старта
-            # таски: `create_task` только ставит корутину в очередь loop, до
-            # первого шага `arun` управление сюда ещё вернётся.
-            for message in queued_messages:
-                executor.add_message(message)
             started_at = time.time()
             run_ref: ActiveRun | None = None
 
@@ -264,13 +271,10 @@ class AgentRunRegistry:
         with self._lock:
             run = self._runs.get(key)
             if run is None or run.done:
-                reserved = self._reservations.get(key)
-                if reserved is None:
-                    return False
-                # Контекст этой задачи ещё строится: копим здесь, агент получит
-                # сообщение сразу после старта (см. `reserve`).
-                reserved.append(make_message(content))
-                return True
+                # Прогона нет — даже если контекст задачи сейчас строится:
+                # такое сообщение ждёт конца сборки у эндпоинта (`await_build`),
+                # а не копится здесь.
+                return False
             run.last_activity_at = time.time()
 
         run.executor.add_message(make_message(content))
