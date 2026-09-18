@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import threading
@@ -310,6 +311,37 @@ async def get_run_status(system: str, task_id: str):
     }
 
 
+#: Потолок ожидания чужой сборки контекста по умолчанию, секунд.
+_CONTEXT_BUILD_WAIT_DEFAULT_S = 120.0
+
+
+def _context_build_wait_s(raw: Any) -> float:
+    """Потолок ожидания чужой сборки из `server.context_build_wait_seconds`.
+
+    Не задан — 120 с: с запасом на законно медленную сборку (MCP-дискавери
+    идёт по сети), но конечный. Мусор — не число, ноль, отрицательное,
+    бесконечность — не отключает потолок и не роняет старт: дефолт и
+    предупреждение, как у `log_level`. Строку принимаем: из `${ENV:...}`
+    значение приезжает строкой.
+    """
+    if raw is None:
+        return _CONTEXT_BUILD_WAIT_DEFAULT_S
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = float("nan")
+    # `bool` — подкласс `int`: `true` в YAML иначе стал бы потолком в секунду.
+    # NaN отсекается тем же сравнением — с ним оно ложно.
+    if isinstance(raw, bool) or not 0 < value < float("inf"):
+        logger.warning(
+            "server.context_build_wait_seconds=%r — нужно положительное конечное "
+            "число секунд, беру %g",
+            raw, _CONTEXT_BUILD_WAIT_DEFAULT_S,
+        )
+        return _CONTEXT_BUILD_WAIT_DEFAULT_S
+    return value
+
+
 @app.post("/events/webhook")
 async def events_webhook(request: Request):
     try:
@@ -366,6 +398,13 @@ async def events_webhook(request: Request):
     # шла, прогон мог стартовать — тогда сообщение уходит в него, — а мог и не
     # стартовать, если сборка упала; тогда строим сами. Откладывать сообщение
     # «до следующего вебхука» нельзя: следующего может не быть вовсе.
+    #
+    # Потолок — на всё ожидание запроса, а не на каждую чужую сборку: после
+    # отказа одной ключ может занять другой ждущий, и потолки по сборке
+    # складывались бы, а HTTP-запрос висел бы открытым их сумму. Ставится при
+    # первом ожидании: запрос без чужой сборки конфиг и не читает.
+    ceiling: Optional[float] = None
+    deadline = 0.0
     while True:
         if agent_run_registry.add_user_message(
             system=system,
@@ -402,8 +441,39 @@ async def events_webhook(request: Request):
         # успевал проскочить проверку занятости выше.
         if agent_run_registry.reserve(system=system, task_id=task_id):
             break
-        # Контекст этой задачи строит другой вебхук — ждём конца его сборки.
-        await agent_run_registry.await_build(system=system, task_id=task_id)
+        # Контекст этой задачи строит другой вебхук — ждём конца его сборки, но
+        # не дольше потолка. Своего дедлайна у сборки нет, и вводить его не
+        # станем: медленная, но законная сборка не должна падать. Без потолка же
+        # ждущий висел с открытым запросом всё время сборки, а если прогон
+        # короче сборки, одновременные вебхуки строили контекст по очереди —
+        # источник с ретраем по таймауту получал шторм на ту же задачу.
+        # По истечении — честный 503: сообщение не принято, повторять клиенту.
+        if ceiling is None:
+            ceiling = _context_build_wait_s(
+                (SERVER_CONFIG.get("server") or {}).get("context_build_wait_seconds")
+            )
+            deadline = asyncio.get_running_loop().time() + ceiling
+        try:
+            async with asyncio.timeout_at(deadline):
+                await agent_run_registry.await_build(system=system, task_id=task_id)
+        except TimeoutError:
+            logger.warning(
+                "context_build_wait_timeout system=%s task_id=%s ceiling_s=%g",
+                system, task_id, ceiling,
+                extra={
+                    "event": "context_build_wait_timeout",
+                    "system": system,
+                    "task_id": task_id,
+                    "ceiling_s": ceiling,
+                },
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "error",
+                    "payload": "task context is still being built, retry later",
+                },
+            )
 
     # Всё, что может упасть после взятия брони, — внутри `try`: бронь, не
     # снятая из-за исключения до него, навсегда усыпила бы вебхуки задачи.

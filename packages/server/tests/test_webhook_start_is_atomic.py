@@ -16,6 +16,8 @@
 """
 import asyncio
 import json
+import logging
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -262,3 +264,152 @@ async def test_status_during_the_build_is_running_not_the_previous_result(harnes
     )
     assert "result" not in during
     assert after["status"] == "completed"
+
+
+# --- потолок ожидания чужой сборки -----------------------------------------
+
+#: Потолок в тестах. Заметно меньше запаса ожидания ниже, чтобы «ответил по
+#: потолку» не сливалось с «висит, пока не отпустят сборку».
+_CEILING_SEC = 0.3
+
+
+def _set_ceiling(monkeypatch, value) -> None:
+    server_cfg = dict(server.SERVER_CONFIG.get("server") or {})
+    server_cfg["context_build_wait_seconds"] = value
+    monkeypatch.setitem(server.SERVER_CONFIG, "server", server_cfg)
+
+
+async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(
+    harness, monkeypatch
+):
+    """Ждущий чужую сборку отвечает 503 по потолку, а сборка доходит до старта.
+
+    Своего дедлайна у сборки нет, и ждущий ждал её без предела. Пока прогон
+    короче сборки, одновременные вебхуки строят контекст по очереди, и
+    HTTP-запрос каждого открыт всё это время: источник с ретраем по таймауту
+    получал шторм на ту же задачу. Медленная, но законная сборка падать при
+    этом не должна — потолок у ожидания, а не у сборки.
+    """
+    _set_ceiling(monkeypatch, _CEILING_SEC)
+    gate, entered = asyncio.Event(), asyncio.Event()
+    harness.plan[:] = [{"entered": entered, "gate": gate}]
+
+    async with _client() as client:
+        first = asyncio.create_task(_post(client, "первый"))
+        second = None
+        try:
+            await _within(entered.wait())
+            began = time.monotonic()
+            second = asyncio.create_task(_post(client, "второй"))
+            done, _ = await asyncio.wait({second}, timeout=_CEILING_SEC + 2.0)
+            waited = time.monotonic() - began
+            building, _ = harness.registry.get_status_snapshot(
+                system="s", task_id="t"
+            )
+        finally:
+            gate.set()
+            first = await _within(first)
+            if second is not None:
+                second = await _within(second)
+
+    assert second is not None and done, (
+        "ждущий вебхук висит дольше потолка: его HTTP-запрос открыт, пока идёт "
+        "чужая сборка"
+    )
+    assert second.status_code == 503, second.text
+    assert second.json()["detail"]["status"] == "error", second.text
+    assert waited >= _CEILING_SEC, f"503 раньше потолка: через {waited:.2f} с"
+    assert building, "потолок ожидания сломал бронь: сборка ещё идёт, а ключ свободен"
+    assert first.status_code == 200 and first.json()["status"] == "started"
+    assert harness.builds == 1
+    await _settle(harness.registry)
+    assert not harness.registry._reservations, "бронь пережила свою сборку"
+    assert _texts(harness.agents[0].delivered) == ["первый"]
+
+
+async def test_ceiling_covers_the_whole_request_not_each_foreign_build(
+    harness, monkeypatch
+):
+    """Потолок — на всё ожидание запроса, а не на каждую чужую сборку.
+
+    После отказа сборки ключ занимает первый из ждущих, а остальные ждут уже
+    его сборку. С потолком на каждую сборку ожидания складывались бы, и
+    HTTP-запрос висел бы открытым их сумму. Здесь первая сборка падает
+    незадолго до потолка: запрос, которому снова пришлось ждать, обязан
+    ответить по исходному потолку, а не отсчитать его заново.
+    """
+    ceiling = 1.0
+    _set_ceiling(monkeypatch, ceiling)
+    entered1, gate1 = asyncio.Event(), asyncio.Event()
+    entered2, gate2 = asyncio.Event(), asyncio.Event()
+    harness.plan[:] = [
+        {"entered": entered1, "gate": gate1, "fail": True},
+        {"entered": entered2, "gate": gate2},
+    ]
+    arrived = [
+        _watch_arrival(monkeypatch, harness.registry, text)
+        for text in ("второй", "третий")
+    ]
+    answered_at: dict = {}
+
+    async def _timed(client, text):
+        response = await _post(client, text)
+        answered_at[text] = time.monotonic()
+        return text, response
+
+    async with _client() as client:
+        first = asyncio.create_task(_post(client, "первый"))
+        waiters: list = []
+        try:
+            await _within(entered1.wait())
+            waiters = [
+                asyncio.create_task(_timed(client, text))
+                for text in ("второй", "третий")
+            ]
+            await _within(asyncio.gather(*(event.wait() for event in arrived)))
+            began = time.monotonic()
+            await asyncio.sleep(0.8 * ceiling)
+            gate1.set()
+            await _within(entered2.wait())
+            await asyncio.wait(
+                waiters, timeout=ceiling + 1.5, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            gate1.set()
+            gate2.set()
+            first = await _within(first)
+            answers = dict(await _within(asyncio.gather(*waiters)))
+    await _settle(harness.registry)
+
+    assert first.status_code == 500
+    rejected = [text for text, r in answers.items() if r.status_code == 503]
+    assert len(rejected) == 1, {text: r.status_code for text, r in answers.items()}
+    waited = answered_at[rejected[0]] - began
+    assert waited < ceiling + 0.4, (
+        f"503 через {waited:.2f} с при потолке {ceiling} с: потолок отсчитан "
+        f"заново на второй чужой сборке"
+    )
+    (built,) = [r for text, r in answers.items() if text not in rejected]
+    assert built.json()["status"] == "started"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, 120.0),
+        (30, 30.0),
+        (0.5, 0.5),
+        # Из `${ENV:...}` значение приезжает строкой.
+        ("45", 45.0),
+    ],
+)
+def test_ceiling_is_read_from_the_server_config(raw, expected):
+    assert server._context_build_wait_s(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["минута", 0, -5, True, float("inf"), float("nan")])
+def test_broken_ceiling_falls_back_to_the_default_loudly(raw, caplog):
+    """Мусор в ключе не отключает потолок и не роняет старт, но и не молчит."""
+    with caplog.at_level(logging.WARNING, logger=server.__name__):
+        assert server._context_build_wait_s(raw) == 120.0
+    assert "context_build_wait_seconds" in caplog.text
