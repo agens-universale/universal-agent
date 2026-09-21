@@ -699,6 +699,7 @@ async def _arun_bounded_process(
     )
 
     timed_out = False
+    cancelled = False
     try:
         try:
             await _await_process_exit(proc, timeout)
@@ -718,17 +719,29 @@ async def _arun_bounded_process(
         await asyncio.wait({out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC)
     except asyncio.CancelledError:
         # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup).
+        cancelled = True
         await _astop_process(proc)
         raise
     finally:
-        for task in (out_task, err_task):
-            if not task.done():
-                task.cancel()
         # Публикуем захваченное к этому моменту: даже на отмене вызывающий
         # получает то, что команда успела напечатать.
         out_sink.publish()
         err_sink.publish()
-        _close_transport(proc)
+        pending = [t for t in (out_task, err_task) if not t.done()]
+        if cancelled or not pending:
+            for task in pending:
+                task.cancel()
+            _close_transport(proc)
+        else:
+            # Труба ещё открыта — её держит фоновый внук (команда с `&`, чужой
+            # скрипт с `nohup`, самодемонизация). Закрыть её сейчас значит
+            # выдать ему EPIPE на первой же записи: обычную программу это
+            # убивает SIGPIPE, питоновскую заваливает `BrokenPipeError` на
+            # каждой строке лога. Поэтому читаем дальше ФОНОМ и закрываем
+            # транспорт, когда внук закроет свой конец сам. Результат вызова
+            # это не трогает: он собран из снимков выше, а накопители
+            # ограничены — сколько бы внук ни писал, память не растёт.
+            _keep_draining(pending, proc)
 
     return ExecResult(
         return_code=return_code,
@@ -736,6 +749,31 @@ async def _arun_bounded_process(
         stdout_stream=out_sink.stream,
         stderr_stream=err_sink.stream,
     )
+
+
+#: Дренажи, доигрывающие после возврата вызова. Держим ссылки: у asyncio на
+#: задачи ссылки СЛАБЫЕ, и сборщик вправе унести задачу посреди работы.
+#: На выходе `asyncio.run` сам отменит оставшиеся — то есть живут они ровно
+#: столько, сколько живёт агент, как daemon-потоки до переезда на корутины.
+_DRAIN_TASKS: set = set()
+
+
+def _keep_draining(tasks: list, proc) -> None:
+    """Дочитать трубы в фоне и закрыть транспорт, когда придёт EOF.
+
+    EOF наступит, когда последний писатель закроет свой конец: фоновый внук
+    умрёт или завершится сам. До тех пор читаем — иначе закрытая труба выдаёт
+    ему EPIPE на первой записи.
+    """
+    async def _finish() -> None:
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            _close_transport(proc)
+
+    task = asyncio.ensure_future(_finish())
+    _DRAIN_TASKS.add(task)
+    task.add_done_callback(_DRAIN_TASKS.discard)
 
 
 def _close_transport(proc) -> None:
