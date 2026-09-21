@@ -81,9 +81,18 @@ def post(url: str, *, config_proxy: Optional[str] = None, **kwargs):
     им Authorization. Плата за trust_env=False — сессия перестаёт видеть и env-прокси,
     поэтому прокси считаем явно тем же резолвером, что backend: config → env → прямо.
     Loopback исключаем всегда: локальная батарейка живёт на этой же машине.
+
+    После инъекции системного траста просим СВЕЖИЙ клиент: `inject_into_ssl`
+    действует на контексты, созданные после неё, а у общего клиента контекст
+    построен при импорте модуля. Пока повтор шёл общим клиентом, он повторял
+    запрос с теми же корнями certifi и падал так же — то есть повтор, ради
+    которого всё и затевалось, не менял ничего. Через прокси это было незаметно:
+    там под запрос и так поднимается свой транспорт.
     """
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
     proxies = None if is_loopback(url) else resolve_proxies(config_proxy, os.environ, url)
-    return NO_NETRC_SESSION.post(url, proxies=proxies, **kwargs)
+    return NO_NETRC_SESSION.post(
+        url, proxies=proxies, fresh_client=_injected, **kwargs
+    )

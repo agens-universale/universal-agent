@@ -46,6 +46,12 @@ class _CompatClient(httpx.Client):
         proxies = kwargs.pop("proxies", None)
         verify = kwargs.pop("verify", None)
         cert = kwargs.pop("cert", None)
+        # `fresh_client=True` — «не бери общий, подними свой». Нужно ровно там,
+        # где изменился САМ ssl-модуль: `truststore.inject_into_ssl()` влияет
+        # на контексты, созданные после инъекции, а контекст общего клиента
+        # построен при импорте. Повтор общим клиентом шёл бы со старыми
+        # корнями — и падал так же (голос, `with_system_trust_retry`).
+        fresh = bool(kwargs.pop("fresh_client", False))
         # allow_redirects — имя из requests; у httpx оно follow_redirects.
         if "allow_redirects" in kwargs:
             kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
@@ -56,7 +62,9 @@ class _CompatClient(httpx.Client):
         # всегда: общий пул не использовался НИ РАЗУ, и каждый запрос платил
         # своим TLS-рукопожатием. `verify=True` без прокси и клиентского
         # сертификата — это ровно то, с чем создан общий клиент.
-        needs_own = bool(proxies) or cert is not None or verify not in (None, True)
+        needs_own = (
+            fresh or bool(proxies) or cert is not None or verify not in (None, True)
+        )
         if needs_own:
             from gc_core.utils.async_http import build_ssl_context, mounts_from_proxies
 
