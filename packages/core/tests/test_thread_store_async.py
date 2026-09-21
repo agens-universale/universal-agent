@@ -320,3 +320,39 @@ async def test_subagent_trace_reaches_the_async_store(tmp_path):
     record = await apersist_subagent_trace(ctx, kind="call", payload={"name": "fs_read"})
     assert record is not None and record["kind"] == "call"
     assert len(store._inner.read_subagent_trace(SYS, TID)) == 1
+
+
+async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(caplog):
+    """Хранилище без `replace_messages` не теряет трассу субагентов при компакции.
+
+    `replace_messages` в контракт НЕ входит: он объявлен умолчанием базы, а
+    `CONTRACT_METHODS` собираются из абстрактных методов. Хранилище, принятое
+    «по сигнатурам» (законный путь, см. docs/thread-store.md), этого метода не
+    имеет — и компакция шла парой `areset` + `aappend_messages`, где `reset` по
+    контракту сносит тред вместе с трассой. Терялась она молча и каждый раз, а
+    конформанс оставался зелёным.
+    """
+    import logging
+
+    store = RedisLikeStore()
+    assert not hasattr(store, "areplace_messages"), "двойник перестал быть утиным"
+    session = await ThreadSession.afrom_config(
+        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+    )
+    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
+    await store.aappend_subagent_trace(
+        SYS, TID, parent_call_id="c1", child_run_id="r1",
+        kind="call", payload={"task": "проверить"},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await session.aarchive_and_compact_summary_payload(
+            {"summary_message_content": "сводка"}
+        )
+
+    trace = await store.aread_subagent_trace(SYS, TID)
+    assert [r["child_run_id"] for r in trace] == ["r1"], f"трасса потеряна: {trace}"
+    assert [r["payload"] for r in trace] == [{"task": "проверить"}]
+    assert "areplace_messages" in caplog.text, (
+        "потеря штампов трассы прошла молча — хранилищу не сказали, что делать"
+    )

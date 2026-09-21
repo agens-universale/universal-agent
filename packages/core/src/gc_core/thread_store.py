@@ -1,10 +1,13 @@
 import glob
 import json
+import logging
 import os
 import re
 import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
@@ -1074,15 +1077,56 @@ class ThreadSession:
         if callable(replace):
             await replace(self.system_id, self.thread_id, compact_messages)
         else:
-            await self.port.areset(self.system_id, self.thread_id)
-            await self.port.aappend_messages(
-                self.system_id, self.thread_id, compact_messages
-            )
+            await self._areplace_keeping_trace(compact_messages)
         return {
             "archive_suffix": _utc_now_suffix(),
             "archive_data_path": None,
             "archive_meta_path": None,
         }
+
+    async def _areplace_keeping_trace(
+        self, compact_messages: List[Dict[str, Any]]
+    ) -> None:
+        """Пара ``areset`` + ``aappend_messages`` для хранилища без
+        ``areplace_messages`` — но с трассой субагентов, спасённой вокруг сброса.
+
+        ``replace_messages`` НЕ входит в контракт: он объявлен умолчанием базы,
+        а ``CONTRACT_METHODS`` выводятся из абстрактных методов. Хранилище,
+        принятое «по сигнатурам» (законный путь, см. ``docs/thread-store.md``),
+        этого метода не имеет — и сюда попадает каждая его компакция. Пока
+        трассу не спасали, ``areset`` уносил её целиком, молча и всякий раз.
+
+        То же самое делает умолчание базы (``ThreadStoreBase.replace_messages``),
+        и с той же оговоркой: штампы записей поедут. ``aappend_subagent_trace``
+        безусловно ставит свежее время и следующий номер, поэтому после
+        компакции у всей трассы будет дата компакции, а нумерация начнётся
+        заново. Спасённая хронология лучше стёртой, но правильный выход —
+        реализовать ``replace_messages`` одной операцией (у SQL это
+        ``DELETE … INSERT`` в транзакции), о чём и говорит предупреждение.
+        """
+        logger.warning(
+            "thread_store_replace_messages_missing store=%s thread=%s: компакция "
+            "идёт через reset — трасса субагентов переписывается со свежими "
+            "штампами. Реализуйте replace_messages/areplace_messages или "
+            "унаследуйте ThreadStoreBase",
+            type(getattr(self.port, "_store", self.port)).__name__, self.thread_id,
+            extra={"event": "thread_store_replace_messages_missing"},
+        )
+        trace = list(
+            await self.port.aread_subagent_trace(self.system_id, self.thread_id) or []
+        )
+        await self.port.areset(self.system_id, self.thread_id)
+        await self.port.aappend_messages(
+            self.system_id, self.thread_id, compact_messages
+        )
+        for record in trace:
+            await self.port.aappend_subagent_trace(
+                self.system_id, self.thread_id,
+                parent_call_id=record.get("parent_call_id", ""),
+                child_run_id=record.get("child_run_id", ""),
+                kind=record.get("kind"),
+                payload=record.get("payload") or {},
+            )
 
     def _compact_result(
         self,
