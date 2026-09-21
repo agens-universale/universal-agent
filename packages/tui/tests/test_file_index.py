@@ -291,3 +291,247 @@ def test_absolute_and_drive_queries_are_not_listed(tmp_path):
     assert fuzzy_search(str(tmp_path), "D:/") == []
     assert fuzzy_search(str(tmp_path), "C:/Us") == []
     assert fuzzy_search(str(tmp_path), "/etc/pas") == []
+
+
+def test_path_index_builds_once_then_filters_in_memory(tmp_path, monkeypatch):
+    """Индекс собирается один раз: вторая буква не запускает второй обход диска."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
+    (tmp_path / "beta.py").write_text("x", encoding="utf-8")
+    calls = []
+    real = file_index._all_paths
+
+    def counting(root, max_paths, **kw):
+        calls.append(root)
+        return real(root, max_paths, **kw)
+
+    monkeypatch.setattr(file_index, "_all_paths", counting)
+    idx = PathIndex(str(tmp_path))
+    assert idx.search("alp") == ["alpha.py"]
+    assert idx.search("bet") == ["beta.py"]
+    assert calls == [str(tmp_path)]
+
+
+def test_concurrent_searches_build_index_once(tmp_path, monkeypatch):
+    """Поиск зовут из фоновых потоков по одному на нажатие: пока первый собирает
+    список, второй ждёт его, а не запускает свой обход."""
+    import threading
+    import time
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
+    calls = []
+    real = file_index._all_paths
+
+    def slow(root, max_paths, **kw):
+        calls.append(root)
+        time.sleep(0.2)
+        return real(root, max_paths, **kw)
+
+    monkeypatch.setattr(file_index, "_all_paths", slow)
+    idx = PathIndex(str(tmp_path))
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(idx.search("alp")))
+               for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results == [["alpha.py"], ["alpha.py"]]
+    assert calls == [str(tmp_path)]
+
+
+def test_walk_cap_keeps_shallow_levels_of_all_dirs(tmp_path):
+    """Предохранитель срезает глубину: неглубокий файл соседней папки попадает
+    в индекс раньше глубоких хвостов большой (os.walk шёл вглубь — zzz/target.py
+    до потолка не доживал)."""
+    from gc_tui.services.file_index import PathIndex
+    big = tmp_path / "aaa_big" / "deep"
+    big.mkdir(parents=True)
+    for i in range(50):
+        (big / f"f{i}.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "zzz").mkdir()
+    (tmp_path / "zzz" / "target.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), max_paths=10)
+    assert idx.search("target") == ["zzz/target.py"]
+    assert idx.truncated is True
+
+
+def test_index_not_truncated_when_project_fits(tmp_path):
+    """Ровно в размер потолка — не «обрезано»: подсказка не должна врать."""
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), max_paths=1)
+    assert idx.search("a") == ["a.py"]
+    assert idx.truncated is False
+
+
+def test_git_listing_cap_keeps_shallow_files(tmp_path, monkeypatch):
+    """git-ветка: при превышении потолка остаются самые неглубокие файлы."""
+    from gc_tui.services.file_index import PathIndex
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+    deep = tmp_path / "aaa" / "b" / "c"
+    deep.mkdir(parents=True)
+    for i in range(10):
+        (deep / f"f{i}.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "top.py").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    idx = PathIndex(str(tmp_path), max_paths=3)
+    assert idx.search("top") == ["top.py"]
+    assert idx.truncated is True
+
+
+def test_git_timeout_falls_back_to_walk_and_is_reported(tmp_path, monkeypatch):
+    """git ls-files не уложился в таймаут (огромный репозиторий): индекс собран
+    обходом, а факт таймаута виден вызывающему — он больше не будет звать git."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
+
+    def timed_out(root):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
+    idx = PathIndex(str(tmp_path))
+    assert idx.search("alp") == ["alpha.py"]
+    assert idx.git_timed_out is True
+
+
+def test_use_git_false_never_calls_git(tmp_path, monkeypatch):
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
+    calls = []
+
+    def git_called(root):
+        calls.append(root)
+        raise AssertionError("git called")
+
+    monkeypatch.setattr(file_index, "_git_ls_files", git_called)
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("alp") == ["alpha.py"]
+    assert calls == []
+    assert idx.git_timed_out is False
+
+
+def test_git_index_finds_non_ascii_names(tmp_path, monkeypatch):
+    """git ls-files квотит не-ASCII имена ("\\320\\276…"): раньше в индекс попадал
+    мусор вида «"/320/276/…» и русские имена не находились вовсе."""
+    from gc_tui.services.file_index import PathIndex
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+    (tmp_path / "доки").mkdir()
+    (tmp_path / "доки" / "план.md").write_text("x", encoding="utf-8")
+    (tmp_path / "отчёт.md").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    idx = PathIndex(str(tmp_path))
+    assert idx.search("отч") == ["отчёт.md"]
+    assert idx.search("план") == ["доки/план.md"]
+    assert "доки/" in idx.search("док")
+    assert idx.search("320") == []
+    assert idx.git_timed_out is False
+
+
+def test_git_index_survives_unquoted_utf8_output(tmp_path, monkeypatch):
+    """core.quotePath=false: git пишет имена сырым UTF-8. С text=True вывод
+    декодировался локальной кодировкой (cp1251 на Windows) — падение или кракозябры."""
+    from gc_tui.services.file_index import PathIndex
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+    (tmp_path / "отчёт.md").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "core.quotePath", "false"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    assert PathIndex(str(tmp_path)).search("отч") == ["отчёт.md"]
+
+
+def test_walk_keeps_rest_of_dir_when_one_entry_errors(tmp_path, monkeypatch):
+    """Ошибка на одной записи не должна выкидывать из индекса остаток папки."""
+    from gc_tui.services import file_index
+    (tmp_path / "aaa.py").write_text("x", encoding="utf-8")
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "zzz.py").write_text("x", encoding="utf-8")
+    real_scandir = os.scandir
+
+    class _Entry:
+        def __init__(self, entry):
+            self._entry = entry
+            self.name = entry.name
+
+        def is_dir(self):
+            return self._entry.is_dir()
+
+        def is_symlink(self):
+            if self.name == "bad":
+                raise OSError("boom")
+            return self._entry.is_symlink()
+
+    class _Scan:
+        def __init__(self, path):
+            self._it = real_scandir(path)
+
+        def __enter__(self):
+            self._it.__enter__()
+            return (_Entry(e) for e in self._it)
+
+        def __exit__(self, *exc):
+            return self._it.__exit__(*exc)
+
+    monkeypatch.setattr(file_index.os, "scandir", _Scan)
+    paths, truncated = file_index._walk_paths(str(tmp_path))
+    assert sorted(paths) == ["aaa.py", "bad/", "zzz.py"]
+    assert truncated is False
+
+
+def test_rank_with_limit_equals_sorted_prefix():
+    paths = ["b/agent.py", "agents/", "a/x/agent_old.py", "Agent.md", "zz/reagent.py",
+             "agents/agent.py", "docs/agent/", "AGENT.txt", "docs/Agent.md", "docs/agent.md"]
+    assert rank("agent", paths, limit=3) == rank("agent", paths)[:3]
+    assert rank("agent", paths, limit=50) == rank("agent", paths)
+
+
+def test_names_existing_dir(tmp_path):
+    from gc_tui.services.file_index import names_existing_dir
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
+    root = str(tmp_path)
+    assert names_existing_dir(root, "agents/ag") is True
+    assert names_existing_dir(root, "agents/") is True
+    assert names_existing_dir(root, "nodir/ag") is False
+    assert names_existing_dir(root, "agents/agent.py/x") is False   # файл, не папка
+    assert names_existing_dir(root, "agent") is False
+    assert names_existing_dir(root, "/etc/pas") is False
+    assert names_existing_dir(root, "C:/Us") is False
+
+
+import pytest
+
+
+def test_run_bounded_kills_whole_process_tree_on_timeout(tmp_path):
+    """Команда не уложилась в таймаут, а её ДОЧЕРНИЙ процесс держит stdout (так
+    ведёт себя git из PATH на Windows — обёртка над настоящим git): вызов обязан
+    вернуться около таймаута, а не ждать закрытия пайпа, и потомка не оставить."""
+    import sys
+    import time
+    from gc_tui.services import file_index
+    beat = tmp_path / "beat.txt"
+    # Потомок и родитель самоограничены (~20 с): если гашение дерева сломают,
+    # тест честно упадёт на времени, а не повесит прогон и не оставит сирот.
+    child = ("import time, sys\n"
+             "for _ in range(200):\n"
+             "    open(sys.argv[1], 'a').write('x')\n"
+             "    time.sleep(0.1)\n")
+    parent = ("import subprocess, sys, time\n"
+              f"subprocess.Popen([sys.executable, '-c', {child!r}, sys.argv[1]])\n"
+              "time.sleep(20)\n")
+    started = time.perf_counter()
+    with pytest.raises(subprocess.TimeoutExpired):
+        file_index._run_bounded([sys.executable, "-c", parent, str(beat)], str(tmp_path), 3.0)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 10
+    assert beat.exists()                          # потомок успел родиться — есть кого гасить
+    time.sleep(0.5)
+    size = beat.stat().st_size
+    time.sleep(0.7)
+    assert beat.stat().st_size == size            # потомок мёртв
