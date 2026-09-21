@@ -73,9 +73,17 @@ class AsyncAgent:
         приложение, поднимающее агентов пачками, заплатит за каждого. Общий
         кэш снимает это, и он же достаётся субагентам через ``ctx``::
 
-            cache = ToolsCache(config_dict)
-            a1 = await AsyncAgent.create(cfg, tools_cache=cache)
-            a2 = await AsyncAgent.create(cfg, tools_cache=cache)   # уже бесплатно
+            backend = resolve_os_backend(config_dict)   # harbor: + environment, loop
+            cache = ToolsCache(config_dict, os_backend=backend)
+            a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
+            a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
+
+        Бэкенд кэшу нужен ОБЯЗАТЕЛЬНО, если в конфиге есть MCP-сервер с
+        ``execute_on: os_backend``: свой бэкенд кэш получает только при
+        создании (передача в агента перепривязывает конфиг, но не бэкенд), а
+        кэш без бэкенда считает такой сервер «своим» и проходит дискавери в
+        процессе агента — для stdio это запуск сервера НА ХОСТЕ, мимо
+        песочницы. Вызовы тулов при этом уходят правильно: течёт дискавери.
         """
         # Набор ЖИВЫХ подписчиков вместо одной очереди на агента.
         #

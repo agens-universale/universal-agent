@@ -332,10 +332,20 @@ logging:
 пачками, заплатит за каждого. Кэшем владеет вызывающий:
 
 ```python
-cache = ToolsCache(config_dict)
-a1 = await AsyncAgent.create(cfg, tools_cache=cache)
-a2 = await AsyncAgent.create(cfg, tools_cache=cache)   # уже бесплатно
+from gc_core.backends.factory import resolve_os_backend
+
+backend = resolve_os_backend(config_dict)        # harbor: + environment=…, loop=…
+cache = ToolsCache(config_dict, os_backend=backend)
+a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
+a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)   # уже бесплатно
 ```
+
+Бэкенд кэшу передаётся ОБЯЗАТЕЛЬНО, если в конфиге есть MCP-сервер с
+`execute_on: os_backend`. Свой бэкенд кэш получает только при создании — при
+передаче в агента он перепривязывает конфиг, но не бэкенд. Кэш без бэкенда
+считает такой сервер «своим» и проходит дискавери в процессе агента: для stdio
+это запуск сервера НА ХОСТЕ, мимо песочницы (вызовы тулов при этом уходят
+правильно — течёт именно дискавери).
 
 Кэш достаётся и субагентам через `ctx` — иначе каждый спавн стоил бы секунду.
 Процессным синглтоном он намеренно не сделан: скрытое время жизни, протечка
