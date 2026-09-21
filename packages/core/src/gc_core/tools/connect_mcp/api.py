@@ -382,7 +382,13 @@ async def acall_mcp_tool(
         from gc_core.tools.connect_mcp.registry import ToolsCache
 
         cache_cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
-        tools_registry = await ToolsCache(cache_cfg).aget_tools()
+        # Бэкенд тому же кэшу ОБЯЗАТЕЛЕН: по его наличию кэш решает, где
+        # поднимать сервер. Без него `execute_on: os_backend` считается
+        # «нашим», и для stdio дискавери запускает команду сервера на хосте —
+        # мимо песочницы, тогда как вызов тула строкой ниже уходит в неё.
+        tools_registry = await ToolsCache(
+            cache_cfg, os_backend=os_backend
+        ).aget_tools()
 
     target = _prepare_mcp_call(
         full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
