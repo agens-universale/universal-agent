@@ -6,6 +6,7 @@ import codecs
 import hashlib
 import os
 import stat as stat_module
+import threading
 import time
 import sys
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
@@ -768,12 +769,83 @@ def _keep_draining(tasks: list, proc) -> None:
     async def _finish() -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            # Loop уходит и забирает дренаж с собой. В TUI это конец КАЖДОГО
+            # хода: `AgentRunner` крутит ход в своём `asyncio.run`, и тот на
+            # выходе отменяет всё оставшееся. Модель к этому моменту уже
+            # проверила порт внутри хода и отчиталась «сервер поднят» — а
+            # транспорт закрылся бы под живым внуком. Поэтому отдаём трубы
+            # потокам, как было до переезда на корутины.
+            _drain_in_threads(proc)
+            raise
         finally:
             _close_transport(proc)
 
     task = asyncio.ensure_future(_finish())
     _DRAIN_TASKS.add(task)
     task.add_done_callback(_DRAIN_TASKS.discard)
+
+
+def _drain_in_threads(proc) -> None:
+    """Дочитать трубы вне loop — по потоку на каждую.
+
+    Поток на трубу, а не один на обе: читатель, залипший на stdout, не мешает
+    внуку писать в stderr, чей буфер иначе заполнится и остановит его насовсем.
+    Потоки daemon — на выходе интерпретатора их никто не ждёт.
+    """
+    for fd in _dup_pipe_fds(proc):
+        threading.Thread(
+            target=_read_until_eof,
+            args=(fd,),
+            daemon=True,
+            name="exec-pipe-drain",
+        ).start()
+
+
+def _dup_pipe_fds(proc) -> list:
+    """Копии дескрипторов наших концов stdout и stderr команды.
+
+    `os.dup` даёт независимый дескриптор того же открытого файла: закрытие
+    транспорта копию не трогает, и труба живёт, пока жива она. Транспорт
+    приватный, поэтому на любой неожиданности возвращаем, что набрали:
+    дренаж потеряем, но вызов не уроним.
+    """
+    transport = getattr(proc, "_transport", None)
+    if transport is None:
+        return []
+    fds: list = []
+    for stream_fd in (1, 2):
+        try:
+            pipe = transport.get_pipe_transport(stream_fd).get_extra_info("pipe")
+            copy = os.dup(pipe.fileno())
+            # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
+            # без этого первое же чтение из потока даёт `BlockingIOError`, мы
+            # принимаем его за конец и закрываем трубу — ровно та беда, от
+            # которой уходим. Флаг общий с оригиналом, но его читателей уже
+            # отменили, а сам он закроется следом.
+            os.set_blocking(copy, True)
+            fds.append(copy)
+        except Exception:
+            continue
+    return fds
+
+
+def _read_until_eof(fd: int) -> None:
+    """Читать копию трубы до EOF и закрыть её.
+
+    Прочитанное выбрасываем: результат вызова давно собран, а нужен тут сам
+    факт чтения — труба, у которой есть живой читатель, не даёт писателю EPIPE.
+    """
+    try:
+        while os.read(fd, _READ_CHUNK):
+            pass
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def _close_transport(proc) -> None:

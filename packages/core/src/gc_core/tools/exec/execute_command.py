@@ -80,8 +80,9 @@ class ExecuteCommand(AbstractSimpleTool):
                             "error and exits, one that keeps running is stopped at the timeout. "
                             "That run is only for reading the error — the service itself is "
                             "still started with this flag. A command started WITHOUT this flag "
-                            "does not outlive the call — appending `&` to it is not enough, "
-                            "because its output pipes close when the call returns."
+                            "does not outlive the call — appending `&` to it is not enough: "
+                            "it is killed with its process group on timeout or cancel, it dies "
+                            "with the agent, and nothing of its output is reported back."
                         ),
                     },
                 },
@@ -113,7 +114,8 @@ Usage:
   error and exits, one that keeps running is stopped at the timeout. That run is only for
   reading the error — the service itself is still started in the background.
   Appending `&` to a normal foreground command is NOT enough: such a command is killed
-  on timeout and its output pipes close when the call returns.
+  with its process group on timeout or cancel, it dies with the agent, and nothing of
+  its output is reported back.
 - On timeout the command is stopped and its work is lost. If it simply needs longer,
   re-run it with a bigger `timeout`, or start it with `run_in_background: true`.
 - Don't remove or create any files or folders outside of project directory!
