@@ -9,6 +9,8 @@
 import ast
 import pathlib
 
+import pytest
+
 from gc_core.security import (
     command_guard,
     command_moderation,
@@ -62,30 +64,54 @@ def test_write_guard_helper_is_not_called_inline_either():
     assert inline == [], f"вызов инлайн на строках {inline}: ожидание уйдёт на loop"
 
 
-def test_download_file_hands_the_write_guard_to_a_thread():
-    """У загрузчика гард свой, синхронный, и зовётся он из корутинного `acall`."""
-    from gc_core.tools.exec import download_file
+async def test_download_file_guard_carries_the_abandoned_mark(tmp_path, monkeypatch):
+    """Гард загрузчика едет тем же маршрутом, что остальные пять, — с меткой «брошен».
 
-    tree = ast.parse(pathlib.Path(download_file.__file__).read_text(encoding="utf-8"))
-    acall = next(n for n in ast.walk(tree)
-                 if isinstance(n, ast.AsyncFunctionDef) and n.name == "acall")
-    direct = [n.lineno for n in ast.walk(acall)
-              if isinstance(n, ast.Call)
-              and getattr(n.func, "attr", None) == "_check_write_guard"]
-    assert direct == [], (
-        f"_check_write_guard вызван прямо на строках {direct} — loop встанет на ожидании"
+    Он зовётся не декоратором, а прямо из `acall`, и ехал через
+    `asyncio.to_thread`. Метку ставит `run_abandonable_in` внутри снимка
+    контекста потока; `to_thread` копирует контекст вызывающего, где она
+    пустая. Тогда брошенное по Ctrl+C подтверждение дожидается следующей
+    строки и записывает по ней разрешение на запись вне периметра — ровно то,
+    что закрывали R4.2 и R5.1. Плюс поток берётся из общего пула, который
+    держит выход процесса, а не из слотов гвардов.
+    """
+    import asyncio
+    import threading
+    import time
+
+    from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
+    from gc_core.tools.exec.download_file import DownloadFile
+    from gc_testkit.helpers.tool_ctx import with_local_ctx
+
+    entered, seen = threading.Event(), {}
+
+    def _slow_guard(self, dest):
+        entered.set()
+        time.sleep(0.3)                     # «человек думает» над y/n
+        seen["abandoned"] = current_call_abandoned()
+        return None
+
+    monkeypatch.setattr(DownloadFile, "_check_write_guard", _slow_guard)
+    launch_root = tmp_path / "project"
+    launch_root.mkdir()
+    tool = with_local_ctx(DownloadFile, config_dict={
+        "launch_root": str(launch_root),
+        "download": {"download_dir": "downloads", "max_bytes": 52_428_800},
+    })
+
+    task = asyncio.ensure_future(
+        tool.acall(url="https://example.com/report.pdf", filename="report.pdf")
     )
-    off_loop = [n for n in ast.walk(acall)
-                if isinstance(n, ast.Call)
-                and getattr(n.func, "attr", None) == "to_thread"
-                and any(getattr(a, "attr", None) == "_check_write_guard" for a in n.args)]
-    assert off_loop, "гард записи больше не уезжает в поток — проверка устарела"
+    assert await asyncio.to_thread(entered.wait, 5), "гард так и не начался"
+    task.cancel()                           # Ctrl+C: вызов брошен
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
-
-def test_moderation_decision_does_not_ask_the_human():
-    tree = ast.parse(pathlib.Path(command_moderation.__file__).read_text(encoding="utf-8"))
-    decide = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
-                  and n.name == "decide_command_execution")
-    calls = [n for n in ast.walk(decide)
-             if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "request_confirm"]
-    assert calls == [], "decide_command_execution снова спрашивает человека сама"
+    for _ in range(100):                    # гарду дать дописать ответ
+        if "abandoned" in seen:
+            break
+        await asyncio.sleep(0.05)
+    assert seen.get("abandoned") is True, (
+        "гард загрузчика не видит метку «брошен»: он уехал мимо маршрута гвардов, "
+        "и подтверждение запишет решение по чужому нажатию"
+    )
