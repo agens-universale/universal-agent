@@ -109,24 +109,36 @@ async def run_abandonable_in(
         _ABANDONED.set(_abandoned)
         return fn(*args, **kwargs)
 
+    def _cleanup_if_abandoned() -> None:
+        """Уборка за брошенным вызовом. Сам ВЫЗЫВАЮЩИЙ прибраться не может: в
+        момент отмены `fn` ещё исполняется, и попытка закрыть его тело даёт
+        `ValueError: generator already executing`. Здесь же `fn` либо уже
+        вернулся, либо не запускался вовсе — закрывать безопасно, и делать это
+        надо именно тут, в потоке, который один и дожил до конца."""
+        if _on_abandoned is not None and _abandoned():
+            try:
+                _on_abandoned()
+            except BaseException:  # noqa: BLE001 — уборку не роняем
+                logger.debug("abandoned cleanup failed", exc_info=True)
+
     def _target() -> None:
         with slots:
+            # Слот мог освободиться уже после того, как вызов бросили: у MCP их
+            # восемь, и на веере дискавери или нескольких агентах очередь
+            # реальна. Тело тогда не исполняем вовсе — иначе отменённый ход всё
+            # равно уходил бы на сервер с побочными эффектами. Доставлять
+            # нечего: future уже отменён либо loop закрыт. А уборку зовём — она
+            # закрывает тело гварда, созданное ДО ухода в поток.
+            if _abandoned():
+                _cleanup_if_abandoned()
+                return
             try:
                 result = ctx_snapshot.run(_marked)
             except BaseException as exc:  # noqa: BLE001 — переносим как есть
                 _deliver(future.set_exception, exc)
             else:
                 _deliver(future.set_result, result)
-            # Уборка за брошенным вызовом. Сам ВЫЗЫВАЮЩИЙ прибраться не может:
-            # в момент отмены `fn` ещё исполняется, и попытка закрыть его
-            # тело даёт `ValueError: generator already executing`. Здесь же
-            # `fn` уже вернулся — значит, закрывать безопасно, и делать это
-            # надо именно тут, в потоке, который один и дожил до конца.
-            if _on_abandoned is not None and _abandoned():
-                try:
-                    _on_abandoned()
-                except BaseException:  # noqa: BLE001 — уборку не роняем
-                    logger.debug("abandoned cleanup failed", exc_info=True)
+            _cleanup_if_abandoned()
 
     threading.Thread(target=_target, daemon=True, name=_thread_name).start()
     return await future
