@@ -445,6 +445,15 @@ async def arequest_backend_chat_completions(
             assembler = StreamAssembler(on_delta=on_delta)
             async for line in _aiter_utf8_lines(r):
                 assembler.feed_line(line)
+                if assembler.done:
+                    # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
+                    # нельзя: закрывает его сервер, а корп-прокси вправе держать
+                    # соединение сколько угодно. Ход ждал бы read-timeout (600 с
+                    # по умолчанию), а тот считается поводом повторить ВЕСЬ
+                    # запрос: показанный ответ стирается и генерируется заново.
+                    # Синхронный путь до переезда выходил здесь же —
+                    # `iter_sse_data_lines` делала на маркере `return`.
+                    break
             assembler.flush()
             assembled = assembler.result()
 
