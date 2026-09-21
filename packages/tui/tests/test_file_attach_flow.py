@@ -870,8 +870,10 @@ async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypa
 
 @pytest.mark.asyncio
 async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, monkeypatch):
-    """Esc во время первой сборки: поиск устарел и не фильтрует, но факт «git не
-    уложился в таймаут» запоминается — следующий «@» не ждёт таймаут заново."""
+    """Esc во время первой сборки: сеанс закрыт, поиск устарел и не фильтрует, но
+    сборка доходит до конца и модуль индекса запоминает таймаут git — следующий
+    «@» не ждёт его заново. Интеграционный сторож: память пишет поток сборки,
+    экран в этом не участвует."""
     pytest.importorskip("textual")
     import subprocess
     import threading
@@ -901,7 +903,7 @@ async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, 
         release.set()
         await worker.wait()
         await pilot.pause()
-        assert str(tmp_path) in scr._slow_git_roots
+        assert str(tmp_path) in file_index._slow_git_roots
         assert scr._file_picker is None
 
 
@@ -1061,3 +1063,72 @@ async def test_switching_to_arg_picker_input_ends_file_search_session(tmp_path, 
         await worker.wait()
         await pilot.pause(0.5)
         assert scr._file_picker is None
+
+
+@pytest.mark.asyncio
+async def test_big_directory_listing_is_capped_with_note(tmp_path):
+    """Папка на 150 файлов: показано 100 и подпись; дописал часть имени — находится
+    и то, что в первые 100 не попало."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    (tmp_path / "many").mkdir()
+    for i in range(150):
+        (tmp_path / "many" / ("f%03d.txt" % i)).write_text("x", encoding="utf-8")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("@many/")
+        await pilot.pause()
+        picker = scr._file_picker
+        assert len(picker._entries) == 100
+        assert picker._note_text() == "показано 100 из 150 · допишите часть имени"
+        assert len(picker.query(".palette-keys")) == 2
+        inp.insert("f149")
+        await pilot.pause()
+        await scr._file_search_worker.wait()
+        await pilot.pause()
+        assert scr._file_picker._entries == ["many/f149.txt"]
+        assert scr._file_picker._note_text() == ""
+
+
+@pytest.mark.asyncio
+async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatch):
+    """Память о медленном git не вечная: после срока следующий сеанс пикера снова
+    пробует git."""
+    pytest.importorskip("textual")
+    import subprocess
+    from gc_tui.app import TuiApp
+    from gc_tui.services import file_index
+
+    (tmp_path / "agents").mkdir()
+    (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
+    git_calls = []
+
+    def timed_out(root, max_paths):
+        git_calls.append(root)
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("@age")
+        await pilot.pause()
+        await scr._file_search_worker.wait()
+        await pilot.pause()
+        assert len(git_calls) == 1
+        await pilot.press("escape")
+        await pilot.pause()
+        monkeypatch.setattr(file_index, "_SLOW_GIT_RETRY_AFTER", 0.0)   # срок вышел
+        inp.insert("n")                                  # новый сеанс
+        await pilot.pause()
+        await scr._file_search_worker.wait()
+        await pilot.pause()
+        assert len(git_calls) == 2

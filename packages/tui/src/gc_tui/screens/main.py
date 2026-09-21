@@ -338,9 +338,6 @@ class TraceScreen(Screen):
         self._file_query: Optional[str] = None
         self._file_shown_query: Optional[str] = None   # для какого query показан список
         self._file_search_worker = None  # textual.worker.Worker | None
-        # Корни, где `git ls-files` не уложился в таймаут: на следующих сеансах
-        # пикера git для них не зовём — иначе каждый новый «@» ждал бы таймаут заново.
-        self._slow_git_roots: set[str] = set()
         self._skills_cache: Optional[list[dict]] = None
         # После Tab-completion в skill picker гасим один Changed-цикл, чтобы
         # on_text_area_changed не переоткрыл только что закрытый picker.
@@ -4080,6 +4077,7 @@ class TraceScreen(Screen):
 
     _MIN_TRACE_WITH_OVERLAY = 3   # минимум строк трейса видно при открытом оверлее
     _FILE_SEARCH_NOTICE_DELAY = 0.3   # сек: после них пикер показывает «ищу по проекту…»
+    _FILE_LISTING_LIMIT = 100   # строк в листинге папки; остальное — «допишите часть имени»
 
     def _open_overlay_widget(self):
         """Открытый input-оверлей (палитра/skill/arg/file-picker) или None."""
@@ -4177,11 +4175,13 @@ class TraceScreen(Screen):
             self._path_index = None
         self._file_query = query
         if not query or query.endswith("/"):
-            self._apply_file_entries(list_dir(root, query[:-1]), truncated=False)
+            entries = list_dir(root, query[:-1])
+            self._apply_file_entries(entries[:self._FILE_LISTING_LIMIT], truncated=False,
+                                      total=len(entries))
             return
         index = self._path_index
         if index is None or index.root != root:
-            index = self._path_index = PathIndex(root, use_git=root not in self._slow_git_roots)
+            index = self._path_index = PathIndex(root)
 
         def _work() -> None:
             entries: Optional[list] = None
@@ -4203,9 +4203,11 @@ class TraceScreen(Screen):
                 _log.warning("file search failed: root=%s query=%r", index.root, query,
                              exc_info=True)
                 entries = []
-            # Подсказка «поиск неполный» не нужна, только если запрос называет
-            # существующую папку: её search дочитывает с диска целиком. Проверка
-            # диска — здесь, в фоновом потоке, не в UI.
+            # Подсказка «поиск неполный» не нужна, если запрос называет существующую
+            # папку: человек уже уточнил путь, а её прямых детей search дочитывает с
+            # диска целиком (совпадения по подстроке в других папках при этом могли
+            # в обрезанный индекс не попасть — осознанно: вечная подсказка на огромном
+            # проекте хуже). Проверка диска — здесь, в фоновом потоке, не в UI.
             self.app.call_from_thread(
                 self._on_file_search_done, index, query, entries,
                 index.truncated and not names_existing_dir(index.root, query))
@@ -4215,8 +4217,6 @@ class TraceScreen(Screen):
                        lambda: self._show_file_search_pending(index, query))
 
     def _on_file_search_done(self, index, query: str, entries: Optional[list], truncated: bool) -> None:
-        if index.git_timed_out:
-            self._slow_git_roots.add(index.root)
         if entries is None or index is not self._path_index or query != self._file_query:
             return  # не считали (устарел ещё в потоке) / сеанс сменился / ввод ушёл дальше
         self._apply_file_entries(entries, truncated=truncated)
@@ -4230,7 +4230,8 @@ class TraceScreen(Screen):
             return  # результат уже на экране
         self._apply_file_entries([], truncated=False, searching=True)
 
-    def _apply_file_entries(self, entries: list, *, truncated: bool, searching: bool = False) -> None:
+    def _apply_file_entries(self, entries: list, *, truncated: bool, searching: bool = False,
+                            total: Optional[int] = None) -> None:
         """Совпадений нет → скрыть.
 
         Пустой ящик «(нет совпадений)» не показываем: выбрать из него нечего,
@@ -4258,11 +4259,12 @@ class TraceScreen(Screen):
             return
         if self._file_picker is None:
             from gc_tui.widgets.file_picker import FilePicker
-            picker = FilePicker(entries, truncated=truncated, searching=searching)
+            picker = FilePicker(entries, truncated=truncated, searching=searching, total=total)
             self._file_picker = picker
             self._mount_input_overlay(picker)
         else:
-            self._file_picker.set_entries(entries, truncated=truncated, searching=searching)
+            self._file_picker.set_entries(entries, truncated=truncated, searching=searching,
+                                           total=total)
 
     def _close_file_picker(self) -> None:
         # Конец сеанса: результат поиска в полёте устарел.
@@ -4365,10 +4367,11 @@ class TraceScreen(Screen):
                 self._handle_command(text[1:])
             return
 
-        # Поиск файлов в полёте: Enter ждёт результата, что бы ни было на экране
+        # Поиск файлов в полёте: Enter игнорируется, что бы ни было на экране
         # (прежний список, «ищу по проекту…» или ещё ничего) — как и Tab. Иначе ушло
-        # бы сообщение с недописанным «@…», а вложение молча потерялось. Отмена —
-        # Esc, после неё Enter отправляет набранное как есть.
+        # бы сообщение с недописанным «@…», а вложение молча потерялось. Нажатие не
+        # запоминаем: достраивать путь по списку, которого человек ещё не видел,
+        # хуже лишнего Enter. Выход — Esc, после неё Enter отправляет набранное как есть.
         if (self._file_query is not None and self._file_shown_query != self._file_query
                 and self._arg_picker is None and self._palette is None):
             return

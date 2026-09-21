@@ -397,7 +397,7 @@ def test_git_listing_cap_keeps_shallow_files(tmp_path, monkeypatch):
 
 def test_git_timeout_falls_back_to_walk_and_is_reported(tmp_path, monkeypatch):
     """git ls-files не уложился в таймаут (огромный репозиторий): индекс собран
-    обходом, а факт таймаута виден вызывающему — он больше не будет звать git."""
+    обходом, а корень запомнен как медленный — git для него больше не зовётся."""
     from gc_tui.services import file_index
     from gc_tui.services.file_index import PathIndex
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
@@ -408,7 +408,28 @@ def test_git_timeout_falls_back_to_walk_and_is_reported(tmp_path, monkeypatch):
     monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
     idx = PathIndex(str(tmp_path))
     assert idx.search("alp") == ["alpha.py"]
-    assert idx.git_timed_out is True
+    assert str(tmp_path) in file_index._slow_git_roots
+
+
+def test_git_timeout_is_remembered_by_the_module_for_a_while(tmp_path, monkeypatch):
+    """Память о медленном git живёт в самом модуле индекса: новый PathIndex того
+    же корня git не зовёт, пока не вышел срок; после срока — пробует снова."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
+    git_calls = []
+
+    def timed_out(root, max_paths):
+        git_calls.append(root)
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
+    assert PathIndex(str(tmp_path)).search("alp") == ["alpha.py"]
+    assert PathIndex(str(tmp_path)).search("alp") == ["alpha.py"]
+    assert len(git_calls) == 1
+    monkeypatch.setattr(file_index, "_SLOW_GIT_RETRY_AFTER", 0.0)      # срок вышел
+    assert PathIndex(str(tmp_path)).search("alp") == ["alpha.py"]
+    assert len(git_calls) == 2
 
 
 def test_use_git_false_never_calls_git(tmp_path, monkeypatch):
@@ -425,12 +446,13 @@ def test_use_git_false_never_calls_git(tmp_path, monkeypatch):
     idx = PathIndex(str(tmp_path), use_git=False)
     assert idx.search("alp") == ["alpha.py"]
     assert calls == []
-    assert idx.git_timed_out is False
+    assert str(tmp_path) not in file_index._slow_git_roots
 
 
 def test_git_index_finds_non_ascii_names(tmp_path, monkeypatch):
     """git ls-files квотит не-ASCII имена ("\\320\\276…"): раньше в индекс попадал
     мусор вида «"/320/276/…» и русские имена не находились вовсе."""
+    from gc_tui.services import file_index
     from gc_tui.services.file_index import PathIndex
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
     (tmp_path / "доки").mkdir()
@@ -443,7 +465,7 @@ def test_git_index_finds_non_ascii_names(tmp_path, monkeypatch):
     assert idx.search("план") == ["доки/план.md"]
     assert "доки/" in idx.search("док")
     assert idx.search("320") == []
-    assert idx.git_timed_out is False
+    assert str(tmp_path) not in file_index._slow_git_roots
 
 
 def test_git_index_survives_unquoted_utf8_output(tmp_path, monkeypatch):
@@ -616,7 +638,7 @@ def test_git_stream_survives_any_chunk_boundary(tmp_path, monkeypatch):
     idx = PathIndex(str(tmp_path))
     assert idx.search("отч") == ["отчёт.md"]
     assert idx.search("план") == ["доки/план.md"]
-    assert idx.git_timed_out is False
+    assert str(tmp_path) not in file_index._slow_git_roots
     assert idx.search("ignored") == []  # обход диска нашёл бы его — значит, отработала именно git-ветка
 
 
@@ -635,7 +657,7 @@ def test_partial_git_output_is_discarded_on_timeout(tmp_path, monkeypatch):
     idx = PathIndex(str(tmp_path))
     assert idx.search("ghost") == []
     assert idx.search("real") == ["real.py"]
-    assert idx.git_timed_out is True
+    assert str(tmp_path) in file_index._slow_git_roots
 
 
 def test_stream_bounded_wait_is_bounded_even_if_tree_kill_fails(tmp_path, monkeypatch):
@@ -771,7 +793,7 @@ def test_git_timeout_fallback_respects_gitignore(tmp_path, monkeypatch):
     monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
     idx = PathIndex(str(tmp_path))
     assert idx.search("inner") == ["src/inner.py"]
-    assert idx.git_timed_out is True
+    assert str(tmp_path) in file_index._slow_git_roots
 
 
 def test_gitignore_negation_with_path_keeps_every_dir_of_that_name(tmp_path):

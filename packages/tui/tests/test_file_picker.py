@@ -99,3 +99,60 @@ async def test_entries_set_after_compose_before_mount_are_shown():
         assert len(picker.query(".palette-row")) == 3
         assert picker._stale is False
         assert picker.styles.min_height.value == picker.desired_height
+
+
+def test_listing_cut_note_and_height():
+    """Листинг обрезан потолком строк: подпись в подвале и +2 к честной высоте;
+    ровно в размер и без total — подписи нет."""
+    p = FilePicker(["a", "b"], total=5)
+    assert p._note_text() == "показано 2 из 5 · допишите часть имени"
+    assert p.desired_height == 2 + 2 + 2 + 2
+    assert FilePicker(["a", "b"], total=2)._note_text() == ""
+    assert FilePicker(["a", "b"])._note_text() == ""
+    assert FilePicker(["a", "b"], total=2).desired_height == 2 + 2 + 2
+    p.set_entries(["a"])
+    assert p._note_text() == ""
+
+
+@pytest.mark.asyncio
+async def test_arrows_move_highlight_without_recreating_rows():
+    """Стрелка перекрашивает две строки, а не пересоздаёт весь список."""
+    pytest.importorskip("textual")
+    from textual.app import App
+
+    app = App()
+    async with app.run_test() as pilot:
+        picker = FilePicker(["a.py", "b.py", "c.py"])
+        await pilot.app.mount(picker)
+        await pilot.pause()
+        before = list(picker.query(".palette-row"))
+        picker.move_selection(1)
+        await pilot.pause()
+        after = list(picker.query(".palette-row"))
+        assert [id(w) for w in after] == [id(w) for w in before]
+        assert [w.has_class("selected") for w in after] == [False, True, False]
+        picker.move_selection(-2)                        # заворот через начало
+        await pilot.pause()
+        assert [w.has_class("selected") for w in picker.query(".palette-row")] == [False, False, True]
+        assert picker.selected_entry() == "c.py"
+
+
+@pytest.mark.asyncio
+async def test_arrow_right_after_set_entries_highlights_new_rows():
+    """Прежние строки после set_entries ещё удаляются асинхронно — стрелка сразу
+    следом должна красить новые, а не уходящие."""
+    pytest.importorskip("textual")
+    from textual.app import App
+
+    app = App()
+    async with app.run_test() as pilot:
+        picker = FilePicker(["a.py", "b.py", "c.py"])
+        await pilot.app.mount(picker)
+        await pilot.pause()
+        picker.set_entries(["x.py", "y.py", "z.py"])
+        picker.move_selection(1)
+        await pilot.pause()
+        rows = list(picker.query(".palette-row"))
+        assert [str(w.render()).strip() for w in rows] == ["x.py", "y.py", "z.py"]
+        assert [w.has_class("selected") for w in rows] == [False, True, False]
+        assert picker.selected_entry() == "y.py"

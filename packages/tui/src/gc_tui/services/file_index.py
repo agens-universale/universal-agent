@@ -14,6 +14,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 from collections import deque
 from typing import Callable, Optional
 
@@ -450,11 +451,23 @@ def _git_ls_files(root: str, max_paths: int) -> Optional[tuple[list[str], bool]]
     return picked.result(), picked.truncated
 
 
+_SLOW_GIT_RETRY_AFTER = 600.0   # сек: через столько снова пробуем git для «медленного» корня
+# Корни, где `git ls-files` не уложился в таймаут → момент таймаута (time.monotonic()).
+# Пока срок не вышел, новый индекс того же корня git не зовёт: иначе в огромном
+# репозитории каждый новый «@» ждал бы таймаут заново. Не навсегда: разовый
+# медленный git не должен оставить репозиторий на обходе диска до конца процесса.
+_slow_git_roots: dict[str, float] = {}
+
+
+def _git_recently_slow(root: str) -> bool:
+    at = _slow_git_roots.get(root)
+    return at is not None and time.monotonic() - at < _SLOW_GIT_RETRY_AFTER
+
+
 def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
-               use_git: bool = True) -> tuple[list[str], bool, bool]:
+               use_git: bool = True) -> tuple[list[str], bool]:
     """tracked + untracked файлы git (учтён .gitignore) + их папки-префиксы;
-    не git-репо → walk + хардкод-игнор. Возвращает (пути, обрезан ли список,
-    не уложился ли git в таймаут).
+    не git-репо → walk + хардкод-игнор. Возвращает (пути, обрезан ли список).
 
     --others обязателен: без него untracked-файлы (новые, .claude/ и т.п.)
     видны через drill-in (list_dir читает диск), но не находятся набором —
@@ -465,10 +478,11 @@ def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
     же принцип, что у _walk_paths: срезаем глубину, а не соседей; для git-ветки
     это делает `_git_ls_files` на лету, пока читает вывод git потоком.
 
-    Третье значение — `git ls-files` вышел по таймауту (огромный репозиторий):
-    вызывающий запоминает это и в следующий раз передаёт `use_git=False`,
-    чтобы не ждать таймаут на каждый сеанс пикера и не гонять тяжёлый git по
-    миллиону файлов впустую. `use_git=False` → git не зовётся вовсе, сразу walk.
+    `git ls-files` вышел по таймауту (огромный репозиторий) → такой корень модуль
+    запоминает (`_slow_git_roots`) и `_SLOW_GIT_RETRY_AFTER` секунд git для него не
+    зовёт; это единственный след таймаута — отдельного флага у индекса нет, чтобы
+    не было второго источника той же правды. `use_git=False` → git не зовётся
+    вовсе, сразу walk.
 
     Обход диска (запасной путь) сверх `_IGNORE_DIRS` уважает простые строки
     корневого .gitignore (см. `_simple_gitignore_dirs`); .gitignore не
@@ -477,7 +491,7 @@ def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
         anywhere, root_only = _simple_gitignore_dirs(root)
         return _walk_paths(root, max_paths, ignore_anywhere=anywhere, ignore_root=root_only)
 
-    if use_git:
+    if use_git and not _git_recently_slow(root):
         try:
             listing = _git_ls_files(root, max_paths)
             if listing is not None:
@@ -488,14 +502,13 @@ def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
                         parts = f.split("/")
                         for i in range(1, len(parts)):
                             dirs.add("/".join(parts[:i]) + "/")
-                    return sorted(dirs) + files, truncated, False
+                    return sorted(dirs) + files, truncated
         except subprocess.TimeoutExpired:
-            paths, truncated = walk()
-            return paths, truncated, True
+            _slow_git_roots[root] = time.monotonic()
+            return walk()
         except (OSError, subprocess.SubprocessError):
             pass
-    paths, truncated = walk()
-    return paths, truncated, False
+    return walk()
 
 
 class PathIndex:
@@ -504,14 +517,13 @@ class PathIndex:
 
     Потокобезопасен: поиск зовут из фоновых потоков (по одному на нажатие) —
     пока первый собирает список, остальные ждут на локе, а не запускают второй
-    обход диска. `truncated` и `git_timed_out` осмыслены после сборки — первого
-    `build` или `search`."""
+    обход диска. `truncated` осмыслен после сборки — первого `build` или
+    `search`."""
 
     def __init__(self, root: str, *, max_paths: int = MAX_INDEX_PATHS,
                  use_git: bool = True) -> None:
         self.root = root
         self.truncated = False
-        self.git_timed_out = False
         self._max_paths = max_paths
         self._use_git = use_git
         self._paths: Optional[list[str]] = None
@@ -521,12 +533,10 @@ class PathIndex:
     def _ensure_paths(self) -> list[str]:
         with self._lock:
             if self._paths is None:
-                paths, truncated, git_timed_out = _all_paths(
-                    self.root, self._max_paths, use_git=self._use_git)
+                paths, truncated = _all_paths(self.root, self._max_paths, use_git=self._use_git)
                 lower = [p.lower() for p in paths]
                 self._lower = lower
                 self.truncated = truncated
-                self.git_timed_out = git_timed_out
                 self._paths = paths
             return self._paths
 
