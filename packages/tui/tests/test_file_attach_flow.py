@@ -515,7 +515,7 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
     git_calls = []
 
-    def fake_git_ls_files(root):
+    def fake_git_ls_files(root, max_paths):
         git_calls.append(root)
         raise subprocess.TimeoutExpired(cmd="git", timeout=5)
 
@@ -882,7 +882,7 @@ async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, 
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
     release = threading.Event()
 
-    def fake_git_ls_files(root):
+    def fake_git_ls_files(root, max_paths):
         release.wait(timeout=5)
         raise subprocess.TimeoutExpired(cmd="git", timeout=5)
 

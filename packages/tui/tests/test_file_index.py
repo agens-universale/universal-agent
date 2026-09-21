@@ -293,6 +293,18 @@ def test_absolute_and_drive_queries_are_not_listed(tmp_path):
     assert fuzzy_search(str(tmp_path), "/etc/pas") == []
 
 
+def test_rooted_query_is_outside_root_even_when_isabs_says_no(tmp_path, monkeypatch):
+    """Python 3.13 на Windows: isabs("/Users") стал False, а join(root, "/Users")
+    по-прежнему даёт D:/Users — путь от корня диска листался бы как папка проекта.
+    Тесты идут на 3.12, поэтому поведение 3.13 подменяем."""
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(os.path, "isabs", lambda p: False)
+    assert list_dir(str(tmp_path), "/Users") == []
+    assert list_dir(str(tmp_path), "\\Users") == []
+    assert list_dir(str(tmp_path), "/") == []
+    assert fuzzy_search(str(tmp_path), "/Us") == []
+
+
 def test_path_index_builds_once_then_filters_in_memory(tmp_path, monkeypatch):
     """Индекс собирается один раз: вторая буква не запускает второй обход диска."""
     from gc_tui.services import file_index
@@ -390,7 +402,7 @@ def test_git_timeout_falls_back_to_walk_and_is_reported(tmp_path, monkeypatch):
     from gc_tui.services.file_index import PathIndex
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
 
-    def timed_out(root):
+    def timed_out(root, max_paths):
         raise subprocess.TimeoutExpired(cmd="git", timeout=5)
 
     monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
@@ -405,7 +417,7 @@ def test_use_git_false_never_calls_git(tmp_path, monkeypatch):
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
     calls = []
 
-    def git_called(root):
+    def git_called(root, max_paths):
         calls.append(root)
         raise AssertionError("git called")
 
@@ -508,7 +520,7 @@ def test_names_existing_dir(tmp_path):
 import pytest
 
 
-def test_run_bounded_kills_whole_process_tree_on_timeout(tmp_path):
+def test_stream_bounded_kills_whole_process_tree_on_timeout(tmp_path):
     """Команда не уложилась в таймаут, а её ДОЧЕРНИЙ процесс держит stdout (так
     ведёт себя git из PATH на Windows — обёртка над настоящим git): вызов обязан
     вернуться около таймаута, а не ждать закрытия пайпа, и потомка не оставить."""
@@ -527,7 +539,8 @@ def test_run_bounded_kills_whole_process_tree_on_timeout(tmp_path):
               "time.sleep(20)\n")
     started = time.perf_counter()
     with pytest.raises(subprocess.TimeoutExpired):
-        file_index._run_bounded([sys.executable, "-c", parent, str(beat)], str(tmp_path), 3.0)
+        file_index._stream_bounded([sys.executable, "-c", parent, str(beat)], str(tmp_path), 3.0,
+                                   lambda chunk: None)
     elapsed = time.perf_counter() - started
     assert elapsed < 10
     assert beat.exists()                          # потомок успел родиться — есть кого гасить
@@ -535,3 +548,301 @@ def test_run_bounded_kills_whole_process_tree_on_timeout(tmp_path):
     size = beat.stat().st_size
     time.sleep(0.7)
     assert beat.stat().st_size == size            # потомок мёртв
+
+
+def test_parent_dir_queries_are_not_listed(tmp_path):
+    """«..» выводит за корень так же, как D: и абсолютный путь: пикер не
+    подсказывает то, что лежит выше проекта (внешние пути набираются руками)."""
+    from gc_tui.services.file_index import names_existing_dir
+    root = tmp_path / "proj"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.py").write_text("x", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("x", encoding="utf-8")
+    r = str(root)
+    assert list_dir(r, "..") == []
+    assert list_dir(r, "src/../..") == []
+    assert fuzzy_search(r, "../out") == []
+    assert fuzzy_search(r, "src/../../out") == []
+    assert names_existing_dir(r, "../x") is False
+    # внутри корня «..» законен: src/../src — это сам проект
+    assert list_dir(r, "src/../src") == ["src/../src/a.py"]
+    # имя, начинающееся с двух точек, — не выход за корень
+    (root / "..cfg").write_text("x", encoding="utf-8")
+    assert fuzzy_search(r, "..cf") == ["..cfg"]
+
+
+def test_shallowest_paths_equals_stable_sort_prefix():
+    """Отборщик даёт ровно то же, что sorted(по глубине)[:n], включая порядок и
+    ничьи внутри глубины; пока вход влезает — порядок прихода сохранён."""
+    from gc_tui.services.file_index import _ShallowestPaths
+    paths = ["a/b/c/1", "x", "a/b/2", "a/3", "y", "a/b/c/4", "a/b/5", "z/6", "a/b/c/d/7", "w"]
+    for n in range(1, len(paths) + 2):
+        sel = _ShallowestPaths(n)
+        for p in paths:
+            sel.add(p)
+        expected = sorted(paths, key=lambda f: f.count("/"))[:n]
+        if n >= len(paths):
+            assert sel.result() == paths and sel.truncated is False
+        else:
+            assert sel.result() == expected and sel.truncated is True
+
+
+def test_shallowest_paths_memory_is_bounded():
+    """Сколько бы путей ни пришло, в памяти остаётся не больше потолка."""
+    from gc_tui.services.file_index import _ShallowestPaths
+    sel = _ShallowestPaths(1000)
+    biggest = 0
+    for i in range(200_000):
+        sel.add("d%d/" % (i % 7) * (i % 5) + "f%d.txt" % i)
+        if i % 5000 == 0:
+            biggest = max(biggest, len(sel))
+    assert biggest <= 1000
+    assert len(sel) == 1000 and sel.truncated is True
+
+
+def test_git_stream_survives_any_chunk_boundary(tmp_path, monkeypatch):
+    """Граница куска посреди пути и посреди многобайтного символа пути не портит."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+    (tmp_path / "доки").mkdir()
+    (tmp_path / "доки" / "план.md").write_text("x", encoding="utf-8")
+    (tmp_path / "отчёт.md").write_text("x", encoding="utf-8")
+    (tmp_path / "ignored.log").write_text("x", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("ignored.log\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(file_index, "_GIT_CHUNK", 1)
+    idx = PathIndex(str(tmp_path))
+    assert idx.search("отч") == ["отчёт.md"]
+    assert idx.search("план") == ["доки/план.md"]
+    assert idx.git_timed_out is False
+    assert idx.search("ignored") == []  # обход диска нашёл бы его — значит, отработала именно git-ветка
+
+
+def test_partial_git_output_is_discarded_on_timeout(tmp_path, monkeypatch):
+    """Таймаут посреди потока: обрывок вывода git в индекс не попадает — индекс
+    собирается обходом диска, факт таймаута виден."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / "real.py").write_text("x", encoding="utf-8")
+
+    def half_then_timeout(cmd, cwd, timeout, on_chunk):
+        on_chunk(b"ghost.py\0real")
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(file_index, "_stream_bounded", half_then_timeout)
+    idx = PathIndex(str(tmp_path))
+    assert idx.search("ghost") == []
+    assert idx.search("real") == ["real.py"]
+    assert idx.git_timed_out is True
+
+
+def test_stream_bounded_wait_is_bounded_even_if_tree_kill_fails(tmp_path, monkeypatch):
+    """Гашение дерева не удалось (taskkill запрещён/завис), дочерний процесс держит
+    пайп: вызов всё равно обязан вернуться около таймаута — читает пайп служебный
+    поток, а не вызывающий."""
+    import sys
+    import time
+    from gc_tui.services import file_index
+    child = ("import time, sys\n"
+             "for _ in range(200):\n"
+             "    time.sleep(0.1)\n")
+    parent = ("import subprocess, sys, time\n"
+              f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+              "time.sleep(20)\n")
+    monkeypatch.setattr(file_index, "_kill_process_tree", lambda proc: proc.kill())
+    started = time.perf_counter()
+    with pytest.raises(subprocess.TimeoutExpired):
+        file_index._stream_bounded([sys.executable, "-c", parent], str(tmp_path), 2.0,
+                                   lambda chunk: None)
+    assert time.perf_counter() - started < 8
+
+
+def test_stream_bounded_stops_feeding_chunks_after_timeout(tmp_path, monkeypatch):
+    """Гашение дерева не удалось, дочерний процесс продолжает писать: после
+    таймаута его вывод уже никому не нужен — служебный поток не должен дальше
+    звать on_chunk (иначе разбор вывода git идёт вхолостую до конца процесса)."""
+    import sys
+    import time
+    from gc_tui.services import file_index
+    child = ("import time, sys\n"
+             "for _ in range(80):\n"
+             "    sys.stdout.write('x' * 100); sys.stdout.flush(); time.sleep(0.1)\n")
+    monkeypatch.setattr(file_index, "_kill_process_tree", lambda proc: None)
+    chunks = []
+    with pytest.raises(subprocess.TimeoutExpired):
+        file_index._stream_bounded([sys.executable, "-c", child], str(tmp_path), 0.5, chunks.append)
+    seen = len(chunks)
+    assert seen > 0
+    time.sleep(0.6)
+    assert len(chunks) == seen
+
+
+def test_shallowest_paths_equals_stable_sort_prefix_on_random_inputs():
+    """Свойство отборщика на случайных входах (та же логика, что у fixed-example
+    теста выше, только вход случайный): пока путей не больше потолка — порядок
+    прихода сохранён; при превышении — ровно sorted(по глубине)[:n]. Включает
+    n=0 (потолок <= 0) и пустой вход."""
+    import random
+    from gc_tui.services.file_index import _ShallowestPaths
+    rnd = random.Random(20260921)
+    for _ in range(2000):
+        count = rnd.randint(0, 40)
+        paths = []
+        for k in range(count):
+            depth = rnd.randint(0, 5)
+            paths.append("/".join(["d"] * depth + ["f%d" % k]))
+        n = rnd.randint(0, 45)
+        sel = _ShallowestPaths(n)
+        for p in paths:
+            sel.add(p)
+        if count <= n:
+            assert sel.result() == paths and sel.truncated is False
+        else:
+            assert sel.result() == sorted(paths, key=lambda f: f.count("/"))[:n]
+            assert sel.truncated is True
+
+
+def test_walk_respects_simple_gitignore_dir_names(tmp_path):
+    """Обход диска (запасной путь без git) не тащит в индекс то, что проект сам
+    объявил мусором; листинг папки руками при этом не меняется."""
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("target/\nout\n/gen\n", encoding="utf-8")
+    for d in ("target", "out", "gen", "src/target", "src/gen", "src/keep"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("inner") == ["src/gen/inner.py", "src/keep/inner.py"]
+    assert list_dir(str(tmp_path), "target") == ["target/inner.py"]
+
+
+def test_gitignore_patterns_we_do_not_understand_are_skipped(tmp_path):
+    """Шаблоны, пути с '/' в середине и экранирование — не наш случай: при
+    сомнении показываем."""
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("*.log\nfoo*/\ndocs/tmp/\nba\\r/\n", encoding="utf-8")
+    for d in ("foo1", "docs/tmp", "bar"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("inner") == ["bar/inner.py", "foo1/inner.py", "docs/tmp/inner.py"]
+
+
+def test_gitignore_negation_keeps_the_dir(tmp_path):
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("out/\n!out/\ngen/\n!ge*\njunk/\n", encoding="utf-8")
+    for d in ("out", "gen", "junk"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("inner") == ["gen/inner.py", "out/inner.py"]
+
+
+def test_gitignore_with_bom_crlf_and_comments(tmp_path):
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_bytes("\ufeff# мусор\r\n\r\ntarget/  \r\n".encode("utf-8"))
+    for d in ("target", "src"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    assert PathIndex(str(tmp_path), use_git=False).search("inner") == ["src/inner.py"]
+
+
+def test_gitignore_name_hides_dirs_not_files(tmp_path):
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("outfile\n", encoding="utf-8")
+    (tmp_path / "outfile").write_text("x", encoding="utf-8")
+    assert PathIndex(str(tmp_path), use_git=False).search("outfi") == ["outfile"]
+
+
+def test_git_timeout_fallback_respects_gitignore(tmp_path, monkeypatch):
+    """Главный случай: git не уложился в таймаут — обход не должен отличаться от
+    git тем, что проект объявил мусором."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("junk/\n", encoding="utf-8")
+    for d in ("junk", "src"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+
+    def timed_out(root, max_paths):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
+    idx = PathIndex(str(tmp_path))
+    assert idx.search("inner") == ["src/inner.py"]
+    assert idx.git_timed_out is True
+
+
+def test_gitignore_negation_with_path_keeps_every_dir_of_that_name(tmp_path):
+    """`lib/` + `!src/lib/` — git показывает src/lib, значит и обход не прячет.
+    Отрицание сверяем по последнему сегменту и без учёта регистра (на Windows и
+    macOS git так и делает): лишнее отрицание безвредно, пропущенное прячет код."""
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("lib/\n!src/lib/\nout/\n!OUT/\njunk/\n", encoding="utf-8")
+    for d in ("lib", "src/lib", "out", "junk"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("inner") == ["lib/inner.py", "out/inner.py", "src/lib/inner.py"]
+
+
+def test_gitignore_lines_with_odd_whitespace_are_skipped(tmp_path):
+    """git снимает только хвостовые пробелы: ведущий пробел и таб — часть
+    шаблона, а \\x0c внутри имени — не конец строки. Сомнение — показываем."""
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_bytes(b"  target/\nout\t\nfoo\x0cbar/\ngen\r\r\njunk/   \n")
+    for d in ("target", "out", "foo", "bar", "gen", "junk"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("inner") == ["bar/inner.py", "foo/inner.py", "gen/inner.py", "out/inner.py",
+                                   "target/inner.py"]
+
+
+def test_gitignore_negation_in_dialect_we_do_not_speak_lifts_all_ignores(tmp_path):
+    """`[^x]` и экранирование git понимает, fnmatch — нет: чем гадать, какую папку
+    вернуло такое отрицание, не прячем ничего."""
+    from gc_tui.services.file_index import PathIndex
+    (tmp_path / ".gitignore").write_text("lib/\n!li[^x]/\njunk/\n", encoding="utf-8")
+    for d in ("lib", "junk"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    idx = PathIndex(str(tmp_path), use_git=False)
+    assert idx.search("inner") == ["junk/inner.py", "lib/inner.py"]
+
+
+def test_oversized_gitignore_is_not_trusted(tmp_path, monkeypatch):
+    """Файл не влез в лимит чтения: обрезанная строка стала бы другим именем, а
+    отрицание за границей потерялось бы — не верим такому файлу вовсе."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    monkeypatch.setattr(file_index, "_GITIGNORE_MAX_BYTES", 16)
+    for d in ("junk", "src"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "inner.py").write_text("x", encoding="utf-8")
+    (tmp_path / ".gitignore").write_bytes(b"junk/\n" + b"#" * 10)          # ровно лимит — читаем
+    assert PathIndex(str(tmp_path), use_git=False).search("inner") == ["src/inner.py"]
+    (tmp_path / ".gitignore").write_bytes(b"junk/\n" + b"#" * 11)          # на байт больше — нет
+    assert PathIndex(str(tmp_path), use_git=False).search("inner") == ["junk/inner.py", "src/inner.py"]
+
+
+def test_ignored_dirs_do_not_consume_the_fuse(tmp_path):
+    from gc_tui.services.file_index import _walk_paths
+    # Игнорируемые — по обе стороны от src: порядок выдачи диска не важен.
+    for d in ("a_junk", "src", "z_junk"):
+        (tmp_path / d).mkdir()
+    paths, truncated = _walk_paths(str(tmp_path), 1, ignore_anywhere=frozenset({"a_junk", "z_junk"}))
+    assert (paths, truncated) == (["src/"], False)
+
+
+def test_gitignore_is_not_read_when_git_answered(tmp_path, monkeypatch):
+    """У git своя, полная семантика игнора — упрощённый разбор ему не нужен."""
+    from gc_tui.services import file_index
+    from gc_tui.services.file_index import PathIndex
+    calls = []
+    monkeypatch.setattr(file_index, "_git_ls_files", lambda root, max_paths: (["src/inner.py"], False))
+    monkeypatch.setattr(file_index, "_simple_gitignore_dirs",
+                        lambda root: calls.append(root) or (frozenset(), frozenset()))
+    assert PathIndex(str(tmp_path)).search("inner") == ["src/inner.py"]
+    assert calls == []

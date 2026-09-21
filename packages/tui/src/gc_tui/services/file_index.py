@@ -7,6 +7,7 @@
 сборка технического футера. Корень всегда передаётся явно (cwd проекта)."""
 from __future__ import annotations
 
+import fnmatch
 import heapq
 import os
 import re
@@ -14,7 +15,7 @@ import signal
 import subprocess
 import threading
 from collections import deque
-from typing import Optional
+from typing import Callable, Optional
 
 
 def parse_at_segment(text: str, cursor: int) -> Optional[tuple[int, str]]:
@@ -44,11 +45,21 @@ _DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 def _is_outside_root(rel: str) -> bool:
-    """Абсолютный или дисковый путь — вне корня проекта: пикер такие не
-    подсказывает (внешние пути набираются руками). Отдельная Windows-ловушка:
-    join(root, "D:") даёт drive-relative путь — «текущую папку диска D»,
-    т.е. листался бы корень проекта под видом D:/…"""
-    return bool(rel) and (os.path.isabs(rel) or bool(_DRIVE_RE.match(rel)))
+    """Абсолютный, дисковый или уходящий вверх через «..» путь — вне корня
+    проекта: пикер такие не подсказывает (внешние пути набираются руками).
+    Отдельная Windows-ловушка: join(root, "D:") даёт drive-relative путь —
+    «текущую папку диска D», т.е. листался бы корень проекта под видом D:/…
+    «..» — то же самое: list_dir(root, "..") листал бы родителя проекта.
+    Внутри корня «..» законен («src/../src»), поэтому судим по нормализованному
+    пути, а не по наличию «..» в строке. Путь от корня диска («/Users») ловим
+    сами: с Python 3.13 isabs на Windows считает его относительным, а join
+    по-прежнему даёт D:/Users."""
+    if not rel:
+        return False
+    if rel[0] in "/\\" or os.path.isabs(rel) or _DRIVE_RE.match(rel):
+        return True
+    norm = os.path.normpath(rel)
+    return norm == os.pardir or norm.startswith(os.pardir + os.sep)
 
 
 def list_dir(root: str, rel: str) -> list[str]:
@@ -85,7 +96,9 @@ def names_existing_dir(root: str, query: str) -> bool:
     """query вида «папка/хвост», где «папка» реально существует под root.
 
     Только такой запрос PathIndex.search дополняет живым листингом названной
-    папки — выдача по ней полная даже при обрезанном индексе. «gc_tui/scre» при
+    папки — её прямые дети в выдаче есть все даже при обрезанном индексе.
+    Совпадения по подстроке в других местах (src/ma → packages/core/src/main.py)
+    полнотой не обладают: они берутся только из индекса. «gc_tui/scre» при
     отсутствии gc_tui/ в корне — обычный поиск по индексу, хоть в нём и есть '/'."""
     dirpart, sep, _tail = query.replace("\\", "/").rpartition("/")
     if not sep or not dirpart or _is_outside_root(dirpart):
@@ -97,6 +110,64 @@ _IGNORE_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".idea",
     ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "dist", "build",
 }
+
+_GITIGNORE_MAX_BYTES = 1 << 20
+_GLOB_CHARS = frozenset("*?[\\")
+
+
+def _simple_gitignore_dirs(root: str) -> tuple[frozenset[str], frozenset[str]]:
+    """Имена папок, которые проект сам объявил мусором в корневом .gitignore:
+    (игнор на любой глубине, игнор только в корне).
+
+    Нужен обходу диска — запасному пути, когда git не уложился в таймаут: иначе
+    он, в отличие от git ls-files, тащит в индекс target/, .next/ и т.п. Разбор
+    намеренно простой и консервативный: только строки-имена (`out`, `out/`,
+    `/out`), без шаблонов, без вложенных .gitignore и глобального ignore. Имя,
+    упомянутое в любом отрицании (`!out/`, `!src/out/`, `!OUT`), не игнорируется
+    нигде: сверяем последний сегмент отрицания без учёта регистра. При любом
+    сомнении (странные пробелы, файл не влез в лимит) папку оставляем: лишний
+    мусор в выдаче безобиднее спрятанного кода. Чего разбор не видит: отрицания
+    во вложенных .gitignore и файлы, добавленные в git силой внутри игнорируемой
+    папки, — они находятся листингом папки, но не поиском."""
+    try:
+        with open(os.path.join(root, ".gitignore"), "rb") as fh:
+            data = fh.read(_GITIGNORE_MAX_BYTES + 1)
+    except OSError:
+        return frozenset(), frozenset()
+    if len(data) > _GITIGNORE_MAX_BYTES:
+        return frozenset(), frozenset()     # обрезанная строка стала бы другим именем
+    text = data.decode("utf-8", errors="replace")
+    anywhere: set[str] = set()
+    root_only: set[str] = set()
+    negated: list[str] = []
+    # split("\n"), не splitlines(): тот режет и по \x0c, \x85, \u2028 внутри имени.
+    for raw in text.lstrip("\ufeff").split("\n"):
+        if raw.strip().startswith("!"):
+            # Отрицание разбираем щедро: лишнее безвредно, пропущенное прячет код.
+            # `[^…]` и экранирование fnmatch не понимает — такое отрицание снимает игнор целиком.
+            segment = raw.strip()[1:].strip("/").rsplit("/", 1)[-1].lower()
+            negated.append("*" if "[" in segment or "\\" in segment else segment)
+            continue
+        # git снимает один \r и хвостовые пробелы; второй \r — уже часть шаблона
+        line = (raw[:-1] if raw.endswith("\r") else raw).rstrip(" ")
+        if not line or line.startswith("#"):
+            continue
+        if line != line.strip() or _GLOB_CHARS & set(line):
+            continue
+        name = line.rstrip("/")
+        if name.startswith("/"):
+            name = name[1:]
+            target = root_only
+        else:
+            target = anywhere
+        if name and "/" not in name:
+            target.add(name)
+
+    def kept(name: str) -> bool:
+        return not any(fnmatch.fnmatchcase(name.lower(), pattern) for pattern in negated)
+
+    return (frozenset(n for n in anywhere if kept(n)),
+            frozenset(n for n in root_only if kept(n)))
 
 # Предохранитель индекса, не размер выдачи (в пикере по-прежнему до 50 строк).
 # Без него проект на миллион файлов — минуты сборки и сотни мегабайт даже в фоне,
@@ -141,7 +212,9 @@ def rank(query: str, paths: list[str], *, limit: Optional[int] = None) -> list[s
     return heapq.nsmallest(limit, paths, key=key)
 
 
-def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS) -> tuple[list[str], bool]:
+def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
+                ignore_anywhere: frozenset[str] = frozenset(),
+                ignore_root: frozenset[str] = frozenset()) -> tuple[list[str], bool]:
     """Обход В ШИРИНУ с предохранителем → (пути, обрезан ли список).
 
     В ширину, а не os.walk (он идёт вглубь): верхние уровни ВСЕХ папок попадают
@@ -149,7 +222,9 @@ def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS) -> tuple[list[str],
     глубину. Гарантия — порядок по уровням, не полнота уровня, на котором он
     сработал: там записи идут в порядке выдачи диска, и широкая плоская папка
     всё ещё может вытеснить соседей. Симлинк на папку показываем, но внутрь не
-    идём (как os.walk без followlinks)."""
+    идём (как os.walk без followlinks). `ignore_anywhere`/`ignore_root` —
+    имена папок из корневого .gitignore (см. `_simple_gitignore_dirs`),
+    пропускаются наравне с `_IGNORE_DIRS`."""
     out: list[str] = []
     queue: deque[str] = deque([""])
     while queue:
@@ -161,7 +236,9 @@ def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS) -> tuple[list[str],
                         is_dir = entry.is_dir()
                     except OSError:
                         is_dir = False
-                    if is_dir and entry.name in _IGNORE_DIRS:
+                    if is_dir and (entry.name in _IGNORE_DIRS
+                                   or entry.name in ignore_anywhere
+                                   or (not rel_dir and entry.name in ignore_root)):
                         continue
                     if len(out) >= max_paths:
                         return out, True
@@ -181,7 +258,61 @@ def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS) -> tuple[list[str],
     return out, False
 
 
+class _ShallowestPaths:
+    """Отбор самых неглубоких max_paths путей с ограниченной памятью.
+
+    Результат тот же, что у `sorted(paths, key=глубина)[:max_paths]` (сортировка
+    устойчива: внутри одной глубины остаются пришедшие раньше), но без хранения
+    всего входа: пока путей не больше потолка — обычный список в порядке прихода
+    (порядок git, как было раньше); при первом превышении — раскладка по глубине,
+    и каждый лишний путь сразу вытесняет самый глубокий из оставленных либо
+    отбрасывается сам."""
+
+    def __init__(self, max_paths: int) -> None:
+        self._max = max_paths
+        self._flat: Optional[list[str]] = []
+        self._by_depth: dict[int, list[str]] = {}
+        self.truncated = False
+
+    def __len__(self) -> int:
+        if self._flat is not None:
+            return len(self._flat)
+        return sum(len(b) for b in self._by_depth.values())
+
+    def add(self, path: str) -> None:
+        if self._max <= 0:
+            self.truncated = True
+            return
+        if self._flat is not None:
+            if len(self._flat) < self._max:
+                self._flat.append(path)
+                return
+            for p in self._flat:                       # первое превышение: в раскладку
+                self._by_depth.setdefault(p.count("/"), []).append(p)
+            self._flat = None
+        self.truncated = True
+        depth = path.count("/")
+        deepest = max(self._by_depth)
+        if depth >= deepest:
+            return                                     # не мельче самого глубокого — лишний он сам
+        bucket = self._by_depth[deepest]
+        bucket.pop()                                   # вытесняем последний из самых глубоких
+        if not bucket:
+            del self._by_depth[deepest]
+        self._by_depth.setdefault(depth, []).append(path)
+
+    def result(self) -> list[str]:
+        if self._flat is not None:
+            return self._flat
+        return [p for depth in sorted(self._by_depth) for p in self._by_depth[depth]]
+
+
 _GIT_TIMEOUT = 5.0
+# GIL освобождается на время самого чтения (сырой read1). Кусок небольшой:
+# read1(n) на пустом буфере выделяет байты под весь n при каждом вызове и потом
+# обрезает — а пайп всё равно отдаёт только килобайты за раз, крупный n тут
+# только лишняя аллокация и копирование.
+_GIT_CHUNK = 1 << 16
 
 
 def _kill_process_tree(proc: "subprocess.Popen") -> None:
@@ -205,10 +336,28 @@ def _kill_process_tree(proc: "subprocess.Popen") -> None:
         pass
 
 
-def _run_bounded(cmd: list[str], cwd: str, timeout: float) -> Optional[bytes]:
-    """stdout команды или None при ненулевом коде/ошибке запуска; не уложилась в
-    timeout — subprocess.TimeoutExpired: дерево процессов гасится (best-effort),
-    а ожидание в любом случае ограничено — таймаут плюс секунды на гашение.
+def _reap(proc: "subprocess.Popen") -> None:
+    """Подобрать погашенный процесс, не дольше пары секунд (на POSIX иначе зомби)."""
+    try:
+        proc.wait(timeout=2)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
+def _stream_bounded(cmd: list[str], cwd: str, timeout: float,
+                    on_chunk: Callable[[bytes], None]) -> bool:
+    """Запустить команду и отдавать её stdout кусками в on_chunk. True — код
+    возврата 0; False — ненулевой код, команда не запустилась, или вывод
+    кончился, но процесс пришлось гасить принудительно; не уложилась в
+    timeout — subprocess.TimeoutExpired. Уже отданные куски при таймауте —
+    обрывок: вызывающий обязан их выбросить.
+
+    Пайп читает служебный поток (`_pump`), а не вызывающий: ждать саму
+    блокирующую read1 бесполезно ограничивать таймаутом снаружи, а гашение
+    дерева (`_kill_process_tree`) — best-effort и может не сработать. Поэтому
+    вызывающий ждёт поток с дедлайном (как `communicate` на Windows): не
+    дождался — таймаут гарантирован таймингом ожидания, а не тем, получится
+    ли убить дерево; `on_chunk` при этом выполняется в служебном потоке.
 
     Не subprocess.run: на Windows он после kill() ждёт закрытия пайпа без таймаута,
     а пайп держит переживший обёртку дочерний процесс — «таймаут 5 с» превращался
@@ -220,30 +369,85 @@ def _run_bounded(cmd: list[str], cwd: str, timeout: float) -> Optional[bytes]:
         proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, **kwargs)
     except OSError:
-        return None
-    try:
-        out, _ = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        _kill_process_tree(proc)
+        return False
+
+    failure: list[BaseException] = []
+    stop = threading.Event()        # после таймаута вывод никому не нужен
+
+    def _pump() -> None:
         try:
-            proc.communicate(timeout=2)         # подобрать процесс; ждать пайп вечно нельзя
-        except (subprocess.TimeoutExpired, OSError, ValueError):
+            while True:
+                chunk = proc.stdout.read1(_GIT_CHUNK)
+                if not chunk or stop.is_set():
+                    return
+                on_chunk(chunk)
+        except BaseException as exc:            # отдадим вызывающему
+            failure.append(exc)
+
+    reader = threading.Thread(target=_pump, name="file-index-reader", daemon=True)
+    reader.start()
+    reader.join(timeout)
+    if reader.is_alive():
+        stop.set()
+        _kill_process_tree(proc)
+        reader.join(2)      # пайп закрылся — поток дочитает и выйдет; не вышел — бросаем его (daemon)
+        _reap(proc)
+        if not reader.is_alive():
+            # Закрывать можно только без читателя: он держит лок буфера, close завис бы.
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    try:
+        if failure:
+            _kill_process_tree(proc)
+            _reap(proc)
+            raise failure[0]
+        try:
+            proc.wait(timeout=2)                # вывод кончился — процесс вот-вот выйдет
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            _reap(proc)
+    finally:
+        try:
+            proc.stdout.close()
+        except OSError:
             pass
-        raise
-    return out if proc.returncode == 0 else None
+    return proc.returncode == 0
 
 
-def _git_ls_files(root: str) -> Optional[bytes]:
-    """Сырой вывод `git ls-files -z` (tracked + untracked, с учётом .gitignore) или
-    None, если git его не дал (не репозиторий, git не установлен, ненулевой код);
-    subprocess.TimeoutExpired — не уложился.
+def _git_ls_files(root: str, max_paths: int) -> Optional[tuple[list[str], bool]]:
+    """Файлы git (tracked + untracked, с учётом .gitignore): (пути, обрезан ли
+    список) — не больше max_paths самых неглубоких; None, если git их не дал (не
+    репозиторий, git не установлен, ненулевой код); subprocess.TimeoutExpired —
+    не уложился.
 
     -z и байты: с core.quotePath=true (дефолт) git квотит не-ASCII имена
     восьмеричными кодами в текстовом выводе; с -z он их не трогает и разделяет
-    NUL. Декодирует вызывающий (git пишет UTF-8, а не локальной кодировкой)."""
-    return _run_bounded(
+    NUL. Режем байты по NUL и только потом декодируем как UTF-8: NUL внутри
+    многобайтного символа не встречается, поэтому граница куска путь не портит.
+    Вывод читается потоком — в памяти не больше max_paths путей, сколько бы
+    файлов ни было в репозитории."""
+    picked = _ShallowestPaths(max_paths)
+    tail = b""
+
+    def on_chunk(chunk: bytes) -> None:
+        nonlocal tail
+        parts = (tail + chunk).split(b"\0")
+        tail = parts.pop()
+        for part in parts:
+            if part:
+                picked.add(part.decode("utf-8", errors="replace"))
+
+    ok = _stream_bounded(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        root, _GIT_TIMEOUT)
+        root, _GIT_TIMEOUT, on_chunk)
+    if not ok:
+        return None
+    if tail:
+        picked.add(tail.decode("utf-8", errors="replace"))
+    return picked.result(), picked.truncated
 
 
 def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
@@ -258,21 +462,27 @@ def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
 
     Предохранитель max_paths — по файлам; папки-префиксы идут сверх него
     (обычно их намного меньше). При превышении остаются самые неглубокие файлы — тот
-    же принцип, что у _walk_paths: срезаем глубину, а не соседей.
+    же принцип, что у _walk_paths: срезаем глубину, а не соседей; для git-ветки
+    это делает `_git_ls_files` на лету, пока читает вывод git потоком.
 
     Третье значение — `git ls-files` вышел по таймауту (огромный репозиторий):
     вызывающий запоминает это и в следующий раз передаёт `use_git=False`,
     чтобы не ждать таймаут на каждый сеанс пикера и не гонять тяжёлый git по
-    миллиону файлов впустую. `use_git=False` → git не зовётся вовсе, сразу walk."""
+    миллиону файлов впустую. `use_git=False` → git не зовётся вовсе, сразу walk.
+
+    Обход диска (запасной путь) сверх `_IGNORE_DIRS` уважает простые строки
+    корневого .gitignore (см. `_simple_gitignore_dirs`); .gitignore не
+    читается, если git ответил успешно."""
+    def walk() -> tuple[list[str], bool]:
+        anywhere, root_only = _simple_gitignore_dirs(root)
+        return _walk_paths(root, max_paths, ignore_anywhere=anywhere, ignore_root=root_only)
+
     if use_git:
         try:
-            raw = _git_ls_files(root)
-            if raw is not None:
-                files = [p for p in raw.decode("utf-8", errors="replace").split("\0") if p]
+            listing = _git_ls_files(root, max_paths)
+            if listing is not None:
+                files, truncated = listing
                 if files:
-                    truncated = len(files) > max_paths
-                    if truncated:
-                        files = sorted(files, key=lambda f: f.count("/"))[:max_paths]
                     dirs: set[str] = set()
                     for f in files:
                         parts = f.split("/")
@@ -280,11 +490,11 @@ def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
                             dirs.add("/".join(parts[:i]) + "/")
                     return sorted(dirs) + files, truncated, False
         except subprocess.TimeoutExpired:
-            paths, truncated = _walk_paths(root, max_paths)
+            paths, truncated = walk()
             return paths, truncated, True
         except (OSError, subprocess.SubprocessError):
             pass
-    paths, truncated = _walk_paths(root, max_paths)
+    paths, truncated = walk()
     return paths, truncated, False
 
 
