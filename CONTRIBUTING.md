@@ -69,6 +69,9 @@
 [readme.md](readme.md), [docs/usage.md](docs/usage.md) и
 [docs/packaging.md](docs/packaging.md). Зависимости ставьте только через `uv`.
 
+Практическая памятка — карта репозитория, запуск из исходников, частые
+грабли — в [docs/for_developers](docs/for_developers/README.md).
+
 Для разработки достаточно двух команд в корне клона:
 
 ```bash
