@@ -39,6 +39,7 @@ def get_hash(ctx: Any | None = None) -> str | None:
     """Хеш содержимого long memory для baseline/changed hints (D10, D40)."""
     return content_hash(resolve_project_memory_path(ctx))
 
+
 __all__ = [
     "DEFAULT_MAX_CHARS",
     "MAX_CHARS",

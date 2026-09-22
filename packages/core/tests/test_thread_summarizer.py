@@ -13,7 +13,10 @@ from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 class ThreadSummarizerTest(unittest.TestCase):
     def test_append_user_log_entries_skips_technical_user_message(self) -> None:
         messages = [
-            {"role": "user", "content": "client has non-empty thread notes; call `thread_notes` with action=\"read\" to load them."},
+            {
+                "role": "user",
+                "content": 'client has non-empty thread notes; call `thread_notes` with action="read" to load them.',
+            },
             {"role": "user", "content": "There is no tool call in Agent response. Please send appropriate tool call"},
             {"role": "user", "content": "❌ Tool Argument Validation Failed. Expected schema: {...}"},
             {"role": "user", "content": "<dialog_summary>\n...\n</dialog_summary>"},
@@ -43,7 +46,7 @@ class ThreadSummarizerTest(unittest.TestCase):
             max_steps=5,
             message_max_chars=5000,
         )
-        self.assertIn("<cutted_envelope truncated=\"true\"", steps)
+        self.assertIn('<cutted_envelope truncated="true"', steps)
         self.assertNotIn("TEXT CUTTED", steps)
 
     def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
@@ -76,9 +79,7 @@ class ThreadSummarizerTest(unittest.TestCase):
             {"role": "user", "content": "c" * 2000},
         ]
         turns = group_into_turns(messages)
-        batches = split_turns_into_char_batches(
-            turns, batch_chars_limit=3500
-        )
+        batches = split_turns_into_char_batches(turns, batch_chars_limit=3500)
         self.assertEqual(len(batches), 2)
         self.assertEqual(len(batches[0]), 1)
         self.assertEqual(len(batches[1]), 1)

@@ -1,5 +1,6 @@
 """Ephemeral in-progress streaming block (TUI). Shows live model output for the
 current step; removed when the canonical thread row arrives or the run ends."""
+
 from __future__ import annotations
 
 from rich.console import RenderableType

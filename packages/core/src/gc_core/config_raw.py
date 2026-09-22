@@ -8,6 +8,7 @@
 Статус ссылки определяется по os.environ, а НЕ по резолвнутому значению: пустой
 резолв («переменной нет») неотличим от «значение не задано».
 """
+
 from __future__ import annotations
 
 import os
@@ -70,8 +71,7 @@ def env_refs(value: Any) -> List[str]:
     return _ENV_MARKER.findall(value)
 
 
-def env_refs_overwritten(new_values: Dict[str, Any],
-                         old_values: Dict[str, Any]) -> tuple[List[str], List[str]]:
+def env_refs_overwritten(new_values: Dict[str, Any], old_values: Dict[str, Any]) -> tuple[List[str], List[str]]:
     """Переменные окружения, чьи ссылки затрёт запись `new_values` поверх
     `old_values` (сырые значения тех же ключей), разложенные по тому, ЧТО с ними
     произойдёт: (перезапись литералом, удаление пустым значением). Оба списка

@@ -10,6 +10,7 @@
 проявлялась бы редко и не воспроизводимо: только когда аллокатор отдаст новому
 loop адрес умершего.
 """
+
 import asyncio
 import gc
 
@@ -43,10 +44,9 @@ def test_client_is_rebuilt_when_the_loop_id_is_reused():
         # Аллокатор не переиспользовал ни одного адреса за 12 попыток: сам факт
         # переиспользования от нас не зависит, поэтому это не провал теста.
         # Проверяем инвариант напрямую — записи помнят СВОЙ loop.
-        assert all(
-            isinstance(entry, tuple) and len(entry) == 2
-            for entry in async_http._clients.values()
-        ), "реестр не хранит ссылку на loop — сверить принадлежность нечем"
+        assert all(isinstance(entry, tuple) and len(entry) == 2 for entry in async_http._clients.values()), (
+            "реестр не хранит ссылку на loop — сверить принадлежность нечем"
+        )
 
 
 def test_registry_entry_remembers_its_loop():
@@ -61,6 +61,4 @@ def test_registry_entry_remembers_its_loop():
 
     assert async_http._clients, "клиент не попал в реестр"
     for loop_ref, _client in async_http._clients.values():
-        assert loop_ref() is None or loop_ref() is loop, (
-            "запись реестра указывает на ЧУЖОЙ loop"
-        )
+        assert loop_ref() is None or loop_ref() is loop, "запись реестра указывает на ЧУЖОЙ loop"

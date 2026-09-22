@@ -62,16 +62,13 @@ def _bare_python() -> Path:
                     return cand
                 too_old.append(f"{cand} ({major}.{minor})")
     if too_old:
-        pytest.skip(
-            "базовый интерпретатор не удовлетворяет requires-python >=3.11: "
-            + ", ".join(too_old)
-        )
+        pytest.skip("базовый интерпретатор не удовлетворяет requires-python >=3.11: " + ", ".join(too_old))
     pytest.skip(f"базовый интерпретатор не найден в {sys.base_prefix}")
 
 
 def _env_without_repo(extra_path: Path) -> dict[str, str]:
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(extra_path)   # только заглушка yaml, репозитория тут нет
+    env["PYTHONPATH"] = str(extra_path)  # только заглушка yaml, репозитория тут нет
     env["PYTHONNOUSERSITE"] = "1"
     return env
 
@@ -84,18 +81,21 @@ def test_direct_run_finds_our_packages(script, tmp_path):
 
     probe = subprocess.run(
         [str(python), "-c", "import gc_core"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if probe.returncode == 0:
-        pytest.skip("базовому интерпретатору gc_core виден и без бутстрапа — "
-                    "проверять нечего")
+        pytest.skip("базовому интерпретатору gc_core виден и без бутстрапа — проверять нечего")
 
     res = subprocess.run(
         [str(python), str(_RECIPES / script), "--help"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
-    assert "No module named" not in res.stderr, (
-        f"{script}: бутстрап не нашёл наши исходники\n{res.stderr}"
-    )
+    assert "No module named" not in res.stderr, f"{script}: бутстрап не нашёл наши исходники\n{res.stderr}"
     assert res.returncode == 0, res.stderr
     assert "usage" in res.stdout.lower(), res.stdout

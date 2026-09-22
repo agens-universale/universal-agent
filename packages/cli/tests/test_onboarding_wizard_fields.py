@@ -12,7 +12,7 @@ def test_auto_asks_only_pending_and_wraps_token():
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
-        "model": "gigacode_agent_v1.6_rc",   # задан → не спрашивается
+        "model": "gigacode_agent_v1.6_rc",  # задан → не спрашивается
     }
     # endpoint, затем auth-меню: "1" (ввести токен), затем сам токен
     io, _ = _io(["https://x/v1/chat/completions", "1", "sk-1"])
@@ -29,7 +29,7 @@ def test_skip_leaves_field_out():
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
         "model": "m",
     }
-    io, _ = _io(["", ""])   # оба пропущены
+    io, _ = _io(["", ""])  # оба пропущены
     assert wz.collect_fields(io, cfg, review_all=False) == {}
 
 
@@ -59,5 +59,5 @@ def test_invalid_endpoint_reask_then_enter_skips():
         "chat_completion_headers": {"Authorization": "Bearer set"},
         "model": "m",
     }
-    io, _ = _io(["ftp://weird", ""])   # невалид → переспрос → Enter = пропуск
+    io, _ = _io(["ftp://weird", ""])  # невалид → переспрос → Enter = пропуск
     assert wz.collect_fields(io, cfg, review_all=False) == {}

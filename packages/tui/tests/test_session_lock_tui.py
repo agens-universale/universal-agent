@@ -1,4 +1,5 @@
 """TUI-проводка session lock: deny resume, badge, release на /new, empty-state."""
+
 from __future__ import annotations
 
 import json
@@ -11,8 +12,11 @@ from gc_tui.services.session_lock import BUSY_MESSAGE, lock_path, try_acquire
 
 def _seed(threads_dir, tid, prompt="hello"):
     append_new_thread_messages(
-        str(threads_dir), "cli", tid,
-        [{"role": "user", "content": prompt, "id": f"m_{tid}"}], set(),
+        str(threads_dir),
+        "cli",
+        tid,
+        [{"role": "user", "content": prompt, "id": f"m_{tid}"}],
+        set(),
     )
     meta = {
         "thread_id": tid,
@@ -22,14 +26,13 @@ def _seed(threads_dir, tid, prompt="hello"):
         "messages_count": 1,
     }
     (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(
-        json.dumps(meta, ensure_ascii=False), encoding="utf-8",
+        json.dumps(meta, ensure_ascii=False),
+        encoding="utf-8",
     )
 
 
 def _rows_text(pilot):
-    return "\n".join(
-        str(s.render()) for s in pilot.app.screen.query("#sessions-list Static")
-    )
+    return "\n".join(str(s.render()) for s in pilot.app.screen.query("#sessions-list Static"))
 
 
 @pytest.mark.asyncio
@@ -107,9 +110,7 @@ async def test_sessions_shows_busy_badge(tmp_path):
     from gc_tui.screens.sessions import SessionsScreen
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
-        await pilot.app.push_screen(
-            SessionsScreen(threads_dir=str(tmp_path), system="cli")
-        )
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         text = _rows_text(pilot)
         assert "🔒 занято" in text
@@ -132,9 +133,7 @@ async def test_sessions_resume_denies_busy(tmp_path):
         pilot.app.notify = lambda msg, **kw: notifications.append(msg)
         scr = pilot.app.screen
         assert scr.attach_active_task(tid_a, is_resume=True) is True
-        await pilot.app.push_screen(
-            SessionsScreen(threads_dir=str(tmp_path), system="cli")
-        )
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         screen = pilot.app.screen
         assert isinstance(screen, SessionsScreen)
@@ -166,9 +165,7 @@ async def test_sessions_switch_releases_previous(tmp_path):
         scr = pilot.app.screen
         assert scr.attach_active_task(tid_a, is_resume=True) is True
         assert Path(lock_path(str(tmp_path), "cli", tid_a)).exists()
-        await pilot.app.push_screen(
-            SessionsScreen(threads_dir=str(tmp_path), system="cli")
-        )
+        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
         screen = pilot.app.screen
         screen._resume_thread(tid_b)

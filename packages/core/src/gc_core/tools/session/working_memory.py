@@ -44,10 +44,7 @@ def _registers_summary(
     limits: Dict[str, int],
 ) -> Dict[str, str]:
     return {
-        name: (
-            f"Length - {len(registers.get(name, ''))} chars "
-            f"(limit: {limits.get(name, 0)} chars)"
-        )
+        name: (f"Length - {len(registers.get(name, ''))} chars (limit: {limits.get(name, 0)} chars)")
         for name in REGISTER_ORDER
     }
 
@@ -65,31 +62,23 @@ class WorkingMemory(AbstractSimpleTool):
         self._ctx = ctx
         self._state = state
         cfg = getattr(ctx, "config_dict", None) or {}
-        limits_cfg = (
-            working_memory_limits_from_params(cfg.get("working_memory_params")) or {}
-        )
+        limits_cfg = working_memory_limits_from_params(cfg.get("working_memory_params")) or {}
 
         self._register_limits = {
-            REGISTER_GOAL: self._cfg_int(
-                limits_cfg, "max_chars_goal", DEFAULT_REGISTER_LIMITS[REGISTER_GOAL]
-            ),
+            REGISTER_GOAL: self._cfg_int(limits_cfg, "max_chars_goal", DEFAULT_REGISTER_LIMITS[REGISTER_GOAL]),
             REGISTER_CONSTRAINTS: self._cfg_int(
                 limits_cfg,
                 "max_chars_constraints",
                 DEFAULT_REGISTER_LIMITS[REGISTER_CONSTRAINTS],
             ),
-            REGISTER_STATE: self._cfg_int(
-                limits_cfg, "max_chars_state", DEFAULT_REGISTER_LIMITS[REGISTER_STATE]
-            ),
+            REGISTER_STATE: self._cfg_int(limits_cfg, "max_chars_state", DEFAULT_REGISTER_LIMITS[REGISTER_STATE]),
             REGISTER_KNOWLEDGE: self._cfg_int(
                 limits_cfg,
                 "max_chars_knowledge",
                 DEFAULT_REGISTER_LIMITS[REGISTER_KNOWLEDGE],
             ),
         }
-        self._total_budget_chars = self._cfg_int(
-            limits_cfg, "total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS
-        )
+        self._total_budget_chars = self._cfg_int(limits_cfg, "total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS)
 
     @staticmethod
     def _cfg_int(cfg: Dict[str, Any], key: str, default: int) -> int:
@@ -144,10 +133,7 @@ class WorkingMemory(AbstractSimpleTool):
                     "register": {
                         "type": "string",
                         "enum": list(REGISTER_ORDER),
-                        "description": (
-                            "Target memory register. Required for every action "
-                            "(ignored for list)."
-                        ),
+                        "description": ("Target memory register. Required for every action (ignored for list)."),
                     },
                     "reason": {
                         "type": "string",
@@ -228,15 +214,10 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
         raw = getattr(shared, "working_memory", None)
         if not isinstance(raw, dict):
             return {}
-        return {
-            name: str(raw.get(name, "")) if isinstance(raw.get(name, ""), str) else ""
-            for name in REGISTER_ORDER
-        }
+        return {name: str(raw.get(name, "")) if isinstance(raw.get(name, ""), str) else "" for name in REGISTER_ORDER}
 
     def _set_registers(self, registers: Dict[str, str]) -> None:
-        self._state.shared.working_memory = {
-            name: registers.get(name, "") for name in REGISTER_ORDER
-        }
+        self._state.shared.working_memory = {name: registers.get(name, "") for name in REGISTER_ORDER}
 
     def _result(
         self,
@@ -270,7 +251,6 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             total_chars=_total_chars(registers),
             error={"type": error_type, "message": message},
         )
-
 
     async def acall(
         self,
@@ -315,18 +295,13 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             return self._error(
                 action=action,
                 error_type="missing_register",
-                message=(
-                    f"register is required for {action}; "
-                    "one of: goal, constraints, state, knowledge."
-                ),
+                message=(f"register is required for {action}; one of: goal, constraints, state, knowledge."),
             )
         if register not in REGISTER_SET:
             return self._error(
                 action=action,
                 error_type="invalid_register",
-                message=(
-                    "register must be one of: goal, constraints, state, knowledge."
-                ),
+                message=("register must be one of: goal, constraints, state, knowledge."),
             )
         return None
 
@@ -437,15 +412,10 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             return self._error(
                 action=action,
                 error_type="register_limit_exceeded",
-                message=(
-                    f"Register '{target_register}' would exceed {register_limit} chars. "
-                    f"{hint}"
-                ),
+                message=(f"Register '{target_register}' would exceed {register_limit} chars. {hint}"),
             )
 
-        projected_total = (
-            sum(len(v) for k, v in registers.items() if k != target_register) + len(new_text)
-        )
+        projected_total = sum(len(v) for k, v in registers.items() if k != target_register) + len(new_text)
         if projected_total > self._total_budget_chars:
             return self._error(
                 action=action,

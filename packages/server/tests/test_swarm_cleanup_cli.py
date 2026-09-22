@@ -46,9 +46,12 @@ def aged_tree(tmp_path):
 def _argv(threads, sandboxes, *extra):
     return [
         "cleanup",
-        "--threads-dir", str(threads),
-        "--sandbox-root-dir", str(sandboxes),
-        "--ttl-hours", "24",
+        "--threads-dir",
+        str(threads),
+        "--sandbox-root-dir",
+        str(sandboxes),
+        "--ttl-hours",
+        "24",
         *extra,
     ]
 
@@ -116,11 +119,19 @@ def test_documented_module_invocation_succeeds(aged_tree):
     """
     threads, sandboxes = aged_tree
     proc = subprocess.run(
-        [sys.executable, "-m", "gc_server.swarm.cleanup",
-         "--threads-dir", str(threads),
-         "--sandbox-root-dir", str(sandboxes),
-         "--ttl-hours", "24"],
-        capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "gc_server.swarm.cleanup",
+            "--threads-dir",
+            str(threads),
+            "--sandbox-root-dir",
+            str(sandboxes),
+            "--ttl-hours",
+            "24",
+        ],
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc.stderr
     assert "swarm cleanup:" in proc.stdout

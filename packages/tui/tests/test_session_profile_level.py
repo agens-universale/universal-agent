@@ -3,6 +3,7 @@
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-11-brief.md,
 docs/specs/2026-07-23-profiles-design.md §6.4, §8, §9, §3.2, §3.3, §3.5.
 """
+
 import os
 import time
 from pathlib import Path
@@ -70,8 +71,7 @@ def test_level_registered_in_session_keys():
 async def test_level_restored_on_attach(tmp_path):
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     store.update_tui_meta("t-level", {"session_settings": {"level": "max"}})
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
-                 config={"model": "M", "level": "default"})
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M", "level": "default"})
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-level")
         await pilot.pause(0.1)
@@ -82,8 +82,7 @@ async def test_level_restored_on_attach(tmp_path):
 
 
 def test_level_change_does_not_invalidate_runner(tmp_path):
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
-                 config={"model": "M", "level": "default"})
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M", "level": "default"})
     calls = {"n": 0}
     app.invalidate_runner = lambda: calls.__setitem__("n", calls["n"] + 1)
     app.apply_session_override("level", "light")
@@ -91,11 +90,10 @@ def test_level_change_does_not_invalidate_runner(tmp_path):
 
 
 def test_level_provider_reflects_session_override_without_rebuild(tmp_path):
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli",
-                 config={"model": "M", "level": "default"})
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M", "level": "default"})
     assert app._level_provider() == "default"
     app.set_session_override("level", "max")
-    assert app._level_provider() == "max"   # без пересборки executor
+    assert app._level_provider() == "max"  # без пересборки executor
 
 
 # --- 3. session-профиль → пере-мерж effective_config -------------------------------
@@ -143,18 +141,21 @@ def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
     трогала: он берётся из профиля, иначе «сессия сверху» выродилась бы в
     «сессия вместо профиля».
     """
-    _write_yaml(tmp_path / "profiles" / "work.yml", {
-        "models": {"flash": {"url": "http://work/v1/chat/completions", "token": ""}},
-        "slots": {"default": "flash"},
-        "level": "max",
-    })
+    _write_yaml(
+        tmp_path / "profiles" / "work.yml",
+        {
+            "models": {"flash": {"url": "http://work/v1/chat/completions", "token": ""}},
+            "slots": {"default": "flash"},
+            "level": "max",
+        },
+    )
     app = _app_with_base(tmp_path)
 
     # 1) сессия раньше профиля — профиль её не смывает
     app.set_session_override("level", "light")
     app.switch_session_profile("work")
     assert app.effective_config()["level"] == "light"
-    assert "flash" in app.effective_config()["models"]   # прочее из профиля пришло
+    assert "flash" in app.effective_config()["models"]  # прочее из профиля пришло
 
     # 2) сессия позже профиля — ложится сверху
     app.set_session_override("level", "default")
@@ -174,6 +175,7 @@ def test_effective_config_caches_profile_remerge(tmp_path, monkeypatch):
     app.switch_session_profile("work")
 
     from gc_core import config as cfg_mod
+
     calls = {"n": 0}
     orig = cfg_mod.load_config_ex
 
@@ -185,7 +187,7 @@ def test_effective_config_caches_profile_remerge(tmp_path, monkeypatch):
     app.effective_config()
     app.effective_config()
     app.effective_config()
-    assert calls["n"] == 0   # уже закэшировано в switch_session_profile
+    assert calls["n"] == 0  # уже закэшировано в switch_session_profile
 
 
 def test_reload_config_refreshes_stale_profile_cache(tmp_path):
@@ -223,8 +225,13 @@ def test_reload_config_if_changed_picks_up_edit_of_session_selected_profile(tmp_
     assert app.effective_config()["models"]["flash"]["url"] == "http://work/v1/chat/completions"
 
     work_path = tmp_path / "profiles" / "work.yml"
-    _write_yaml(work_path, {"models": {"flash": {"url": "http://work-v2/v1/chat/completions", "token": ""}},
-                            "slots": {"default": "flash"}})
+    _write_yaml(
+        work_path,
+        {
+            "models": {"flash": {"url": "http://work-v2/v1/chat/completions", "token": ""}},
+            "slots": {"default": "flash"},
+        },
+    )
     _bump_mtime(work_path)
 
     app.reload_config_if_changed()
@@ -268,15 +275,15 @@ def test_profile_remerge_notices_once_on_race_and_falls_back(tmp_path):
     # перечитка) — прямой вызов _profile_remerge с изменившимся содержимым,
     # но старым кэш-ключом, эмулирует гонку "испортилось между кадрами".
     work_path = tmp_path / "profiles" / "work.yml"
-    app._session_profile_cache = None   # форсируем реальный поход в load_config_ex
+    app._session_profile_cache = None  # форсируем реальный поход в load_config_ex
     work_path.write_text("models: [broken", encoding="utf-8")
 
     cfg1 = app._profile_remerge("work")
-    assert cfg1 == app._config   # фоллбэк — прежняя (базовая) рабочая конфигурация
+    assert cfg1 == app._config  # фоллбэк — прежняя (базовая) рабочая конфигурация
     codes = [n.code for n in collect_runtime_notices()]
     assert codes.count("session_profile_remerge_failed") == 1
 
-    cfg2 = app._profile_remerge("work")   # тот же (испорченный) ключ — кэш, БЕЗ повторного notice
+    cfg2 = app._profile_remerge("work")  # тот же (испорченный) ключ — кэш, БЕЗ повторного notice
     assert cfg2 == app._config
     codes_after = [n.code for n in collect_runtime_notices()]
     assert codes_after.count("session_profile_remerge_failed") == 1
@@ -287,7 +294,7 @@ def test_profile_remerge_notices_once_on_race_and_falls_back(tmp_path):
 
 def test_sanitize_drops_stale_session_profile_with_notice(tmp_path):
     clear_runtime_notices()
-    app = _app_with_base(tmp_path)   # никакого profiles/ghost.yml на диске
+    app = _app_with_base(tmp_path)  # никакого profiles/ghost.yml на диске
     app.set_session_override("profile", "ghost")
     calls = {"n": 0}
     app.invalidate_runner = lambda: calls.__setitem__("n", calls["n"] + 1)
@@ -325,7 +332,7 @@ def test_reload_config_if_changed_keeps_base_when_config_profile_pointer_broken(
     базового конфига — существующий канон reload_config_if_changed (config_reload_failed,
     прежняя база), НЕ санация сессии — это разные ветки одной спеки."""
     clear_runtime_notices()
-    app = _app_with_base(tmp_path)   # profile: "" — валидно на старте
+    app = _app_with_base(tmp_path)  # profile: "" — валидно на старте
     good_config = dict(app._config)
 
     base = Path(app._config_path)
@@ -430,7 +437,7 @@ def test_run_persists_circuit_breaker_even_after_runner_replaced(tmp_path):
 
         async def arun(self, *a, **k):
             app._circuit_breaker.trip("flash", "недоступна")
-            app.active_runner = None          # как _stop_and_replace_runner
+            app.active_runner = None  # как _stop_and_replace_runner
             return "done"
 
         def stop_run(self):
@@ -561,6 +568,7 @@ async def test_footer_model_name_hides_unset_sentinel(tmp_path):
     """Легаси-режим (пустой реестр) с ещё не заполненным `agent.model` (шаблонный
     сентинел, Task 14) — футер не должен показывать сырой плейсхолдер как имя модели."""
     from gc_core import onboarding
+
     cfg = {
         "backend_api_mode": "chat_completions",
         "model": onboarding.MODEL_SENTINEL,
@@ -625,7 +633,7 @@ def test_boot_frozen_diff_notice_on_profile_switch(tmp_path):
 
 
 def test_boot_frozen_diff_no_notice_when_unchanged(tmp_path):
-    _write_work_profile(tmp_path)   # профиль не трогает paths.*
+    _write_work_profile(tmp_path)  # профиль не трогает paths.*
     clear_runtime_notices()
     app = _app_with_base(tmp_path)
     app.switch_session_profile("work")
@@ -649,7 +657,7 @@ def test_switch_session_profile_defers_while_run_is_live(tmp_path):
     app.switch_session_profile("work")
 
     assert app._runner_stale is True
-    assert app.active_runner is not None   # не выброшен — довершит ход
+    assert app.active_runner is not None  # не выброшен — довершит ход
     codes = [n.code for n in collect_runtime_notices()]
     assert "profile_switch_deferred" in codes
 
@@ -666,8 +674,7 @@ def test_project_profile_activation_notice(tmp_path, monkeypatch):
     _write_yaml(base, _MINIMAL_BASE)
     _write_yaml(
         project_dir / ".gc" / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://proj/v1/chat/completions", "token": ""}},
-         "slots": {"default": "flash"}},
+        {"models": {"flash": {"url": "http://proj/v1/chat/completions", "token": ""}}, "slots": {"default": "flash"}},
     )
     cfg, _meta = load_config_ex(str(base))
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
@@ -702,8 +709,10 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
     base_profile = _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://base-root/v1/chat/completions", "token": ""}},
-         "slots": {"default": "flash"}},
+        {
+            "models": {"flash": {"url": "http://base-root/v1/chat/completions", "token": ""}},
+            "slots": {"default": "flash"},
+        },
     )
 
     cfg, _meta = load_config_ex(str(base))
@@ -714,8 +723,10 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     # приехал проектный тёзка — он выигрывает по §3.1
     proj_profile = _write_yaml(
         project_dir / ".gc" / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://project-root/v1/chat/completions", "token": ""}},
-         "slots": {"default": "flash"}},
+        {
+            "models": {"flash": {"url": "http://project-root/v1/chat/completions", "token": ""}},
+            "slots": {"default": "flash"},
+        },
     )
     app.reload_config_if_changed()
 
@@ -725,8 +736,8 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     assert match, f"нет notice о смене источника профиля; коды: {[n.code for n in notices]}"
     msg = match[0].message
     assert "work" in msg
-    assert str(proj_profile) in msg      # куда переехал
-    assert str(base_profile) in msg      # откуда
+    assert str(proj_profile) in msg  # куда переехал
+    assert str(base_profile) in msg  # откуда
 
 
 def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch):
@@ -742,16 +753,17 @@ def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch)
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
     profile = _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://one/v1/chat/completions", "token": ""}},
-         "slots": {"default": "flash"}},
+        {"models": {"flash": {"url": "http://one/v1/chat/completions", "token": ""}}, "slots": {"default": "flash"}},
     )
 
     cfg, _meta = load_config_ex(str(base))
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
     app.set_config_path(str(base))
 
-    _write_yaml(profile, {"models": {"flash": {"url": "http://two/v1/chat/completions", "token": ""}},
-                          "slots": {"default": "flash"}})
+    _write_yaml(
+        profile,
+        {"models": {"flash": {"url": "http://two/v1/chat/completions", "token": ""}}, "slots": {"default": "flash"}},
+    )
     _bump_mtime(profile)
     app.reload_config_if_changed()
 
@@ -775,10 +787,11 @@ def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeyp
 
     base = tmp_path / "config.yml"
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
-    for name, url in (("work", "http://work/v1/chat/completions"),
-                      ("home", "http://home/v1/chat/completions")):
-        _write_yaml(tmp_path / "profiles" / f"{name}.yml",
-                    {"models": {"flash": {"url": url, "token": ""}}, "slots": {"default": "flash"}})
+    for name, url in (("work", "http://work/v1/chat/completions"), ("home", "http://home/v1/chat/completions")):
+        _write_yaml(
+            tmp_path / "profiles" / f"{name}.yml",
+            {"models": {"flash": {"url": url, "token": ""}}, "slots": {"default": "flash"}},
+        )
 
     cfg, _meta = load_config_ex(str(base))
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
@@ -792,9 +805,7 @@ def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeyp
 
     assert app.active_profile_ref().name == "home"
     codes = [n.code for n in collect_runtime_notices()]
-    assert "profile_source_changed" not in codes, (
-        f"смена имени профиля — не смена источника; коды: {codes}"
-    )
+    assert "profile_source_changed" not in codes, f"смена имени профиля — не смена источника; коды: {codes}"
 
 
 def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
@@ -805,14 +816,13 @@ def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
     идущая другим поводом (attach треда, перечитка), не должна менять
     `effective_config`."""
     app = _app_with_base(tmp_path)
-    _write_yaml(tmp_path / "profiles" / "work.yml",
-                {"strip_tags_projection": {"tags": ["scratchpad"]}})
+    _write_yaml(tmp_path / "profiles" / "work.yml", {"strip_tags_projection": {"tags": ["scratchpad"]}})
     app.set_session_override("profile", "work")
     before = dict(app.effective_config().get("strip_tags_projection") or {})
 
     app.sanitize_session_profile()
 
-    assert "profile" in app._session_overrides   # профиль здоров — санация не сняла
+    assert "profile" in app._session_overrides  # профиль здоров — санация не сняла
     after = dict(app.effective_config().get("strip_tags_projection") or {})
     assert after == before
 
@@ -826,8 +836,7 @@ def _write_unreadable_profile(tmp_path: Path, name: str = "broken-enc") -> Path:
     path = tmp_path / "profiles" / f"{name}.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        yaml.safe_dump({"models": {"gc": {"url": "http://y", "token": ""}},
-                        "slots": {"default": "gc"}}),
+        yaml.safe_dump({"models": {"gc": {"url": "http://y", "token": ""}}, "slots": {"default": "gc"}}),
         encoding="utf-16",
     )
     return path
@@ -835,6 +844,7 @@ def _write_unreadable_profile(tmp_path: Path, name: str = "broken-enc") -> Path:
 
 def _meta_overrides(tmp_path: Path, task_id: str) -> dict:
     from gc_tui.session_settings import read_from_meta
+
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     return read_from_meta(store.get_task_meta(task_id))
 
@@ -928,8 +938,7 @@ def test_switch_session_profile_gate_probes_without_applying_to_process(tmp_path
     """Проба гейта не применяет профиль к процессу — иначе сорвавшийся персист
     (каталог тредов недоступен) оставлял бы процесс с чужим
     `strip_tags_projection`, которого нет ни в сессии, ни в мете."""
-    _write_yaml(tmp_path / "profiles" / "work.yml",
-                {"strip_tags_projection": {"tags": ["scratchpad"]}})
+    _write_yaml(tmp_path / "profiles" / "work.yml", {"strip_tags_projection": {"tags": ["scratchpad"]}})
     app = _app_with_base(tmp_path)
 
     def _no_disk() -> None:
@@ -975,8 +984,7 @@ def test_sanitize_drops_an_unreadable_session_profile_naming_the_reason(tmp_path
     app.sanitize_session_profile()
 
     assert "profile" not in app._session_overrides
-    msg = next(n.message for n in collect_runtime_notices()
-               if n.code == "session_profile_stale")
+    msg = next(n.message for n in collect_runtime_notices() if n.code == "session_profile_stale")
     assert "broken-enc" in msg and str(path) in msg
 
 

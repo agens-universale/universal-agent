@@ -1,6 +1,7 @@
 """
 Утилиты для извлечения SSL/TLS параметров из конфига MCP-сервера.
 """
+
 import logging
 import os
 from typing import Any, Dict, Optional, Tuple, Union

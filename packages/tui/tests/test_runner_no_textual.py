@@ -1,4 +1,5 @@
 """main() без textual должен дать понятный stderr и exit 1, без трейсбэка."""
+
 import builtins
 import sys
 
@@ -19,6 +20,7 @@ def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys
             sys.modules.pop(mod, None)
 
     from gc_tui import main
+
     rc = main(argv=[])
 
     err = capsys.readouterr().err

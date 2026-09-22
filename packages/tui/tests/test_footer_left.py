@@ -10,6 +10,7 @@ Running: Ctrl+C/stop — и больше ничего (Task 17, решение �
 [Esc] back/выход убраны — на main Esc контекстуален (clear/exit/stop),
 поведение досказывается confirm-hint в footer-right.
 """
+
 import json
 from pathlib import Path
 
@@ -19,15 +20,17 @@ import pytest
 def _notices(*, warnings=0, infos=0):
     """Уведомления под бейдж — ровно столько, сколько просят по уровням."""
     from gc_core.startup_notices import Notice
-    return ([Notice("warning", f"w{i}", "предупреждение") for i in range(warnings)]
-            + [Notice("info", f"i{i}", "сообщение") for i in range(infos)])
+
+    return [Notice("warning", f"w{i}", "предупреждение") for i in range(warnings)] + [
+        Notice("info", f"i{i}", "сообщение") for i in range(infos)
+    ]
 
 
 def _write_task(tmp_path, tid):
-    meta = {"thread_id": tid, "status": "stopped",
-            "updated_at": "2026-05-28T12:00:00+00:00", "messages_count": 0}
+    meta = {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-28T12:00:00+00:00", "messages_count": 0}
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps(meta), encoding="utf-8",
+        json.dumps(meta),
+        encoding="utf-8",
     )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
@@ -103,15 +106,18 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
     from textual.widgets import Static
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     tid = "run1"
     _write_task(tmp_path, tid)
     for width in (200, 60):
         app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
         async with app.run_test(size=(width, 30)) as pilot:
-            pilot.app._update_available = True      # непустой бейдж уведомлений
+            pilot.app._update_available = True  # непустой бейдж уведомлений
             pilot.app.screen.attach_active_task(tid)
             pilot.app.active_runner = _FakeRunner()
             # Footer обновляется в _poll_active каждые 250ms — подождём один тик.
@@ -119,9 +125,8 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
 
             rendered = str(pilot.app.query_one("#footer-left", Static).render())
             assert "Ctrl+C/stop" in rendered, width
-            assert "F4/notices" in rendered, width      # бейдж виден всегда
-            for key in ("F1/help", "F2/sessions", "F3/diff", "F5/config",
-                        "F6/settings", "F7/buffer"):
+            assert "F4/notices" in rendered, width  # бейдж виден всегда
+            for key in ("F1/help", "F2/sessions", "F3/diff", "F5/config", "F6/settings", "F7/buffer"):
                 assert key not in rendered, (width, key)
             assert "/mcp" not in rendered
             assert "/skills" not in rendered
@@ -140,8 +145,12 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
     class _FakeRunner:
         def __init__(self) -> None:
             self._running = True
-        def is_running(self) -> bool: return self._running
-        def stop(self) -> None: self._running = False
+
+        def is_running(self) -> bool:
+            return self._running
+
+        def stop(self) -> None:
+            self._running = False
 
     tid = "trans1"
     _write_task(tmp_path, tid)
@@ -181,7 +190,8 @@ async def test_footer_badge_counts_update_notice():
         screen._refresh_notices_footer()
         await pilot.pause()
         footer = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "notices" in footer          # счётчик появился
+        assert "notices" in footer  # счётчик появился
+
 
 @pytest.mark.asyncio
 async def test_footer_shows_notices_badge_and_buffer_key_together():
@@ -195,15 +205,16 @@ async def test_footer_shows_notices_badge_and_buffer_key_together():
     from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
-        pilot.app._update_available = True          # даёт непустой счётчик футера
+        pilot.app._update_available = True  # даёт непустой счётчик футера
         screen = pilot.app.screen_stack[0]
         screen._refresh_notices_footer()
         await pilot.pause()
         footer = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "F7/buffer" in footer                # клавиша develop не вытеснена
-        assert "F4/notices" in footer               # наш суффикс на месте
+        assert "F7/buffer" in footer  # клавиша develop не вытеснена
+        assert "F4/notices" in footer  # наш суффикс на месте
         # счётчики парой, без точки между собой (решение владельца против варианта develop)
         from gc_tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH
+
         assert f"{WARN_GLYPH} 1 · {INFO_GLYPH}" not in footer
 
 
@@ -218,7 +229,7 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
     from textual.widgets import Static
 
     async with TuiApp().run_test(size=(48, 24)) as pilot:
-        pilot.app._update_available = True          # непустой счётчик футера
+        pilot.app._update_available = True  # непустой счётчик футера
         screen = pilot.app.screen_stack[0]
         screen._refresh_notices_footer()
         await pilot.pause()
@@ -228,7 +239,6 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
         assert len(lines) == 2, f"блок не уехал вниз целиком: {text!r}"
         assert "F4/notices" in lines[1] and "notices" not in lines[0]
         assert not lines[1].lstrip().startswith("·"), "ведущая точка на строке без соседа"
-
 
     # набор для футера содержит уведомление об обновлении, для карточки — нет
     async with TuiApp().run_test() as pilot:
@@ -260,19 +270,15 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
             await pilot.pause()
             foot = pilot.app.screen.query_one("#footer")
             right = pilot.app.screen.query_one("#footer-right")
-            strips = ["".join(seg.text for seg in strip)
-                      for strip in pilot.app.screen._compositor.render_strips()]
+            strips = ["".join(seg.text for seg in strip) for strip in pilot.app.screen._compositor.render_strips()]
             lines = [strips[foot.region.y + i] for i in range(foot.region.height)]
             for i, line in enumerate(lines):
-                head = line[:right.region.x]
+                head = line[: right.region.x]
                 if not head.strip():
                     continue
                 gap = len(head) - len(head.rstrip())
-                assert gap >= 2, (
-                    f"ширина {width}, строка {i + 1}: зазор {gap} — колонки слиплись\n"
-                    f"  [{line.rstrip()}]"
-                )
-            if len(lines) > 1 and lines[1][:right.region.x].strip():
+                assert gap >= 2, f"ширина {width}, строка {i + 1}: зазор {gap} — колонки слиплись\n  [{line.rstrip()}]"
+            if len(lines) > 1 and lines[1][: right.region.x].strip():
                 wrapped_somewhere = True
     assert wrapped_somewhere, "ни на одной ширине хвост левой части не перенёсся вниз"
 
@@ -280,9 +286,9 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
 def _rendered_rows(text: str, width: int) -> int:
     from rich.console import Console
     from rich.text import Text
+
     console = Console(width=width)
-    return sum(max(1, len(Text(line).wrap(console, width)))
-               for line in text.split("\n"))
+    return sum(max(1, len(Text(line).wrap(console, width))) for line in text.split("\n"))
 
 
 def test_footer_left_never_renders_three_rows():

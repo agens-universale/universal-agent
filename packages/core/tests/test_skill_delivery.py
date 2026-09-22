@@ -26,4 +26,5 @@ async def test_delivery_fallback_on_unknown_skill():
     class _Bad:
         async def load_skill_detail(self, skill_id):
             raise KeyError(skill_id)
+
     assert await build_skill_delivery("x", _Bad()) == "Use skill `x`."

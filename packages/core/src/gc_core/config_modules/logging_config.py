@@ -7,8 +7,8 @@ class RedactSecretsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    extra_keys: list[str] = []       # доп. подстроки имён ключей (к встроенным)
-    extra_patterns: list[str] = []   # доп. regex по значению (к встроенным)
+    extra_keys: list[str] = []  # доп. подстроки имён ключей (к встроенным)
+    extra_patterns: list[str] = []  # доп. regex по значению (к встроенным)
 
 
 class LoggingConfig(BaseModel):
@@ -47,7 +47,5 @@ class LoggingConfig(BaseModel):
     def _validate_log_level(cls, value: str) -> str:
         normalized = str(value).strip().lower()
         if normalized not in {"debug", "info", "warning", "error"}:
-            raise ValueError(
-                "logging.log_level должен быть 'debug', 'info', 'warning' или 'error'"
-            )
+            raise ValueError("logging.log_level должен быть 'debug', 'info', 'warning' или 'error'")
         return normalized

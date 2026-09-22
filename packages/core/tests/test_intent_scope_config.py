@@ -13,15 +13,11 @@ from gc_core.config_modules.intent_scope import (
 
 def test_intent_scope_active_requires_non_empty_tools():
     assert not intent_scope_active(IntentScopeConfig(tools={}))
-    assert intent_scope_active(
-        IntentScopeConfig(tools={"turn_ask_human": IntentScopeToolConfig(record="aggregated")})
-    )
+    assert intent_scope_active(IntentScopeConfig(tools={"turn_ask_human": IntentScopeToolConfig(record="aggregated")}))
 
 
 def test_intent_scope_from_config_dict_prefers_model_on_dict():
-    model = IntentScopeConfig(
-        tools={"turn_finish": IntentScopeToolConfig(record="raw")}
-    )
+    model = IntentScopeConfig(tools={"turn_finish": IntentScopeToolConfig(record="raw")})
     cfg = intent_scope_from_config_dict(
         {
             "intent_scope": model,
@@ -54,9 +50,7 @@ def test_intent_scope_from_config_dict_defaults():
 
 
 def test_intent_scope_read_page_record_limit_from_config():
-    cfg = intent_scope_from_config_dict(
-        {"intent_scope_params": {"read_page_record_limit": 25}}
-    )
+    cfg = intent_scope_from_config_dict({"intent_scope_params": {"read_page_record_limit": 25}})
     assert cfg.read_page_record_limit == 25
 
 

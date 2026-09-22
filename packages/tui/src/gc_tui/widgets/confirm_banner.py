@@ -13,6 +13,7 @@ Layout: скроллируемое тело (команда/код как ест
 При ``max_height`` от ``_cap_sticky_banner`` main.py выставляет ``height=cap``,
 иначе Textual клипает box, а дети layout'ятся полной высотой и опции уезжают.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -57,9 +58,17 @@ _OPTIONS = [
 ]
 
 # Метки primary payload-поля — рендерится первым, multiline, cb-payload class.
-_PAYLOAD_LABELS = frozenset({
-    "команда", "код", "command", "code", "path", "url", "путь",
-})
+_PAYLOAD_LABELS = frozenset(
+    {
+        "команда",
+        "код",
+        "command",
+        "code",
+        "path",
+        "url",
+        "путь",
+    }
+)
 
 
 def _is_payload_label(label: str) -> bool:

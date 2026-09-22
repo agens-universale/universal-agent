@@ -69,12 +69,7 @@ def _emit_project_memory_hints(out: list, state: Any, meta: dict, ctx: Any, cfg:
 
 
 def _project_counter_reset(interval: int | None, after_tick: int | None, final: int | None) -> bool:
-    return (
-        interval is not None
-        and after_tick is not None
-        and after_tick >= interval
-        and final == 0
-    )
+    return interval is not None and after_tick is not None and after_tick >= interval and final == 0
 
 
 def _emitted_tools(tool_thresholds: dict[str, int], counters: dict[str, int]) -> set[str]:
@@ -105,9 +100,7 @@ def apply_tool_usage_notice_before_llm(
     available_tools = available_tool_names(ctx, state)
 
     notice_rules = [
-        rule
-        for rule in active_tool_usage_notice_rules(cfg)
-        if tool_is_available(available_tools, rule.tool_name)
+        rule for rule in active_tool_usage_notice_rules(cfg) if tool_is_available(available_tools, rule.tool_name)
     ]
     tool_thresholds = _tool_thresholds(notice_rules)
     counters_before = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
@@ -115,11 +108,7 @@ def apply_tool_usage_notice_before_llm(
     project_hints_enabled = project_memory_hints_enabled(cfg) and tool_is_available(
         available_tools, PROJECT_MEMORY_TOOL_NAME
     )
-    project_interval = (
-        project_memory_from_config_dict(cfg).check_interval_messages
-        if project_hints_enabled
-        else None
-    )
+    project_interval = project_memory_from_config_dict(cfg).check_interval_messages if project_hints_enabled else None
     project_check_after_tick: int | None = None
 
     if project_hints_enabled:
@@ -131,9 +120,7 @@ def apply_tool_usage_notice_before_llm(
     counters_before_collect = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
     out = list(messages)
 
-    emitted_project_hints = _emit_project_memory_hints(
-        out, state, meta, ctx, cfg, enabled=project_hints_enabled
-    )
+    emitted_project_hints = _emit_project_memory_hints(out, state, meta, ctx, cfg, enabled=project_hints_enabled)
     project_check_final = get_project_memory_check_cnt(meta) if project_hints_enabled else None
     project_reset = _project_counter_reset(project_interval, project_check_after_tick, project_check_final)
 

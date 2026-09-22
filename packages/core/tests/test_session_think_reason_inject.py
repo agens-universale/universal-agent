@@ -27,9 +27,7 @@ def _inject_config(**overrides):
         "skills_data_path": "",
         "mcp_servers": {},
         "stop_tools": [],
-        "inject_tool_fields": {
-            "reason": "Brief rationale (1–2 sentences): goal, why now, expected outcome."
-        },
+        "inject_tool_fields": {"reason": "Brief rationale (1–2 sentences): goal, why now, expected outcome."},
     }
     cfg.update(overrides)
     return cfg
@@ -45,9 +43,7 @@ async def test_apply_tool_session_think_reason_only_ok_with_inject():
     )
     raw = await aapply_tool(
         tool_name="session_think",
-        arguments=json.dumps(
-            {"reason": "Need to weigh trade-offs before editing the parser."}
-        ),
+        arguments=json.dumps({"reason": "Need to weigh trade-offs before editing the parser."}),
         ctx=ctx,
     )
     data = json.loads(raw)

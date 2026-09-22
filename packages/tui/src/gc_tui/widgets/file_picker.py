@@ -2,6 +2,7 @@
 
 Отличие: фильтрацию/листинг делает экран (через file_index), сюда приходят
 готовые строки путей. Те же CSS-классы (.palette / .palette-row / .palette-hint)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -24,8 +25,9 @@ class FilePicker(VerticalScroll):
 
     DEFAULT_CSS = ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
 
-    def __init__(self, entries: list[str], *, truncated: bool = False,
-                 searching: bool = False, total: Optional[int] = None) -> None:
+    def __init__(
+        self, entries: list[str], *, truncated: bool = False, searching: bool = False, total: Optional[int] = None
+    ) -> None:
         super().__init__(classes="palette")
         self._entries = list(entries)
         # Индекс путей упёрся в предохранитель (file_index.MAX_INDEX_PATHS): без
@@ -38,8 +40,8 @@ class FilePicker(VerticalScroll):
         # None — неизвестно/не листинг (поиск по индексу уже обрезает сам список).
         self._total = total
         self._selected = 0
-        self._stale = False   # данные сменились до конца монтирования: перестроить в on_mount
-        self._rows: list[Static] = []   # ссылки на строки-виджеты — для move_selection без пересоздания
+        self._stale = False  # данные сменились до конца монтирования: перестроить в on_mount
+        self._rows: list[Static] = []  # ссылки на строки-виджеты — для move_selection без пересоздания
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def _empty_text(self) -> str:
@@ -102,8 +104,9 @@ class FilePicker(VerticalScroll):
         footer = 2 + (2 if self._note_text() else 0)
         return flow + footer + 2
 
-    def set_entries(self, entries: list[str], *, truncated: bool = False,
-                     searching: bool = False, total: Optional[int] = None) -> None:
+    def set_entries(
+        self, entries: list[str], *, truncated: bool = False, searching: bool = False, total: Optional[int] = None
+    ) -> None:
         self._entries = list(entries)
         self._truncated = truncated
         self._searching = searching
@@ -117,7 +120,7 @@ class FilePicker(VerticalScroll):
         old = self._selected
         self._selected = (self._selected + delta) % len(self._entries)
         if len(self._rows) != len(self._entries):
-            self._rebuild()                     # строки ещё не те — старый путь
+            self._rebuild()  # строки ещё не те — старый путь
             return
         self._rows[old].remove_class("selected")
         row = self._rows[self._selected]

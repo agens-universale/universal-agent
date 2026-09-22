@@ -7,6 +7,7 @@ post-process the stream, so they capture at the walk ceiling (~50M).
 
 Correctness > speed. On any anomaly callers fall back to the Python path.
 """
+
 from __future__ import annotations
 
 import heapq
@@ -107,8 +108,16 @@ def _winner_entries(winners: Any, report_path: Callable[[str], str], torn_tail: 
 class _RecordScan:
     """One pass over the grep buffer: yields ``(key, i, abs_path, line_no, text, is_last)``."""
 
-    def __init__(self, stdout: str, *, hit_cap: bool, root: str, backend: Any,
-                 allow_path: Optional[Callable[[str], bool]], rank_key: Optional[Callable[[str], Any]]) -> None:
+    def __init__(
+        self,
+        stdout: str,
+        *,
+        hit_cap: bool,
+        root: str,
+        backend: Any,
+        allow_path: Optional[Callable[[str], bool]],
+        rank_key: Optional[Callable[[str], Any]],
+    ) -> None:
         self._stdout = stdout
         self._hit_cap = hit_cap
         self._root = root
@@ -176,9 +185,7 @@ def _stream_top_k(
         else:
             winners = list(scan.records())
     except _ParseFailure:
-        return NativeGrepResult(
-            matches=[], truncated=False, hit_capture_cap=hit_cap, failure="native_error"
-        )
+        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure="native_error")
     return NativeGrepResult(
         matches=_winner_entries(winners, report_path, torn_tail),
         truncated=hit_cap,
@@ -252,7 +259,6 @@ def native_grep_refusal(
     return None
 
 
-
 def _fnmatch_escape(path: str) -> str:
     """Literal ``find -path`` pattern: backslash-escape the fnmatch metacharacters."""
     return "".join("\\" + ch if ch in "\\*?[]" else ch for ch in path)
@@ -283,9 +289,7 @@ def find_prune_group(
     """
     # Имя экранируется так же, как путь ниже: домашний предикат сравнивает строго,
     # а `-name` без экранирования читает имя как шаблон — `my[1]` вырезал бы `my1`.
-    parts: List[List[str]] = [
-        ["-type", "d", "-name", _fnmatch_escape(n)] for n in exclude_dir_names if n
-    ]
+    parts: List[List[str]] = [["-type", "d", "-name", _fnmatch_escape(n)] for n in exclude_dir_names if n]
     if exclude_nested_dot_dirs:
         parts.append(["-type", "d", "-name", ".*"])
     parts.extend(["-type", "d", "-path", _fnmatch_escape(p)] for p in exclude_paths if p)
@@ -507,9 +511,7 @@ async def anative_prefilter_candidates(
     """
     cmd = build_prefilter_command(path, **kwargs)
     try:
-        res = await arun_backend_exec_raw(
-            backend, cmd, **_prefilter_run_kwargs(backend)
-        )
+        res = await arun_backend_exec_raw(backend, cmd, **_prefilter_run_kwargs(backend))
     except Exception as exc:
         log.debug("native prefilter failed: %s", exc)
         return None, "failed"
@@ -526,9 +528,7 @@ def _prefilter_run_kwargs(backend: Any) -> Dict[str, Any]:
     }
 
 
-def _prefilter_result(
-    res: Any, backend: Any, path: str
-) -> tuple[Optional[List[str]], Optional[str]]:
+def _prefilter_result(res: Any, backend: Any, path: str) -> tuple[Optional[List[str]], Optional[str]]:
     """Разбор результата префильтра — общий для обеих форм."""
     if getattr(res, "timed_out", False):
         return None, "timeout"
@@ -542,13 +542,12 @@ def _prefilter_result(
     # поэтому разбор выбирается по факту наличия NUL, а не по вере в флаг.
     stdout = res.stdout or ""
     out: List[str] = []
-    for raw in (stdout.split("\0") if "\0" in stdout else stdout.splitlines()):
+    for raw in stdout.split("\0") if "\0" in stdout else stdout.splitlines():
         line = raw.strip("\r\n")
         if not line:
             continue
         out.append(line if backend.isabs(line) else backend.join(path, line))
     return out, None
-
 
 
 @dataclass
@@ -637,12 +636,8 @@ async def arun_native_grep(
     запуска процесса нативная асинхронная форма есть.
     """
     names = [n for n in exclude_dir_names if n]
-    need_prune = is_dir_target and (
-        bool(names) or exclude_nested_dot_dirs or bool(exclude_paths)
-    )
-    grep_argv: List[str] = build_grep_argv_flags(
-        case_insensitive=plan.case_insensitive, fixed=plan.fixed
-    )
+    need_prune = is_dir_target and (bool(names) or exclude_nested_dot_dirs or bool(exclude_paths))
+    grep_argv: List[str] = build_grep_argv_flags(case_insensitive=plan.case_insensitive, fixed=plan.fixed)
     grep_argv.extend(["--", plan.pattern])
     env = _grep_env(plan)
 
@@ -668,9 +663,7 @@ async def arun_native_grep(
         )
     except Exception as exc:
         log.debug("native grep failed: %s", exc)
-        return NativeGrepResult(
-            matches=[], truncated=False, hit_capture_cap=False, failure="native_error"
-        )
+        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=False, failure="native_error")
 
     return _grep_result(
         res,
@@ -686,6 +679,7 @@ async def arun_native_grep(
 
 def _grep_exit_outcome(rc: Any, stdout: str, stderr: str, hit_cap: bool) -> Optional[NativeGrepResult]:
     """Итог по коду выхода grep без разбора вывода; None — вывод надо разбирать."""
+
     def _failed(kind: str) -> NativeGrepResult:
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind)
 
@@ -715,9 +709,7 @@ def _grep_result(
     """Разбор вывода grep — общий для синхронной и асинхронной форм."""
 
     def _failed(kind: str, *, hit_cap: bool = False) -> NativeGrepResult:
-        return NativeGrepResult(
-            matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind
-        )
+        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind)
 
     if getattr(res, "timed_out", False):
         return _failed("native_timeout")
@@ -731,7 +723,6 @@ def _grep_result(
     early = _grep_exit_outcome(rc, stdout, stderr, hit_cap)
     if early is not None:
         return early
-
 
     result = _stream_top_k(
         stdout,

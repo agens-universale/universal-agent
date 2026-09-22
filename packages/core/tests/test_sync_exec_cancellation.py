@@ -12,6 +12,7 @@ Esc в TUI это выглядело как «стоп не работает».
 у каждого встраивающего), но платить за них на loop незачем: прогрев уводит
 все четыре в один поток однократно на процесс.
 """
+
 import asyncio
 import threading
 import time
@@ -65,9 +66,7 @@ def test_cancelled_run_exits_without_waiting_for_the_command():
     asyncio.run(_body())
     elapsed = time.monotonic() - started
 
-    assert elapsed < 2.0, (
-        f"прогон вышел за {elapsed:.2f} с — выход ждал чужую команду"
-    )
+    assert elapsed < 2.0, f"прогон вышел за {elapsed:.2f} с — выход ждал чужую команду"
     assert not backend.finished.is_set(), "проверка пустая: команда уже кончилась"
 
 
@@ -82,9 +81,7 @@ async def test_the_thread_is_not_the_default_pool():
 
     await aexec_port(_Naming(0)).aexec("echo")
 
-    assert seen and "asyncio_" not in seen[0], (
-        f"команда ушла в дефолтный пул ({seen[0]}) — отмена снова не вернётся"
-    )
+    assert seen and "asyncio_" not in seen[0], f"команда ушла в дефолтный пул ({seen[0]}) — отмена снова не вернётся"
 
 
 def test_sync_exec_does_not_share_the_mcp_pool():
@@ -107,11 +104,10 @@ def test_sync_exec_does_not_share_the_mcp_pool():
     src = inspect.getsource(async_protocol.SyncExecAdapter._off_loop)
     called = {
         getattr(c.func, "id", None) or getattr(c.func, "attr", None)
-        for c in ast.walk(ast.parse(inspect.cleandoc(src))) if isinstance(c, ast.Call)
+        for c in ast.walk(ast.parse(inspect.cleandoc(src)))
+        if isinstance(c, ast.Call)
     }
-    assert "run_abandonable" not in called, (
-        "команды снова идут на пуле MCP: долгая команда займёт слоты дискавери"
-    )
+    assert "run_abandonable" not in called, "команды снова идут на пуле MCP: долгая команда займёт слоты дискавери"
     assert "run_abandonable_in" in called
 
 
@@ -127,9 +123,7 @@ async def test_search_warms_the_probes_off_loop(monkeypatch, tmp_path):
 
     tool = FindInFiles.__new__(FindInFiles)
     object.__setattr__(tool, "_backend_override", _Backend())
-    monkeypatch.setattr(
-        type(tool), "_backend", property(lambda self: self._backend_override)
-    )
+    monkeypatch.setattr(type(tool), "_backend", property(lambda self: self._backend_override))
 
     async def _stub_dispatch(*a, **kw):
         return "{}"

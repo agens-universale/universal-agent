@@ -1,4 +1,5 @@
 """Фундамент: техническое user-сообщение не отрывается от своего реального хода."""
+
 from gc_core.message_format.dialog_history import group_into_turns, split_turns_into_char_batches
 
 
@@ -23,8 +24,10 @@ def test_real_plus_technical_form_one_turn():
 
 def test_two_pairs_form_two_turns():
     msgs = [
-        _user("первый"), _tech("attached: a.py"),
-        _user("второй"), _tech("attached: b.py"),
+        _user("первый"),
+        _tech("attached: a.py"),
+        _user("второй"),
+        _tech("attached: b.py"),
     ]
     turns = group_into_turns(msgs)
     assert len(turns) == 2

@@ -24,6 +24,7 @@
 Windows и stdin без `fileno()` сюда не попадают: `select` к консоли неприменим,
 там вызывающий читает построчно сам.
 """
+
 from __future__ import annotations
 
 import codecs
@@ -70,7 +71,7 @@ def _drain_ready(fd: int) -> None:
             if not select.select([fd], [], [], 0)[0]:
                 return
             chunk = os.read(fd, _READ_CHUNK)
-        except (OSError, ValueError):       # stdin закрыли посреди вопроса
+        except (OSError, ValueError):  # stdin закрыли посреди вопроса
             _EOF = True
             return
         if not chunk:

@@ -158,6 +158,7 @@ class TestApplyToolPassesCallId:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
+
             # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
             async def _arun(*_a, **_kw):
                 return "ok"
@@ -189,6 +190,7 @@ class TestApplyToolPassesCallId:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
+
             # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
             async def _arun(*_a, **_kw):
                 return "ok"
@@ -237,20 +239,22 @@ class TestProcessToolCallsForwardsCallId:
             return '{"ok": true}'
 
         monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
-        run_coro(aprocess_tool_calls(
-            messages=[
-                {
-                    "id": "fc_1",
-                    "type": "function_call",
-                    "call_id": "call_xyz",
-                    "name": "fs_read_file",
-                    "arguments": "{}",
-                }
-            ],
-            state=state,
-            ctx=ctx,
-            run_agent_func=lambda *_a, **_k: None,
-        ))
+        run_coro(
+            aprocess_tool_calls(
+                messages=[
+                    {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "call_id": "call_xyz",
+                        "name": "fs_read_file",
+                        "arguments": "{}",
+                    }
+                ],
+                state=state,
+                ctx=ctx,
+                run_agent_func=lambda *_a, **_k: None,
+            )
+        )
         assert seen.get("call_id") == "call_xyz"
 
 

@@ -5,6 +5,7 @@ Per-alias предохранитель (`model_router.CircuitBreaker`), дегр
 ошибка класса 2 (main-трейс). См.
 .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-9-brief.md.
 """
+
 import json
 from types import SimpleNamespace
 
@@ -102,13 +103,15 @@ def test_service_consumer_trips_breaker_after_pinned_model_fails(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    out = run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_service_state(),
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="finish_gate",
-    ))
+    out = run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_service_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="finish_gate",
+        )
+    )
 
     assert out == "active answer"
     assert router.breaker.is_open("flash") is True
@@ -138,13 +141,15 @@ def test_service_consumer_open_alias_skips_wasted_transport_call(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    out = run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_service_state(),
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="finish_gate",
-    ))
+    out = run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_service_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="finish_gate",
+        )
+    )
 
     assert out == "active answer"
     assert calls["n"] == 1  # ровно один вызов — активной моделью, пин не трогали
@@ -171,13 +176,15 @@ def test_service_consumer_degrades_and_pushes_fallback_notice(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_service_state(),
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="finish_gate",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_service_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="finish_gate",
+        )
+    )
 
     notices = collect_runtime_notices()
     assert len(notices) == 1
@@ -206,13 +213,15 @@ def test_double_failure_service_consumer_propagates_for_per_consumer_fail_semant
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(llm_chat_client.arequest_chat_completion_text(
-            ctx=ctx,
-            state=_service_state(),
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=10,
-            consumer="finish_gate",
-        ))
+        run_coro(
+            llm_chat_client.arequest_chat_completion_text(
+                ctx=ctx,
+                state=_service_state(),
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=10,
+                consumer="finish_gate",
+            )
+        )
 
     assert router.breaker.is_open("flash") is True
     assert router.breaker.is_open("glm-local") is True
@@ -235,13 +244,15 @@ def test_no_binding_no_degradation_attempt_when_already_active(monkeypatch):
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(llm_chat_client.arequest_chat_completion_text(
-            ctx=ctx,
-            state=_service_state(),
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=10,
-            consumer="summary",
-        ))
+        run_coro(
+            llm_chat_client.arequest_chat_completion_text(
+                ctx=ctx,
+                state=_service_state(),
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=10,
+                consumer="summary",
+            )
+        )
 
     assert calls["n"] == 1  # ни одной лишней (идентичной) попытки
 
@@ -290,9 +301,7 @@ def test_finish_gate_guard_double_failure_is_fail_open_error(monkeypatch):
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    decision = run_coro(FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(
-        finish_handoff_arguments="done"
-    ))
+    decision = run_coro(FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(finish_handoff_arguments="done"))
 
     assert decision.outcome == "fail_open_error"
 
@@ -318,9 +327,7 @@ async def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
         logger=None,
         auth_connector=None,
         is_tui=False,
-        auxiliary_llm=SimpleNamespace(
-            max_tokens=500, judge_max_tokens=200, completion_kwargs={}
-        ),
+        auxiliary_llm=SimpleNamespace(max_tokens=500, judge_max_tokens=200, completion_kwargs={}),
     )
 
     def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
@@ -332,9 +339,7 @@ async def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
     # `run_command_judge_with_retry` — он получал корутину, отдавал её в
     # `validate_judge_result`, и тест зеленел на «это не словарь» вместо
     # «бэкенд ответил 500». Сама корутина оставалась неждаемой.
-    judge_client = command_moderation._default_judge_client(
-        (), {"ctx": ctx, "state": _service_state()}
-    )
+    judge_client = command_moderation._default_judge_client((), {"ctx": ctx, "state": _service_state()})
     with pytest.raises(Exception) as judge_failure:
         await judge_client({"tool_name": "execute_command"})
     assert "500" in str(judge_failure.value) or "http" in str(judge_failure.value).lower(), (
@@ -342,9 +347,7 @@ async def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
     )
 
     # command_judge остаётся fail-closed: судья недоступен → deny-mode блокирует.
-    decision = command_moderation.decide_command_execution(
-        "deny", None, judge_available=False, user_confirmation=None
-    )
+    decision = command_moderation.decide_command_execution("deny", None, judge_available=False, user_confirmation=None)
     assert decision.allowed is False
     assert decision.reason_code == "judge_unavailable"
 
@@ -448,6 +451,7 @@ def test_resolve_check_breaker_false_returns_model_for_open_alias():
 
     # Дефолтное поведение рантайма (check_breaker=True) — прежнее: мгновенный отказ.
     from gc_core.model_router import AliasCircuitOpenError
+
     with pytest.raises(AliasCircuitOpenError):
         router.resolve("main")
 
@@ -645,9 +649,7 @@ async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
         assert child_ctx.model_router.resolve("main").alias == "flash"
         return "ok"
 
-    result = await runner.arun(
-        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
-    )
+    result = await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -685,9 +687,7 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(tmp_path
         assert seeded_trace_message in messages
         return "ok"
 
-    result = await runner.arun(
-        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
-    )
+    result = await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -712,9 +712,7 @@ async def test_subagent_repeated_failure_after_fallback_returns_honest_tool_erro
     async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
         raise _http_error(500)
 
-    result = await runner.arun(
-        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
-    )
+    result = await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
 
     payload = json.loads(result)
     assert payload["ok"] is False
@@ -743,9 +741,7 @@ async def test_subagent_non_availability_error_skips_fallback_entirely(tmp_path)
         calls["n"] += 1
         raise ValueError("some unrelated bug")
 
-    result = await runner.arun(
-        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
-    )
+    result = await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
 
     payload = json.loads(result)
     assert payload["ok"] is False
@@ -773,9 +769,7 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tm
     def failing_run_agent(messages, child_state, child_ctx, **kwargs):
         raise _http_error(500)
 
-    result = await runner.arun(
-        "subagent_worker", {"task": "do x", "reason": "r"}, failing_run_agent
-    )
+    result = await runner.arun("subagent_worker", {"task": "do x", "reason": "r"}, failing_run_agent)
     payload = json.loads(result)
     assert payload["ok"] is False
 
@@ -791,9 +785,7 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(tm
         calls["n"] += 1
         return "unreachable"
 
-    result2 = await runner.arun(
-        "subagent_worker", {"task": "do x again", "reason": "r"}, should_not_be_called
-    )
+    result2 = await runner.arun("subagent_worker", {"task": "do x again", "reason": "r"}, should_not_be_called)
     payload2 = json.loads(result2)
     assert payload2["ok"] is False
     assert calls["n"] == 0

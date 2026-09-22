@@ -7,6 +7,7 @@
 (его develop как раз сделал транзиентным) ронял запрос. Тест держит границу:
 с ``use_retry=True`` транзиентная ошибка повторяется, без него — нет.
 """
+
 import httpx
 import pytest
 from gc_core.utils import aretry

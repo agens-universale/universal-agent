@@ -1,4 +1,5 @@
 """TUI: runtime LLM error → счётчик в карточке, футере и /notices."""
+
 from __future__ import annotations
 
 import pytest
@@ -19,10 +20,13 @@ async def test_runtime_notice_appears_in_card(tmp_path):
         await pilot.pause()
         assert "/notices" not in str(scr._mcp_status_row.render())
 
-        push_runtime_notice(Notice(
-            "warning", "llm_error_400",
-            "Ошибка LLM (судья): HTTP 400. reasoning_effort invalid",
-        ))
+        push_runtime_notice(
+            Notice(
+                "warning",
+                "llm_error_400",
+                "Ошибка LLM (судья): HTTP 400. reasoning_effort invalid",
+            )
+        )
         pilot.app.refresh_notices_indicators()
         card = str(scr._mcp_status_row.render())
         assert f"{WARN_GLYPH} 1" in card
@@ -66,4 +70,3 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path)
         pilot.app.refresh_notices_indicators()
         footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
         assert f"{WARN_GLYPH} 1" in footer_right
-

@@ -1,4 +1,5 @@
 """Tests for subagent progress TUI consumer (drain → nested rows / heartbeat)."""
+
 from __future__ import annotations
 
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
@@ -22,10 +23,8 @@ class TestPlanProgressActions:
     def test_tool_start_then_end(self):
         actions = plan_progress_actions(
             [
-                _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1",
-                    args_summary="path='a.py'"),
-                _ev(kind="tool_end", tool_name="fs_read_file", tool_call_id="tc1",
-                    ok=True, elapsed_ms=12),
+                _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1", args_summary="path='a.py'"),
+                _ev(kind="tool_end", tool_name="fs_read_file", tool_call_id="tc1", ok=True, elapsed_ms=12),
             ]
         )
         kinds = [a.kind for a in actions]
@@ -48,9 +47,7 @@ class TestPlanProgressActions:
         assert any(a.kind == "parent_heartbeat" for a in actions)
 
     def test_user_message(self):
-        actions = plan_progress_actions(
-            [_ev(kind="user_message", prose="смотри auth")]
-        )
+        actions = plan_progress_actions([_ev(kind="user_message", prose="смотри auth")])
         assert actions[0].kind == "mount_nested_user"
         assert actions[0].prose == "смотри auth"
         assert any(a.kind == "parent_heartbeat" for a in actions)
@@ -86,10 +83,8 @@ class TestPlanProgressActions:
 class TestConsumerApply:
     def test_apply_mounts_and_finishes_via_hooks(self):
         sink = QueueSubagentProgressSink()
-        sink.emit(_ev(kind="tool_start", tool_name="fs_read_file",
-                      tool_call_id="tc1", args_summary="p"))
-        sink.emit(_ev(kind="tool_end", tool_name="fs_read_file",
-                      tool_call_id="tc1", ok=True))
+        sink.emit(_ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1", args_summary="p"))
+        sink.emit(_ev(kind="tool_end", tool_name="fs_read_file", tool_call_id="tc1", ok=True))
 
         mounted: list[dict] = []
         finished: list[dict] = []
@@ -134,11 +129,15 @@ class TestConsumerApply:
         consumer = SubagentProgressConsumer()
         mounted: list[tuple[str, dict]] = []
         first = _ev(
-            kind="tool_start", tool_name="session_todo", tool_call_id="c1",
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c1",
             todo_items=[{"content": "a", "status": "pending"}],
         )
         second = _ev(
-            kind="tool_start", tool_name="session_todo", tool_call_id="c2",
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c2",
             todo_items=[{"content": "a", "status": "completed"}],
         )
         consumer.apply_drained(
@@ -155,7 +154,9 @@ class TestConsumerApply:
         consumer = SubagentProgressConsumer()
         mounted: list[tuple[str, dict]] = []
         ev = _ev(
-            kind="tool_start", tool_name="session_todo", tool_call_id="c1",
+            kind="tool_start",
+            tool_name="session_todo",
+            tool_call_id="c1",
             todo_items=[{"content": "a", "status": "pending"}],
         )
         consumer.apply_drained(

@@ -1,4 +1,5 @@
 """Билдеры rich.Text чек-листов — канон spec 2026-07-31 §1-§3."""
+
 from gc_tui import palette
 from gc_tui.services.todo_render import build_main_todo_lines, build_subagent_todo_lines
 from gc_tui.services.trace_mapper import _todo_checklist_summary
@@ -25,7 +26,7 @@ def _text(lines) -> Text:
 def _spans_by_text(text: Text) -> dict[str, str]:
     """{фрагмент: style-строка} для проверки зон."""
     plain = text.plain
-    return {plain[s.start:s.end]: str(s.style) for s in text.spans}
+    return {plain[s.start : s.end]: str(s.style) for s in text.spans}
 
 
 def test_main_header_counts_completed_of_total():
@@ -88,14 +89,16 @@ def test_subagent_completed_struck_muted_open_tool_name():
 
 # --- общая обвязка строк для всех каналов -----------------------------------
 
+
 def test_build_todo_rows_classes_per_channel():
     """Заголовок отличается классом по каналу, пункты — общим line-todo-item."""
     import pytest
+
     pytest.importorskip("textual")
     from gc_tui.services.todo_render import build_todo_rows
 
     main = build_todo_rows(ITEMS, subagent=False, indent="   ", event_no=7)
-    assert len(main) == 4                       # заголовок + три пункта
+    assert len(main) == 4  # заголовок + три пункта
     assert main[0].has_class("line-todo")
     assert main[1].has_class("line-todo-item")
     assert all(r._event_no == 7 for r in main)
@@ -106,6 +109,7 @@ def test_build_todo_rows_classes_per_channel():
 
 # --- блок как единица выделения ---------------------------------------------
 
+
 def test_todo_block_is_single_focusable_widget():
     """Клик по любой строке подсвечивает весь чек-лист: блок — один виджет.
 
@@ -113,6 +117,7 @@ def test_todo_block_is_single_focusable_widget():
     (Screen.get_focusable_widget_at), поэтому Tab-стоп остаётся один на событие.
     """
     import pytest
+
     pytest.importorskip("textual")
     from gc_tui.services.todo_render import build_todo_block
     from gc_tui.widgets.trace_row import TraceRow
@@ -120,7 +125,7 @@ def test_todo_block_is_single_focusable_widget():
     block = build_todo_block(ITEMS, subagent=False, indent="   ", event_no=7)
     assert block.can_focus
     rows = block.todo_rows
-    assert len(rows) == 4                       # заголовок + три пункта
+    assert len(rows) == 4  # заголовок + три пункта
     assert all(isinstance(r, TraceRow) for r in rows)
     assert not any(r.can_focus for r in rows)
     # Ctrl+клик с любой строки открывает payload события.
@@ -129,6 +134,7 @@ def test_todo_block_is_single_focusable_widget():
 
 def test_todo_block_classes_by_channel():
     import pytest
+
     pytest.importorskip("textual")
     from gc_tui.services.todo_render import build_todo_block
 

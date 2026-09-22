@@ -7,6 +7,7 @@
 Дополняет test_cli_onboarding_wiring.py — тот проверяет ВЫЗОВ визарда, этот
 создание файла.
 """
+
 import sys
 
 # `import cli` парсит sys.argv на импорте (нужен -q или --init) — пиннем валидный.
@@ -17,10 +18,16 @@ from gc_core.config_modules import env_vars
 
 
 def _isolate(tmp_path, monkeypatch):
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.setattr(env_vars, "project_slug", lambda: "p")
     # Проектный слой заглушает autouse-фикстура `_isolated_config_layers`
     # (gc_testkit.plugin): она отдаёт слой, только если тест сам сдвинул cwd.
@@ -46,5 +53,3 @@ def test_cli_init_does_not_clobber_existing(tmp_path, monkeypatch, capsys):
     # Новое поведение: не-TTY → setup_guide (путь к конфигу выводится в stderr)
     assert "config.yml" in capsys.readouterr().err
     assert "mine" in (cfgdir / "config.yml").read_text(encoding="utf-8")
-
-

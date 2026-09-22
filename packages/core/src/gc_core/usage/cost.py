@@ -29,7 +29,7 @@ class CostPart:
 
     amount: float
     currency: str
-    source: str          # "provider" | "tariff"
+    source: str  # "provider" | "tariff"
 
 
 @dataclass
@@ -41,7 +41,7 @@ class CategoryCost:
     calls: int
     missing_usage_calls: int
     parts: list[CostPart] = field(default_factory=list)
-    unpriced: bool = False      # есть вызовы, цену которых узнать нечем
+    unpriced: bool = False  # есть вызовы, цену которых узнать нечем
 
     @property
     def cost_source(self) -> str:
@@ -68,7 +68,7 @@ class CostReport:
     total_cached: int = 0
     total_calls: int = 0
     total_missing_usage_calls: int = 0
-    has_cost: bool = False      # есть хотя бы одна учтённая сумма (факт или тариф)
+    has_cost: bool = False  # есть хотя бы одна учтённая сумма (факт или тариф)
     has_unpriced: bool = False  # есть категория с остатком, цену которого узнать нечем
 
     @property
@@ -76,9 +76,7 @@ class CostReport:
         return len(self.by_currency) > 1
 
 
-def _tariff_cost(
-    tariff: ResolvedTariff, input_tokens: int, output_tokens: int, cached_tokens: int
-) -> float:
+def _tariff_cost(tariff: ResolvedTariff, input_tokens: int, output_tokens: int, cached_tokens: int) -> float:
     per = tariff.per_tokens
     cached = max(0, min(cached_tokens, input_tokens))
     if tariff.cache_read is not None:

@@ -80,10 +80,7 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
         from gc_tui.widgets.trace_row import TraceRow
 
         nested_user = [
-            r
-            for r in scr.query(TraceRow)
-            if getattr(r, "_content", "") == "копни глубже"
-            and "line-user" in r.classes
+            r for r in scr.query(TraceRow) if getattr(r, "_content", "") == "копни глубже" and "line-user" in r.classes
         ]
         assert nested_user, "ответ child HITL должен быть nested user-строкой"
 
@@ -125,9 +122,7 @@ async def test_parent_ask_human_answer_still_tracks_pending(tmp_path):
         await pilot.pause()
         assert scr._ask_human_child_parent_call_id is None
 
-        await scr.on_command_text_area_submitted(
-            CommandTextArea.Submitted(value="да")
-        )
+        await scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="да"))
         await pilot.pause()
         assert runner.submitted == ["да"]
         replies = list(scr.query(UserReplyContainer))

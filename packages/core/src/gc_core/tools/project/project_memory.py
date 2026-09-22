@@ -4,6 +4,7 @@ The agent sees only three actions: read / append / write. Path, lock, atomicity,
 and compaction are entirely under the hood. Errors carry concrete actionable
 messages without leaking implementation details.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,16 +32,13 @@ def backup_path(*, cwd: str | None = None) -> Path:
     slug = project_slug(cwd)
     return gc_paths()["state"] / "projects" / slug / _BACKUP_FILE_NAME
 
+
 _FILE_NAME = "project_memory.md"
 
 _READ_EMPTY_HINT = (
-    "long memory is empty. Use action=write to seed it with important facts "
-    "you want to remember across sessions."
+    "long memory is empty. Use action=write to seed it with important facts you want to remember across sessions."
 )
-_AUTO_COMPACTION_HINT = (
-    "Memory was compacted to fit the limit. "
-    "Call action=read if you want to see what was kept."
-)
+_AUTO_COMPACTION_HINT = "Memory was compacted to fit the limit. Call action=read if you want to see what was kept."
 _HIGH_FILL_THRESHOLD_PERCENT = 70
 _HIGH_FILL_HINT = (
     f"Project memory is over {_HIGH_FILL_THRESHOLD_PERCENT}% full. Consider action=write to reorganize it: "
@@ -67,9 +65,7 @@ class ProjectMemory(AbstractSimpleTool):
             self._backup: Optional[Path] = backup_path(cwd=cwd)
         else:
             self._backup = None
-        limits = project_memory_limits_from_config_dict(
-            getattr(ctx, "config_dict", None) if ctx is not None else None
-        )
+        limits = project_memory_limits_from_config_dict(getattr(ctx, "config_dict", None) if ctx is not None else None)
         self._max_chars = limits["max_chars"]
         self._max_append_chars = limits["max_append_chars"]
 
@@ -104,7 +100,7 @@ class ProjectMemory(AbstractSimpleTool):
                             "Required for every action; ignored for read. "
                             "For append: ONLY the new delta. "
                             "For write: the FULL updated markdown (full overwrite). "
-                            "For read: pass empty string \"\"."
+                            'For read: pass empty string "".'
                         ),
                     },
                 },
@@ -116,7 +112,7 @@ class ProjectMemory(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        return '''Tool name: project_memory
+        return """Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.
 Append short factual deltas; write (full overwrite) only for rare full replacements.
@@ -147,7 +143,7 @@ Return format (JSON string):
   "compaction": {"performed": bool, "before_chars"?: number, "after_chars"?: number},
   "hint": "..." (when relevant; includes reorganize nudge above 70% fill)
 }
-'''
+"""
 
     def _usage_fields(self, length: int) -> Dict[str, int]:
         return {
@@ -228,7 +224,6 @@ Return format (JSON string):
             return await self._ahandle_append(content)
         return self._dispatch_sync(action, content)
 
-
     def _reject_unusable(self, action: str) -> Optional[str]:
         """Отказ, если тулу негде работать. Общий для обоих входов."""
         if self._path is None:
@@ -268,7 +263,6 @@ Return format (JSON string):
             hint=_READ_EMPTY_HINT if is_empty else None,
         )
 
-
     async def _ahandle_append(self, content: str) -> str:
         """Дописать в long memory; компакцию ждём НАТИВНО.
 
@@ -278,9 +272,7 @@ Return format (JSON string):
         early, combined = self._append_prepare(content)
         if early is not None:
             return early
-        return self._append_finish(
-            combined, await compaction.acompact_text(combined, self._ctx, self._state)
-        )
+        return self._append_finish(combined, await compaction.acompact_text(combined, self._ctx, self._state))
 
     def _append_prepare(self, content: str) -> tuple[Optional[str], str]:
         """``(готовый ответ, текст для компакции)`` — ровно одно из двух значимо.
@@ -309,16 +301,10 @@ Return format (JSON string):
             ), ""
         existing = storage.read(self._path, backup=self._backup)
         existing_stripped = existing.strip()
-        combined = (
-            f"{existing_stripped}\n\n{delta_stripped}"
-            if existing_stripped
-            else delta_stripped
-        )
+        combined = f"{existing_stripped}\n\n{delta_stripped}" if existing_stripped else delta_stripped
         if len(combined) <= self._max_chars:
             try:
-                info = storage.append(
-                    self._path, delta_stripped, max_chars=self._max_chars, backup=self._backup
-                )
+                info = storage.append(self._path, delta_stripped, max_chars=self._max_chars, backup=self._backup)
             except ProjectMemoryError as e:
                 return self._err(action="append", error_type=e.code, message=e.message), ""
             self._sync_baseline_after_mutation()
@@ -371,8 +357,7 @@ Return format (JSON string):
                 action="write",
                 error_type="input_too_long",
                 message=(
-                    f"content is {len(text_stripped)} chars (> {self._max_chars}). "
-                    "Rewrite more concisely and retry."
+                    f"content is {len(text_stripped)} chars (> {self._max_chars}). Rewrite more concisely and retry."
                 ),
             )
         try:

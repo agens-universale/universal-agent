@@ -8,6 +8,7 @@
 Each test drives real code with a jsonl-mode per-run logger from
 ``create_run_logger`` and asserts the event line + expected keys appear.
 """
+
 import json
 import tempfile
 from types import SimpleNamespace
@@ -50,7 +51,7 @@ def _embedded_events(recs, event_name):
     for rec in recs:
         msg = rec.get("msg") or ""
         if msg.startswith(prefix):
-            out.append(json.loads(msg[len(prefix):]))
+            out.append(json.loads(msg[len(prefix) :]))
     return out
 
 
@@ -134,6 +135,7 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
     logger, logging_path = _make_logger(tmp_path)
 
     with tempfile.TemporaryDirectory() as thread_dir:
+
         class _SkillsRegistryStub:
             async def list_skills(self):
                 return []

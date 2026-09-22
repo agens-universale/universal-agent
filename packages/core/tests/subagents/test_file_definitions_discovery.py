@@ -4,6 +4,7 @@
 test_file_subagent). Здесь всё деградирует до варнинга: один битый файл не должен
 лишать оператора остальных.
 """
+
 import logging
 
 from gc_core.tools.subagents.custom.file_definitions import discover_subagent_definitions
@@ -127,7 +128,8 @@ class TestWarningsAreLoggable:
         _write(tmp_path, "z_dup.md", "subagent_dup")
         discover_subagent_definitions(
             {"subagents_dir": str(tmp_path)},
-            builtin_names=BUILTIN, logger=logger,
+            builtin_names=BUILTIN,
+            logger=logger,
         )
 
     def test_every_warning_path_survives_real_logging(self, tmp_path, caplog):
@@ -143,6 +145,7 @@ class TestWarningsAreLoggable:
         with caplog.at_level(logging.WARNING, logger="test_extra_keys"):
             discover_subagent_definitions(
                 {"subagents_dir": str(tmp_path / "нет")},
-                builtin_names=BUILTIN, logger=logger,
+                builtin_names=BUILTIN,
+                logger=logger,
             )
         assert any(getattr(r, "event", None) == "subagents_dir_missing" for r in caplog.records)

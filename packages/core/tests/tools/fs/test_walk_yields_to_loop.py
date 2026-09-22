@@ -25,6 +25,7 @@
 нет, хотя точка уступки добавлена во все три цикла. Замерзают они там, где
 фоллбек и работает: в песочнице без утилит и на Windows.
 """
+
 import asyncio
 import time
 
@@ -117,9 +118,7 @@ async def _worst_gap_while(coro):
 async def test_list_files_lets_the_loop_breathe(big_tree, python_walk, costly_walk):
     tool = ListFiles(ctx=local_ctx())
 
-    _out, worst, ticks = await _worst_gap_while(
-        tool.acall(path=str(big_tree), max_entries=100_000, max_depth=10)
-    )
+    _out, worst, ticks = await _worst_gap_while(tool.acall(path=str(big_tree), max_entries=100_000, max_depth=10))
 
     assert ticks > 3, f"обход отработал быстрее пульса: {ticks}"
     assert worst < _MAX_GAP_SEC, f"loop залипал на {worst * 1000:.0f} мс"

@@ -2,6 +2,7 @@
 
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-5-brief.md.
 """
+
 from types import SimpleNamespace
 
 import pytest
@@ -107,13 +108,15 @@ def test_begin_turn_is_noop_without_model_router():
 def test_begin_turn_refixes_model_between_turns_when_level_changes():
     """Спека §6.4: смена активного уровня меняет default_model следующего хода —
     только через явный begin_turn, не сама по себе внутри текущего хода."""
-    snapshot = _snapshot({
-        "models": {
-            "fast": {"url": "http://fast/v1", "token": ""},
-            "smart": {"url": "http://smart/v1", "token": ""},
-        },
-        "slots": {"light": "fast", "max": "smart"},
-    })
+    snapshot = _snapshot(
+        {
+            "models": {
+                "fast": {"url": "http://fast/v1", "token": ""},
+                "smart": {"url": "http://smart/v1", "token": ""},
+            },
+            "slots": {"light": "fast", "max": "smart"},
+        }
+    )
     level = {"value": "light"}
     router = ModelRouter(snapshot, level_provider=lambda: level["value"])
     ctx = SimpleNamespace(model_router=router)
@@ -135,13 +138,15 @@ def test_begin_turn_refixes_model_between_turns_when_level_changes():
 
 
 def _two_slot_router(level_box: dict) -> ModelRouter:
-    snapshot = _snapshot({
-        "models": {
-            "fast": {"url": "http://fast/v1", "token": ""},
-            "smart": {"url": "http://smart/v1", "token": ""},
-        },
-        "slots": {"light": "fast", "max": "smart"},
-    })
+    snapshot = _snapshot(
+        {
+            "models": {
+                "fast": {"url": "http://fast/v1", "token": ""},
+                "smart": {"url": "http://smart/v1", "token": ""},
+            },
+            "slots": {"light": "fast", "max": "smart"},
+        }
+    )
     return ModelRouter(snapshot, level_provider=lambda: level_box["value"])
 
 
@@ -159,11 +164,11 @@ def test_main_transport_resolve_is_pinned_to_turn_level():
     begin_turn(state, ctx)
     assert pr._resolve_main_for_turn(state, ctx).alias == "fast"
 
-    level["value"] = "max"                     # живой /level посреди хода
+    level["value"] = "max"  # живой /level посреди хода
     assert pr._resolve_main_for_turn(state, ctx).alias == "fast"
     assert pr._resolve_main_for_turn(state, ctx).url == "http://fast/v1"
 
-    begin_turn(state, ctx)                     # следующий ход
+    begin_turn(state, ctx)  # следующий ход
     assert pr._resolve_main_for_turn(state, ctx).alias == "smart"
 
 

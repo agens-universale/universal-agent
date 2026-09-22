@@ -144,15 +144,15 @@ class Calculator(AbstractSimpleTool):
                     },
                 },
                 "required": ["expression"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = f'''Tool name: exec_calculator
+        description = f"""Tool name: exec_calculator
 Tool description: Evaluates an arithmetic expression (int/float literals + operators) and returns a JSON string. This is NOT Python — no sandbox, no builtins, no function calls, no names, no attribute access, no subscripts, no containers.
 Input schema: {{"type": "object", "properties": {{"expression": {{"type": "string", "description": "Arithmetic expression (int/float literals and operators only)."}}}}, "required": ["expression"], "additionalProperties": false}}
 
@@ -172,9 +172,8 @@ Return format (JSON string):
   "error": null|{{"type":"...","message":"..."}},
   "value": <number or null>
 }}
-'''
+"""
         return description
-
 
     async def acall(self, expression: str, **kwargs) -> str:
         if not isinstance(expression, str):
@@ -205,7 +204,10 @@ Return format (JSON string):
                 expression=expression,
                 value=None,
                 value_type="",
-                error={"type": "expression_too_long", "message": f"Expression length exceeds {self.max_expression_chars} chars"},
+                error={
+                    "type": "expression_too_long",
+                    "message": f"Expression length exceeds {self.max_expression_chars} chars",
+                },
             )
 
         try:
@@ -238,7 +240,4 @@ Return format (JSON string):
                 error={"type": "eval_failed", "message": str(e)},
             )
 
-        return self._result(
-            ok=True, expression=expression, value=result, value_type=result_type, error=None
-        )
-
+        return self._result(ok=True, expression=expression, value=result, value_type=result_type, error=None)

@@ -1,4 +1,5 @@
 """stdin_bridge: подмена sys.stdin на queue-backed source, input() читает оттуда."""
+
 import queue
 import sys
 import threading
@@ -31,6 +32,7 @@ def test_redirect_stdin_replaces_during_block():
     # sys.stdin теперь потоко-aware прокси (установлен один раз, обратно не свапаем);
     # у текущего (main) потока источник не назначен.
     from gc_tui.services.stdin_bridge import _ThreadAwareStdin, _tls
+
     assert isinstance(sys.stdin, _ThreadAwareStdin)
     assert getattr(_tls, "stdin", None) is None
 
@@ -46,20 +48,20 @@ def test_two_threads_read_own_queue():
 
     def worker(name: str, q: "queue.Queue[str]") -> None:
         with redirect_stdin(q):
-            inside.wait()          # дождаться, пока ОБА потока внутри redirect_stdin
+            inside.wait()  # дождаться, пока ОБА потока внутри redirect_stdin
             results[name] = input()
 
     ta = threading.Thread(target=worker, args=("a", qa))
     tb = threading.Thread(target=worker, args=("b", qb))
     ta.start()
     tb.start()
-    inside.wait()                  # оба потока уже подменили stdin (наихудший случай гонки)
+    inside.wait()  # оба потока уже подменили stdin (наихудший случай гонки)
     qa.put("AAA\n")
     qb.put("BBB\n")
     ta.join(timeout=2.0)
     tb.join(timeout=2.0)
 
-    assert results == {"a": "AAA", "b": "BBB"}   # каждый прочитал свою очередь
+    assert results == {"a": "AAA", "b": "BBB"}  # каждый прочитал свою очередь
 
 
 def test_nested_redirect_restores_outer_queue():
@@ -73,9 +75,9 @@ def test_nested_redirect_restores_outer_queue():
         with redirect_stdin(outer):
             with redirect_stdin(inner):
                 inner.put("IN\n")
-                got.append(input())     # читает inner
+                got.append(input())  # читает inner
             outer.put("OUT\n")
-            got.append(input())          # вернулись к outer
+            got.append(input())  # вернулись к outer
 
     t = threading.Thread(target=worker)
     t.start()

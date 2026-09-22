@@ -1,4 +1,5 @@
 """Smoke: `/view` открывает FileViewerScreen; пагинация и позиция."""
+
 import pytest
 from textual.widgets import Static, TextArea
 from textual.widgets.text_area import Selection

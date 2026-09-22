@@ -38,6 +38,7 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 
+
 def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Pattern:
     flags = re.IGNORECASE if case_insensitive else 0
     return re.compile(f"^{glob_to_regex(pattern)}$", flags)
@@ -76,9 +77,7 @@ class FindFilesByName(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": (
-                            "Absolute directory to search under. Must be an existing directory."
-                        ),
+                        "description": ("Absolute directory to search under. Must be an existing directory."),
                     },
                     "query": {
                         "type": "string",
@@ -177,8 +176,7 @@ class FindFilesByName(AbstractSimpleTool):
                 )
             else:
                 payload["guidance"] = (
-                    f"Results truncated (showing up to {max_matches} matches). "
-                    "Increase max_matches if you need more."
+                    f"Results truncated (showing up to {max_matches} matches). Increase max_matches if you need more."
                 )
         if walk_stats is not None:
             payload["walk_stats"] = walk_stats
@@ -243,9 +241,7 @@ class FindFilesByName(AbstractSimpleTool):
         return True
 
     @staticmethod
-    def _build_matcher(
-        query: str, *, case_insensitive: bool
-    ) -> Callable[[str, str], bool]:
+    def _build_matcher(query: str, *, case_insensitive: bool) -> Callable[[str, str], bool]:
         """Return matcher(rel_path, basename) -> bool."""
         q = query.replace("\\", "/")
         if not q:
@@ -257,10 +253,7 @@ class FindFilesByName(AbstractSimpleTool):
             patterns = [q]
             if "/" not in q and not q.startswith("**/"):
                 patterns.append("**/" + q)
-            compiled = [
-                _compile_glob_fullmatch(p, case_insensitive=case_insensitive)
-                for p in patterns
-            ]
+            compiled = [_compile_glob_fullmatch(p, case_insensitive=case_insensitive) for p in patterns]
 
             def _match_glob(rel: str, _base: str) -> bool:
                 rel_n = rel.replace("\\", "/")
@@ -283,9 +276,7 @@ class FindFilesByName(AbstractSimpleTool):
 
         return _match_sub
 
-    async def _probe_file_meta(
-        self, filepath: str, size_bytes: Optional[int] = None
-    ) -> Dict[str, Any]:
+    async def _probe_file_meta(self, filepath: str, size_bytes: Optional[int] = None) -> Dict[str, Any]:
         """size / binary for a matched file; never raises.
 
         ``size_bytes`` comes with the walk row when the backend knows it
@@ -308,9 +299,7 @@ class FindFilesByName(AbstractSimpleTool):
             meta["is_binary"] = True
         return meta
 
-    async def _entry(
-        self, filepath: str, is_dir: bool, size: Optional[int] = None
-    ) -> Dict[str, Any]:
+    async def _entry(self, filepath: str, is_dir: bool, size: Optional[int] = None) -> Dict[str, Any]:
         # Default match is a visible text file: omit type/is_hidden/is_binary
         # unless they differ (directory / hidden / binary). size_bytes stays
         # for triage.
@@ -324,7 +313,6 @@ class FindFilesByName(AbstractSimpleTool):
         if not is_dir:
             entry.update(await self._probe_file_meta(filepath, size))
         return entry
-
 
     def _arg_error(self, path: Any, query: Any, max_matches: Any, _result: Callable[..., str]) -> Optional[str]:
         if not isinstance(path, str):

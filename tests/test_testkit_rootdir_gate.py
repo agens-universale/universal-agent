@@ -77,7 +77,7 @@ class _Blocker:
 sys.meta_path.insert(0, _Blocker())
 """
 
-_INI = "[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n"
+_INI = '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
 
 
 def _write(path, text):
@@ -94,8 +94,7 @@ def _working_copy(tmp_path, name="repo"):
     """
     root = tmp_path / name
     # Маркер рабочей копии — тот самый, по которому её ищет gc_testkit.paths.
-    _write(root / "packages" / "core" / "pyproject.toml",
-           '[project]\nname = "gc-core"\n\n' + _INI)
+    _write(root / "packages" / "core" / "pyproject.toml", '[project]\nname = "gc-core"\n\n' + _INI)
     _write(root / "pyproject.toml", _INI)
     # Модуль, которого нет ни в репозитории, ни в site-packages: виден, только
     # если бутстрап положил на sys.path packages/*/src ЭТОЙ копии.
@@ -107,8 +106,7 @@ def _working_copy(tmp_path, name="repo"):
     )
     # Чужой проект ВНУТРИ нашего дерева — как вендоренные MCP-серверы.
     _write(root / "external" / "vendor" / "thing-mcp" / "pyproject.toml", _INI)
-    for suite in (root, root / "packages" / "core",
-                  root / "external" / "vendor" / "thing-mcp"):
+    for suite in (root, root / "packages" / "core", root / "external" / "vendor" / "thing-mcp"):
         _write(suite / "tests" / "test_probe.py", _PROBE)
     return root
 
@@ -127,13 +125,15 @@ def _run(root, rel, *, hide_mcp=False, tmp_path=None, testkit_root=None):
         # Плагин НЕ подключается флагом: он приезжает сам, через pytest11.
         [sys.executable, "-m", "pytest", "-q", "-s", "-p", "no:cacheprovider"],
         cwd=root / rel if rel else root,
-        env=env, capture_output=True, text=True,
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
 
 def _gate(res):
     line = next(ln for ln in res.stdout.splitlines() if ln.startswith("GATE "))
-    return json.loads(line[len("GATE "):])
+    return json.loads(line[len("GATE ") :])
 
 
 @pytest.mark.parametrize(
@@ -199,11 +199,7 @@ def test_every_vendored_server_declares_its_own_rootdir():
     manifests = sorted(VENDOR.glob("*/pyproject.toml"))
     assert manifests, f"в {VENDOR} не найдено ни одного манифеста"
 
-    without = [
-        m.parent.name
-        for m in manifests
-        if "[tool.pytest.ini_options]" not in m.read_text(encoding="utf-8")
-    ]
+    without = [m.parent.name for m in manifests if "[tool.pytest.ini_options]" not in m.read_text(encoding="utf-8")]
     assert not without, (
         f"без секции [tool.pytest.ini_options]: {', '.join(without)}. "
         "pytest объявит rootdir корнем монорепозитория, и бутстрап тест-кита "

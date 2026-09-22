@@ -37,8 +37,6 @@ _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
-
-
 async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
     """Прокси в хранилище сессии (I1: не clobber tui).
 
@@ -130,11 +128,7 @@ def filter_messages_not_in_state(
     """
     if not batch:
         return []
-    known = {
-        make_message_key(m)
-        for m in state_messages
-        if isinstance(m, dict)
-    }
+    known = {make_message_key(m) for m in state_messages if isinstance(m, dict)}
     out: list[dict] = []
     for msg in batch:
         if not isinstance(msg, dict):
@@ -171,12 +165,9 @@ def _preserved_user_ask_batch(
         incoming = [
             m
             for m in current_messages
-            if isinstance(m, dict)
-            and make_message_key(m) not in message_keys_already_persisted
+            if isinstance(m, dict) and make_message_key(m) not in message_keys_already_persisted
         ]
-        scoped_messages = (
-            incoming if incoming else [current_messages[-1]]
-        )
+        scoped_messages = incoming if incoming else [current_messages[-1]]
     last = scoped_messages[-1]
     out: list[dict] = []
     for msg in scoped_messages[:-1]:
@@ -193,10 +184,7 @@ def _preserved_user_ask_batch(
 
 
 def _preserved_function_output_batch(current_messages: list[dict], state_messages: list[dict]) -> list[dict]:
-    outputs = [
-        m for m in current_messages
-        if isinstance(m, dict) and m.get("type") in _FUNCTION_OUTPUT_TYPES
-    ]
+    outputs = [m for m in current_messages if isinstance(m, dict) and m.get("type") in _FUNCTION_OUTPUT_TYPES]
     batches: list[dict] = []
     seen_calls: set[str] = set()
     for output in outputs:
@@ -287,9 +275,7 @@ class RunSummaryCoordinator:
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
-        self._proj_tags = projection_tags_from_config(
-            getattr(ctx, "config_dict", None)
-        )
+        self._proj_tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -303,9 +289,7 @@ class RunSummaryCoordinator:
             self._ctx,
             trigger_reason=str(event.get("trigger_reason") or ""),
             trace_data=event.get("summary_trace", {}),
-            newly_summarized_message_id=str(
-                event.get("newly_summarized_message_id") or ""
-            ),
+            newly_summarized_message_id=str(event.get("newly_summarized_message_id") or ""),
         )
 
     async def apre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
@@ -352,13 +336,11 @@ class RunSummaryCoordinator:
                 logger,
                 SummaryCompactionLog(
                     trigger_reason=trigger_reason,
-                    thread_id=getattr(self._thread_session, "thread_id", None)
-                    or getattr(state, "thread_id", None),
+                    thread_id=getattr(self._thread_session, "thread_id", None) or getattr(state, "thread_id", None),
                     is_cli_mode=self._is_cli_mode,
                 ),
                 summarize_exc,
             )
-
 
     async def aforce_compact_once(self, *, trigger_reason: str = "manual") -> None:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
@@ -379,7 +361,6 @@ class RunSummaryCoordinator:
             )
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         gc.collect()
-
 
     async def apre_backend_compaction_hook(
         self,
@@ -449,7 +430,6 @@ class RunSummaryCoordinator:
         # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
         gc.collect()
 
-
     async def aturn_end_compact_if_needed(self) -> None:
         """Compaction после accept ``turn_finish`` (turn-end trigger).
 
@@ -487,10 +467,8 @@ class RunSummaryCoordinator:
                 logger,
                 SummaryCompactionLog(
                     trigger_reason="turn_end",
-                    thread_id=getattr(self._thread_session, "thread_id", None)
-                    or getattr(state, "thread_id", None),
+                    thread_id=getattr(self._thread_session, "thread_id", None) or getattr(state, "thread_id", None),
                     is_cli_mode=self._is_cli_mode,
                 ),
                 summarize_exc,
             )
-

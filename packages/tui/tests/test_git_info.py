@@ -1,4 +1,5 @@
 """current_branch — git-ветка cwd; не-git/detached/нет git → None."""
+
 import subprocess
 
 import pytest
@@ -6,8 +7,7 @@ from gc_tui.services.git_info import current_branch
 
 
 def _git(cwd, *args):
-    subprocess.run(["git", *args], cwd=cwd, check=True,
-                   capture_output=True, text=True)
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
 def _has_git() -> bool:

@@ -30,6 +30,7 @@
 строка под курсором. Пока вьюпорта не было, подводить было НЕКУДА: элемент «виден» в
 координатах скролла и невидим на экране.
 """
+
 from __future__ import annotations
 
 from textual.css.query import NoMatches
@@ -190,7 +191,7 @@ def _reveal_focus_now(host, frame: int) -> None:
     try:
         scope = host.screen
     except Exception:
-        return                     # экран уже сменился — подводить нечего
+        return  # экран уже сменился — подводить нечего
     target = None
     for selector in (f".{KEEP_IN_VIEW}", ".selected"):
         found = [w for w in scope.query(selector) if w.display]

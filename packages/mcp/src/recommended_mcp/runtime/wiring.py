@@ -3,6 +3,7 @@
 Контроллер: читает agent_config.snippet.yml рецепта, резолвит плейсхолдеры
 {npx}/{cache}, upsert'ит mcp.servers.<name> в managed-файл. config.yml
 пользователя не трогается."""
+
 from __future__ import annotations
 
 import re
@@ -59,7 +60,7 @@ def save_managed(data: dict[str, Any]) -> None:
 
 def wired_servers() -> dict[str, Any]:
     """mcp.servers из managed-файла (= что подключено через gc-mcp)."""
-    return ((load_managed().get("mcp") or {}).get("servers") or {})
+    return (load_managed().get("mcp") or {}).get("servers") or {}
 
 
 def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[str]:
@@ -67,9 +68,7 @@ def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[s
     оставшихся неизвестных плейсхолдеров (для warn)."""
     snippet = read_snippet(recipe_dir)
     if len(snippet) != 1:
-        raise ValueError(
-            f"snippet должен иметь ровно одну запись, найдено {len(snippet)}: {list(snippet)}"
-        )
+        raise ValueError(f"snippet должен иметь ровно одну запись, найдено {len(snippet)}: {list(snippet)}")
     # сниппет — {server_key: config}; берём единственный config-блок
     config_block = next(iter(snippet.values()))
     resolved = resolve_placeholders(config_block, npx=npx, cache=cache)

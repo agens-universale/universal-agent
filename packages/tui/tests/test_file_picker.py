@@ -1,4 +1,5 @@
 """FilePicker — overlay список путей, set_entries (внешний листинг), навигация."""
+
 import pytest
 from gc_tui.widgets.file_picker import FilePicker
 
@@ -68,7 +69,7 @@ async def test_entries_set_before_mount_completes_are_shown(tmp_path):
     app = App()
     async with app.run_test() as pilot:
         picker = FilePicker([], searching=True)
-        pilot.app.mount(picker)                        # монтирование не ждём
+        pilot.app.mount(picker)  # монтирование не ждём
         picker.set_entries(["a.py", "b.py", "c.py"])
         await pilot.pause()
         assert len(picker.query(".palette-row")) == 3
@@ -93,8 +94,8 @@ async def test_entries_set_after_compose_before_mount_are_shown():
     async with app.run_test() as pilot:
         picker = _LateData([], searching=True)
         await pilot.app.mount(picker)
-        await pilot.pause()      # отложенный _rebuild (call_after_refresh из on_mount)
-        await pilot.pause()      # его remove_children/mount_all — асинхронные, ещё один цикл
+        await pilot.pause()  # отложенный _rebuild (call_after_refresh из on_mount)
+        await pilot.pause()  # его remove_children/mount_all — асинхронные, ещё один цикл
         assert len(picker.query(".palette-row")) == 3
         assert picker._stale is False
         assert picker.styles.min_height.value == picker.desired_height
@@ -130,7 +131,7 @@ async def test_arrows_move_highlight_without_recreating_rows():
         after = list(picker.query(".palette-row"))
         assert [id(w) for w in after] == [id(w) for w in before]
         assert [w.has_class("selected") for w in after] == [False, True, False]
-        picker.move_selection(-2)                        # заворот через начало
+        picker.move_selection(-2)  # заворот через начало
         await pilot.pause()
         assert [w.has_class("selected") for w in picker.query(".palette-row")] == [False, False, True]
         assert picker.selected_entry() == "c.py"

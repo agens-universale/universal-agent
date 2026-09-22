@@ -59,9 +59,7 @@ def test_extract_register_bodies_unescaped_ampersand_and_last_match():
 
 
 def test_render_persistent_state_roundtrip_all_registers():
-    snapshot = WorkingMemorySnapshot(
-        **{name: f"body-{name}" for name in REGISTER_ORDER}
-    )
+    snapshot = WorkingMemorySnapshot(**{name: f"body-{name}" for name in REGISTER_ORDER})
     rendered = render_persistent_state_for_prompt(snapshot)
     extracted = extract_register_bodies(rendered)
     for name in REGISTER_ORDER:
@@ -345,9 +343,7 @@ def test_resolve_persistent_state_block_uses_explicit_block():
 
 
 def test_resolve_persistent_state_block_reads_from_state_when_none():
-    state = types.SimpleNamespace(
-        shared=types.SimpleNamespace(working_memory={"goal": "from state"})
-    )
+    state = types.SimpleNamespace(shared=types.SimpleNamespace(working_memory={"goal": "from state"}))
     resolved = resolve_persistent_state_block(state, None)
     assert "<persistent_state>" in resolved
     assert "from state" in resolved

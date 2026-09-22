@@ -10,6 +10,7 @@
 ошибку (реальный permission-error, ENOENT, и весь POSIX, где ``winerror`` нет)
 пробрасываем сразу — семантика ``os.replace`` сохраняется, атомарность не трогаем.
 """
+
 import os
 import time
 

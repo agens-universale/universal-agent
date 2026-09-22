@@ -34,10 +34,7 @@ class Think(AbstractSimpleTool):
         reason = args.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             return args
-        if any(
-            isinstance(args.get(name), str) and args.get(name, "").strip()
-            for name in _THINK_FIELDS
-        ):
+        if any(isinstance(args.get(name), str) and args.get(name, "").strip() for name in _THINK_FIELDS):
             return args
         remapped = dict(args)
         remapped["thoughts"] = reason
@@ -86,7 +83,7 @@ class Think(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: session_think
+        description = """Tool name: session_think
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
 IMPORTANT: think content is NOT saved to thread memory and NOT saved to any durable storage. It only exists in the current dialogue context.
 RULE: If your think output contains a specific Decision / Canonical target / Plan completed / Verified fact, record it separately via the thread memory tool (append) when one is available so it can persist.
@@ -96,11 +93,17 @@ At least one of thoughts, critics, doubts, reflection should be non-empty.
 
 Return format (JSON string):
 {"tool":"session_think","ok":true,"error":null|{"type":"...","message":"..."},"message":"..."}
-'''
+"""
         return description
 
-
-    async def acall(self, thoughts: str | None = None, critics: str | None = None, doubts: str | None = None, reflection: str | None = None, **kwargs) -> str:
+    async def acall(
+        self,
+        thoughts: str | None = None,
+        critics: str | None = None,
+        doubts: str | None = None,
+        reflection: str | None = None,
+        **kwargs,
+    ) -> str:
         vals = [thoughts, critics, doubts, reflection]
         for name, val in zip(_THINK_FIELDS, vals):
             if val is not None and not isinstance(val, str):

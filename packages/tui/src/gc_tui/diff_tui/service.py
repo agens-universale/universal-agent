@@ -2,6 +2,7 @@
 
 В git-mode (v2) — гибрид: git-visible через index, ignored — через ``.gc/diffs/``.
 """
+
 from __future__ import annotations
 
 import threading
@@ -126,11 +127,7 @@ class DiffService:
         if self._cache_cleared:
             return
         if self.mode == "git-mode":
-            git_keys = {
-                e.path
-                for e in git_ops.git_status(self.launch_root)
-                if self._cache_key(e.path) is not None
-            }
+            git_keys = {e.path for e in git_ops.git_status(self.launch_root) if self._cache_key(e.path) is not None}
             evict_stale_cache(self._store, git_visible_keys=git_keys)
         self._cache_cleared = True
 
@@ -157,9 +154,7 @@ class DiffService:
         if key is not None and not Path(key).is_absolute():
             return key
         try:
-            return Path(path).resolve().relative_to(
-                Path(self.launch_root).resolve()
-            ).as_posix()
+            return Path(path).resolve().relative_to(Path(self.launch_root).resolve()).as_posix()
         except ValueError:
             return None
 
@@ -210,16 +205,10 @@ class DiffService:
             self._discard_own(*stale)
         return raw
 
-    def _list_hybrid(
-        self, *, pending_only: bool, touched: set[str]
-    ) -> list[DiffFileEntry]:
+    def _list_hybrid(self, *, pending_only: bool, touched: set[str]) -> list[DiffFileEntry]:
         git_entries = list(git_ops.git_status(self.launch_root))
         # protected / вне perimeter (.gc и т.п.) — не показываем в /diff
-        trackable_git = [
-            e
-            for e in git_entries
-            if e.path in touched and self._cache_key(e.path) is not None
-        ]
+        trackable_git = [e for e in git_entries if e.path in touched and self._cache_key(e.path) is not None]
         git_keys = {e.path for e in trackable_git}
         # конфликт → git побеждает; stale cache удаляем при refresh
         evict_stale_cache(self._store, git_visible_keys=git_keys)
@@ -252,9 +241,7 @@ class DiffService:
             )
         return out
 
-    def _list_cache(
-        self, *, pending_only: bool, touched: set[str]
-    ) -> list[DiffFileEntry]:
+    def _list_cache(self, *, pending_only: bool, touched: set[str]) -> list[DiffFileEntry]:
         out: list[DiffFileEntry] = []
         for e in self._store.list_entries(cleanup_stale=True):
             if e.key not in touched:
@@ -264,9 +251,7 @@ class DiffService:
             kind: FileKind
             if e.status == STATUS_CREATED and not e.baseline_exists:
                 kind = "created"
-            elif e.status == STATUS_DELETED or (
-                not disk.is_file() and orig.is_file()
-            ):
+            elif e.status == STATUS_DELETED or (not disk.is_file() and orig.is_file()):
                 kind = "deleted"
             else:
                 kind = "modified"
@@ -284,9 +269,7 @@ class DiffService:
             )
         return out
 
-    def _cache_review_state(
-        self, key: str, status: str, baseline_exists: bool
-    ) -> ReviewState:
+    def _cache_review_state(self, key: str, status: str, baseline_exists: bool) -> ReviewState:
         if status == STATUS_CREATED and not baseline_exists:
             return "pending"
         orig = self._store._orig_path(key)
@@ -501,11 +484,7 @@ class DiffService:
                     key=rel,
                     backend="git",
                 )
-            if (
-                entry is not None
-                and entry.kind == "deleted"
-                and entry.state == "approved"
-            ):
+            if entry is not None and entry.kind == "deleted" and entry.state == "approved":
                 return OpResult(
                     ok=True,
                     reason="already_deleted_in_index",
@@ -563,9 +542,7 @@ class DiffService:
             return ""
         return self._visual_diff_cache(path, mode=mode)
 
-    def _visual_diff_git(
-        self, path: PathLike, *, mode: str = "adaptive"
-    ) -> str:
+    def _visual_diff_git(self, path: PathLike, *, mode: str = "adaptive") -> str:
         rel = self._git_rel(path)
         if rel is None:
             return ""
@@ -599,9 +576,7 @@ class DiffService:
         # удаление от последнего staged не можем (нет baseline в index).
         return ""
 
-    def _visual_diff_as_created(
-        self, key: str, disk: Path
-    ) -> str:
+    def _visual_diff_as_created(self, key: str, disk: Path) -> str:
         """Unified diff ``/dev/null`` → содержимое нового файла на диске.
 
         ``mode`` не нужен: созданный файл всегда показывается целиком как
@@ -642,9 +617,7 @@ class DiffService:
         except OSError:
             return None
 
-    def _visual_diff_cache(
-        self, path: PathLike, *, mode: str = "adaptive"
-    ) -> str:
+    def _visual_diff_cache(self, path: PathLike, *, mode: str = "adaptive") -> str:
         key = self._cache_key(path)
         if key is None:
             return ""

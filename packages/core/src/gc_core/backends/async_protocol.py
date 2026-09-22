@@ -13,6 +13,7 @@
 включая чужие реализации — заворачивается в ``SyncExecAdapter``: тот же
 результат, поток вместо корутины.
 """
+
 from __future__ import annotations
 
 import threading
@@ -25,25 +26,35 @@ from gc_core.backends.protocol import ExecResult
 class AsyncExecPort(Protocol):
     """Что нужно циклу от бэкенда, чтобы запускать команды не блокируя loop."""
 
-    async def aexec(self, command: str, *, cwd: Optional[str] = None,
-                    timeout: Optional[int] = None,
-                    env: Optional[dict] = None) -> ExecResult: ...
+    async def aexec(
+        self, command: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None, env: Optional[dict] = None
+    ) -> ExecResult: ...
 
-    async def aexec_raw(self, command: str, *, cwd: Optional[str] = None,
-                        timeout: Optional[int] = None,
-                        env: Optional[dict] = None,
-                        capture_max_chars: Optional[int] = None) -> ExecResult:
+    async def aexec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """Механический POSIX без инициализации окружения образа."""
         ...
 
-    async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                         cwd: Optional[str] = None,
-                         timeout: Optional[int] = None,
-                         env: Optional[dict] = None) -> ExecResult: ...
+    async def aexec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> ExecResult: ...
 
-    async def arun_python(self, code: str, *, cwd: Optional[str] = None,
-                          timeout: Optional[int] = None,
-                          env: Optional[dict] = None) -> ExecResult: ...
+    async def arun_python(
+        self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None, env: Optional[dict] = None
+    ) -> ExecResult: ...
 
 
 #: Слоты для чужих синхронных бэкендов — СВОИ, не общие с MCP.
@@ -99,15 +110,12 @@ class SyncExecAdapter:
     async def _off_loop(fn: Any, *args: Any, **kwargs: Any) -> ExecResult:
         from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
-        return await run_abandonable_in(
-            _EXEC_SLOTS, fn, *args, _thread_name="sync-exec", **kwargs
-        )
+        return await run_abandonable_in(_EXEC_SLOTS, fn, *args, _thread_name="sync-exec", **kwargs)
 
 
 def aexec_port(backend: Any) -> AsyncExecPort:
     """Асинхронный порт для бэкенда: свой, если он есть, иначе адаптер."""
-    if all(callable(getattr(backend, name, None))
-           for name in ("aexec", "aexec_argv", "arun_python")):
+    if all(callable(getattr(backend, name, None)) for name in ("aexec", "aexec_argv", "arun_python")):
         return backend
     return SyncExecAdapter(backend)
 

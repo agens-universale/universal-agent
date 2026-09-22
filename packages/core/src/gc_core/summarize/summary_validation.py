@@ -28,9 +28,7 @@ def has_nonempty_summary_body(text: str) -> bool:
 def fallback_summary_xml() -> str:
     filler = "- n/a"
     bodies = dict.fromkeys(section_tags(), filler)
-    bodies[primary_section_tag()] = (
-        f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
-    )
+    bodies[primary_section_tag()] = f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
     return assemble_summary_xml(bodies)
 
 

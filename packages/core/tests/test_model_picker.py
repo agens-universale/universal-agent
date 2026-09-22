@@ -13,6 +13,7 @@ def local_http_server():
     Нужен там, где проверяется поведение транспорта ДО ответа сервера (кодирование
     заголовков): на закрытом порту соединение отваливается раньше, и тест зеленеет
     по неверной причине."""
+
     class _H(BaseHTTPRequestHandler):
         def _reply(self):
             body = json.dumps({"ok": True}).encode()
@@ -37,12 +38,22 @@ def local_http_server():
 
 
 def test_parse_config_models():
-    payload = {"chat": {"models": [
-        {"model": "vllm/Qwen3-Coder-Next-262k", "description": "Qwen3-Coder",
-         "plugin_side": {"supports_parallel_tool_calls": True, "context_window_size": 262144}},
-        {"model": "CodeChat", "description": "CodeChat(Qwen3-32B)",
-         "plugin_side": {"supports_parallel_tool_calls": False, "context_window_size": 131072}},
-    ]}}
+    payload = {
+        "chat": {
+            "models": [
+                {
+                    "model": "vllm/Qwen3-Coder-Next-262k",
+                    "description": "Qwen3-Coder",
+                    "plugin_side": {"supports_parallel_tool_calls": True, "context_window_size": 262144},
+                },
+                {
+                    "model": "CodeChat",
+                    "description": "CodeChat(Qwen3-32B)",
+                    "plugin_side": {"supports_parallel_tool_calls": False, "context_window_size": 131072},
+                },
+            ]
+        }
+    }
     out = mp.parse_config_models(payload)
     assert [m.id for m in out] == ["vllm/Qwen3-Coder-Next-262k", "CodeChat"]
     assert out[0].tool_capable is True and out[0].context == 262144
@@ -55,16 +66,19 @@ def test_parse_config_models_empty():
 
 
 def test_parse_models_list_filters_chat():
-    payload = {"object": "list", "data": [
-        {"id": "CodeChat", "endpoints": ["/chat/completions", "/responses"]},
-        {"id": "Gigacode-Inline-13B", "endpoints": ["/completions"]},
-        {"id": "no-endpoints-field"},
-    ]}
+    payload = {
+        "object": "list",
+        "data": [
+            {"id": "CodeChat", "endpoints": ["/chat/completions", "/responses"]},
+            {"id": "Gigacode-Inline-13B", "endpoints": ["/completions"]},
+            {"id": "no-endpoints-field"},
+        ],
+    }
     out = mp.parse_models_list(payload)
     ids = [m.id for m in out]
     assert "CodeChat" in ids
-    assert "Gigacode-Inline-13B" not in ids       # только /completions
-    assert "no-endpoints-field" in ids            # нет поля endpoints → не фильтруем
+    assert "Gigacode-Inline-13B" not in ids  # только /completions
+    assert "no-endpoints-field" in ids  # нет поля endpoints → не фильтруем
     assert all(m.tool_capable is None for m in out)
 
 
@@ -102,11 +116,13 @@ def test_fetch_models_from_an_stt_endpoint_hits_the_v1_root():
 
 def test_fetch_prefers_config_then_models_then_none():
     calls = []
+
     def get_config_ok(url, headers, verify):
         calls.append(url)
         if url.endswith("/config"):
             return {"chat": {"models": [{"model": "M1", "plugin_side": {"supports_parallel_tool_calls": True}}]}}
         raise RuntimeError("no")
+
     got = mp.fetch_models("https://h/api/v2/chat/completions", "Bearer x", http_get=get_config_ok)
     assert [m.id for m in got] == ["M1"]
 
@@ -114,22 +130,26 @@ def test_fetch_prefers_config_then_models_then_none():
         if url.endswith("/config"):
             raise RuntimeError("404")
         return {"data": [{"id": "M2", "endpoints": ["/chat/completions"]}]}
+
     got = mp.fetch_models("https://h/api/v2/chat/completions", None, http_get=get_only_models)
     assert [m.id for m in got] == ["M2"]
 
     def get_all_fail(url, headers, verify):
         raise RuntimeError("down")
+
     assert mp.fetch_models("https://h/api/v2/chat/completions", None, http_get=get_all_fail) is None
 
 
 def test_probe_fetch_dedups_identical_network_errors(monkeypatch):
     err = "<urlopen error [WinError 10061] отказано>"
-    monkeypatch.setattr(mp, "_requests_get_ex",
-                        lambda url, headers, verify, *, config_proxy=None: mp.HttpReply(
-                            status=None, payload=None, network_error=err))
+    monkeypatch.setattr(
+        mp,
+        "_requests_get_ex",
+        lambda url, headers, verify, *, config_proxy=None: mp.HttpReply(status=None, payload=None, network_error=err),
+    )
     out = mp.probe_fetch("http://x/v1", None, verify=False)
     assert out.status is None
-    assert out.network_error.count(err) == 1        # дедуп: не дважды
+    assert out.network_error.count(err) == 1  # дедуп: не дважды
 
 
 class _FakeResp:
@@ -166,6 +186,7 @@ def test_requests_introduce_themselves_by_product_name():
     подменённый транспорт видит ровно тот набор, что ушёл бы в сеть. Тест на самом
     транспорте проверял бы функцию, которую в бою никто не зовёт."""
     from gc_core import app_version
+
     seen = []
 
     def get_ex(url, headers, verify):
@@ -194,6 +215,7 @@ def test_the_legacy_urllib_transport_introduces_itself_too(monkeypatch):
     остаётся инъектируемой заменой для `probe_fetch`, и визитку ставит своим путём
     (`_request`), мимо `_headers`. Отвалится — отвалится молча."""
     from gc_core import app_version
+
     seen = _capture_user_agents(monkeypatch)
 
     mp._urllib_get_ex("https://h/v1/models", {}, True)
@@ -207,6 +229,7 @@ def test_the_user_agent_carries_the_live_version(monkeypatch):
     """Имя и версия — из метаданных пакета, не из строки в коде: подняли версию в
     pyproject — визитка поехала сама."""
     from gc_core import app_version
+
     monkeypatch.setattr(app_version, "agent_version", lambda: "9.9.9")
     mp._user_agent.cache_clear()
     try:
@@ -227,7 +250,7 @@ def test_transport_survives_non_latin1_header(local_http_server):
     РАНЬШЕ кодирования заголовка, и тест был бы зелёным даже без фикса."""
     url = f"{local_http_server}/v1/chat/completions"
     ok = mp._requests_post_ex(url, mp._headers("Bearer sk-latin"), {"model": "m"}, True)
-    assert ok.status == 200          # контроль: до сервера доезжаем
+    assert ok.status == 200  # контроль: до сервера доезжаем
 
     reply = mp._requests_post_ex(url, mp._headers("Bearer уквxxx"), {"model": "m"}, True)
     assert reply.status is None

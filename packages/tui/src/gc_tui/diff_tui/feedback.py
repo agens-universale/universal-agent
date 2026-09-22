@@ -2,6 +2,7 @@
 
 UX-строки для DiffScreen / trace — отдельно от technical message агенту.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Sequence
@@ -112,17 +113,10 @@ def build_undo_feedback_body(
     parts = ["User reverted pending file changes via Diff-UI undo."]
     if restored:
         lines = "\n".join(f"- {k}" for k in restored)
-        parts.append(
-            "Changes reverted — re-read these files from disk "
-            "before assuming their contents:\n"
-            f"{lines}"
-        )
+        parts.append(f"Changes reverted — re-read these files from disk before assuming their contents:\n{lines}")
     if deleted:
         lines = "\n".join(f"- {k}" for k in deleted)
-        parts.append(
-            "Deleted previously created files:\n"
-            f"{lines}"
-        )
+        parts.append(f"Deleted previously created files:\n{lines}")
     return "\n\n".join(parts) + "\n"
 
 

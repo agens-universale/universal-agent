@@ -101,7 +101,8 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "arequest_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="Custom role",
         ):
             run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
@@ -122,7 +123,8 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "arequest_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
             run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
@@ -137,14 +139,18 @@ class TestFinalizeRole:
         общий для всех вспомогательных LLM-вызовов."""
         instance = asyncio.run(
             SpecialAgent.create_instance(
-                role="Dev", role_description="desc", task="task",
-                model="test-model", config_dict=_make_config(),
+                role="Dev",
+                role_description="desc",
+                task="task",
+                model="test-model",
+                config_dict=_make_config(),
             )
         )
         ctx = _make_ctx()
         state = _make_state()
         with patch.object(
-            special_agent_module, "arequest_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
             run_coro(instance.afinalize_role(ctx, state))
@@ -158,12 +164,16 @@ class TestFinalizeRole:
     def test_uses_configured_max_tokens_default(self):
         instance = asyncio.run(
             SpecialAgent.create_instance(
-                role="Dev", role_description="desc", task="task",
-                model="test-model", config_dict=_make_config(),
+                role="Dev",
+                role_description="desc",
+                task="task",
+                model="test-model",
+                config_dict=_make_config(),
             )
         )
         with patch.object(
-            special_agent_module, "arequest_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
             run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
@@ -174,12 +184,16 @@ class TestFinalizeRole:
         """If LLM call fails, finalize_role should raise."""
         instance = asyncio.run(
             SpecialAgent.create_instance(
-                role="Dev", role_description="desc", task="task",
-                model="m", config_dict=_make_config(),
+                role="Dev",
+                role_description="desc",
+                task="task",
+                model="m",
+                config_dict=_make_config(),
             )
         )
         with patch.object(
-            special_agent_module, "arequest_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             side_effect=ConnectionError("Network error"),
         ):
             with pytest.raises(ConnectionError):
@@ -202,20 +216,23 @@ class TestSpecialAgentWithRunner:
         # runner их awaits.
         with (
             patch.object(
-                special_agent_module, "arequest_auxiliary_completion_text",
+                special_agent_module,
+                "arequest_auxiliary_completion_text",
                 new=AsyncMock(return_value="You are a security auditor."),
             ),
             patch.object(
-                runner, "_build_child_ctx",
-                new=AsyncMock(return_value=SimpleNamespace(
-                    logger=None,
-                    run_id="cr",
-                    is_tui=False,
-                    # Профиль aux нужен: роль теперь зовёт
-                    # `auxiliary_llm_completion_kwargs(ctx)`.
-                    auxiliary_llm=ChatCompletionsLlmConfig(),
-                    config_dict=cfg,
-                )
+                runner,
+                "_build_child_ctx",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(
+                        logger=None,
+                        run_id="cr",
+                        is_tui=False,
+                        # Профиль aux нужен: роль теперь зовёт
+                        # `auxiliary_llm_completion_kwargs(ctx)`.
+                        auxiliary_llm=ChatCompletionsLlmConfig(),
+                        config_dict=cfg,
+                    )
                 ),
             ),
         ):

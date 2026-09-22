@@ -5,6 +5,7 @@
 их развели — см. `_send_osc52`. Внутренний app.clipboard наполняется всегда.
 Возврат bool = успех native при blocking; при async — True если задача поставлена.
 """
+
 from __future__ import annotations
 
 import os
@@ -14,9 +15,7 @@ from typing import Any
 from gc_tui.services.os_ops import write_clipboard
 
 MSG_COPIED = "Скопировано"
-MSG_LINUX_DEPS = (
-    "системный буфер недоступен — установите wl-clipboard или xclip"
-)
+MSG_LINUX_DEPS = "системный буфер недоступен — установите wl-clipboard или xclip"
 MSG_SSH_OSC = "терминал должен разрешать OSC 52"
 
 
@@ -49,7 +48,7 @@ def _remember_internally(app: Any, text: str) -> None:
     try:
         app._clipboard = text
     except Exception:
-        pass   # чужая реализация app — внутренний буфер не наша забота
+        pass  # чужая реализация app — внутренний буфер не наша забота
 
 
 def _send_osc52(app: Any, text: str) -> None:

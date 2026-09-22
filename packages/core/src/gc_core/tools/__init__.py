@@ -91,19 +91,11 @@ def is_internal_tool_error_output(output: str) -> bool:
 
 
 def format_unknown_tool_output(tool_name: str, available_names: Iterable[str]) -> str:
-    suggestions = difflib.get_close_matches(
-        tool_name, list(available_names), n=5, cutoff=0.3
-    )
+    suggestions = difflib.get_close_matches(tool_name, list(available_names), n=5, cutoff=0.3)
     error_message = f"No tool named '{tool_name}' on client."
-    use_only = (
-        "Use only tools from the provided tool list "
-        "in section <tools> in system prompt."
-    )
+    use_only = "Use only tools from the provided tool list in section <tools> in system prompt."
     if suggestions:
-        message = (
-            f"Unknown tool '{tool_name}'. Maybe you mean tools: "
-            f"{', '.join(suggestions)}. {use_only}"
-        )
+        message = f"Unknown tool '{tool_name}'. Maybe you mean tools: {', '.join(suggestions)}. {use_only}"
     else:
         message = f"Unknown tool '{tool_name}'. {use_only}"
     payload = {
@@ -225,9 +217,7 @@ def apply_subagent_tools_filter(
     _warn_unknown_filter_names(tools_data, allow, stop, logger)
 
     filtered = {
-        name: entry
-        for name, entry in tools_data.items()
-        if (allow is None or name in allow) and name not in stop
+        name: entry for name, entry in tools_data.items() if (allow is None or name in allow) and name not in stop
     }
     # Служебное ядро возвращается безусловно: перечислять его в `tools` не нужно,
     # и `stop_tools` его не отбирает (попытка запрета логируется в реестре). Если
@@ -282,9 +272,7 @@ async def abuild_tools_data(
     """
     from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
 
-    tools_data = _collect_local_tools_data(
-        config_dict, os_backend=os_backend, skills_registry=skills_registry
-    )
+    tools_data = _collect_local_tools_data(config_dict, os_backend=os_backend, skills_registry=skills_registry)
     # `os_backend` обязателен: без него `runs_in_agent_runtime` считает любой
     # MCP-сервер «своим», и `execute_on: os_backend` молча исполнялся на хосте,
     # мимо песочницы. develop передаёт его здесь же; при переводе аргумент
@@ -293,8 +281,12 @@ async def abuild_tools_data(
         config_dict, on_progress, tools_cache=tools_cache, os_backend=os_backend
     )
     return _finish_tools_data(
-        tools_data, mcp_tools_data, mcp_status, config_dict,
-        logger=logger, registered_names=registered_names,
+        tools_data,
+        mcp_tools_data,
+        mcp_status,
+        config_dict,
+        logger=logger,
+        registered_names=registered_names,
     )
 
 
@@ -338,6 +330,7 @@ def _finish_tools_data(
     backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
     if subagents_enabled(local_subagents_cfg) and backend_mode == "chat_completions":
         from gc_core.tools.subagents.registry import get_subagents_tools_data
+
         # Реестр уже применил список из use_local_subagents к кастомным;
         # встроенные семь доступны всегда, пока фича включена.
         subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
@@ -370,8 +363,11 @@ def _finish_tools_data(
         spec = v.get("spec")
         if isinstance(spec, dict):
             _normalize_tool_spec(
-                spec, v, inject_tool_fields=inject_tool_fields,
-                openai_strict=openai_strict, send_tool_strict=send_tool_strict,
+                spec,
+                v,
+                inject_tool_fields=inject_tool_fields,
+                openai_strict=openai_strict,
+                send_tool_strict=send_tool_strict,
             )
 
     tools_spec = [v["spec"] for v in tools_data.values()]
@@ -398,10 +394,11 @@ class _SubagentTool:
         self._run_agent_func = run_agent_func
         self._parent_call_id = parent_call_id
 
-
     async def acall(self) -> str:
         return await self._runner.arun(
-            self._tool_name, self._arguments, self._run_agent_func,
+            self._tool_name,
+            self._arguments,
+            self._run_agent_func,
             parent_call_id=self._parent_call_id,
         )
 
@@ -459,6 +456,7 @@ def _prepare_subagent_call(
     kwargs: Dict[str, Any],
 ) -> "tuple[Any, Dict[str, Any], list[str]] | str":
     from gc_core.tools.subagents.runner import SubagentRunner
+
     orchestrator_state = kwargs.get("state")
     run_agent_func = kwargs.get("run_agent_func")
     if orchestrator_state is None or run_agent_func is None:
@@ -482,13 +480,17 @@ def _prepare_subagent_call(
         injected_fields=entry.get("injected_fields") or [],
     )
     runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-    return _SubagentTool(
-        runner,
-        tool_name=tool_name,
-        arguments=parsed_args,
-        run_agent_func=run_agent_func,
-        parent_call_id=kwargs.get("call_id"),
-    ), {}, dropped_unknown
+    return (
+        _SubagentTool(
+            runner,
+            tool_name=tool_name,
+            arguments=parsed_args,
+            run_agent_func=run_agent_func,
+            parent_call_id=kwargs.get("call_id"),
+        ),
+        {},
+        dropped_unknown,
+    )
 
 
 def _prepare_tool_call(
@@ -521,17 +523,13 @@ def _prepare_tool_call(
     use_server_subagents = config_dict.get("use_server_subagents", False)
     server_tool_prefix = config_dict.get("server_tool_prefix")
 
-    if use_server_subagents and server_tool_prefix and tool_name.startswith(
-        server_tool_prefix
-    ):
+    if use_server_subagents and server_tool_prefix and tool_name.startswith(server_tool_prefix):
         return f"{tool_name} call"
 
     local_subagents_cfg = config_dict.get("use_local_subagents", False)
     # Отдельная сверка со списком не нужна: реестр уже отдаёт только разрешённых
     # кастомных, поэтому is_subagent_tool на отфильтрованном вернёт False.
-    if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
-        tool_name, config_dict
-    ):
+    if subagents_enabled(local_subagents_cfg) and is_subagent_tool(tool_name, config_dict):
         return _prepare_subagent_call(tool_name, arguments, tools_data_, ctx, config_dict, kwargs)
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
@@ -657,17 +655,12 @@ async def aapply_tool(
         # Жёстко, а не тихим уходом в поток: тул без `acall` — это ошибка
         # проводки, и она обязана быть видна сразу, а не размазаться по
         # прогону лишним слотом пула.
-        raise TypeError(
-            f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); "
-            f"the tool contract is async-only"
-        )
+        raise TypeError(f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); the tool contract is async-only")
     try:
         res = await acall(**args)
     except Exception as e:
         return annotate_output_with_dropped_arguments(
-            _tool_failure_output(
-                e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
-            ),
+            _tool_failure_output(e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")),
             dropped,
         )
     # Заметка об отброшенных аргументах — на ОБОИХ выходах, как на develop:

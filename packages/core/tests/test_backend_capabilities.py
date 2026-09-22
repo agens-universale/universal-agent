@@ -1,4 +1,5 @@
 """Capability probes and FakeBackend overrides."""
+
 import os
 import re
 import shlex
@@ -179,7 +180,7 @@ class _PosixBox(LocalFsBackend):
             tok = rest[i]
             if tok == "(":
                 j = rest.index(")", i)
-                group = rest[i + 1:j]
+                group = rest[i + 1 : j]
                 k = 0
                 while k < len(group):
                     if group[k] == "-name":
@@ -208,19 +209,14 @@ class _PosixBox(LocalFsBackend):
 
         rows = []
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [
-                d for d in dirnames if not any(fnmatch(d, p) for p in prune_names)
-            ]
+            dirnames[:] = [d for d in dirnames if not any(fnmatch(d, p) for p in prune_names)]
             for d in sorted(dirnames):
                 rows.append((os.path.join(dirpath, d), True))
             for f in sorted(filenames):
                 rows.append((os.path.join(dirpath, f), False))
 
         if printf_fmt is not None:
-            out = "".join(
-                os.path.relpath(p, root) + "\t" + ("d" if is_dir else "f") + "\n"
-                for p, is_dir in rows
-            )
+            out = "".join(os.path.relpath(p, root) + "\t" + ("d" if is_dir else "f") + "\n" for p, is_dir in rows)
             return ExecResult(out, "", 0)
 
         files = [p for p, is_dir in rows if not is_dir]
@@ -238,7 +234,7 @@ class _PosixBox(LocalFsBackend):
         while i < len(argv):
             tok = argv[i]
             if tok == "--":
-                pattern, paths = argv[i + 1], argv[i + 2:]
+                pattern, paths = argv[i + 1], argv[i + 2 :]
                 break
             if tok in self.grep_rejects:
                 return ExecResult("", "grep: unrecognized option " + tok + "\n", 2)
@@ -275,9 +271,7 @@ class _PosixBox(LocalFsBackend):
                     continue
                 for dirpath, dirnames, filenames in os.walk(p):
                     if exclude_dir:
-                        dirnames[:] = [
-                            d for d in dirnames if not fnmatch(d, exclude_dir)
-                        ]
+                        dirnames[:] = [d for d in dirnames if not fnmatch(d, exclude_dir)]
                     for f in sorted(filenames):
                         if include and not fnmatch(f, include):
                             continue
@@ -306,9 +300,7 @@ class _PosixBox(LocalFsBackend):
 
 def _always_on_grep_flags():
     """Flags the shared builder emits for every production call (no hardcoding)."""
-    return set(build_grep_argv_flags(fixed=False)[1:]) & set(
-        build_grep_argv_flags(fixed=True)[1:]
-    )
+    return set(build_grep_argv_flags(fixed=False)[1:]) & set(build_grep_argv_flags(fixed=True)[1:])
 
 
 async def test_grep_probes_run_the_production_flags():
@@ -323,9 +315,7 @@ async def test_grep_probes_run_the_production_flags():
 
 
 async def test_grep_probe_smokes_fixed_and_case_insensitive_flags():
-    mode_flags = set(build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]) - set(
-        build_grep_argv_flags()[1:]
-    )
+    mode_flags = set(build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]) - set(build_grep_argv_flags()[1:])
     box = _PosixBox()
 
     assert await aprobe_has_grep(box) is True
@@ -423,6 +413,7 @@ async def test_capable_box_reports_all_capabilities():
 
 
 # --- wire format обхода: rel, type, size --------------------------------------
+
 
 def test_parse_find_printf_entries_reads_sizes_and_tolerates_two_columns():
     from gc_core.backends.capabilities import parse_find_printf_entries

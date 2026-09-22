@@ -33,9 +33,7 @@ class FinishGateIterationLimitTest(unittest.TestCase):
     def test_zero_config_falls_back_to_ten_not_unlimited(self) -> None:
         main_state = SimpleNamespace(parent_state_id=None)
         self.assertEqual(
-            resolve_finish_gate_max_rejections(
-                {"finish_gate_max_iterations": 0}, main_state
-            ),
+            resolve_finish_gate_max_rejections({"finish_gate_max_iterations": 0}, main_state),
             10,
         )
 

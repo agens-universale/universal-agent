@@ -5,6 +5,7 @@
 есть «есть что обновлять». Чтобы признак не врал, версия в манифесте обязана совпадать с
 pyproject.toml соответствующего проекта в external/ — это и проверяем.
 """
+
 import tomllib
 from pathlib import Path
 
@@ -29,8 +30,7 @@ def test_source_mcp_versions_match_pyproject():
         # install.source — ИМЯ каталога, а не путь (с 18.08.2026): исходники
         # ищет тот же резолвер, что и установщик.
         src_dir = next(
-            c for c in _vendor_candidates(str(entry.install.source), root)
-            if (c / "pyproject.toml").exists()
+            c for c in _vendor_candidates(str(entry.install.source), root) if (c / "pyproject.toml").exists()
         )
         assert entry.install.version, f"{entry.name}: install.version не задан в манифесте"
         assert entry.install.version == _pyproject_version(src_dir), (
@@ -42,18 +42,27 @@ def test_available_update_for_source_uses_manifest_version():
     """source-MCP: установлена 0.2.0, в манифесте (новый релиз) 0.3.0 → есть обновление."""
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime.cli import _available_update
-    entry = MCPEntry(name="office", description="", path=Path("./office"),
-                     install=InstallSpec(type="source", source=Path("../external/office-mcp"),
-                                         dist="office-mcp", version="0.3.0"))
+
+    entry = MCPEntry(
+        name="office",
+        description="",
+        path=Path("./office"),
+        install=InstallSpec(type="source", source=Path("../external/office-mcp"), dist="office-mcp", version="0.3.0"),
+    )
     assert _available_update(entry, "0.2.0") == "0.3.0"
-    assert _available_update(entry, "0.3.0") is None          # та же версия — обновлять нечего
-    assert _available_update(entry, None) is None             # версию не узнали — не врём
+    assert _available_update(entry, "0.3.0") is None  # та же версия — обновлять нечего
+    assert _available_update(entry, None) is None  # версию не узнали — не врём
 
 
 def test_available_update_none_without_manifest_version():
     """Рецепт без version (напр. npx) — признака нет, а не ложное «обновление»."""
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime.cli import _available_update
-    entry = MCPEntry(name="browser_playwright", description="", path=Path("./b"),
-                     install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
+
+    entry = MCPEntry(
+        name="browser_playwright",
+        description="",
+        path=Path("./b"),
+        install=InstallSpec(type="npx", npm_package="@playwright/mcp"),
+    )
     assert _available_update(entry, "1.0.0") is None

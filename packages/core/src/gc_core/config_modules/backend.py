@@ -86,13 +86,9 @@ class BackendConfig(BaseModel):
         try:
             n = int(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "backend.request_timeout_sec должен быть положительным целым числом"
-            ) from exc
+            raise ValueError("backend.request_timeout_sec должен быть положительным целым числом") from exc
         if n <= 0:
-            raise ValueError(
-                "backend.request_timeout_sec должен быть положительным целым числом"
-            )
+            raise ValueError("backend.request_timeout_sec должен быть положительным целым числом")
         return n
 
     @field_validator("chat_completion_kwargs", mode="before")

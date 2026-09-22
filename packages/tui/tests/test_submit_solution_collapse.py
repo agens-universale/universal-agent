@@ -4,6 +4,7 @@
 внутренняя кухня качества пользователю не показывается — никаких
 "[intent_guard] попытка N отклонена" маркеров в трейсе.
 """
+
 import json
 
 import pytest
@@ -19,42 +20,75 @@ async def test_two_submit_attempts_first_collapsed(tmp_path):
     tid = "t1"
     # Build a data file with two submit_solution events
     lines = []
-    lines.append(json.dumps({
-        "type": "message", "seq": 1, "ts_utc": "2026-05-21T12:00:00+00:00",
-        "payload": {"id": "u1", "role": "user", "content": "анализ"},
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "2026-05-21T12:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "анализ"},
+            }
+        )
+    )
     # First submit_solution
-    lines.append(json.dumps({
-        "type": "message", "seq": 2, "ts_utc": "2026-05-21T12:00:01+00:00",
-        "payload": {
-            "id": "fc1", "type": "function_call", "call_id": "c1",
-            "name": "submit_solution",
-            "arguments": json.dumps({
-                "solution_type": "answer_question",
-                "task_report": "Первая попытка результата.",
-            }),
-        },
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 2,
+                "ts_utc": "2026-05-21T12:00:01+00:00",
+                "payload": {
+                    "id": "fc1",
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "submit_solution",
+                    "arguments": json.dumps(
+                        {
+                            "solution_type": "answer_question",
+                            "task_report": "Первая попытка результата.",
+                        }
+                    ),
+                },
+            }
+        )
+    )
     # intent_guard rejection (policy message)
-    lines.append(json.dumps({
-        "type": "message", "seq": 3, "ts_utc": "2026-05-21T12:00:02+00:00",
-        "payload": {
-            "role": "user", "id": "p1",
-            "content": "<technical type=\"technical\">Finish gate: fix_report.</technical>",
-        },
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 3,
+                "ts_utc": "2026-05-21T12:00:02+00:00",
+                "payload": {
+                    "role": "user",
+                    "id": "p1",
+                    "content": '<technical type="technical">Finish gate: fix_report.</technical>',
+                },
+            }
+        )
+    )
     # Second submit_solution
-    lines.append(json.dumps({
-        "type": "message", "seq": 4, "ts_utc": "2026-05-21T12:00:03+00:00",
-        "payload": {
-            "id": "fc2", "type": "function_call", "call_id": "c2",
-            "name": "submit_solution",
-            "arguments": json.dumps({
-                "solution_type": "answer_question",
-                "task_report": "Финальная версия результата.",
-            }),
-        },
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 4,
+                "ts_utc": "2026-05-21T12:00:03+00:00",
+                "payload": {
+                    "id": "fc2",
+                    "type": "function_call",
+                    "call_id": "c2",
+                    "name": "submit_solution",
+                    "arguments": json.dumps(
+                        {
+                            "solution_type": "answer_question",
+                            "task_report": "Финальная версия результата.",
+                        }
+                    ),
+                },
+            }
+        )
+    )
 
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (tmp_path / f"meta_cli_{tid}.json").write_text(
@@ -94,37 +128,69 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
     tid = "t1"
     lines = []
     # Turn 1
-    lines.append(json.dumps({
-        "type": "message", "seq": 1, "ts_utc": "2026-05-22T12:00:00+00:00",
-        "payload": {"id": "u1", "role": "user", "content": "первый вопрос"},
-    }))
-    lines.append(json.dumps({
-        "type": "message", "seq": 2, "ts_utc": "2026-05-22T12:00:01+00:00",
-        "payload": {
-            "id": "fc1", "type": "function_call", "call_id": "c1",
-            "name": "submit_solution",
-            "arguments": json.dumps({
-                "solution_type": "answer_question",
-                "task_report": "Ответ на первый вопрос.",
-            }),
-        },
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "2026-05-22T12:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "первый вопрос"},
+            }
+        )
+    )
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 2,
+                "ts_utc": "2026-05-22T12:00:01+00:00",
+                "payload": {
+                    "id": "fc1",
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "submit_solution",
+                    "arguments": json.dumps(
+                        {
+                            "solution_type": "answer_question",
+                            "task_report": "Ответ на первый вопрос.",
+                        }
+                    ),
+                },
+            }
+        )
+    )
     # Turn 2 — real user message
-    lines.append(json.dumps({
-        "type": "message", "seq": 3, "ts_utc": "2026-05-22T12:00:02+00:00",
-        "payload": {"id": "u2", "role": "user", "content": "второй вопрос"},
-    }))
-    lines.append(json.dumps({
-        "type": "message", "seq": 4, "ts_utc": "2026-05-22T12:00:03+00:00",
-        "payload": {
-            "id": "fc2", "type": "function_call", "call_id": "c2",
-            "name": "submit_solution",
-            "arguments": json.dumps({
-                "solution_type": "answer_question",
-                "task_report": "Ответ на второй вопрос.",
-            }),
-        },
-    }))
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 3,
+                "ts_utc": "2026-05-22T12:00:02+00:00",
+                "payload": {"id": "u2", "role": "user", "content": "второй вопрос"},
+            }
+        )
+    )
+    lines.append(
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 4,
+                "ts_utc": "2026-05-22T12:00:03+00:00",
+                "payload": {
+                    "id": "fc2",
+                    "type": "function_call",
+                    "call_id": "c2",
+                    "name": "submit_solution",
+                    "arguments": json.dumps(
+                        {
+                            "solution_type": "answer_question",
+                            "task_report": "Ответ на второй вопрос.",
+                        }
+                    ),
+                },
+            }
+        )
+    )
 
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (tmp_path / f"meta_cli_{tid}.json").write_text(
@@ -164,29 +230,38 @@ async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block
         "type": "function_call",
         "name": "submit_solution",
         "call_id": "c1",
-        "arguments": json.dumps({
-            "task_report": "Готово:\n```python\nresult = 42\n```\nКонец.",
-            "comment": "первая попытка",
-        }),
+        "arguments": json.dumps(
+            {
+                "task_report": "Готово:\n```python\nresult = 42\n```\nКонец.",
+                "comment": "первая попытка",
+            }
+        ),
     }
     # Вторая submit_solution (та же call_id не используется — это retry).
     second_payload = {
         "type": "function_call",
         "name": "submit_solution",
         "call_id": "c2",
-        "arguments": json.dumps({
-            "task_report": "Финальный ответ.",
-            "comment": None,
-        }),
+        "arguments": json.dumps(
+            {
+                "task_report": "Финальный ответ.",
+                "comment": None,
+            }
+        ),
     }
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 2}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 2}
+        ),
+        encoding="utf-8",
+    )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps({"type": "message", "seq": 1, "ts_utc": "...", "payload": first_payload}) + "\n"
-        + json.dumps({"type": "message", "seq": 2, "ts_utc": "...", "payload": second_payload}) + "\n",
-        encoding="utf-8")
+        json.dumps({"type": "message", "seq": 1, "ts_utc": "...", "payload": first_payload})
+        + "\n"
+        + json.dumps({"type": "message", "seq": 2, "ts_utc": "...", "payload": second_payload})
+        + "\n",
+        encoding="utf-8",
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -202,7 +277,8 @@ async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block
         # Continuation-prose первой попытки ("Конец.") тоже удалён.
         # Должны остаться только prose-блоки второй попытки.
         from textual.widgets import Static
+
         all_text = "\n".join(str(s.render()) for s in scr.query(Static))
         assert "Конец." not in all_text
-        assert "отклонена" not in all_text        # маркер юзеру не показываем
+        assert "отклонена" not in all_text  # маркер юзеру не показываем
         assert "Финальный ответ." in all_text

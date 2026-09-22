@@ -4,6 +4,7 @@
 стоял всегда. Здесь он выпал — тул фильтровал только каталоги, и содержимое .env,
 приватных ключей и credentials*.json уходило модели.
 """
+
 import inspect
 import json
 
@@ -39,7 +40,7 @@ def _assert_no_denied_leak(raw: str, data: dict) -> None:
             assert MARKER not in (m.get(field) or "")
     for denied in denied_names:
         assert f"/{denied}" not in raw
-        assert f"/{denied}\"" not in raw
+        assert f'/{denied}"' not in raw
 
 
 @pytest.fixture
@@ -126,8 +127,9 @@ def test_native_only_denied_matches_scan_complete(tmp_path, monkeypatch):
 
 def test_allowed_file_still_found(tree):
     """Гвард не должен глушить обычный поиск."""
-    data = json.loads(with_local_ctx(FindInFiles, config_dict=_cfg(tree))(
-        path=str(tree), pattern="SECRET", query_mode="python-re"))
+    data = json.loads(
+        with_local_ctx(FindInFiles, config_dict=_cfg(tree))(path=str(tree), pattern="SECRET", query_mode="python-re")
+    )
     assert any(m.get("file", "").endswith("app.py") for m in data.get("matches", []))
 
 

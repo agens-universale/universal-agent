@@ -1,4 +1,5 @@
 """areset_stale_summarizing_flag: протухший runtime.summarizing снимается на старте run'а."""
+
 from gc_core.run_summary_coordinator import areset_stale_summarizing_flag
 from gc_core.thread_store import load_thread_meta, save_thread_meta
 

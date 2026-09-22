@@ -7,6 +7,7 @@
 оркестрация мержа и итоговая (фаза 2) ссылочная целостность — в `config.py` /
 `config_modules/model_sections_validation.py` соответственно.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -88,18 +89,14 @@ def _register_profile(result: dict, path: Path, root_kind, notices: Optional[lis
     name = path.stem
     if name in RESERVED_WORDS:
         if notices is not None:
-            notices.append(
-                f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован'
-            )
+            notices.append(f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован')
         return
     if name in result:
         return  # тёзка из менее приоритетного корня — проектный уже выиграл
     result[name] = ProfileRef(name=name, path=path, root_kind=root_kind)
 
 
-def discover_profiles(
-    roots: list[Path], *, notices: Optional[list[str]] = None
-) -> dict[str, ProfileRef]:
+def discover_profiles(roots: list[Path], *, notices: Optional[list[str]] = None) -> dict[str, ProfileRef]:
     """Дискавери профилей по корням (в порядке приоритета — первый найденный побеждает).
 
     Зарезервированные имена (`RESERVED_WORDS`) пропускаются + warning в `notices`,
@@ -127,9 +124,7 @@ def _format_available(discovered: dict[str, ProfileRef]) -> str:
     return ", ".join(segments) if segments else "нет"
 
 
-def resolve_profile(
-    name: str, roots: list[Path], *, notices: Optional[list[str]] = None
-) -> ProfileRef:
+def resolve_profile(name: str, roots: list[Path], *, notices: Optional[list[str]] = None) -> ProfileRef:
     """Найти профиль `name` в `roots`. Не найден / имя зарезервировано → `ValueError`
     (спека §3.1, §3.2) — тот же класс, каким `load_config` уже падает на невалидном
     (ссылочно) конфиге, см. `model_sections_validation.validate_model_sections`.
@@ -138,16 +133,12 @@ def resolve_profile(
     имя файла, обнаруженное дискавери попутно с резолвом указателя, не долетал бы до
     вызывающего кода (спека §3.2)."""
     if name in RESERVED_WORDS:
-        raise ValueError(
-            f'profile: имя "{name}" зарезервировано ({", ".join(RESERVED_WORDS)})'
-        )
+        raise ValueError(f'profile: имя "{name}" зарезервировано ({", ".join(RESERVED_WORDS)})')
     discovered = discover_profiles(roots, notices=notices)
     if name in discovered:
         return discovered[name]
     candidates = ", ".join(str(Path(root) / f"{name}.yml") for root in roots)
-    raise ValueError(
-        f'профиль "{name}" не найден; искал: {candidates}; есть: {_format_available(discovered)}'
-    )
+    raise ValueError(f'профиль "{name}" не найден; искал: {candidates}; есть: {_format_available(discovered)}')
 
 
 def _read_yaml_document(path: Path) -> dict:
@@ -210,13 +201,9 @@ def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> No
         # Не сырой `str(exc)`: pydantic-дамп несёт `input_value=<repr записи>` —
         # токен НЕАКТИВНОГО профиля уезжал в нотис секции «Модели» этим, вторым
         # путём (первый — `layers._app_config_from_raw`; ревью MR #80, L28).
-        raise ValueError(
-            f"{prefix}{PROFILE_SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
-        ) from exc
+        raise ValueError(f"{prefix}{PROFILE_SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
     if "profile" in raw:
-        raise ValueError(
-            f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
-        )
+        raise ValueError(f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены')
 
 
 def load_profile_document(
@@ -235,7 +222,7 @@ def load_profile_document(
     if warn_literal_tokens and notices is not None:
         for alias in find_literal_tokens(raw):
             notices.append(
-                f'{path}: models.{alias}.token — литеральный токен в проектном профиле; '
+                f"{path}: models.{alias}.token — литеральный токен в проектном профиле; "
                 f"используйте ${{ENV:VAR}} или наследование из базового конфига"
             )
     raw = resolve_env_placeholders(raw)
@@ -303,14 +290,11 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list[ProfileRef]]:
             name = path.stem
             if name in RESERVED_WORDS:
                 continue
-            result.setdefault(name, []).append(
-                ProfileRef(name=name, path=path, root_kind=root_kind))
+            result.setdefault(name, []).append(ProfileRef(name=name, path=path, root_kind=root_kind))
     return result
 
 
-def find_active_ref(
-    name: Optional[str], project_dir: Path, base_config_path: Path
-) -> Optional[ProfileRef]:
+def find_active_ref(name: Optional[str], project_dir: Path, base_config_path: Path) -> Optional[ProfileRef]:
     """`ProfileRef` действующего имени профиля или `None` (нет имени / указатель
     не резолвится — санация уже случилась выше по стеку, здесь просто нечего
     показать). Общий источник для витрин `/config`, `/status`, Settings —

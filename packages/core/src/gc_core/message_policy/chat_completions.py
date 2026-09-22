@@ -187,9 +187,7 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
     return result
 
 
-_INTERRUPTED_ASSISTANT_PLACEHOLDER = (
-    "(previous turn was interrupted — continuing from the new request)"
-)
+_INTERRUPTED_ASSISTANT_PLACEHOLDER = "(previous turn was interrupted — continuing from the new request)"
 
 
 def inject_assistant_after_orphan_tool_outputs(messages: List[Dict]) -> List[Dict]:

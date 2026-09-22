@@ -3,6 +3,7 @@
 Ядро — библиотека: у встраивающего приложения свой способ спросить
 пользователя, и stdin ему не принадлежит.
 """
+
 from types import SimpleNamespace
 
 from gc_core.tools.turn.ask_human import _aread_human_response
@@ -25,6 +26,7 @@ async def test_sync_port_is_used():
 
 async def test_async_port_is_awaited():
     """Порт асинхронного приложения принимается наравне с обычным."""
+
     async def port(question: str) -> str:
         return f"async: {question}"
 

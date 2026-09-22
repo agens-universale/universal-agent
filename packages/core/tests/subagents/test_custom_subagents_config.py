@@ -1,4 +1,5 @@
 """Конфиг-ключи agent.subagents_dir / agent.subagents_max_count."""
+
 import pytest
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig

@@ -15,6 +15,7 @@
 проверять. Здесь закреплено, что тул больше ничего не пишет на диск и прямо
 говорит модели, что вывода не будет.
 """
+
 import json
 import sys
 
@@ -75,17 +76,17 @@ def test_a_log_path_from_the_model_is_dropped_and_nothing_is_written(tmp_path):
         }
     }
 
-    raw = run_coro(aapply_tool(
-        "exec_command",
-        {"command": _CMD, "run_in_background": True, "log_path": str(wanted)},
-        tools_data_=tools,
-        ctx=local_ctx(cfg),
-    ))
+    raw = run_coro(
+        aapply_tool(
+            "exec_command",
+            {"command": _CMD, "run_in_background": True, "log_path": str(wanted)},
+            tools_data_=tools,
+            ctx=local_ctx(cfg),
+        )
+    )
 
     res = json.loads(raw)
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, "команду не запустили"
-    assert "log_path" in res.get("dropped_arguments", ""), (
-        f"модели не сказали, что поле снято: {res}"
-    )
+    assert "log_path" in res.get("dropped_arguments", ""), f"модели не сказали, что поле снято: {res}"
     assert not wanted.exists(), "тул записал вывод туда, куда указала модель"

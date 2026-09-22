@@ -12,8 +12,10 @@ def _stub_repair_load(monkeypatch, config):
     предмет этих тестов — разводка мастера, а не загрузка конфига (её ступени
     проверяет tests/test_config_repair_ladder.py на настоящих файлах)."""
     from gc_core import onboarding
+
     monkeypatch.setattr(
-        onboarding, "load_config_for_repair",
+        onboarding,
+        "load_config_for_repair",
         lambda: onboarding.RepairLoad(config, None, onboarding.REPAIR_STAGE_FULL, None),
     )
 
@@ -25,8 +27,14 @@ def test_run_init_calls_wizard_review_all_when_interactive(monkeypatch, tmp_path
     _stub_repair_load(monkeypatch, {"model": "m"})
     seen = {}
     from gc_cli import onboarding_wizard
-    monkeypatch.setattr(onboarding_wizard, "run",
-                        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: seen.update(review_all=review_all) or True)
+
+    monkeypatch.setattr(
+        onboarding_wizard,
+        "run",
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: (
+            seen.update(review_all=review_all) or True
+        ),
+    )
     assert cli._run_init() == 0
     assert seen["review_all"] is True
 
@@ -35,8 +43,7 @@ def test_run_init_passive_when_not_interactive(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli, "_interactive", lambda: False)
     monkeypatch.setattr(cli, "_bootstrap_user_config", lambda: True)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
-    _stub_repair_load(monkeypatch, {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions"})
+    _stub_repair_load(monkeypatch, {"completions_url": "http://your-backend:PORT/v1/chat/completions"})
     assert cli._run_init() == 0
     assert "config.yml" in capsys.readouterr().err
 
@@ -48,8 +55,14 @@ def test_run_init_no_mcp(monkeypatch, tmp_path):
     _stub_repair_load(monkeypatch, {"model": "m"})
     seen = {}
     from gc_cli import onboarding_wizard
-    monkeypatch.setattr(onboarding_wizard, "run",
-                        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: seen.update(mcp=mcp, review_all=review_all) or True)
+
+    monkeypatch.setattr(
+        onboarding_wizard,
+        "run",
+        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: (
+            seen.update(mcp=mcp, review_all=review_all) or True
+        ),
+    )
     assert cli._run_init() == 0
     assert seen["mcp"] is None and seen["review_all"] is True
 
@@ -63,25 +76,49 @@ def test_run_init_returns_1_when_wizard_leaves_config_unconfigured(monkeypatch, 
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
     _stub_repair_load(monkeypatch, {"model": "m"})
     from gc_cli import onboarding_wizard
-    monkeypatch.setattr(onboarding_wizard, "run",
-                        lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: False)
+
+    monkeypatch.setattr(
+        onboarding_wizard, "run", lambda cfg, path, *, review_all, io, mcp=None, deactivate_profile=False: False
+    )
     assert cli._run_init() == 1
 
 
 def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     # неполный конфиг + интерактив → визард НЕ вызывается, печатается пассивный хинт
     monkeypatch.setattr(cli, "_interactive", lambda: True)
-    monkeypatch.setattr(cli.arg_parser, "run_args", type("A", (), {"init_config": False, "init": False, "config": None,
-        "write_guard": None, "no_write_guard": False, "command_moderation": None, "read_guard": None,
-        "no_read_guard": False, "read_guard_mode": None, "agentsmd_override": False, "skill": None,
-        "profile": None})())
-    monkeypatch.setattr(cli, "load_config_ex", lambda *a, **k: (
-        {"completions_url": "http://your-backend:PORT/v1/chat/completions"}, None))
+    monkeypatch.setattr(
+        cli.arg_parser,
+        "run_args",
+        type(
+            "A",
+            (),
+            {
+                "init_config": False,
+                "init": False,
+                "config": None,
+                "write_guard": None,
+                "no_write_guard": False,
+                "command_moderation": None,
+                "read_guard": None,
+                "no_read_guard": False,
+                "read_guard_mode": None,
+                "agentsmd_override": False,
+                "skill": None,
+                "profile": None,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_config_ex",
+        lambda *a, **k: ({"completions_url": "http://your-backend:PORT/v1/chat/completions"}, None),
+    )
     monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(cli, "user_config_path", lambda: tmp_path / "config.yml")
     from gc_cli import onboarding_wizard
+
     monkeypatch.setattr(onboarding_wizard, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("run вызван")))
     assert cli.main() == 0
     assert "config.yml" in capsys.readouterr().err

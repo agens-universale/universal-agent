@@ -15,14 +15,13 @@ def test_sink_begin_update_snapshot():
 
 
 def test_format_progress_multiline_block():
-    text = format_mcp_progress({"a": {"status": "connected"}, "b": None,
-                                "c": {"status": "failed"}})
+    text = format_mcp_progress({"a": {"status": "connected"}, "b": None, "c": {"status": "failed"}})
     lines = text.splitlines()
-    assert lines[0].startswith("подключаю MCP")          # заголовок
-    assert lines[1] == ""                                 # отступ-строка после заголовка
-    assert len(lines) == 5                                # заголовок + отступ + 3 сервера
+    assert lines[0].startswith("подключаю MCP")  # заголовок
+    assert lines[1] == ""  # отступ-строка после заголовка
+    assert len(lines) == 5  # заголовок + отступ + 3 сервера
     body = lines[2:]
-    assert any("a" in ln and "✓" in ln for ln in body)   # каждый сервер на своей строке
+    assert any("a" in ln and "✓" in ln for ln in body)  # каждый сервер на своей строке
     assert any("b" in ln and "⏳" in ln for ln in body)
     assert any("c" in ln and "✗" in ln for ln in body)
 
@@ -33,9 +32,9 @@ def test_format_progress_caps_long_list():
     servers = {f"s{i}": {"status": "connected"} for i in range(8)}
     lines = format_mcp_progress(servers).splitlines()
     assert lines[0].startswith("подключаю MCP")
-    assert lines[1] == ""                    # отступ после заголовка
-    assert len(lines) == 7                    # заголовок + отступ + 4 + счётчик
-    assert lines[-1] == "… ещё +4"          # 8 всего − 4 показанных = 4 скрытых
+    assert lines[1] == ""  # отступ после заголовка
+    assert len(lines) == 7  # заголовок + отступ + 4 + счётчик
+    assert lines[-1] == "… ещё +4"  # 8 всего − 4 показанных = 4 скрытых
     assert sum(1 for ln in lines if "✓" in ln) == 4
 
 
@@ -43,7 +42,7 @@ def test_format_progress_no_cap_at_threshold():
     # ровно 5 серверов — показываем все, без счётчика.
     servers = {f"s{i}": {"status": "connected"} for i in range(5)}
     lines = format_mcp_progress(servers).splitlines()
-    assert len(lines) == 7                   # заголовок + отступ + 5 серверов
+    assert len(lines) == 7  # заголовок + отступ + 5 серверов
     assert not any("ещё" in ln for ln in lines)
 
 

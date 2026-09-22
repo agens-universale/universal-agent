@@ -3,6 +3,7 @@
 Документация к SDK — тоже интерфейс: пример, который не компилируется,
 обнаруживается пользователем, а не нами.
 """
+
 import ast
 import re
 
@@ -59,9 +60,7 @@ def test_entry_table_matches_reality():
     for module_name, async_name in entries:
         module = importlib.import_module(module_name)
         assert hasattr(module, async_name), f"{module_name}.{async_name} исчез"
-        assert not hasattr(module, async_name[1:]), (
-            f"вернулся синхронный {module_name}.{async_name[1:]}"
-        )
+        assert not hasattr(module, async_name[1:]), f"вернулся синхронный {module_name}.{async_name[1:]}"
         assert async_name in text, f"{async_name} не назван в таблице"
 
     from gc_core.agent_executor import AgentExecutor

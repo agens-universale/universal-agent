@@ -45,9 +45,7 @@ def truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + " ... [TEXT CUTTED]"
 
 
-_TOOL_BLOB_TYPES = frozenset(
-    {"function_call", "tool_call", "function_call_output", "tool_call_output"}
-)
+_TOOL_BLOB_TYPES = frozenset({"function_call", "tool_call", "function_call_output", "tool_call_output"})
 
 
 def _xml_escape_body(text: str) -> str:
@@ -83,9 +81,7 @@ def message_text_limited(
     tags: Sequence[str] = (),
     strip_think: bool = True,
 ) -> str:
-    text = strip_original_user_messages_block(
-        message_text_for_summary(message, tags=tags, strip_think=strip_think)
-    )
+    text = strip_original_user_messages_block(message_text_for_summary(message, tags=tags, strip_think=strip_think))
     if max_message_chars <= 0:
         return text
     msg_type = str(message.get("type") or "message") if isinstance(message, dict) else "message"
@@ -111,12 +107,8 @@ def build_history_text(
     rows: List[str] = []
     for idx, msg in enumerate(messages, start=1):
         content_text = user_content_to_text(msg.get("content")).strip()
-        per_limit = (
-            0 if is_dialog_summary_user_message_text(content_text) else max_message_chars
-        )
-        text = message_text_limited(
-            msg, per_limit, tags=tags, strip_think=strip_think
-        ).strip()
+        per_limit = 0 if is_dialog_summary_user_message_text(content_text) else max_message_chars
+        text = message_text_limited(msg, per_limit, tags=tags, strip_think=strip_think).strip()
         if not text:
             continue
         rows.append(f'<message n="{idx}">\n{text}\n</message>')
@@ -140,11 +132,7 @@ def trim_history_to_max_dialogue_chars(
     return _tail_by_limit(
         messages,
         max_dialogue_chars,
-        lambda msg: len(
-            message_text_limited(
-                msg, max_message_chars, tags=tags, strip_think=strip_think
-            )
-        ),
+        lambda msg: len(message_text_limited(msg, max_message_chars, tags=tags, strip_think=strip_think)),
     )
 
 
@@ -271,12 +259,7 @@ def split_turns_into_char_batches(
     current_chars = 0
     for turn in turns:
         turn_chars = sum(
-            len(
-                message_text_limited(
-                    msg, max_message_chars, tags=tags, strip_think=strip_think
-                )
-            )
-            for msg in turn
+            len(message_text_limited(msg, max_message_chars, tags=tags, strip_think=strip_think)) for msg in turn
         )
         if current and current_chars + turn_chars > batch_chars_limit:
             batches.append(current)
@@ -309,9 +292,7 @@ def format_last_dialog_steps(
     for idx, turn in enumerate(tail, start=start_idx):
         rendered: List[str] = []
         for msg in turn:
-            text = message_text_limited(
-                msg, message_max_chars, tags=tags, strip_think=strip_think
-            ).strip()
+            text = message_text_limited(msg, message_max_chars, tags=tags, strip_think=strip_think).strip()
             if text:
                 rendered.append(text)
         text = "\n".join(rendered).strip()

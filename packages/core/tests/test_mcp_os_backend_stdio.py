@@ -8,8 +8,7 @@ from gc_core.tools.connect_mcp.os_backend_client import (
 
 
 class _ExecResult:
-    def __init__(self, stdout="", stderr="", return_code=0,
-                 stdout_hit_capture_cap=False):
+    def __init__(self, stdout="", stderr="", return_code=0, stdout_hit_capture_cap=False):
         self.stdout = stdout
         self.stderr = stderr
         self.return_code = return_code
@@ -25,10 +24,10 @@ class _StdioSandbox:
         self.lines = lines
         self.calls = []
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
-                  capture_max_chars=None):
-        self.calls.append({"argv": list(argv), "stdin": stdin, "env": env,
-                           "timeout": timeout, "capture_max_chars": capture_max_chars})
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        self.calls.append(
+            {"argv": list(argv), "stdin": stdin, "env": env, "timeout": timeout, "capture_max_chars": capture_max_chars}
+        )
         return _ExecResult(stdout="\n".join(self.lines))
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
@@ -40,14 +39,15 @@ def _frame(rpc_id, result):
 
 
 async def test_stdio_list_tools_runs_the_command_in_the_backend():
-    backend = _StdioSandbox([
-        _frame(1, {"protocolVersion": "2024-11-05"}),
-        _frame("gc-tools/list", {"tools": [{"name": "echo"}]}),
-    ])
+    backend = _StdioSandbox(
+        [
+            _frame(1, {"protocolVersion": "2024-11-05"}),
+            _frame("gc-tools/list", {"tools": [{"name": "echo"}]}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "srv",
-        {"transport": "stdio", "command": "python3",
-         "args": ["/srv/mcp_server.py"], "execute_on": "os_backend"},
+        {"transport": "stdio", "command": "python3", "args": ["/srv/mcp_server.py"], "execute_on": "os_backend"},
         os_backend=backend,
     )
     assert await client.alist_tools(timeout=20.0) == [{"name": "echo"}]
@@ -55,19 +55,16 @@ async def test_stdio_list_tools_runs_the_command_in_the_backend():
 
 
 async def test_stdio_sends_the_full_handshake_on_stdin():
-    backend = _StdioSandbox([
-        _frame(1, {}),
-        _frame("gc-tools/list", {"tools": []}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
+    backend = _StdioSandbox(
+        [
+            _frame(1, {}),
+            _frame("gc-tools/list", {"tools": []}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     await client.alist_tools(timeout=20.0)
-    sent = [json.loads(line) for line in backend.calls[0]["stdin"].splitlines()
-            if line.strip()]
-    assert [m.get("method") for m in sent] == [
-        "initialize", "notifications/initialized", "tools/list"
-    ]
+    sent = [json.loads(line) for line in backend.calls[0]["stdin"].splitlines() if line.strip()]
+    assert [m.get("method") for m in sent] == ["initialize", "notifications/initialized", "tools/list"]
 
 
 async def test_stdio_env_binds_to_the_server_not_to_printf():
@@ -89,40 +86,34 @@ async def test_stdio_env_binds_to_the_server_not_to_printf():
 
 async def test_stdio_exchange_gets_the_whole_budget_and_no_more():
     backend = _StdioSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     await client.alist_tools(timeout=20.0)
     assert backend.calls[0]["timeout"] == 20
 
 
 async def test_stdio_without_env_runs_the_command_bare():
     backend = _StdioSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     await client.alist_tools(timeout=20.0)
     assert backend.calls[0]["argv"] == ["srv-bin"]
 
 
 async def test_stdio_call_tool_matches_the_reply_by_id():
-    backend = _StdioSandbox([
-        _frame(1, {}),
-        '{"jsonrpc": "2.0", "method": "notifications/message"}',
-        _frame("gc-tools/call", {"content": [{"type": "text", "text": "ok"}]}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
+    backend = _StdioSandbox(
+        [
+            _frame(1, {}),
+            '{"jsonrpc": "2.0", "method": "notifications/message"}',
+            _frame("gc-tools/call", {"content": [{"type": "text", "text": "ok"}]}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     out = await client.acall_tool("echo", {"text": "hi"}, timeout=20.0)
     assert out["result"]["content"][0]["text"] == "ok"
 
 
 async def test_stdio_missing_command_is_an_error():
     backend = _StdioSandbox([])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio"}, os_backend=backend)
     with pytest.raises(McpExecCarrierError) as excinfo:
         await client.alist_tools(timeout=20.0)
     assert "command" in str(excinfo.value)
@@ -130,21 +121,19 @@ async def test_stdio_missing_command_is_an_error():
 
 async def test_stdio_no_matching_reply_is_an_error():
     backend = _StdioSandbox([_frame(1, {}), "not json at all"])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     with pytest.raises(McpExecCarrierError):
         await client.alist_tools(timeout=20.0)
 
 
 async def test_stdio_truncated_output_is_an_error():
     class _TruncatingSandbox(_StdioSandbox):
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
-                      capture_max_chars=None):
+        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
             return _ExecResult(stdout=_frame(1, {}), stdout_hit_capture_cap=True)
 
     client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"},
+        "srv",
+        {"transport": "stdio", "command": "srv-bin"},
         os_backend=_TruncatingSandbox([]),
     )
     with pytest.raises(McpExecCarrierError) as excinfo:
@@ -162,21 +151,19 @@ async def test_stdio_never_probes_the_http_carrier():
             return _ExecResult(stdout="")
 
     backend = _NoHttpSandbox([_frame(1, {}), _frame("gc-tools/list", {"tools": []})])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     await client.alist_tools(timeout=20.0)
     assert probes == []
 
 
 async def test_stdio_carrier_uses_internal_channel_ceiling():
-    backend = _StdioSandbox([
-        _frame(1, {"protocolVersion": "2024-11-05"}),
-        _frame("gc-tools/list", {"tools": []}),
-    ])
-    backend.walk_output_max_chars = 12_345_678
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend
+    backend = _StdioSandbox(
+        [
+            _frame(1, {"protocolVersion": "2024-11-05"}),
+            _frame("gc-tools/list", {"tools": []}),
+        ]
     )
+    backend.walk_output_max_chars = 12_345_678
+    client = OsBackendStatelessClient("srv", {"transport": "stdio", "command": "srv-bin"}, os_backend=backend)
     await client.alist_tools(timeout=20.0)
     assert backend.calls[-1]["capture_max_chars"] == 12_345_678

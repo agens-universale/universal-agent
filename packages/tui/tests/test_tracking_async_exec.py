@@ -10,6 +10,7 @@
 подпроцесса не доходил, а `asyncio.run` хода на выходе ждёт
 `shutdown_default_executor`. После Esc поток жил до таймаута команды.
 """
+
 import asyncio
 
 import pytest

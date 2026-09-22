@@ -5,6 +5,7 @@
 - тариф выключен → только токены, без цены;
 - итога запроса ещё нет → только сегмент сессии.
 """
+
 from gc_core.usage.account import CATEGORY_FINISH_GATE, CATEGORY_MAIN, UsageAccount
 from gc_core.usage.cost import compute_cost
 from gc_core.usage.report import render_cost_report
@@ -45,8 +46,8 @@ def test_hidden_when_session_meta_none():
 
 def test_tokens_and_cost_when_pricing_on():
     # Чисто тарифный отчёт (нет факта провайдера) — тильды нет нигде.
-    session = _meta(2_000_000, 0)      # total 2.0M, cost 2.0 ₽
-    last_run = _meta(1_000_000, 0)     # total 1.0M, cost 1.0 ₽
+    session = _meta(2_000_000, 0)  # total 2.0M, cost 2.0 ₽
+    last_run = _meta(1_000_000, 0)  # total 1.0M, cost 1.0 ₽
     m = render_usage_meter(session, last_run, _PRICING_ON, _MODEL)
     assert m is not None
     assert m.plain == "запрос 1.0M/1.00₽ · сессия 2.0M/2.00₽"
@@ -101,7 +102,7 @@ def test_footer_shows_every_currency_never_hides_money():
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m").plain
     assert "10.5$" in text and "60.0₽" in text
-    assert "?" not in text          # неполноты нет: у каждой траты есть цена
+    assert "?" not in text  # неполноты нет: у каждой траты есть цена
 
 
 def test_footer_plain_when_all_billed():
@@ -129,7 +130,7 @@ def test_footer_marks_two_currencies_and_unpriced_together():
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=2.0, billed=True, currency="$")
     acc.add(CATEGORY_MAIN, 500_000, 50_000, 0, cost=200.0, billed=True, currency="₽")
-    acc.add(CATEGORY_MAIN, 1000, 100)                                # цены нет вовсе
+    acc.add(CATEGORY_MAIN, 1000, 100)  # цены нет вовсе
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_NO_RATES, "m").plain
     assert "2.00$+200.0₽?" in text
     assert "~" not in text
@@ -177,7 +178,7 @@ def test_footer_currency_order_follows_token_share():
     # Порядок валют детерминирован: первой идёт валюта категории с наибольшими
     # токенами. Иначе футер прыгал бы между перерисовками.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 5_000_000, 200_000)                                 # тариф ₽
+    acc.add(CATEGORY_MAIN, 5_000_000, 200_000)  # тариф ₽
     acc.add(CATEGORY_FINISH_GATE, 3_000, 100, 0, cost=0.004, billed=True, currency="$")
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, "m").plain
     assert "540.0₽+<0.01$~" in text
@@ -229,7 +230,7 @@ def test_legacy_meta_currency_resolved_by_endpoint():
     # Суммы старых сессий валюты не несут — она берётся из текущего конфига,
     # ровно как вела себя предыдущая версия.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)   # без валюты
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)  # без валюты
     ru = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
     assert "1.00₽" in ru and "$" not in ru
     usd = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL).plain
@@ -239,7 +240,7 @@ def test_legacy_meta_currency_resolved_by_endpoint():
 def test_legacy_and_fresh_sums_merge_into_one_part():
     # Старая сумма (без валюты) и новая в той же валюте — одно слагаемое, не два.
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)               # legacy
+    acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=1.0, billed=True)  # legacy
     acc.add(CATEGORY_MAIN, 1_000_000, 0, 0, cost=2.0, billed=True, currency="₽")
     text = render_usage_meter(acc.to_meta(), acc.to_meta(), _PRICING_RUB, _MODEL, _RU_URL).plain
     assert "3.00₽" in text

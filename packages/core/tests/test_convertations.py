@@ -97,6 +97,7 @@ def test_get_output_list_accepts_unknown_finish_with_content():
     out = get_output_list(_dct("eos", content="текст"))
     assert any(o["type"] == "message" for o in out)
 
+
 def test_get_output_list_empty_unknown_finish_is_empty_batch():
     # Случай C: пустой choice — не ValueError транспорта, цикл bounce сам.
     assert get_output_list(_dct(None, content="")) == []
@@ -262,9 +263,7 @@ def test_get_output_list_salvages_reasoning_only_into_think_tags():
 
 def test_get_output_list_salvage_neutralizes_literal_think_close():
     payload = _dct("stop", content=None)
-    payload["choices"][0]["message"]["reasoning_content"] = (
-        "про </think> теги и ещё </THINK> хвост"
-    )
+    payload["choices"][0]["message"]["reasoning_content"] = "про </think> теги и ещё </THINK> хвост"
     out = get_output_list(payload)
     msg, text = _message_text(out)
     assert text == "<think>про  теги и ещё  хвост</think>"

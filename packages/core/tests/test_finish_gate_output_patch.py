@@ -25,11 +25,13 @@ def _make_state() -> State:
 
 
 def test_apply_finish_gate_decision_reject_marks_output_not_ok():
-    base = run_coro(SubmitSolution().acall(
-        solution_type="full_solution",
-        task_report="done",
-        handoff="{}",
-    ))
+    base = run_coro(
+        SubmitSolution().acall(
+            solution_type="full_solution",
+            task_report="done",
+            handoff="{}",
+        )
+    )
     validation = ValidationResult(
         ok=False,
         action="fix_report",
@@ -106,8 +108,6 @@ def test_patch_function_call_output_returns_updated_message():
             "output": '{"tool":"turn_finish","ok":true}',
         }
     ]
-    updated = patch_function_call_output(
-        messages, call_id="c1", new_output='{"tool":"turn_finish","ok":false}'
-    )
+    updated = patch_function_call_output(messages, call_id="c1", new_output='{"tool":"turn_finish","ok":false}')
     assert updated is not None
     assert json.loads(messages[0]["output"])["ok"] is False

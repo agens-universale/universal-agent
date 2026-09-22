@@ -1,4 +1,5 @@
 """run_agent: сообщение, пришедшее во время turn-end компакции, подхватывается новым ходом."""
+
 from __future__ import annotations
 
 import json
@@ -55,9 +56,7 @@ def _submit_solution_call():
         "type": "function_call",
         "name": "turn_finish",
         "arguments": json.dumps(
-            {"solution_type": "full_solution",
-             "task_report": "Сделано по запросу пользователя",
-             "handoff": "{}"},
+            {"solution_type": "full_solution", "task_report": "Сделано по запросу пользователя", "handoff": "{}"},
             ensure_ascii=False,
         ),
         "call_id": "call_finish",
@@ -71,27 +70,34 @@ def _expected_finish_return() -> str:
 
 async def _accept_validation(**_kwargs):
     return ValidationResult(
-        ok=True, action="accept", trace_ok=True, report_ok=True,
-        trace_gaps=[], report_mismatches=[], missing_requirements=[],
-        conflicts=[], coverage_score=1.0, feedback_for_agent="",
+        ok=True,
+        action="accept",
+        trace_ok=True,
+        report_ok=True,
+        trace_gaps=[],
+        report_mismatches=[],
+        missing_requirements=[],
+        conflicts=[],
+        coverage_score=1.0,
+        feedback_for_agent="",
     )
 
 
 def _pending_once(compacted):
     """get_pending: возвращает новое сообщение ровно один раз — после компакции."""
+
     def _get_pending():
         if compacted["done"] and not compacted["consumed"]:
             compacted["consumed"] = True
             return [{"role": "user", "content": "новое во время сжатия", "id": "m_new"}]
         return []
+
     return _get_pending
 
 
 def test_pending_after_compaction_is_picked_up(monkeypatch):
     """Сообщение, пришедшее во время компакции, подхватывается → backend вызван для нового хода."""
-    monkeypatch.setattr(
-        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation
-    )
+    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation)
     compacted = {"done": False, "consumed": False}
 
     def _hook():
@@ -105,13 +111,15 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=_pending_once(compacted),
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=_pending_once(compacted),
+        )
+    )
 
     assert result == _expected_finish_return()
     assert compacted["done"] is True
@@ -121,9 +129,7 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 
 def test_no_pending_finishes_normally(monkeypatch):
     """Нет pending → финиш как раньше: компакция один раз, backend не зовётся (регресс инварианта)."""
-    monkeypatch.setattr(
-        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation
-    )
+    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation)
     hook_calls: list = []
 
     def _hook():
@@ -137,13 +143,15 @@ def test_no_pending_finishes_normally(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=list,
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=list,
+        )
+    )
 
     assert result == _expected_finish_return()
     assert hook_calls == [1]
@@ -152,9 +160,7 @@ def test_no_pending_finishes_normally(monkeypatch):
 
 def test_stop_after_compaction_does_not_continue(monkeypatch):
     """stop_requested во время компакции → после continue верх цикла возвращает None, нового хода нет."""
-    monkeypatch.setattr(
-        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation
-    )
+    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation)
     compacted = {"done": False, "consumed": False}
     stopped = {"flag": False}
 
@@ -170,14 +176,16 @@ def test_stop_after_compaction_does_not_continue(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=_pending_once(compacted),
-        check_stop=lambda: stopped["flag"],
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=_pending_once(compacted),
+            check_stop=lambda: stopped["flag"],
+        )
+    )
 
     assert result is None
     assert ua_calls == []
@@ -202,17 +210,17 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
         gate_calls.append(kwargs)
         return await _accept_validation()
 
-    monkeypatch.setattr(
-        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
-    )
+    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        _make_state(),
-        _make_ctx(strict_turn_finish_validation=True),
-        turn_end_compaction_hook=_hook,
-        get_pending_messages=_pending_once(compacted),
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            _make_state(),
+            _make_ctx(strict_turn_finish_validation=True),
+            turn_end_compaction_hook=_hook,
+            get_pending_messages=_pending_once(compacted),
+        )
+    )
 
     assert result == _expected_finish_return()
     # finish-gate отработал дважды: первый ход + продолженный (после компакции)
@@ -225,6 +233,7 @@ def test_pending_survives_failed_turn_begin(monkeypatch, caplog):
     ошибка класса 2). Уронив ход здесь, мы потеряли бы набранное пользователем
     сообщение бесследно — вернуть его в очередь некуда. Поэтому ход продолжается
     на модели прошлого хода, а отказ приходит из транспорта единым текстом."""
+
     def _boom(_state, _ctx):
         raise RuntimeError("Модель 'flash' (алиас 'flash') недоступна")
 

@@ -117,9 +117,7 @@ class ParseValidatorResponseTest(unittest.TestCase):
 
     def test_action_mismatch_normalized_with_warning(self) -> None:
         with self.assertLogs("gc_core.intent_guard.validation_result", level="WARNING") as logs:
-            result = parse_validator_response(
-                _raw(action="continue_work", report_ok=False)
-            )
+            result = parse_validator_response(_raw(action="continue_work", report_ok=False))
         assert result is not None
         self.assertEqual(result.action, "fix_report")
         self.assertTrue(any("normalized" in m for m in logs.output))
@@ -136,7 +134,7 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertEqual(result.action, "accept")
 
     def test_think_wrapper_is_stripped_before_json(self) -> None:
-        raw = "<think>ignore {\"action\":\"continue_work\"}</think>" + _raw()
+        raw = '<think>ignore {"action":"continue_work"}</think>' + _raw()
         result = parse_validator_response(raw)
         assert result is not None
         self.assertTrue(result.ok)

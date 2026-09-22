@@ -4,6 +4,7 @@ Unit-тесты для path-policy слоя read_guard (Контур 1).
 Структура аналогична существующим test_root_box_*: проверяем
 `check_read_path_allowed` напрямую с разными конфигами.
 """
+
 from __future__ import annotations
 
 import os
@@ -114,7 +115,8 @@ def test_home_ssh_blocked(lab, cfg_default):
 
 def test_wildcard_root_allow_by_default(lab):
     cfg = ReadGuardConfig(
-        enabled=True, mode="deny",
+        enabled=True,
+        mode="deny",
         allowed_read_roots=["*"],
         denied_read_paths=["/etc/ssl/private"],
     )
@@ -125,13 +127,13 @@ def test_wildcard_root_allow_by_default(lab):
 
 def test_wildcard_root_denied_still_blocks(lab):
     cfg = ReadGuardConfig(
-        enabled=True, mode="deny",
+        enabled=True,
+        mode="deny",
         allowed_read_roots=["*"],
         denied_read_paths=["/etc/ssl/private"],
     )
     with pytest.raises(ReadGuardViolation):
-        check_read_path_allowed("/etc/ssl/private/foo.key",
-                                launch_root=lab, cfg=cfg)
+        check_read_path_allowed("/etc/ssl/private/foo.key", launch_root=lab, cfg=cfg)
 
 
 def test_extra_allowed_read_root(lab, tmp_path):
@@ -139,11 +141,14 @@ def test_extra_allowed_read_root(lab, tmp_path):
     sibling = tmp_path.parent / "other_proj"
     sibling.mkdir(exist_ok=True)
     cfg = ReadGuardConfig(
-        enabled=True, mode="deny",
+        enabled=True,
+        mode="deny",
         allowed_read_roots=[str(sibling)],
     )
     result = check_read_path_allowed(
-        str(sibling / "file.txt"), launch_root=lab, cfg=cfg,
+        str(sibling / "file.txt"),
+        launch_root=lab,
+        cfg=cfg,
     )
     assert "other_proj" in result
 
@@ -188,13 +193,15 @@ def test_parse_default_disabled_when_read_guard_block_absent():
 
 
 def test_parse_respects_explicit_config():
-    parsed = parse_read_guard_config({
-        "read_guard": {
-            "enabled": False,
-            "mode": "ask",
-            "denied_read_paths": ["/secret"],
-        },
-    })
+    parsed = parse_read_guard_config(
+        {
+            "read_guard": {
+                "enabled": False,
+                "mode": "ask",
+                "denied_read_paths": ["/secret"],
+            },
+        }
+    )
     assert parsed.enabled is False
     assert parsed.mode == "ask"
     assert parsed.denied_read_paths == ["/secret"]
@@ -225,7 +232,9 @@ def test_extra_allowed_paths_bypasses_denied_and_roots(tmp_path):
     # Без extra_allowed — блокируется.
     with pytest.raises(ReadGuardViolation):
         check_read_path_allowed(
-            str(skill_file), launch_root=str(lab), cfg=cfg,
+            str(skill_file),
+            launch_root=str(lab),
+            cfg=cfg,
         )
 
     # С extra_allowed — пропускается насквозь.
@@ -240,6 +249,7 @@ def test_extra_allowed_paths_bypasses_denied_and_roots(tmp_path):
 
 def test_resolve_skills_root_default_and_custom(tmp_path):
     from gc_core.security.read_guard import _resolve_skills_root
+
     # Без skills_data_path → берёт <project_root>/skills.
     default = _resolve_skills_root({})
     assert default is not None

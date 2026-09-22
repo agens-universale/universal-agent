@@ -1,4 +1,5 @@
 """AskHumanBanner — вопрос агента, sticky-блок над полем ввода (canon §3.4)."""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -36,5 +37,6 @@ class AskHumanBanner(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         from gc_tui.services.trace_render import build_block_widgets
+
         yield Static(format_ask_label(self._via), classes="ah-label", markup=False)
         yield from build_block_widgets(self._question, prose_bullet=False, event_no=0)

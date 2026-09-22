@@ -87,9 +87,7 @@ class TestActiveScopeRegistry:
         with activate_child_input(ctx, parent_call_id="call_sub_1") as scope:
             assert is_child_input_active(ctx) is True
             assert active_parent_call_id(ctx) == "call_sub_1"
-            assert try_enqueue_user_message(
-                ctx, {"role": "user", "content": "steer"}
-            ) is True
+            assert try_enqueue_user_message(ctx, {"role": "user", "content": "steer"}) is True
             assert scope.drain() == [{"role": "user", "content": "steer"}]
             assert scope.drain() == []
         assert is_child_input_active(ctx) is False
@@ -170,21 +168,25 @@ class TestRunnerWiresPending:
 
         def _run():
             with patch.object(
-                runner, "_build_child_ctx", return_value=SimpleNamespace(
+                runner,
+                "_build_child_ctx",
+                return_value=SimpleNamespace(
                     run_id="run_c1",
                     parent_call_id="call_parent_9",
                     subagent_progress_sink=None,
                     logger=None,
-                )
+                ),
             ):
                 # Цель потока: loop'а здесь нет, поэтому свой — как у точки
                 # входа `main`. Синхронной формы у прогона субагента больше нет.
-                asyncio.run(runner.arun(
-                    "subagent_worker",
-                    {"task": "test"},
-                    fake_run_agent,
-                    parent_call_id="call_parent_9",
-                ))
+                asyncio.run(
+                    runner.arun(
+                        "subagent_worker",
+                        {"task": "test"},
+                        fake_run_agent,
+                        parent_call_id="call_parent_9",
+                    )
+                )
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -192,10 +194,7 @@ class TestRunnerWiresPending:
         assert captured["active_during"] is True
         assert captured["parent_call_id"] == "call_parent_9"
         assert callable(captured["get_pending"])
-        try_enqueue_user_message(
-            ctx,
-            {"role": "user", "content": "look at auth", "id": "m_steer"}
-        )
+        try_enqueue_user_message(ctx, {"role": "user", "content": "look at auth", "id": "m_steer"})
         release.set()
         t.join(timeout=2)
         assert captured["drained"][0]["content"] == "look at auth"
@@ -227,27 +226,26 @@ class TestRunnerWiresPending:
 
         def _run():
             with patch.object(runner, "_build_child_ctx", return_value=child_ctx):
-                asyncio.run(runner.arun(
-                    "subagent_worker",
-                    {"task": "test"},
-                    fake_run_agent,
-                    parent_call_id="call_sub_steer",
-                ))
+                asyncio.run(
+                    runner.arun(
+                        "subagent_worker",
+                        {"task": "test"},
+                        fake_run_agent,
+                        parent_call_id="call_sub_steer",
+                    )
+                )
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
         assert barrier.wait(timeout=5)
-        try_enqueue_user_message(
-            ctx,
-            {"role": "user", "content": "check auth next", "id": "m_u1"}
-        )
+        try_enqueue_user_message(ctx, {"role": "user", "content": "check auth next", "id": "m_u1"})
         # technical must enqueue but not emit nested user row
         try_enqueue_user_message(
             ctx,
             {
                 "role": "user",
                 "content": wrap_technical_user_content("attachment meta"),
-            }
+            },
         )
         events = sink.drain()
         user_evs = [e for e in events if e.kind == "user_message"]

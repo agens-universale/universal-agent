@@ -10,6 +10,7 @@
 Вызовы тулов при этом уходят правильно; расходится именно дискавери, и
 сказано об этом только в debug-лог.
 """
+
 import sys
 
 from gc_core.backends.protocol import ExecResult

@@ -38,9 +38,7 @@ def test_tool_description_has_three_actions_only():
 def test_tool_description_requires_action_and_content():
     required = ProjectMemory.tool_description()["parameters"]["required"]
     assert required == ["action", "content"]
-    content_desc = ProjectMemory.tool_description()["parameters"]["properties"]["content"][
-        "description"
-    ].lower()
+    content_desc = ProjectMemory.tool_description()["parameters"]["properties"]["content"]["description"].lower()
     assert "required for every action" in content_desc
     assert "ignored for read" in content_desc
 
@@ -185,9 +183,7 @@ def test_tool_append_overflow_compaction_failed(tmp_path):
     _seed_memory(tmp_path, "x" * 9_900)
     tool = _make_tool(tmp_path)
 
-    failed = CompactionResult(
-        ok=False, text="", error_type="backend_error", error_message="boom"
-    )
+    failed = CompactionResult(ok=False, text="", error_type="backend_error", error_message="boom")
     with patch("gc_core.project_memory.compaction.acompact_text", return_value=failed):
         res = json.loads(tool(action="append", content="y" * 200))
 
@@ -202,9 +198,7 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
     _seed_memory(tmp_path, "x" * 9_900)
     tool = _make_tool(tmp_path)
 
-    over = CompactionResult(
-        ok=True, text="z" * 10_001, error_type=None, error_message=None
-    )
+    over = CompactionResult(ok=True, text="z" * 10_001, error_type=None, error_message=None)
     with patch("gc_core.project_memory.compaction.acompact_text", return_value=over):
         res = json.loads(tool(action="append", content="y" * 200))
 

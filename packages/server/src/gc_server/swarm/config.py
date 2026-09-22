@@ -82,9 +82,11 @@ def _resolve_wrapper_path(maybe_path: Any, config_dir: str) -> str:
         return packaged
 
     logger.warning(
-        "swarm.wrapper_path=%r не найден (искал %s и %s) — беру обёртку из "
-        "пакета: %s",
-        maybe_path, local, packaged, default,
+        "swarm.wrapper_path=%r не найден (искал %s и %s) — беру обёртку из пакета: %s",
+        maybe_path,
+        local,
+        packaged,
+        default,
     )
     return default
 
@@ -132,9 +134,7 @@ def _user_config_dir(server_cfg: Dict[str, Any], explicit: str | None) -> str:
     return os.getcwd()
 
 
-def build_swarm_config(
-    server_cfg: Dict[str, Any], *, config_dir: str | None = None
-) -> Dict[str, Any]:
+def build_swarm_config(server_cfg: Dict[str, Any], *, config_dir: str | None = None) -> Dict[str, Any]:
     """
     Построить нормализованный конфиг для swarm-режима.
 
@@ -182,9 +182,7 @@ def build_swarm_config(
     # Куда на хосте lifecycle сохраняет агентские .gc/logs из песочницы при
     # финализации. Абсолютный путь — как есть; относительный — от каталога
     # config_server.yml; пусто → дефолт `threads_dir/<swarm_id>/agent_logs/`.
-    swarm_logs_dir = _resolve_user_path(
-        raw_swarm.get("swarm_logs_dir"), "", config_dir=base_dir
-    )
+    swarm_logs_dir = _resolve_user_path(raw_swarm.get("swarm_logs_dir"), "", config_dir=base_dir)
 
     max_concurrent = int(raw_swarm.get("max_concurrent", 10))
     ttl_seconds = int(raw_swarm.get("ttl_seconds", 86400))
@@ -204,9 +202,7 @@ def build_swarm_config(
     # пути там быть не могло в принципе.
     wrapper_path = _resolve_wrapper_path(raw_swarm.get("wrapper_path"), base_dir)
     sandbox_tool = str(raw_swarm.get("sandbox_tool", "bubblewrap"))
-    agentmd_path = _resolve_asset_path(
-        raw_swarm.get("agentmd_path"), "prompts/server_agent.md"
-    )
+    agentmd_path = _resolve_asset_path(raw_swarm.get("agentmd_path"), "prompts/server_agent.md")
     # Скиллы для песочницы — пользовательский контент, а не ассет дистрибутива:
     # дефолт кладём рядом с обычным пользовательским слоем скиллов ядра
     # (`gc_paths()["data"]/skills`, см. tools/skills/registry.get_skills_registry),
@@ -264,27 +260,21 @@ def build_swarm_config(
     ):
         cli_venv_root = sys.prefix
         logger.info(
-            "swarm: cli_venv_root не задан — беру venv сервера %s "
-            "(он же уйдёт --ro-bind внутрь песочницы)",
+            "swarm: cli_venv_root не задан — беру venv сервера %s (он же уйдёт --ro-bind внутрь песочницы)",
             cli_venv_root,
         )
     agent_dep_dir = _abs_or_empty(raw_swarm.get("agent_dep_dir"))
     extra_mounts_raw = raw_swarm.get("extra_mounts") or []
     if not isinstance(extra_mounts_raw, list):
         extra_mounts_raw = []
-    extra_mounts = [
-        str(p).strip() for p in extra_mounts_raw
-        if isinstance(p, str) and p.strip()
-    ]
+    extra_mounts = [str(p).strip() for p in extra_mounts_raw if isinstance(p, str) and p.strip()]
 
     # agent_overrides пробрасываем из server_cfg как есть — materializer применит
     # их к raw YAML с auto-wrap'ом flat → {agent: ...}, чтобы единая секция
     # config_server.yml::agent_overrides работала и для webhook'а (cfg.update
     # на flat-dict) и для swarm'а (deep_merge в raw YAML).
     agent_overrides_raw = server_cfg.get("agent_overrides") or {}
-    agent_overrides = (
-        dict(agent_overrides_raw) if isinstance(agent_overrides_raw, dict) else {}
-    )
+    agent_overrides = dict(agent_overrides_raw) if isinstance(agent_overrides_raw, dict) else {}
 
     return {
         "enabled": enabled,
@@ -320,4 +310,3 @@ def _abs_or_empty(value: Any) -> str:
 
 
 __all__ = ["build_swarm_config"]
-

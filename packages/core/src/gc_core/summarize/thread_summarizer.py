@@ -92,7 +92,9 @@ def _empty_history_result(trace: Dict[str, Any], logger: Any) -> Dict[str, Any]:
     }
 
 
-def _batch_user_prompt(batch_index: int, summarizer_prefix: str, batch_history_text: str, accumulated_summary: str) -> str:
+def _batch_user_prompt(
+    batch_index: int, summarizer_prefix: str, batch_history_text: str, accumulated_summary: str
+) -> str:
     if batch_index == 1:
         return (
             f"{summarizer_prefix}"
@@ -117,9 +119,21 @@ def _batch_user_prompt(batch_index: int, summarizer_prefix: str, batch_history_t
 class _BatchRun:
     """Один прогон инкрементальной суммаризации: батч → LLM → валидация/починка → сжатие."""
 
-    def __init__(self, *, ctx: Any, state: Any, logger: Any, system_prompt: str, summarizer_prefix: str,
-                 max_message_chars: int, max_accumulated_summary_chars: int, max_tokens: int | None,
-                 batch_total: int, tags: Any = (), strip_think: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        ctx: Any,
+        state: Any,
+        logger: Any,
+        system_prompt: str,
+        summarizer_prefix: str,
+        max_message_chars: int,
+        max_accumulated_summary_chars: int,
+        max_tokens: int | None,
+        batch_total: int,
+        tags: Any = (),
+        strip_think: bool = True,
+    ) -> None:
         self.ctx = ctx
         self.state = state
         self.logger = logger
@@ -133,7 +147,9 @@ class _BatchRun:
         self.tags = tags
         self.strip_think = strip_think
 
-    async def arun_batch(self, batch_index: int, batch_turns: List[List[Dict[str, Any]]], accumulated_summary: str) -> tuple:
+    async def arun_batch(
+        self, batch_index: int, batch_turns: List[List[Dict[str, Any]]], accumulated_summary: str
+    ) -> tuple:
         """→ (новая накопленная сводка, trace_batch)."""
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
         batch_history_text = dialog_history.build_history_text(
@@ -206,8 +222,15 @@ class _BatchRun:
             )
         return accumulated_summary, trace_batch
 
-    async def _arepair(self, batch_index: int, text: str, reason: str, batch_history_text: str,
-                       accumulated_summary: str, trace_batch: Dict[str, Any]) -> str:
+    async def _arepair(
+        self,
+        batch_index: int,
+        text: str,
+        reason: str,
+        batch_history_text: str,
+        accumulated_summary: str,
+        trace_batch: Dict[str, Any],
+    ) -> str:
         self.log.warning(
             "summary_batch_invalid batch=%s/%s reason=%s text_chars=%s text_preview=%s",
             batch_index,
@@ -306,8 +329,9 @@ async def _arun_patch_step(ctx: Any, state: Any, llm_result: Any, max_tokens: in
     return deltas, touched, repair_attempted, repair_success, raw_used
 
 
-def _skip_memory_patch_multi_batch(trace: Dict[str, Any], *, text: str, full_history_text: str,
-                                   persistent_state_block: str, batches: int, logger: Any) -> None:
+def _skip_memory_patch_multi_batch(
+    trace: Dict[str, Any], *, text: str, full_history_text: str, persistent_state_block: str, batches: int, logger: Any
+) -> None:
     trace["memory_patch"] = {
         "executed": False,
         "reason": "skipped_multi_batch",
@@ -323,9 +347,17 @@ def _skip_memory_patch_multi_batch(trace: Dict[str, Any], *, text: str, full_his
         log_memory_patch_skipped_multi_batch(logger, batches=batches)
 
 
-async def _arun_single_batch_memory_patch(*, ctx: Any, state: Any, text: str, full_history_text: str,
-                                          persistent_state_block: str, max_tokens: int | None,
-                                          trace: Dict[str, Any], logger: Any) -> tuple:
+async def _arun_single_batch_memory_patch(
+    *,
+    ctx: Any,
+    state: Any,
+    text: str,
+    full_history_text: str,
+    persistent_state_block: str,
+    max_tokens: int | None,
+    trace: Dict[str, Any],
+    logger: Any,
+) -> tuple:
     """Полная перезапись регистров WM (только single-batch) → (replace_deltas, replace_touched)."""
     replace_result = await memory_suggestions.arequest_patch_replace(
         ctx=ctx,
@@ -484,12 +516,8 @@ async def asummarize_dialog_via_chat_completions(
     )
     closed_records = list(user_intent_log or [])
     open_records = list(current_user_intent or [])
-    persistent_state_block = resolve_persistent_state_block(
-        state, persistent_state_block
-    )
-    summarizer_prefix = (
-        f"{persistent_state_block.strip()}\n\n" if persistent_state_block.strip() else ""
-    )
+    persistent_state_block = resolve_persistent_state_block(state, persistent_state_block)
+    summarizer_prefix = f"{persistent_state_block.strip()}\n\n" if persistent_state_block.strip() else ""
     batches = dialog_history.split_turns_into_char_batches(
         dialog_history.group_into_turns(history_for_summary),
         batch_chars_limit=batch_chars_limit,
@@ -508,10 +536,17 @@ async def asummarize_dialog_via_chat_completions(
             prompt_path,
         )
     run = _BatchRun(
-        ctx=ctx, state=state, logger=logger, system_prompt=system_prompt,
-        summarizer_prefix=summarizer_prefix, max_message_chars=max_message_chars,
-        max_accumulated_summary_chars=max_accumulated_summary_chars, max_tokens=max_tokens,
-        batch_total=len(batches), tags=tags, strip_think=strip_think,
+        ctx=ctx,
+        state=state,
+        logger=logger,
+        system_prompt=system_prompt,
+        summarizer_prefix=summarizer_prefix,
+        max_message_chars=max_message_chars,
+        max_accumulated_summary_chars=max_accumulated_summary_chars,
+        max_tokens=max_tokens,
+        batch_total=len(batches),
+        tags=tags,
+        strip_think=strip_think,
     )
     accumulated_summary = ""
     for batch_index, batch_turns in enumerate(batches, start=1):
@@ -526,14 +561,23 @@ async def asummarize_dialog_via_chat_completions(
 
     if len(batches) <= 1:
         memory_replace_deltas, replace_touched = await _arun_single_batch_memory_patch(
-            ctx=ctx, state=state, text=text, full_history_text=full_history_text,
-            persistent_state_block=persistent_state_block, max_tokens=max_tokens,
-            trace=trace, logger=logger,
+            ctx=ctx,
+            state=state,
+            text=text,
+            full_history_text=full_history_text,
+            persistent_state_block=persistent_state_block,
+            max_tokens=max_tokens,
+            trace=trace,
+            logger=logger,
         )
     else:
         _skip_memory_patch_multi_batch(
-            trace, text=text, full_history_text=full_history_text,
-            persistent_state_block=persistent_state_block, batches=len(batches), logger=logger,
+            trace,
+            text=text,
+            full_history_text=full_history_text,
+            persistent_state_block=persistent_state_block,
+            batches=len(batches),
+            logger=logger,
         )
     if logger is not None:
         logger.info(

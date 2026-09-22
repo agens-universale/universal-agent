@@ -76,12 +76,12 @@ def persist_reasoning_content_from_config(config: object) -> bool:
     if section is None:
         return False
     return not bool(section.get("strip_think", True))
+
+
 def _clean_tag_name(item: object) -> str | None:
     """Очищенное имя тега или ``None`` (с warning), если запись невалидна."""
     if not isinstance(item, str):
-        _logger.warning(
-            "strip_tags_projection.tags: non-string entry %r dropped", item
-        )
+        _logger.warning("strip_tags_projection.tags: non-string entry %r dropped", item)
         return None
     name = item.strip()
     if name.startswith("<") and name.endswith(">") and len(name) >= 2:
@@ -90,9 +90,7 @@ def _clean_tag_name(item: object) -> str | None:
         _logger.warning("strip_tags_projection.tags: empty/whitespace tag dropped")
         return None
     if _is_invalid_tag_name(name):
-        _logger.warning(
-            "strip_tags_projection.tags: invalid tag %r dropped", item
-        )
+        _logger.warning("strip_tags_projection.tags: invalid tag %r dropped", item)
         return None
     return name
 

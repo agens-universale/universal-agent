@@ -19,6 +19,7 @@
 Стоимость самой проверки — ``perf_counter()`` на запись, десятки наносекунд;
 на фоне ``stat()`` каждой записи это шум.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -141,7 +141,10 @@ def test_check_one_swarm_passes_correct_args(monkeypatch):
     monkeypatch.setattr("gc_server.swarm.monitor.lifecycle.check_and_finalize", mock_finalize)
     m._check_one_swarm("xxx")
     mock_finalize.assert_called_once_with(
-        "/threads", "/sandbox", "xxx", heavy_checks=True,
+        "/threads",
+        "/sandbox",
+        "xxx",
+        heavy_checks=True,
         swarm_logs_dir="",
     )
 
@@ -160,6 +163,7 @@ def test_run_loop_exits_on_stop_event(monkeypatch):
     m.start_in_background()
     # Дать loop'у возможность стартовать
     import time
+
     time.sleep(0.05)
     t0 = time.time()
     m.stop()
@@ -182,6 +186,7 @@ def test_run_loop_invokes_check_for_each_active(monkeypatch):
     t.start()
 
     import time
+
     # check_interval_seconds=0 → wait(0) сразу возвращает False, loop крутится.
     # Дадим 100ms на несколько итераций.
     time.sleep(0.1)

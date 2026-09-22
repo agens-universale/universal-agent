@@ -21,10 +21,7 @@ def tool_project_memory_enabled(config_dict: dict[str, Any] | None) -> bool:
 
 
 def project_memory_hints_enabled(config_dict: dict[str, Any] | None) -> bool:
-    return (
-        project_memory_notice_enabled(config_dict)
-        and tool_project_memory_enabled(config_dict)
-    )
+    return project_memory_notice_enabled(config_dict) and tool_project_memory_enabled(config_dict)
 
 
 def on_persist_steps(meta: dict[str, Any], *, steps: int = 1) -> int:
@@ -46,6 +43,7 @@ def touch_project_memory_baseline(
         from gc_core.project_memory import (
             get_hash,  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
         )
+
         get_hash_fn = get_hash
     current = get_hash_fn(ctx)
     state.project_memory_content_hash = current
@@ -82,6 +80,7 @@ def collect_project_memory_hints(
         from gc_core.project_memory import (
             get_hash,  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
         )
+
         get_hash_fn = get_hash
 
     cfg = project_memory_from_config_dict(config_dict)
@@ -98,11 +97,7 @@ def collect_project_memory_hints(
     if current is not None and baseline is None:
         hints.append(build_project_memory_exists_message())
         state.project_memory_content_hash = current
-    elif (
-        current is not None
-        and isinstance(baseline, str)
-        and current != baseline
-    ):
+    elif current is not None and isinstance(baseline, str) and current != baseline:
         hints.append(build_project_memory_changed_message())
     return hints
 

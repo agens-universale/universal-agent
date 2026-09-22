@@ -20,11 +20,24 @@ logger = logging.getLogger(__name__)
 # Известные top-level секции в config.yml. Если agent_overrides содержит хотя бы
 # одну из них на верхнем уровне — считаем его raw-структурой; иначе — flat
 # (legacy формат для webhook'а) и оборачиваем в {"agent": ...}.
-_KNOWN_RAW_SECTIONS = frozenset({
-    "backend", "agent", "agent_auth", "logging", "paths", "mcp",
-    "security", "summary", "chat_completions", "working_memory",
-    "quality_gate", "tool_usage_notice", "project_memory", "intent_scope",
-})
+_KNOWN_RAW_SECTIONS = frozenset(
+    {
+        "backend",
+        "agent",
+        "agent_auth",
+        "logging",
+        "paths",
+        "mcp",
+        "security",
+        "summary",
+        "chat_completions",
+        "working_memory",
+        "quality_gate",
+        "tool_usage_notice",
+        "project_memory",
+        "intent_scope",
+    }
+)
 
 
 def _normalize_agent_overrides_to_raw(overrides: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,9 +89,7 @@ def _utc_now_iso() -> str:
 
 def _compute_deadline_iso(timeout_seconds: int) -> str:
     """Вернуть ISO-timestamp когда sworm должен быть принудительно убит по таймауту."""
-    return (
-        datetime.now(UTC) + timedelta(seconds=int(timeout_seconds))
-    ).isoformat()
+    return (datetime.now(UTC) + timedelta(seconds=int(timeout_seconds))).isoformat()
 
 
 def _materialize_runtime_config(
@@ -121,8 +132,7 @@ def _materialize_runtime_config(
     base_text = read_user_text_or_none(host_config_path)
     if base_text is None:
         logger.warning(
-            "runtime config materialization: base config %s not found or unreadable, "
-            "using empty base",
+            "runtime config materialization: base config %s not found or unreadable, using empty base",
             host_config_path,
         )
         base = {}
@@ -143,10 +153,7 @@ def _materialize_runtime_config(
     except Exception:
         project_path = None
 
-    if (
-        project_path is not None
-        and os.path.abspath(project_path) != os.path.abspath(host_config_path)
-    ):
+    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(host_config_path):
         project_text = read_user_text_or_none(project_path)
         if project_text is None:
             logger.warning(
@@ -299,8 +306,7 @@ def start_swarm_process(
         )
     if not os.access(wrapper_path, os.X_OK):
         raise PermissionError(
-            f"swarm wrapper не исполняем: {wrapper_path!r} — нужен бит +x "
-            "(в колесе обёртка едет как package data)"
+            f"swarm wrapper не исполняем: {wrapper_path!r} — нужен бит +x (в колесе обёртка едет как package data)"
         )
 
     # Директория песочницы для этого сворма.
@@ -450,4 +456,3 @@ def start_swarm_process(
 
 
 __all__ = ["start_swarm_process"]
-

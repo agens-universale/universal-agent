@@ -3,6 +3,7 @@
 TUI-сервис: parse / preflight / Popen+read / truncate / cancel.
 Не пишет в thread jsonl — только эфемерный результат для трейса.
 """
+
 from __future__ import annotations
 
 import os
@@ -20,10 +21,21 @@ from gc_core.utils.win_console import preserve_console_mode
 DEFAULT_MAX_OUTPUT_BYTES = 32768
 DEFAULT_MAX_OUTPUT_LINES = 200
 
-_INTERACTIVE_BINS = frozenset({
-    "vim", "nvim", "vi", "nano", "emacs",
-    "less", "more", "top", "htop", "btop", "watch",
-})
+_INTERACTIVE_BINS = frozenset(
+    {
+        "vim",
+        "nvim",
+        "vi",
+        "nano",
+        "emacs",
+        "less",
+        "more",
+        "top",
+        "htop",
+        "btop",
+        "watch",
+    }
+)
 _PRIVILEGE_TOKENS = frozenset({"sudo", "su", "doas", "pkexec", "runas"})
 _TTY_CONTAINER_CMDS = frozenset({"docker", "podman", "nerdctl"})
 _TTY_FLAGS = frozenset({"-it", "-ti", "--interactive", "--tty"})
@@ -31,12 +43,8 @@ _TTY_FLAGS = frozenset({"-it", "-ti", "--interactive", "--tty"})
 _MSG_EMPTY = "пустая команда"
 _MSG_DISABLED = "bang-shell выключен"
 _MSG_BUSY = "дождитесь завершения предыдущей !"
-_MSG_INTERACTIVE = (
-    "интерактивные команды не поддерживаются — откройте внешний терминал"
-)
-_MSG_PRIVILEGE = (
-    "привилегированные команды не поддерживаются — откройте внешний терминал"
-)
+_MSG_INTERACTIVE = "интерактивные команды не поддерживаются — откройте внешний терминал"
+_MSG_PRIVILEGE = "привилегированные команды не поддерживаются — откройте внешний терминал"
 
 
 @dataclass(frozen=True)
@@ -77,12 +85,7 @@ class BangShellResult:
 
     @property
     def ok(self) -> bool:
-        return (
-            self.rejected is None
-            and not self.cancelled
-            and not self.timed_out
-            and self.exit_code == 0
-        )
+        return self.rejected is None and not self.cancelled and not self.timed_out and self.exit_code == 0
 
 
 def parse_body(text: str) -> Optional[str]:
@@ -183,12 +186,7 @@ def _leading_command(tokens: list[str]) -> Optional[str]:
             while i < n and "=" in tokens[i] and not tokens[i].startswith("-"):
                 i += 1
             continue
-        if (
-            "=" in t
-            and not t.startswith("-")
-            and not t.startswith("/")
-            and "/" not in t.split("=", 1)[0]
-        ):
+        if "=" in t and not t.startswith("-") and not t.startswith("/") and "/" not in t.split("=", 1)[0]:
             i += 1
             continue
         break

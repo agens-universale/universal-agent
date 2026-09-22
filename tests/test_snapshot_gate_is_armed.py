@@ -23,6 +23,7 @@ TUI (`cd packages/tui && pytest` без dev-группы). Значит, еди�
 (строку убрали И окружение пересобрали) поймали бы обе; половинчатые состояния —
 только соответствующая. Проверено подменами обеих сторон 01.09.2026.
 """
+
 import re
 import subprocess
 import sys
@@ -64,9 +65,7 @@ def test_plugin_module_name_matches_importorskip():
     Опечатка в `importorskip` вернула бы ровно исходную дыру: тесты снова
     пропускались бы молча, а манифест выглядел бы здоровым.
     """
-    assert find_spec(PLUGIN_MODULE) is not None, (
-        f"{PLUGIN_DIST} не установлен — снапшот-эталоны никто не проверяет"
-    )
+    assert find_spec(PLUGIN_MODULE) is not None, f"{PLUGIN_DIST} не установлен — снапшот-эталоны никто не проверяет"
     called = set()
     for path in SNAPSHOT_FILES:
         called |= set(re.findall(r'importorskip\(\s*"([\w.]+)"', path.read_text(encoding="utf-8")))
@@ -83,15 +82,22 @@ def test_snapshot_modules_collect_every_test():
     срабатывает на уровне МОДУЛЯ, и любая его причина (нет плагина, нет textual,
     опечатка в имени) выносит весь файл из прогона одинаково незаметно.
     """
-    expected = sum(
-        len(re.findall(r"^def (test_\w+)", p.read_text(encoding="utf-8"), re.M))
-        for p in SNAPSHOT_FILES
-    )
+    expected = sum(len(re.findall(r"^def (test_\w+)", p.read_text(encoding="utf-8"), re.M)) for p in SNAPSHOT_FILES)
     assert expected >= 16, expected
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q",
-         "-p", "no:cacheprovider", *[str(p) for p in SNAPSHOT_FILES]],
-        cwd=str(REPO), capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *[str(p) for p in SNAPSHOT_FILES],
+        ],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
     )
     out = proc.stdout + proc.stderr
     # rc=5 — «no tests collected»: ровно то, что происходило одиннадцать дней,

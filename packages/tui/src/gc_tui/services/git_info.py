@@ -1,4 +1,5 @@
 """Git-инфо для списка сессий: текущая ветка cwd. Без бизнес-логики."""
+
 from __future__ import annotations
 
 import subprocess
@@ -11,7 +12,10 @@ def current_branch(cwd: Union[str, Path]) -> Optional[str]:
     try:
         proc = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=str(cwd), capture_output=True, text=True, timeout=2,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
     except (OSError, subprocess.SubprocessError):
         return None

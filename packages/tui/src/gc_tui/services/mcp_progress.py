@@ -2,6 +2,7 @@
 
 Sink наполняется из worker-потоков дискавери (через on_progress-колбэк),
 читается TUI-поллингом. «Один активный run за раз» — здесь (MVP)."""
+
 from __future__ import annotations
 
 import threading
@@ -46,7 +47,7 @@ def format_mcp_progress(servers: dict) -> str:
     """Многострочный блок: заголовок + по строке на сервер (имя + статус-глиф).
     При >_MAX_VISIBLE_SERVERS список усекается до (CAP-1) строк + «… ещё +N»."""
     width = max((len(name) for name in servers), default=0)
-    lines = ["подключаю MCP:", ""]   # заголовок + пустая строка-отступ перед списком
+    lines = ["подключаю MCP:", ""]  # заголовок + пустая строка-отступ перед списком
     items = list(servers.items())
     if len(items) > _MAX_VISIBLE_SERVERS:
         shown, hidden = items[: _MAX_VISIBLE_SERVERS - 1], len(items) - (_MAX_VISIBLE_SERVERS - 1)

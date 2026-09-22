@@ -10,6 +10,7 @@
 импорт агрегатора замыкал бы цикл — и держался этот цикл только на отложенных
 импортах внутри функций, то есть до первой естественной правки.
 """
+
 import os
 import re
 from pathlib import Path
@@ -113,8 +114,7 @@ def _readable_layer_document(path, subject: str) -> Dict[str, Any]:
         raise ValueError(unreadable_reason(path, exc)) from exc
 
 
-def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dict[str, Any]]
-                           ) -> Optional[ProfileRef]:
+def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dict[str, Any]]) -> Optional[ProfileRef]:
     """Кандидат, чьё ИМЯ ФАЙЛА совпадает с указателем, — фолбэк на случай, когда
     `resolve_profile` не находит `pointer` НА ДИСКЕ вовсе (переименование пишет
     указатель на новое имя ДО физического `rename()` файла профиля —
@@ -140,14 +140,13 @@ def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dic
             continue
         for idx, root in enumerate(roots):
             if cand_path.parent == Path(root).resolve():
-                return ProfileRef(
-                    name=pointer, path=cand_path,
-                    root_kind="project" if idx == 0 else "base")
+                return ProfileRef(name=pointer, path=cand_path, root_kind="project" if idx == 0 else "base")
     return None
 
 
-def _overlay_layer(raw_config: Dict[str, Any], layer_path, base_path: str, candidate_for,
-                   subject: str, *, require_file: bool) -> tuple[Dict[str, Any], Dict[str, Any]]:
+def _overlay_layer(
+    raw_config: Dict[str, Any], layer_path, base_path: str, candidate_for, subject: str, *, require_file: bool
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """Наложить один файловый слой (managed/project); ``(merged, слой_как_прочитан)``."""
     if layer_path is None or os.path.abspath(str(layer_path)) == os.path.abspath(base_path):
         return raw_config, {}
@@ -157,13 +156,13 @@ def _overlay_layer(raw_config: Dict[str, Any], layer_path, base_path: str, candi
     layer_raw = cand if cand is not _UNSET else _readable_layer_document(layer_path, subject)
     before_env = layer_raw
     layer_raw = resolve_env_placeholders(layer_raw)
-    validate_registry_pairs(layer_raw, source=str(layer_path) if require_file else layer_path,
-                            raw_source=before_env)
+    validate_registry_pairs(layer_raw, source=str(layer_path) if require_file else layer_path, raw_source=before_env)
     return deep_merge(raw_config, layer_raw), layer_raw
 
 
-def _overlay_profile(raw_config: Dict[str, Any], pointer: str, roots, candidates, candidate_for,
-                     notices: list[str]) -> tuple[Dict[str, Any], Optional[ProfileRef]]:
+def _overlay_profile(
+    raw_config: Dict[str, Any], pointer: str, roots, candidates, candidate_for, notices: list[str]
+) -> tuple[Dict[str, Any], Optional[ProfileRef]]:
     """Наложить профиль по указателю; ``(merged, ref)``, без указателя — как есть."""
     if not pointer:
         return raw_config, None
@@ -175,7 +174,8 @@ def _overlay_profile(raw_config: Dict[str, Any], pointer: str, roots, candidates
             raise
     cand = candidate_for(ref.path)
     profile_raw = (
-        cand if cand is not _UNSET
+        cand
+        if cand is not _UNSET
         else load_profile_document(
             ref.path,
             warn_literal_tokens=(ref.root_kind == "project"),
@@ -261,28 +261,25 @@ def _merge_layers(
     if managed_path is _UNSET:
         managed_path = mcp_paths.managed_config_path()
     raw_config, managed_raw = _overlay_layer(
-        raw_config, managed_path, path, _candidate_for, "config.local.yml", require_file=True)
+        raw_config, managed_path, path, _candidate_for, "config.local.yml", require_file=True
+    )
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     if project_path is _UNSET:
         project_path = env_vars.project_local_config_path()
     raw_config, _ = _overlay_layer(
-        raw_config, project_path, path, _candidate_for, "проектный config.yml", require_file=False)
+        raw_config, project_path, path, _candidate_for, "проектный config.yml", require_file=False
+    )
 
     # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,
     # анти-рекурсия — профиль не может выбрать профиль), либо из явного override
     # (CLI --profile / сессия). level: НЕ резолвится тут — обычный ключ полного мержа.
     roots = profile_roots(Path(os.getcwd()), base_path)
-    pointer = (
-        profile_override
-        if profile_override is not None
-        else str(raw_config.get("profile") or "").strip()
-    )
+    pointer = profile_override if profile_override is not None else str(raw_config.get("profile") or "").strip()
     active_name: Optional[str] = pointer or None
     raw_config, ref = _overlay_profile(raw_config, pointer, roots, _candidates, _candidate_for, notices)
 
-    return _Layers(raw_config, ref, active_name, roots, managed_path, project_path,
-                   managed_raw, _base_voice)
+    return _Layers(raw_config, ref, active_name, roots, managed_path, project_path, managed_raw, _base_voice)
 
 
 def _raw_from_text(text: str, subject: str = _CONFIG_FILENAME) -> Dict[str, Any]:
@@ -312,8 +309,7 @@ def _app_config_from_raw(raw: Dict[str, Any]) -> AppConfig:
     try:
         return AppConfig.model_validate(raw)
     except ValidationError as exc:
-        raise ValueError(
-            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
+        raise ValueError(f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
     except Exception as exc:
         raise ValueError(f"{SCHEMA_ERROR_PREFIX}{exc}") from exc
 
@@ -378,16 +374,27 @@ def _stack_assembles(base_path) -> bool:
     MR #80, L19). Вопрос обязан быть ТЕМ ЖЕ, каким судят запись, — иначе это
     вторая редакция правила, и она уже разъехалась."""
     try:
-        validate_model_sections(_app_config_from_raw(_merge_layers(
-            _raw_from_text(Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME),
-            str(base_path)).config))
+        validate_model_sections(
+            _app_config_from_raw(
+                _merge_layers(
+                    _raw_from_text(Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME), str(base_path)
+                ).config
+            )
+        )
     except (OSError, ValueError):
         return False
     return True
 
 
-def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool = False,
-                        extra_candidates=None, lenient_prebroken: bool = False):
+def _stacked_app_config(
+    text: str,
+    *,
+    target=None,
+    base_path,
+    is_profile: bool = False,
+    extra_candidates=None,
+    lenient_prebroken: bool = False,
+):
     """Merged AppConfig стека, который соберёт СЛЕДУЮЩИЙ СТАРТ; None — фаза 2
     неприменима (цель в этот стек не входит либо — только при
     `lenient_prebroken` — он не собирался и без этой записи);
@@ -429,29 +436,21 @@ def _stacked_app_config(text: str, *, target=None, base_path, is_profile: bool =
     try:
         if not is_profile and target is None:
             return _app_config_from_raw(
-                _merge_layers(_raw_from_text(text), str(base_path),
-                             candidates=candidates or None).config)
-        base_raw = _raw_from_text(
-            Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME)
+                _merge_layers(_raw_from_text(text), str(base_path), candidates=candidates or None).config
+            )
+        base_raw = _raw_from_text(Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME)
         if not is_profile:
             candidates[Path(target)] = _raw_from_text(text, _CONFIG_FILENAME)
-            layers = _merge_layers(
-                base_raw, str(base_path),
-                candidates=candidates,
-                project_path=str(target))
+            layers = _merge_layers(base_raw, str(base_path), candidates=candidates, project_path=str(target))
             return _app_config_from_raw(layers.config)
         candidates[Path(target)] = _raw_from_text(text, "профиль")
-        layers = _merge_layers(
-            base_raw, str(base_path),
-            candidates=candidates)
-        if layers.ref is None or (
-            Path(layers.ref.path).resolve() != Path(target).resolve()
-        ):
+        layers = _merge_layers(base_raw, str(base_path), candidates=candidates)
+        if layers.ref is None or (Path(layers.ref.path).resolve() != Path(target).resolve()):
             return None
         return _app_config_from_raw(layers.config)
     except (OSError, ValueError) as exc:
         if lenient_prebroken and not _stack_assembles(base_path):
-            return None         # сломан и без нас — правку стоящего слоя не запрещаем
+            return None  # сломан и без нас — правку стоящего слоя не запрещаем
         raise StackAssemblyError(str(exc)) from exc
 
 
@@ -486,8 +485,7 @@ def prospective_registry(text: str, *, base_path=None, is_profile: bool = False)
             if not is_profile:
                 merged = _merge_layers(_raw_from_text(text), str(base_path)).config
             else:
-                base_raw = _raw_from_text(
-                    Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME)
+                base_raw = _raw_from_text(Path(base_path).read_text(encoding="utf-8"), _CONFIG_FILENAME)
                 # profile_override="" — пустой указатель: слой профиля из файлов НЕ
                 # берётся, его место занимает наш текст, чьим бы файлом он ни был.
                 layers = _merge_layers(base_raw, str(base_path), profile_override="")
@@ -707,8 +705,7 @@ def stack_documents(base_path, *, profile_override=None) -> list:
     # проектным слоем (или победивший её при конфликте), для этой функции не
     # существовал бы вовсе — и `alias_survives_removal`/`references_broken_by_
     # removal` судили бы по неполному или неверному стеку в обе стороны.
-    pointer = (profile_override if profile_override is not None
-               else resolve_profile_pointer(base))
+    pointer = profile_override if profile_override is not None else resolve_profile_pointer(base)
     if pointer:
         try:
             ref = resolve_profile(pointer, profile_roots(Path(os.getcwd()), base))
@@ -720,9 +717,9 @@ def stack_documents(base_path, *, profile_override=None) -> list:
     return docs
 
 
-def validate_config_text_with_sections(text: str, *, base_path=None, target=None,
-                                       extra_candidates=None,
-                                       lenient_prebroken: bool = False) -> None:
+def validate_config_text_with_sections(
+    text: str, *, base_path=None, target=None, extra_candidates=None, lenient_prebroken: bool = False
+) -> None:
     """Как validate_config_text (фаза 1), плюс фаза 2 — ссылочная целостность и
     правило резолвимости секций models/slots/assign (config_modules.
     model_sections_validation.validate_model_sections).
@@ -780,22 +777,25 @@ def validate_config_text_with_sections(text: str, *, base_path=None, target=None
     резолвится вовсе."""
     app_cfg = _app_config_from_text(text)
     if base_path is not None:
-        stacked = _stacked_app_config(text, base_path=base_path, target=target,
-                                      extra_candidates=extra_candidates,
-                                      lenient_prebroken=lenient_prebroken)
+        stacked = _stacked_app_config(
+            text,
+            base_path=base_path,
+            target=target,
+            extra_candidates=extra_candidates,
+            lenient_prebroken=lenient_prebroken,
+        )
         if stacked is not None:
             try:
                 validate_model_sections(stacked)
                 return
             except ValueError:
                 if not lenient_prebroken or _stack_assembles(base_path):
-                    raise       # отказ дословно — поблажки нет или запись и завалила
+                    raise  # отказ дословно — поблажки нет или запись и завалила
                 # не проходил и без неё — откат к однофайловой фазе 2 ниже
     validate_model_sections(app_cfg)
 
 
-def validate_profile_text_with_sections(text: str, *, target, base_path,
-                                        lenient_prebroken: bool = False) -> None:
+def validate_profile_text_with_sections(text: str, *, target, base_path, lenient_prebroken: bool = False) -> None:
     """Фаза 1 профиля (`profiles.validate_profile_text`) плюс фаза 2 на стеке, где
     ЭТОТ текст стоит слоем профиля.
 
@@ -813,13 +813,13 @@ def validate_profile_text_with_sections(text: str, *, target, base_path,
     фазы 2 у профиля нет — поблажка оставляет его на фазе 1: файл частичен по
     устройству."""
     validate_profile_text(text)
-    app_cfg = _stacked_app_config(text, target=target, base_path=base_path,
-                                  is_profile=True,
-                                  lenient_prebroken=lenient_prebroken)
+    app_cfg = _stacked_app_config(
+        text, target=target, base_path=base_path, is_profile=True, lenient_prebroken=lenient_prebroken
+    )
     if app_cfg is None:
         return
     try:
         validate_model_sections(app_cfg)
     except ValueError:
         if not lenient_prebroken or _stack_assembles(base_path):
-            raise               # отказ дословно — поблажки нет или запись и завалила
+            raise  # отказ дословно — поблажки нет или запись и завалила

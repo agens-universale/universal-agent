@@ -73,8 +73,7 @@ class RunPythonCode(AbstractSimpleTool):
             "type": "function",
             "name": "exec_python",
             "description": (
-                "Run Python code synchronously in a subprocess. "
-                "Returns JSON with ok, return_code, stdout, stderr."
+                "Run Python code synchronously in a subprocess. Returns JSON with ok, return_code, stdout, stderr."
             ),
             "parameters": {
                 "type": "object",
@@ -120,9 +119,9 @@ class RunPythonCode(AbstractSimpleTool):
                     },
                 },
                 "required": ["code"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
@@ -130,11 +129,11 @@ class RunPythonCode(AbstractSimpleTool):
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         timeout_default = exec_timeout_from_config_dict(config_dict)
         description = (
-            '''Tool name: exec_python
+            """Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
+Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": """
             + str(timeout_default)
-            + '''}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
+            + """}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:
 - Use this tool to execute small, self-contained Python scripts that do not require interaction.
@@ -143,7 +142,7 @@ Usage:
 - If you need to create files and the default directory is read-only or invalid, pass cwd explicitly. If a tool error includes allowed_write_paths, choose one of those directories as cwd.
 - Do NOT use this tool for long-running tasks, interactive input, or accessing external systems in an unsafe way.
 - If execution exceeds the timeout, the process is terminated and an error message is returned.
-'''
+"""
         )
         return description
 
@@ -210,7 +209,9 @@ Usage:
             return early
         try:
             res = await aexec_port(self._backend).arun_python(
-                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"],
+                plan["code"],
+                cwd=plan["cwd"],
+                timeout=plan["timeout"],
                 env=plan["env"],
             )
         except Exception as exc:
@@ -243,15 +244,10 @@ Usage:
         candidate_roots = _dedupe_abs_paths_ordered(
             [
                 launch_abs,
-                *[
-                    os.path.abspath(str(extra))
-                    for extra in (security_context.write_guard.extra_paths or [])
-                ],
+                *[os.path.abspath(str(extra)) for extra in (security_context.write_guard.extra_paths or [])],
             ]
         )
-        allowed_write_paths = [
-            p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)
-        ]
+        allowed_write_paths = [p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)]
         return cwd_used, _cwd_invalid_error(cwd_used, allowed_write_paths)
 
     async def _plan(
@@ -263,6 +259,7 @@ Usage:
         **kwargs,
     ) -> "tuple[str | None, dict]":
         """Разобрать и проверить аргументы. Общее для обоих входов."""
+
         def reject(error: dict) -> "tuple[str, dict]":
             return self._result(
                 ok=False,
@@ -278,11 +275,7 @@ Usage:
         if not code.strip():
             return reject({"type": "invalid_argument", "field": "code", "message": "Code is empty"})
 
-        effective_timeout = (
-            timeout
-            if timeout is not None
-            else exec_timeout_from_config_dict(self._config_dict)
-        )
+        effective_timeout = timeout if timeout is not None else exec_timeout_from_config_dict(self._config_dict)
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
             return reject({"type": "invalid_argument", "field": "timeout"})
 
@@ -311,12 +304,8 @@ Usage:
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.
-        stdout_stream = as_captured_stream(
-            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
-        )
-        stderr_stream = as_captured_stream(
-            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
-        )
+        stdout_stream = as_captured_stream(getattr(res, "stdout_stream", None) or getattr(res, "stdout", ""))
+        stderr_stream = as_captured_stream(getattr(res, "stderr_stream", None) or getattr(res, "stderr", ""))
 
         if res.timed_out:
             return self._result(
@@ -330,11 +319,7 @@ Usage:
 
         return_code = res.return_code
         ok = return_code == 0
-        error = (
-            None
-            if ok
-            else {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
-        )
+        error = None if ok else {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
         return self._result(
             ok=ok,
             return_code=return_code,

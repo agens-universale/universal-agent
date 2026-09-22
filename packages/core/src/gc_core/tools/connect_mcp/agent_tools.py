@@ -2,6 +2,7 @@
 Подготовка MCP-инструментов в формате tools_data для агента:
 { tool_name: {"tool_fabric": ..., "spec": ..., "description": ...} }
 """
+
 import copy
 import logging
 from typing import Any, Dict, Optional
@@ -115,9 +116,7 @@ def _resolve_schema_refs(
             out[key] = _resolve_schema_refs(value, defs, depth + 1, resolving)
         return out
     if isinstance(node, list):
-        return [
-            _resolve_schema_refs(item, defs, depth + 1, resolving) for item in node
-        ]
+        return [_resolve_schema_refs(item, defs, depth + 1, resolving) for item in node]
     return node
 
 
@@ -135,9 +134,7 @@ def _preserve_referenced_defs(parameters: Dict[str, Any], source_defs: dict[str,
         needed = expanded
     if needed:
         parameters[_DEFS_KEY] = {
-            name: copy.deepcopy(source_defs[name])
-            for name in sorted(needed)
-            if name in source_defs
+            name: copy.deepcopy(source_defs[name]) for name in sorted(needed) if name in source_defs
         }
     elif _DEFS_KEY in parameters:
         del parameters[_DEFS_KEY]
@@ -183,9 +180,7 @@ def _normalize_combinator_branches(schema: dict, param_name: str, *, openai_stri
         branches = schema.get(comb_key)
         if isinstance(branches, list):
             schema[comb_key] = [
-                _normalize_schema_recursive(
-                    branch, param_name=param_name, openai_strict=openai_strict
-                )
+                _normalize_schema_recursive(branch, param_name=param_name, openai_strict=openai_strict)
                 if isinstance(branch, dict)
                 else branch
                 for branch in branches
@@ -212,9 +207,7 @@ def _infer_missing_type(schema: dict) -> None:
 
 
 def _normalize_property(name: str, subschema: Any, *, openai_strict: bool) -> dict:
-    normalized = _normalize_schema_recursive(
-        subschema, param_name=name, openai_strict=openai_strict
-    )
+    normalized = _normalize_schema_recursive(subschema, param_name=name, openai_strict=openai_strict)
     if not isinstance(normalized, dict):
         normalized = {
             "type": "string",
@@ -245,9 +238,7 @@ def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
         apply_openai_strict_object(schema)
 
 
-def _normalize_schema_recursive(
-    schema: Any, param_name: str = "", *, openai_strict: bool = False
-) -> Any:
+def _normalize_schema_recursive(schema: Any, param_name: str = "", *, openai_strict: bool = False) -> Any:
     """
     Рекурсивная нормализация фрагмента JSON Schema.
     Поддерживает объекты, массивы и простые типы.
@@ -318,9 +309,7 @@ def _object_parameters(parameters: Any, *, openai_strict: bool) -> Dict[str, Any
         return {
             "type": "object",
             "properties": {
-                "value": _normalize_schema_recursive(
-                    parameters, param_name="value", openai_strict=openai_strict
-                ),
+                "value": _normalize_schema_recursive(parameters, param_name="value", openai_strict=openai_strict),
             },
             "required": ["value"],
             "additionalProperties": False,
@@ -328,9 +317,7 @@ def _object_parameters(parameters: Any, *, openai_strict: bool) -> Dict[str, Any
     return parameters
 
 
-def normalize_tool_spec_for_agent(
-    tool_spec: Dict[str, Any], *, openai_strict: bool = False
-) -> Dict[str, Any]:
+def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any], *, openai_strict: bool = False) -> Dict[str, Any]:
     """
     Привести произвольную сигнатуру MCP-инструмента к стандарту агента.
     Гарантируются:
@@ -391,7 +378,7 @@ def _mcp_base_tool_name(full_name: str, entry: Dict[str, Any]) -> str:
             return raw.strip()
     prefix = "mcp_"
     if full_name.startswith(prefix):
-        rest = full_name[len(prefix):]
+        rest = full_name[len(prefix) :]
         _, sep, tool = rest.partition("_")
         if sep and tool:
             return tool
@@ -523,9 +510,7 @@ def _prepare_mcp_tools_data(
     return tools_cache, servers_cfg
 
 
-def _warn_if_cache_misses_the_sandbox(
-    tools_cache: ToolsCache, servers_cfg: Dict[str, Any], os_backend: Any
-) -> None:
+def _warn_if_cache_misses_the_sandbox(tools_cache: ToolsCache, servers_cfg: Dict[str, Any], os_backend: Any) -> None:
     """Сказать вслух, что дискавери уйдёт мимо песочницы.
 
     Бэкенд кэш получает только при создании: `rebind` перепривязывает конфиг,
@@ -548,8 +533,7 @@ def _warn_if_cache_misses_the_sandbox(
     orphaned = sorted(
         name
         for name, server_cfg in (servers_cfg or {}).items()
-        if isinstance(server_cfg, dict)
-        and str(server_cfg.get("execute_on") or "agent") == "os_backend"
+        if isinstance(server_cfg, dict) and str(server_cfg.get("execute_on") or "agent") == "os_backend"
     )
     if not orphaned:
         return
@@ -583,10 +567,7 @@ def _assemble_mcp_tools_data(
     дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
     нормализации схем не за что.
     """
-    timeout = (
-        config_dict.get("mcp-meta", {}).get("request_timeout_sec")
-        or 600
-    )
+    timeout = config_dict.get("mcp-meta", {}).get("request_timeout_sec") or 600
 
     default_use_retry = bool(config_dict.get("use_retry", False))
     openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
@@ -610,9 +591,7 @@ def _assemble_mcp_tools_data(
         if not isinstance(tool_entry, dict):
             continue
 
-        normalized_spec = normalize_tool_spec_for_agent(
-            tool_entry, openai_strict=openai_strict
-        )
+        normalized_spec = normalize_tool_spec_for_agent(tool_entry, openai_strict=openai_strict)
         server_key = metadata.get("mcp_server_key") if isinstance(metadata, dict) else None
         server_cfg = servers_cfg.get(server_key) if server_key else None
         loop_warn = _loop_warn_for_mcp_tool(
@@ -643,9 +622,7 @@ async def aget_mcp_tools_data_for_config(
     Форма одна. Синхронного имени нет: единственный вызывающий — сборка
     набора тулов, и она корутинная.
     """
-    prepared = _prepare_mcp_tools_data(
-        config_dict, tools_cache=tools_cache, os_backend=os_backend
-    )
+    prepared = _prepare_mcp_tools_data(config_dict, tools_cache=tools_cache, os_backend=os_backend)
     if prepared is None:
         return {}, {}
     cache, servers_cfg = prepared
@@ -655,9 +632,7 @@ async def aget_mcp_tools_data_for_config(
     except Exception:
         logger.error("Failed to load MCP tools", exc_info=True)
         return {}, {}
-    return _assemble_mcp_tools_data(
-        mcp_registry, status_map, config_dict, servers_cfg, os_backend=os_backend
-    )
+    return _assemble_mcp_tools_data(mcp_registry, status_map, config_dict, servers_cfg, os_backend=os_backend)
 
 
 __all__ = [

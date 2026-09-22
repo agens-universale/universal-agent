@@ -13,10 +13,7 @@ from gc_core.message_projection.projectors.strip_tagged_blocks import strip_thin
 def test_default_pipeline_strips_think_only_without_extra_tags():
     pipeline = for_model_pipeline()
     assert pipeline.project("<think>x</think>Y") == "Y"
-    assert (
-        pipeline.project("<redacted_thinking>x</redacted_thinking>Y")
-        == "<redacted_thinking>x</redacted_thinking>Y"
-    )
+    assert pipeline.project("<redacted_thinking>x</redacted_thinking>Y") == "<redacted_thinking>x</redacted_thinking>Y"
 
 
 def test_project_text_for_model_uses_default_strip():
@@ -50,35 +47,21 @@ def test_effective_for_model_tags_puts_think_first():
         "think",
         "redacted_thinking",
     )
-    assert effective_for_model_tags(("redacted_thinking",), strip_think=False) == (
-        "redacted_thinking",
-    )
+    assert effective_for_model_tags(("redacted_thinking",), strip_think=False) == ("redacted_thinking",)
 
 
 def test_unclosed_extra_tag_inside_think_does_not_eat_answer():
-    text = (
-        "<think>let me use <redacted_thinking> here</think>"
-        "Final answer to the user."
-    )
+    text = "<think>let me use <redacted_thinking> here</think>Final answer to the user."
+    assert project_text_for_model(text, tags=["redacted_thinking"]) == "Final answer to the user."
     assert (
-        project_text_for_model(text, tags=["redacted_thinking"])
-        == "Final answer to the user."
-    )
-    assert (
-        project_text_for_model(
-            text, tags=["redacted_thinking", "think"], strip_think=True
-        )
+        project_text_for_model(text, tags=["redacted_thinking", "think"], strip_think=True)
         == "Final answer to the user."
     )
 
 
 def test_strip_think_false_empty_tags_keeps_think_prose():
-    assert project_text_for_model("<think>x</think>Y", strip_think=False) == (
-        "<think>x</think>Y"
-    )
-    assert project_text_for_model("  keep spaces  ", strip_think=False) == (
-        "  keep spaces  "
-    )
+    assert project_text_for_model("<think>x</think>Y", strip_think=False) == ("<think>x</think>Y")
+    assert project_text_for_model("  keep spaces  ", strip_think=False) == ("  keep spaces  ")
 
 
 def test_strip_think_false_think_in_tags_strips_prose_only():
@@ -147,7 +130,4 @@ def test_project_assistant_text_only_think_empty():
 
 
 def test_non_greedy_in_default_pipeline():
-    assert (
-        project_text_for_model("<think>a</think> prose <think>b</think> end")
-        == "prose  end"
-    )
+    assert project_text_for_model("<think>a</think> prose <think>b</think> end") == "prose  end"

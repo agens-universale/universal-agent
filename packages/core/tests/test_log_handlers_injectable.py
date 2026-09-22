@@ -14,6 +14,7 @@
 Теперь: хендлеры принимаются параметром и ставятся после очистки, а
 ``propagate`` управляется ключом конфига (дефолт прежний).
 """
+
 import logging
 
 import pytest
@@ -35,9 +36,7 @@ _CFG = {"save_logs": False, "console_trace": False, "logs_dump_dir": "/tmp"}
 def test_custom_handler_receives_records():
     """Свой хендлер получает записи рана."""
     cap = _Capture()
-    logger, _path, _trace = create_run_logger(
-        dict(_CFG), run_id="t1", agent_kind="main", log_handlers=[cap]
-    )
+    logger, _path, _trace = create_run_logger(dict(_CFG), run_id="t1", agent_kind="main", log_handlers=[cap])
     logger.info("привет")
     assert cap.records == ["привет"]
 
@@ -49,9 +48,7 @@ def test_custom_handler_survives_the_internal_clear():
     контекста: ядро чистит хендлеры у именованного логгера в начале сборки.
     """
     cap = _Capture()
-    logger, *_ = create_run_logger(
-        dict(_CFG), run_id="t2", agent_kind="main", log_handlers=[cap]
-    )
+    logger, *_ = create_run_logger(dict(_CFG), run_id="t2", agent_kind="main", log_handlers=[cap])
     assert cap in logger.handlers
 
 
@@ -59,13 +56,9 @@ def test_core_handlers_are_not_replaced():
     """Свой хендлер ДОБАВЛЯЕТСЯ, а не вытесняет файловый вывод ядра."""
     cap = _Capture()
     with_files = dict(_CFG)
-    with_files["save_logs"] = False        # файла нет, но stderr-хендлер остаётся
-    logger, *_ = create_run_logger(
-        with_files, run_id="t3", agent_kind="main", log_handlers=[cap]
-    )
-    assert len(logger.handlers) >= 2, (
-        f"хендлеры ядра пропали, остались только {logger.handlers}"
-    )
+    with_files["save_logs"] = False  # файла нет, но stderr-хендлер остаётся
+    logger, *_ = create_run_logger(with_files, run_id="t3", agent_kind="main", log_handlers=[cap])
+    assert len(logger.handlers) >= 2, f"хендлеры ядра пропали, остались только {logger.handlers}"
 
 
 def test_propagate_is_off_by_default():

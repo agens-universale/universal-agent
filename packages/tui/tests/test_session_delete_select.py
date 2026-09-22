@@ -5,8 +5,15 @@ from gc_tui.services.session_delete_select import select_for_deletion
 
 
 def _task(tid: str, updated_at: str) -> TaskSummary:
-    return TaskSummary(thread_id=tid, status="stopped", updated_at=updated_at,
-                       messages_count=1, skill_id=None, unread_count=0, last_error=None)
+    return TaskSummary(
+        thread_id=tid,
+        status="stopped",
+        updated_at=updated_at,
+        messages_count=1,
+        skill_id=None,
+        unread_count=0,
+        last_error=None,
+    )
 
 
 def _tasks():

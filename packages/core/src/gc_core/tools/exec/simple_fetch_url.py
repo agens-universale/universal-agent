@@ -39,6 +39,7 @@ def _response_url(exc: Exception) -> "str | None":
 #: ветки обработки ниже.
 _RedirectBlocked = _SharedRedirectBlocked
 
+
 @loop_warn_on_repeat(**READ_PROFILE)
 class SimpleFetchUrl(AbstractSimpleTool):
     timeout_seconds = 20
@@ -52,9 +53,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
     max_retries = 2
     retry_backoff_seconds = 1.0
     default_user_agent = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
 
     def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
@@ -76,10 +75,22 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "Absolute URL to fetch (http or https)."},
-                    "timeout": {"type": "integer", "description": f"HTTP timeout in seconds. Default {cls.timeout_seconds}."},
-                    "max_preview_chars": {"type": "integer", "description": "Maximum number of characters for preview. Default 1200."},
-                    "offset": {"type": "integer", "description": "Character offset for paginated reads from cached full content. Default 0."},
-                    "limit": {"type": "integer", "description": f"Maximum number of characters to return in content. Default {cls.max_content_chars}."},
+                    "timeout": {
+                        "type": "integer",
+                        "description": f"HTTP timeout in seconds. Default {cls.timeout_seconds}.",
+                    },
+                    "max_preview_chars": {
+                        "type": "integer",
+                        "description": "Maximum number of characters for preview. Default 1200.",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Character offset for paginated reads from cached full content. Default 0.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"Maximum number of characters to return in content. Default {cls.max_content_chars}.",
+                    },
                     "proxy": {
                         "type": "string",
                         "description": (
@@ -202,8 +213,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
                 "type": "invalid_argument",
                 "field": "proxy",
                 "message": (
-                    "proxy must start with http://, https://, socks5://, "
-                    "socks5h://, socks4://, or socks4a://."
+                    "proxy must start with http://, https://, socks5://, socks5h://, socks4://, or socks4a://."
                 ),
             }
         return normalized, None
@@ -214,9 +224,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
             return None
         return {"http": proxy, "https": proxy}
 
-    def _get_from_cache(
-        self, cache_key: str
-    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+    def _get_from_cache(self, cache_key: str) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
         """Возвращает (content, meta) для закэшированного ключа или None.
 
         При cache-hit обновляет LRU-порядок: только что читанный ключ становится
@@ -235,9 +243,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         cache.move_to_end(cache_key)
         return content, meta
 
-    def _put_to_cache(
-        self, cache_key: str, content: str, meta: Dict[str, Optional[str]]
-    ) -> None:
+    def _put_to_cache(self, cache_key: str, content: str, meta: Dict[str, Optional[str]]) -> None:
         """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
         cache = self._get_cache()
         if cache is None:
@@ -292,9 +298,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
             attrs = tag_match.group(1)
             if not re.search(r"""\bname\s*=\s*(['"])description\1""", attrs, flags=re.IGNORECASE):
                 continue
-            content_match = re.search(
-                r"""\bcontent\s*=\s*(['"])(.*?)\1""", attrs, flags=re.IGNORECASE | re.DOTALL
-            )
+            content_match = re.search(r"""\bcontent\s*=\s*(['"])(.*?)\1""", attrs, flags=re.IGNORECASE | re.DOTALL)
             if content_match:
                 return content_match.group(2)
         return None
@@ -453,7 +457,6 @@ class SimpleFetchUrl(AbstractSimpleTool):
             error=error,
         )
 
-
     def _fetch_arg_error(self, timeout, max_preview_chars, offset, limit) -> "Optional[Dict[str, Any]]":
         if timeout is not None and not isinstance(timeout, int):
             return {"type": "invalid_argument", "field": "timeout"}
@@ -497,7 +500,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
             error=None,
         )
 
-    async def _arequest_with_retries(self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy):
+    async def _arequest_with_retries(
+        self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy
+    ):
         """(response, None) либо (None, kwargs ошибки для _result)."""
         attempts = 1 + self.max_retries
         # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
@@ -522,7 +527,10 @@ class SimpleFetchUrl(AbstractSimpleTool):
             try:
                 # Общая петля из ``redirect_policy``: одно правило на три тула.
                 response = await fetch_validating_redirects(
-                    session, normalized_url, headers, effective_timeout,
+                    session,
+                    normalized_url,
+                    headers,
+                    effective_timeout,
                     allowed_schemes=_allowed_schemes,
                     url_blacklist=_url_blacklist,
                     max_redirects=_max_redirects,
@@ -579,7 +587,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
                         },
                     )
                 await asyncio.sleep(self.retry_backoff_seconds * attempt)
-        return None, dict(ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."})
+        return None, dict(
+            ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."}
+        )
 
     def _preview_from_html(self, text: str, max_preview_chars: int) -> "tuple[str, bool]":
         preview_content = re.sub(r"\s+", " ", self._strip_tags(text)).strip()
@@ -630,10 +640,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         headers = {
             "User-Agent": self.default_user_agent,
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                "image/avif,image/webp,*/*;q=0.8"
-            ),
+            "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate",
             "Cache-Control": "no-cache",
@@ -649,7 +656,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
             "sec-ch-ua-platform": '"Linux"',
         }
 
-        response, request_error = await self._arequest_with_retries(normalized_url, headers, effective_timeout, normalized_proxy)
+        response, request_error = await self._arequest_with_retries(
+            normalized_url, headers, effective_timeout, normalized_proxy
+        )
         if request_error is not None:
             return _result(**request_error)
 

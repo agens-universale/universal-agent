@@ -6,9 +6,7 @@ DEFAULT_TOOL_OUTPUT_INLINE_MAX_CHARS = 10000
 DEFAULT_STORED_TOOL_OUTPUTS_MAX_ENTRIES = 50
 
 
-def normalize_tool_output_limits(
-    inline_max_chars: Any, stored_max_entries: Any
-) -> Tuple[int, int]:
+def normalize_tool_output_limits(inline_max_chars: Any, stored_max_entries: Any) -> Tuple[int, int]:
     try:
         inline = int(inline_max_chars)
     except (TypeError, ValueError):
@@ -43,4 +41,3 @@ def get_stored_tool_outputs_max_entries(config: Dict[str, Any]) -> int:
         config.get("stored_tool_outputs_max_entries"),
     )
     return entries
-

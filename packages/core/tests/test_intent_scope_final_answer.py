@@ -63,9 +63,9 @@ def test_long_prose_recorded_as_summary(monkeypatch):
     monkeypatch.setattr(fa, "asummarize_final_answer_line", _fake_summary)
     state = _FakeState()
     long_text = "x" * 50
-    run_coro(amaybe_record_final_answer_intent(
-        assistant_text=long_text, state=state, ctx=_FakeCtx(_FakeScope(threshold=10))
-    ))
+    run_coro(
+        amaybe_record_final_answer_intent(assistant_text=long_text, state=state, ctx=_FakeCtx(_FakeScope(threshold=10)))
+    )
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].content == "SUMMARY LINE"
 
@@ -77,11 +77,13 @@ def test_long_prose_summary_fails_fallback_raw_truncated(monkeypatch):
     monkeypatch.setattr(fa, "asummarize_final_answer_line", _empty_summary)
     state = _FakeState()
     long_text = "y" * 50
-    run_coro(amaybe_record_final_answer_intent(
-        assistant_text=long_text,
-        state=state,
-        ctx=_FakeCtx(_FakeScope(threshold=10, max_raw=20, fallback=True)),
-    ))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text=long_text,
+            state=state,
+            ctx=_FakeCtx(_FakeScope(threshold=10, max_raw=20, fallback=True)),
+        )
+    )
     assert len(state.current_user_intent) == 1
     assert len(state.current_user_intent[0].content) <= 20
 
@@ -92,19 +94,23 @@ def test_long_prose_summary_fails_no_fallback_skips(monkeypatch):
 
     monkeypatch.setattr(fa, "asummarize_final_answer_line", _empty_summary)
     state = _FakeState()
-    run_coro(amaybe_record_final_answer_intent(
-        assistant_text="z" * 50,
-        state=state,
-        ctx=_FakeCtx(_FakeScope(threshold=10, fallback=False)),
-    ))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="z" * 50,
+            state=state,
+            ctx=_FakeCtx(_FakeScope(threshold=10, fallback=False)),
+        )
+    )
     assert state.current_user_intent == []
 
 
 def test_responses_backend_skips():
     state = _FakeState()
-    run_coro(amaybe_record_final_answer_intent(
-        assistant_text="answer", state=state, ctx=_FakeCtx(_FakeScope(), backend="responses")
-    ))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="answer", state=state, ctx=_FakeCtx(_FakeScope(), backend="responses")
+        )
+    )
     assert state.current_user_intent == []
 
 
@@ -128,9 +134,7 @@ def test_threshold_zero_routes_to_summary(monkeypatch):
 
     monkeypatch.setattr(fa, "asummarize_final_answer_line", _fake_summary)
     state = _FakeState()
-    run_coro(amaybe_record_final_answer_intent(
-        assistant_text="hi", state=state, ctx=_FakeCtx(_FakeScope(threshold=0))
-    ))
+    run_coro(amaybe_record_final_answer_intent(assistant_text="hi", state=state, ctx=_FakeCtx(_FakeScope(threshold=0))))
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].content == "S"
 

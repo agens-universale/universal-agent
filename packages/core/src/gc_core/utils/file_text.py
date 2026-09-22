@@ -146,10 +146,7 @@ def encoding_required_error(
     guess, confidence = guess_encoding(data)
     err: dict[str, Any] = {
         "type": "encoding_required",
-        "message": (
-            "File is not confident Unicode (no BOM / not strict UTF-8); "
-            "pass encoding= explicitly."
-        ),
+        "message": ("File is not confident Unicode (no BOM / not strict UTF-8); pass encoding= explicitly."),
         "encoding_guess": guess,
         "encoding_confidence": confidence,
     }

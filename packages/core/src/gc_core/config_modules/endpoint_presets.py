@@ -1,5 +1,6 @@
 """Пресеты адресов провайдеров для полей «Адрес API-сервера» (спека умных форм §3.1).
 Справочник данных — без TUI-логики (слой config)."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

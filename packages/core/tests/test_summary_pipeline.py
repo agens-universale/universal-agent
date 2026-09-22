@@ -234,13 +234,15 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     ]
     state.user_intent_log = user_ask_records("first request", "second request", turn=1)
     state.user_turn_seq = 1
-    ran = run_coro(amaybe_run_summary_compaction(
-        ctx=_ctx(trigger_chars=1),
-        state=state,
-        summary_trigger_chars=1,
-        trigger_reason="post_step",
-        is_cli_mode=False,
-    ))
+    ran = run_coro(
+        amaybe_run_summary_compaction(
+            ctx=_ctx(trigger_chars=1),
+            state=state,
+            summary_trigger_chars=1,
+            trigger_reason="post_step",
+            is_cli_mode=False,
+        )
+    )
     assert ran is True
     assert len(state.messages) == 1
     assert "Summarized context from previous dialogue." in state.messages[0]["content"]
@@ -277,13 +279,15 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     initial_project_data_before = dict(state.initial_project_data)
     call_metadata_before = dict(state.call_metadata)
 
-    ran = run_coro(amaybe_run_summary_compaction(
-        ctx=_ctx(trigger_chars=1),
-        state=state,
-        summary_trigger_chars=1,
-        trigger_reason="post_step",
-        is_cli_mode=False,
-    ))
+    ran = run_coro(
+        amaybe_run_summary_compaction(
+            ctx=_ctx(trigger_chars=1),
+            state=state,
+            summary_trigger_chars=1,
+            trigger_reason="post_step",
+            is_cli_mode=False,
+        )
+    )
 
     assert ran is True
     assert len(state.messages) == 2
@@ -298,4 +302,3 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     # Контракт этапа 1: compaction не должен менять project metadata/call metadata.
     assert state.initial_project_data == initial_project_data_before
     assert state.call_metadata == call_metadata_before
-

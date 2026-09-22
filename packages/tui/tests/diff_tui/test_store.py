@@ -1,4 +1,5 @@
 """DiffStore: snapshot/approve/undo, LRU, stale cleanup (spec2 T1–T4, T6–T9)."""
+
 from __future__ import annotations
 
 import os

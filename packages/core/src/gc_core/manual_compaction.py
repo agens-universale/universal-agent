@@ -7,6 +7,7 @@ state под компакцию, зовёт RunSummaryCoordinator.aforce_compact
 Форма одна — асинхронная (``acompact_thread``). Синхронного имени нет:
 из синхронного кода ведут своим ``asyncio.run`` (так делает TUI).
 """
+
 from __future__ import annotations
 
 from copy import copy as _shallow_copy_msg
@@ -41,12 +42,15 @@ async def acompact_thread(
         return False
     system_id = system or "cli"
     thread_session = await ThreadSession.afrom_config(
-        config_dict=config_dict, system_id=system_id, thread_id=thread_id,
+        config_dict=config_dict,
+        system_id=system_id,
+        thread_id=thread_id,
         # Хранилище встраивающего, если он его передал.
         store=getattr(ctx, "thread_store", None),
     )
     thread_session.history_messages = repair_tool_call_pairing(
-        thread_session.history_messages, keep_latest_unanswered=False,
+        thread_session.history_messages,
+        keep_latest_unanswered=False,
     )
     meta = getattr(thread_session, "meta", None) or {}
     thread_shared = ThreadMetaMapper.shared_from_meta(meta)
@@ -71,21 +75,19 @@ async def acompact_thread(
     state.init_current_user_intent(meta.get("current_user_intent"))
     state.init_user_turn_seq(meta.get("user_turn_seq"))
     state.infer_user_turn_seq_if_missing()
-    state.messages = [
-        _shallow_copy_msg(m)
-        for m in thread_session.history_messages
-        if isinstance(m, dict)
-    ]
+    state.messages = [_shallow_copy_msg(m) for m in thread_session.history_messages if isinstance(m, dict)]
 
     coord = RunSummaryCoordinator(
-        ctx=ctx, state=state, thread_session=thread_session,
+        ctx=ctx,
+        state=state,
+        thread_session=thread_session,
         summary_trigger_chars=parse_summary_trigger_chars(config_dict),
         is_cli_mode=(system_id == "cli"),
-        pre_backend_trigger_reason="pre_backend", logger=getattr(ctx, "logger", None),
+        pre_backend_trigger_reason="pre_backend",
+        logger=getattr(ctx, "logger", None),
     )
     ctx.on_summary_applied = coord.on_summary_applied
     await coord.aforce_compact_once(trigger_reason="manual")
-
 
     # Компакция сохраняет thread meta из ts.meta (старый token_usage переносится
     # как есть) — поэтому обновлённый кумулятив (baseline + summary) персистим
@@ -103,13 +105,7 @@ async def acompact_thread(
     # Обновляем live-state (что читает TUI-футер) только когда он передан и это тот
     # же тред — под замком executor'а. Для программного/standalone вызова (_lock или
     # self_state = None) шаг пропускается.
-    if (
-        _lock is not None
-        and self_state is not None
-        and getattr(self_state, "thread_id", None) == thread_id
-    ):
+    if _lock is not None and self_state is not None and getattr(self_state, "thread_id", None) == thread_id:
         with _lock:
             self_state.usage = UsageAccount.from_meta(state.usage.to_meta())
     return True
-
-

@@ -5,6 +5,7 @@
 каждое различие, уехавшее в параметр (`rows_source`, `render_row`, `matches`,
 `value_of`, `initial_index`, `can_open`, `on_pick`, `restore_on_close`), — по тесту.
 """
+
 import pytest
 
 pytest.importorskip("textual")
@@ -43,9 +44,15 @@ class _Host(Vertical):
 
     def on_mount(self) -> None:
         from gc_tui.editors.field_list import FieldListController
+
         kwargs = dict(
-            input_id="fl-input", row_class=_ROW, hint_class=_HINT, scroll_class=_SCROLL,
-            rows_source=_ITEMS, render_row=_render, hint=lambda ok: "есть" if ok else "нет",
+            input_id="fl-input",
+            row_class=_ROW,
+            hint_class=_HINT,
+            scroll_class=_SCROLL,
+            rows_source=_ITEMS,
+            render_row=_render,
+            hint=lambda ok: "есть" if ok else "нет",
         )
         kwargs.update(self._ctrl_kwargs)
         self.ctrl = FieldListController(self, **kwargs)
@@ -55,6 +62,7 @@ def _harness(host):
     class _App(App):
         def compose(self) -> ComposeResult:
             yield host
+
     return _App()
 
 
@@ -71,6 +79,7 @@ def _hint(host):
 
 
 # --- механика (перенос тестов трёх контроллеров) ---
+
 
 async def test_open_mounts_rows_and_hint_cursor_on_first():
     host = _Host()
@@ -94,7 +103,7 @@ async def test_filter_hides_rows_without_rebuilding_dom():
         host.ctrl.apply_filter("bet")
         await pilot.pause()
         assert _shown(host) == ["▸ beta"]
-        assert _rows(host) == before          # те же виджеты, не новые
+        assert _rows(host) == before  # те же виджеты, не новые
         host.ctrl.apply_filter("")
         await pilot.pause()
         assert len(_shown(host)) == 3
@@ -116,7 +125,7 @@ async def test_move_walks_rows_and_eats_the_key():
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
-        assert host.ctrl.move(1) is False        # свёрнут — клавиша не наша
+        assert host.ctrl.move(1) is False  # свёрнут — клавиша не наша
         host.ctrl.open()
         await pilot.pause()
         assert host.ctrl.move(1) is True
@@ -153,7 +162,7 @@ async def test_close_removes_rows_but_keeps_the_hint_reopen_does_not_duplicate()
         assert "показать список" in _hint_text(host)
         host.ctrl.open()
         await pilot.pause()
-        host.ctrl.open()                       # повторный open() — без дублей строк
+        host.ctrl.open()  # повторный open() — без дублей строк
         await pilot.pause()
         assert len(_rows(host)) == 3
 
@@ -211,14 +220,13 @@ async def test_reload_opens_a_collapsed_list():
         assert host.ctrl.reload() is True
         await pilot.pause()
         assert host.ctrl.is_open is True
-        assert host.ctrl.reload() is False     # раскрытому статическому списку нечего перечитывать
+        assert host.ctrl.reload() is False  # раскрытому статическому списку нечего перечитывать
 
 
 async def test_selected_row_is_scrolled_into_view(monkeypatch):
     seen = []
     original = Static.scroll_visible
-    monkeypatch.setattr(Static, "scroll_visible",
-                        lambda self, **kw: seen.append(self) or original(self, **kw))
+    monkeypatch.setattr(Static, "scroll_visible", lambda self, **kw: seen.append(self) or original(self, **kw))
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
@@ -230,6 +238,7 @@ async def test_selected_row_is_scrolled_into_view(monkeypatch):
 
 
 # --- различия, уехавшие в параметры ---
+
 
 async def test_rows_source_may_be_a_callable_read_on_every_open():
     """Источник строк — параметр: список или функция, которую перечитывают на раскрытии."""
@@ -250,6 +259,7 @@ async def test_rows_source_may_be_a_callable_read_on_every_open():
 
 async def test_render_row_draws_the_columns_of_its_host():
     """Рендер строки — параметр: у моделей колонки и метки, у языка код и название."""
+
     def render(item, *, selected):
         return Text(("> " if selected else "· ") + item.upper())
 
@@ -287,6 +297,7 @@ async def test_value_of_lets_pick_return_the_item_itself():
 async def test_initial_index_highlights_the_current_value():
     """Подсветка на входе — параметр: у языка и моделей это ДЕЙСТВУЮЩЕЕ значение, а не
     первая строка (Enter сразу после входа не имеет права подменить чужое)."""
+
     def initial(items, value):
         return next((i for i, it in enumerate(items) if it == value), None)
 
@@ -303,6 +314,7 @@ async def test_initial_index_highlights_the_current_value():
 async def test_initial_index_may_leave_nothing_highlighted():
     """Своего значения в списке нет — подсвеченной строки нет вовсе, и Enter уходит
     про введённое вручную."""
+
     def initial(items, value):
         return next((i for i, it in enumerate(items) if it == value), None)
 
@@ -392,7 +404,7 @@ async def test_pick_becomes_the_new_baseline():
         host.ctrl.move(1)
         assert host.ctrl.pick() == "beta"
         await pilot.pause()
-        field.value = "beta"                  # так поступает хозяин/`on_pick`
+        field.value = "beta"  # так поступает хозяин/`on_pick`
         host.ctrl.reopen_for_typing("ga")
         await pilot.pause()
         host.ctrl.close()
@@ -407,6 +419,7 @@ async def test_closed_hint_tells_how_to_reopen():
     `hide_closed_hint` удалены вместе с каноном 2026-08-17 — строка под полем
     постоянна, и единственное, что с ней происходит, это смена текста."""
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
+
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()

@@ -12,6 +12,7 @@
 Проверяется свойство, а не наличие строк: имени `create_run_context` не должно
 быть ни в экспорте ядра, ни в вызовах фронтендов.
 """
+
 import ast
 from pathlib import Path
 
@@ -25,9 +26,7 @@ def test_core_exports_one_form():
     import gc_core.run_context as rc
 
     assert hasattr(rc, "acreate_run_context")
-    assert not hasattr(rc, "create_run_context"), (
-        "вернулась вторая нативная сборка контекста"
-    )
+    assert not hasattr(rc, "create_run_context"), "вернулась вторая нативная сборка контекста"
     assert "create_run_context" not in rc.__all__
 
 

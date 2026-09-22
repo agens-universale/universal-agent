@@ -7,13 +7,13 @@
 поэтому зовём его как несвязанную функцию с подставленным объектом. Продовый
 код при этом исполняется целиком, включая чтение `completions_url` из конфига.
 """
+
 from types import SimpleNamespace
 
 import pytest
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
-_PRICING = {"enabled": True, "input": 100, "output": 200, "currency": "₽",
-            "per_tokens": 1_000_000}
+_PRICING = {"enabled": True, "input": 100, "output": 200, "currency": "₽", "per_tokens": 1_000_000}
 _RU_URL = "https://routerai.ru/api/v1/chat/completions"
 _USD_URL = "https://openrouter.ai/api/v1/chat/completions"
 

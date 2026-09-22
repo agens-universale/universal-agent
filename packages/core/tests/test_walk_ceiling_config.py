@@ -32,10 +32,12 @@ def test_factory_passes_walk_ceiling_to_harbor():
 def test_flat_config_carries_walk_ceiling(tmp_path):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
-        yaml.dump({
-            "backend": {"completions_url": "http://localhost/v1/chat/completions"},
-            "agent": {"walk_output_max_chars": 777},
-        }),
+        yaml.dump(
+            {
+                "backend": {"completions_url": "http://localhost/v1/chat/completions"},
+                "agent": {"walk_output_max_chars": 777},
+            }
+        ),
         encoding="utf-8",
     )
     cfg = load_config(str(cfg_path))

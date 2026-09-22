@@ -95,11 +95,13 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
     workspace.mkdir()
     extra = tmp_path / "extra_write"
     extra.mkdir()
-    tool = with_local_ctx(RunPythonCode, config_dict={
+    tool = with_local_ctx(
+        RunPythonCode,
+        config_dict={
             "launch_root": str(workspace),
             "command_moderation": {"mode": "allow"},
             "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
-        }
+        },
     )
     missing = str(workspace / "nope_missing")
     r = json.loads(tool(code="print(1)", cwd=missing))
@@ -120,11 +122,13 @@ def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
         ro_launch.chmod(0o555)
         extra = tmp_path / "writable_extra"
         extra.mkdir()
-        tool = with_local_ctx(RunPythonCode, config_dict={
+        tool = with_local_ctx(
+            RunPythonCode,
+            config_dict={
                 "launch_root": str(ro_launch),
                 "command_moderation": {"mode": "allow"},
                 "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
-            }
+            },
         )
         missing = str(ro_launch / "no_such_subdir")
         r = json.loads(tool(code="print(1)", cwd=missing))

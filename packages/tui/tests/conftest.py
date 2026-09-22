@@ -3,6 +3,7 @@
 Импортируемые хелперы (wait_until, open_settings_section) живут в
 ``gc_testkit.tui_support``: conftest не импортируют из тестов напрямую.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -95,7 +96,7 @@ def pytest_collection_modifyitems(items):
     drift = pytest.mark.xfail(
         strict=True,
         reason="эталон разъехался с кодом, пока снапшот-плагин отсутствовал в "
-               "манифестах; разбор расхождения — отдельная задача N2",
+        "манифестах; разбор расхождения — отдельная задача N2",
     )
     for item in items:
         try:
@@ -116,6 +117,7 @@ def _isolate_agent_state(tmp_path, monkeypatch):
     для всех TUI-тестов; локальный monkeypatch внутри теста (если есть) просто
     переопределяет этот же путь позже — конфликта нет."""
     from gc_core import upgrade_gate
+
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
 
@@ -131,6 +133,7 @@ def _isolate_model_list_cache():
     Автосброс до и после каждого теста (после — на случай, если тест сам не
     дошёл до конца)."""
     from gc_tui.services.model_list_cache import clear_cache
+
     clear_cache()
     yield
     clear_cache()
@@ -141,6 +144,7 @@ def _isolate_slow_git_memo():
     """`gc_tui.services.file_index` помнит корни, где git не уложился в таймаут,
     в модульном dict — иначе таймаут из одного теста отключал бы git соседям."""
     from gc_tui.services import file_index
+
     file_index._slow_git_roots.clear()
     yield
     file_index._slow_git_roots.clear()
@@ -185,9 +189,7 @@ def _no_network_update_check(monkeypatch):
     monkeypatch.setattr(
         check_mod,
         "check_for_update",
-        lambda source, **k: CheckResult(
-            "current", getattr(source, "commit", None), "установлена последняя версия"
-        ),
+        lambda source, **k: CheckResult("current", getattr(source, "commit", None), "установлена последняя версия"),
     )
 
 

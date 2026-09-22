@@ -11,6 +11,7 @@
 Each test drives real code with a jsonl-mode per-run logger from
 ``create_run_logger`` and asserts the event line + expected keys appear.
 """
+
 import json
 
 import pytest
@@ -129,9 +130,15 @@ def test_backend_request_and_response_events_chat_completions(tmp_path, monkeypa
     logger, path = _make_logger(tmp_path, level="debug")
 
     install_transport(monkeypatch, json_response({"choices": [{"message": {"content": "hi"}}]}))
-    run_coro(connect_backend.arequest_backend_chat_completions(
-        {"model": "m", "messages": []}, {}, url="http://x", verify=True, logger=logger,
-    ))
+    run_coro(
+        connect_backend.arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            url="http://x",
+            verify=True,
+            logger=logger,
+        )
+    )
     _flush(logger)
     recs = _records(path)
 
@@ -152,9 +159,15 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
     install_transport(monkeypatch, stream_response("data: not-json-at-all\n\n"))
 
     with pytest.raises(Exception):
-        run_coro(connect_backend.arequest_backend_responses(
-            {}, {}, url="http://x", verify=True, logger=logger,
-        ))
+        run_coro(
+            connect_backend.arequest_backend_responses(
+                {},
+                {},
+                url="http://x",
+                verify=True,
+                logger=logger,
+            )
+        )
     _flush(logger)
     recs = _records(path)
     errs = [r for r in recs if r["event"] == "backend_responses_json_error"]

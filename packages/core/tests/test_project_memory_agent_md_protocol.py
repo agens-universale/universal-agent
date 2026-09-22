@@ -2,9 +2,7 @@
 
 from gc_testkit.paths import ASSETS
 
-_PROMPT_PATH = (
-    ASSETS / "prompts" / "demo_cli_agent.md"
-)
+_PROMPT_PATH = ASSETS / "prompts" / "demo_cli_agent.md"
 
 
 def _read_prompt() -> str:

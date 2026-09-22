@@ -54,9 +54,7 @@ class FetchUrl(AbstractSimpleTool):
     max_retries = 2
     retry_backoff_seconds = 1.0
     default_user_agent = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
 
     def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
@@ -88,10 +86,7 @@ class FetchUrl(AbstractSimpleTool):
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": (
-                            "HTTP timeout in seconds. "
-                            f"Default is {cls.timeout_seconds}."
-                        ),
+                        "description": (f"HTTP timeout in seconds. Default is {cls.timeout_seconds}."),
                     },
                     "max_preview_chars": {
                         "type": "integer",
@@ -335,8 +330,7 @@ Usage:
                 "type": "invalid_argument",
                 "field": "proxy",
                 "message": (
-                    "proxy must start with http://, https://, socks5://, "
-                    "socks5h://, socks4://, or socks4a://."
+                    "proxy must start with http://, https://, socks5://, socks5h://, socks4://, or socks4a://."
                 ),
             }
         return normalized, None
@@ -347,9 +341,7 @@ Usage:
             return None
         return {"http": proxy, "https": proxy}
 
-    def _get_from_cache(
-        self, cache_key: str
-    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+    def _get_from_cache(self, cache_key: str) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
         """Возвращает (content, meta) для закэшированного ключа или None.
 
         При cache-hit обновляет LRU-порядок: только что читанный ключ становится
@@ -368,9 +360,7 @@ Usage:
         cache.move_to_end(cache_key)
         return content, meta
 
-    def _put_to_cache(
-        self, cache_key: str, content: str, meta: Dict[str, Optional[str]]
-    ) -> None:
+    def _put_to_cache(self, cache_key: str, content: str, meta: Dict[str, Optional[str]]) -> None:
         """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
         cache = self._get_cache()
         if cache is None:
@@ -478,7 +468,6 @@ Usage:
         )
         return summary_html, fallback_text
 
-
     def _fetch_arg_error(self, timeout, max_preview_chars, offset, limit) -> "Optional[Dict[str, Any]]":
         if timeout is not None and not isinstance(timeout, int):
             return {"type": "invalid_argument", "field": "timeout"}
@@ -499,7 +488,19 @@ Usage:
             return {"type": "invalid_argument", "field": "timeout", "message": "timeout must be greater than 0."}
         return None
 
-    def _content_payload(self, content: str, offset: int, limit: int, *, source: str, cache_hit: bool, final_url, status_code, content_type, meta) -> Dict[str, Any]:
+    def _content_payload(
+        self,
+        content: str,
+        offset: int,
+        limit: int,
+        *,
+        source: str,
+        cache_hit: bool,
+        final_url,
+        status_code,
+        content_type,
+        meta,
+    ) -> Dict[str, Any]:
         sliced = self._slice_content(content, offset, limit)
         return dict(
             ok=True,
@@ -522,7 +523,9 @@ Usage:
             error=None,
         )
 
-    async def _arequest_with_retries(self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy):
+    async def _arequest_with_retries(
+        self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy
+    ):
         """(response, None) либо (None, kwargs ошибки для _result)."""
         # Контекст политики нужен на КАЖДОМ переходе редиректа, а не только
         # на стартовом адресе (его проверил гвард `enforce_url_policy`).
@@ -533,11 +536,7 @@ Usage:
             try:
                 # Таймаут — на запрос: клиент общий и переиспользуется. Явный
                 # `proxy` тула идёт ПЕРВЫМ аргументом: он и должен побеждать окружение.
-                client = get_async_client(
-                    proxies=resolve_proxies(
-                        normalized_proxy, os.environ, normalized_url
-                    )
-                )
+                client = get_async_client(proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url))
                 # Каждый переход проверяется политикой (см. redirect_policy).
                 response = await fetch_validating_redirects(
                     client,
@@ -565,12 +564,15 @@ Usage:
                 )
             except RedirectBlocked as redirect_exc:
                 decision = redirect_exc.decision
-                return None, ("__blocked__", {
-                    "type": decision.error_type or "url_blocked_by_policy",
-                    "reason": decision.reason,
-                    "matched_rule": decision.matched_rule,
-                    "blocked_on_redirect": True,
-                })
+                return None, (
+                    "__blocked__",
+                    {
+                        "type": decision.error_type or "url_blocked_by_policy",
+                        "reason": decision.reason,
+                        "matched_rule": decision.matched_rule,
+                        "blocked_on_redirect": True,
+                    },
+                )
             except httpx.HTTPError as exc:
                 last_exc = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -682,18 +684,23 @@ Usage:
         cached = self._get_from_cache(cache_key)
         if cached is not None:
             cached_content, cached_meta = cached
-            return _result(**self._content_payload(
-                cached_content, offset, limit, source="cache", cache_hit=True,
-                final_url=normalized_url, status_code=200,
-                content_type="text/plain; charset=utf-8", meta=cached_meta,
-            ))
+            return _result(
+                **self._content_payload(
+                    cached_content,
+                    offset,
+                    limit,
+                    source="cache",
+                    cache_hit=True,
+                    final_url=normalized_url,
+                    status_code=200,
+                    content_type="text/plain; charset=utf-8",
+                    meta=cached_meta,
+                )
+            )
 
         headers = {
             "User-Agent": self.default_user_agent,
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                "image/avif,image/webp,*/*;q=0.8"
-            ),
+            "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate",
             "Cache-Control": "no-cache",
@@ -711,7 +718,9 @@ Usage:
 
         # Контекст политики нужен на КАЖДОМ переходе редиректа, а не только
         # на стартовом адресе (его проверил гвард `enforce_url_policy`).
-        response, request_error = await self._arequest_with_retries(normalized_url, headers, effective_timeout, normalized_proxy)
+        response, request_error = await self._arequest_with_retries(
+            normalized_url, headers, effective_timeout, normalized_proxy
+        )
         if isinstance(request_error, tuple):
             return self._url_policy_blocked_result(request_error[1], normalized_url)
         if request_error is not None:
@@ -758,10 +767,19 @@ Usage:
         if extracted is not None:
             source, c = extracted
             self._put_to_cache(cache_key, c, page_meta)
-            return _result(**self._content_payload(
-                c, offset, limit, source=source, cache_hit=False,
-                final_url=final_url, status_code=status_code, content_type=content_type, meta=page_meta,
-            ))
+            return _result(
+                **self._content_payload(
+                    c,
+                    offset,
+                    limit,
+                    source=source,
+                    cache_hit=False,
+                    final_url=final_url,
+                    status_code=status_code,
+                    content_type=content_type,
+                    meta=page_meta,
+                )
+            )
 
         stripped = self._strip_html_tags(text)
         if self._looks_like_garbled_text(stripped):

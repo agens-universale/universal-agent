@@ -17,6 +17,7 @@
   ``data_cli_1319dcec...``: поле ``content`` — многострочный текст файла
   (24 реальных ``\\n``) → живой пример блочного рендера с реальными переносами.
 """
+
 import json
 import uuid
 from pathlib import Path
@@ -43,6 +44,7 @@ def _plain_text(widget) -> str:
     Static (каждый рендерится в rich.Text — это контракт селектируемости);
     для строк — одиночный Static(Text).
     """
+
     def _one(w) -> str:
         content = getattr(w, "content", "")
         if hasattr(content, "plain"):
@@ -83,16 +85,20 @@ def test_unfold_truncated_readfile_markdown_content():
     с markdown-текстом, обрезанный посреди текста. После починки — dict, а
     markdown внутри — строка с реальными переносами (для multiline-блока)."""
     md = "# SPEC.md — Унифицированный CLI\n\n## 1. Objective\nОбъединить `chat.py`,\n" * 40
-    inner = json.dumps({"tool": "fs_read_file", "ok": True,
-                        "path": "D:\\dev\\SPEC.md", "content": md},
-                       ensure_ascii=False)
-    envelope = {"type": "stored_tool_output", "ok": True, "truncated": True,
-                "content": inner[:len(inner) // 2]}   # обрыв посреди markdown
+    inner = json.dumps(
+        {"tool": "fs_read_file", "ok": True, "path": "D:\\dev\\SPEC.md", "content": md}, ensure_ascii=False
+    )
+    envelope = {
+        "type": "stored_tool_output",
+        "ok": True,
+        "truncated": True,
+        "content": inner[: len(inner) // 2],
+    }  # обрыв посреди markdown
     data = unfold_payload(json.dumps(envelope, ensure_ascii=False))
     repaired = data["content"]
     assert isinstance(repaired, dict)
     assert repaired["tool"] == "fs_read_file"
-    assert "\n" in repaired["content"]           # реальные переносы, не \\n
+    assert "\n" in repaired["content"]  # реальные переносы, не \\n
     assert repaired["content"].startswith("# SPEC.md")
 
 
@@ -235,6 +241,7 @@ def test_payload_blocks_children_render_to_text():
     """Контракт селектируемости: каждый дочерний Static рендерится в rich.Text
     (Widget.get_selection отдаёт None для не-Text рендера — Syntax/Group)."""
     from rich.text import Text as RichText
+
     w = render_payload(INTENT_LOG)
     children = list(getattr(w, "_pending_children", []) or w.children)
     assert children, "render_payload(dict) должен вернуть контейнер с блоками"
@@ -253,6 +260,7 @@ def test_payload_skeleton_keeps_highlighting():
 def test_multiline_payload_selectable_blocks():
     """Payload с multiline-контентом: и каркас, и текст-блок — Text-рендер."""
     from rich.text import Text as RichText
+
     w = render_payload(FS_READ_MULTILINE)
     children = list(getattr(w, "_pending_children", []) or w.children)
     assert len(children) >= 2  # каркас-голова, multiline-блок, (хвост)

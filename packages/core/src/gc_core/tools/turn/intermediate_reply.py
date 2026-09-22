@@ -16,7 +16,7 @@ _TOOL_DESCRIPTION = (
     "Do NOT use for the final report of a multi-step task or to end the current user turn. "
     "Do NOT use when you need the user's answer — this tool does not wait for a reply. "
     "Keep `answer` concise; for long material use a separate artifact and put only summary + path in `answer`. "
-    "Omit `artifact_path` when there is no artifact; if the tool schema requires every key (strict mode), pass \"\" instead. When set, path must be non-empty."
+    'Omit `artifact_path` when there is no artifact; if the tool schema requires every key (strict mode), pass "" instead. When set, path must be non-empty.'
 )
 
 
@@ -63,9 +63,7 @@ class IntermediateReply(AbstractSimpleTool):
                     },
                     "artifact_path": {
                         "type": "string",
-                        "description": (
-                            "Path to a detailed user-facing artifact when long content lives in a file."
-                        ),
+                        "description": ("Path to a detailed user-facing artifact when long content lives in a file."),
                     },
                 },
                 "required": ["answer"],
@@ -92,7 +90,6 @@ Usage:
 - For long content, create a user-facing artifact and include only a brief summary in `answer` plus `artifact_path` (omit when unused; use \"\" only if the schema requires all keys).
 - Hard limit: 4096 characters in `answer`.
 """
-
 
     async def acall(self, answer: str, artifact_path: str | None = None, **kwargs) -> str:
         if not isinstance(answer, str):

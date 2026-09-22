@@ -60,9 +60,7 @@ from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
 
 # Backward compatibility for existing imports.
-_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
-    DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
-)
+_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 
 _LOGGING_SYNC_KEYS = (
     "full_log_backend",
@@ -260,9 +258,7 @@ def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
         "url": entry.url,
         "authorization_header": entry.authorization_header,
         "pricing": entry.pricing.model_dump() if entry.pricing is not None else None,
-        "backend_overrides": (
-            entry.backend.model_dump(exclude_unset=True) if entry.backend is not None else {}
-        ),
+        "backend_overrides": (entry.backend.model_dump(exclude_unset=True) if entry.backend is not None else {}),
     }
 
 
@@ -359,9 +355,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "working_memory_max_chars_knowledge": app_cfg.working_memory.max_chars_knowledge,
         "working_memory_total_budget_chars": app_cfg.working_memory.total_budget_chars,
         "tool_usage_notice": app_cfg.tool_usage_notice,
-        "tool_usage_notice_params": [
-            rule.model_dump() for rule in app_cfg.tool_usage_notice
-        ],
+        "tool_usage_notice_params": [rule.model_dump() for rule in app_cfg.tool_usage_notice],
         "project_memory": app_cfg.project_memory,
         "project_memory_params": app_cfg.project_memory.model_dump(),
         "project_memory_check_interval_messages": app_cfg.project_memory.check_interval_messages,
@@ -421,9 +415,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "model_steering": app_cfg.agent.model_steering,
         "limit_trace_summary": app_cfg.agent.limit_trace_summary,
         "loop_detector": app_cfg.agent.loop_detector.model_dump(),
-        "mcp-servers": {
-            name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()
-        },
+        "mcp-servers": {name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()},
         "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
         "pricing": app_cfg.pricing.model_dump(),
         "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
@@ -432,9 +424,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
         # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
         # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).
-        "models": {
-            alias: _serialize_model_entry(entry) for alias, entry in app_cfg.models.items()
-        },
+        "models": {alias: _serialize_model_entry(entry) for alias, entry in app_cfg.models.items()},
         "slots": app_cfg.slots.model_dump(),
         "assign": app_cfg.assign.model_dump(),
         "profile": app_cfg.profile,
@@ -465,9 +455,7 @@ def _build_mtime_set(
     return mtime_set
 
 
-def profile_mtime_set(
-    config_path: Optional[str], active_name: Optional[str] = None
-) -> Dict[str, Optional[float]]:
+def profile_mtime_set(config_path: Optional[str], active_name: Optional[str] = None) -> Dict[str, Optional[float]]:
     """Тот же снимок, что строит `load_config_ex` (спека §3.3), но БЕЗ парсинга/
     валидации файлов — только `stat()`. Точка входа для TUI (`set_config_path`):
     связывание пути с окном не обязано гонять полную загрузку конфига ради снимка
@@ -529,12 +517,13 @@ def load_config_ex(
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
     base_before_env = raw_config
     raw_config = resolve_env_placeholders(raw_config)
-    validate_registry_pairs(raw_config, source=str(base_path),
-                            raw_source=base_before_env)
+    validate_registry_pairs(raw_config, source=str(base_path), raw_source=base_before_env)
 
-    (raw_config, ref, active_name, roots, managed_path, project_path,
-     managed_raw, _base_voice) = _merge_layers(
-        raw_config, path, profile_override=profile_override, notices=notices,
+    (raw_config, ref, active_name, roots, managed_path, project_path, managed_raw, _base_voice) = _merge_layers(
+        raw_config,
+        path,
+        profile_override=profile_override,
+        notices=notices,
         # Пути слоёв добывает ЗАГРУЗЧИК — своими именами, теми же, что зовёт
         # `profile_mtime_set` ниже и что подменяют тесты, глуша слои машины
         # разработчика. Спроси их `_merge_layers` сам у модулей-владельцев —
@@ -558,10 +547,10 @@ def load_config_ex(
     _mv = managed_raw.get("voice") or {}
     if _mv:
         from gc_core.config_modules.voice import overridden_user_voice
+
         _managed_url = str(_mv.get("url") or "")
         _merged_voice = raw_config.get("voice")
-        _effective_url = str((_merged_voice or {}).get("url") or "") \
-            if isinstance(_merged_voice, dict) else ""
+        _effective_url = str((_merged_voice or {}).get("url") or "") if isinstance(_merged_voice, dict) else ""
         if _effective_url == _managed_url:
             _voice_overridden = overridden_user_voice(_base_voice, _managed_url)
 
@@ -576,8 +565,7 @@ def load_config_ex(
     try:
         app_cfg = AppConfig.model_validate(raw_config)
     except _PydanticValidationError as exc:
-        raise ValueError(
-            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
+        raise ValueError(f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
     _model_section_notices = validate_model_sections(app_cfg)
     resolve_paths(app_cfg, config_dir)
 

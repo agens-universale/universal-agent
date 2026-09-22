@@ -13,6 +13,7 @@ stdout/stderr — трубы к нам. Команда с `&` (в cmd.exe — `s
 
 Здесь внук просыпается заведомо позже потолка дренажа и пишет в оба потока.
 """
+
 import asyncio
 import os
 import shlex
@@ -60,20 +61,14 @@ def _background_command(tmp_path, marker) -> str:
     child.write_text(_CHILD, encoding="utf-8")
     if os.name == "nt":
         return f'start /b "" "{sys.executable}" "{child}" "{marker}"'
-    return (
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(child))} "
-        f"{shlex.quote(str(marker))} &"
-    )
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(child))} {shlex.quote(str(marker))} &"
 
 
 async def _new_drain_threads_gone(before: set, timeout: float = 10.0) -> bool:
     """Потоки дренажа, появившиеся после снимка `before`, дошли до EOF и вышли."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not [
-            t for t in threading.enumerate()
-            if t.name == "exec-pipe-drain" and t.ident not in before
-        ]:
+        if not [t for t in threading.enumerate() if t.name == "exec-pipe-drain" and t.ident not in before]:
             return True
         await asyncio.sleep(0.05)
     return False
@@ -89,9 +84,7 @@ async def test_a_grandchild_keeps_writing_after_the_tool_returned(tmp_path):
     elapsed = time.monotonic() - started
 
     assert res.return_code == 0, res
-    assert elapsed < _WAKE_AFTER_SEC, (
-        f"тул ждал внука {elapsed:.1f} с — он не должен ждать вовсе"
-    )
+    assert elapsed < _WAKE_AFTER_SEC, f"тул ждал внука {elapsed:.1f} с — он не должен ждать вовсе"
     assert await _status_when_written(marker) == "ok", (
         "внук получил ошибку на записи: трубы закрыли под ним, и сервис, "
         "поднятый чужим скриптом, начал сыпаться через пару секунд"
@@ -113,6 +106,7 @@ async def test_a_grandchild_survives_the_end_of_a_turn_loop(tmp_path):
 
     def _turn():
         """Ровно то, что делает воркер TUI: ход в своём loop, в своём потоке."""
+
         async def _body():
             return await LocalFsBackend().aexec(command, timeout=30)
 
@@ -126,6 +120,5 @@ async def test_a_grandchild_survives_the_end_of_a_turn_loop(tmp_path):
         "собой дренаж, а трубы закрылись под живым процессом"
     )
     assert await _new_drain_threads_gone(before), (
-        "внук вышел, а потоки дренажа живы: EOF не распознан, и каждая такая "
-        "команда оставляла бы поток до конца сеанса"
+        "внук вышел, а потоки дренажа живы: EOF не распознан, и каждая такая команда оставляла бы поток до конца сеанса"
     )

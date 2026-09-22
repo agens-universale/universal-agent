@@ -1,4 +1,5 @@
 """'/skill X' — нет задачи/idle: pending_skill_id + meta; идёт run: add_message + meta."""
+
 import json
 import threading
 from pathlib import Path
@@ -32,8 +33,15 @@ async def test_use_skill_running_sends_message_and_updates_meta(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
-                json.dumps({"type": "message", "seq": 1, "ts_utc": "...",
-                            "payload": {"id": "u1", "role": "user", "content": messages[0]}}) + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "seq": 1,
+                        "ts_utc": "...",
+                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
@@ -78,13 +86,23 @@ async def test_use_skill_idle_task_stages_pending_no_error(tmp_path):
 
     tid = "resumed2"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps({"type": "message", "seq": 1, "ts_utc": "2026-05-22T12:00:00+00:00",
-                    "payload": {"id": "u1", "role": "user", "content": "старое"}}) + "\n",
-        encoding="utf-8")
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "2026-05-22T12:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "старое"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 1}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 1}
+        ),
+        encoding="utf-8",
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

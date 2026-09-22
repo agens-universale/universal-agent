@@ -40,9 +40,7 @@ def test_demo_profile_validates_against_profile_schema(demo_profile_raw):
 
 
 def test_demo_profile_subagents_match_registry_and_validator_frozenset(demo_profile_raw):
-    demo_subagents = {
-        name for name in demo_profile_raw["assign"]["subagents"] if name != "*"
-    }
+    demo_subagents = {name for name in demo_profile_raw["assign"]["subagents"] if name != "*"}
     registry_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
 
     assert demo_subagents == registry_names, (
@@ -94,9 +92,7 @@ def test_demo_profile_models_demonstrate_both_token_semantics(demo_profile_raw):
     своим адресом больше не существует: адрес и токен задаются парой (§2), и
     справочник обязан показывать именно ту форму, которую примет валидатор."""
     models = demo_profile_raw["models"]
-    assert any(entry.get("token") for entry in models.values()), (
-        "нет примера модели со своим token"
-    )
+    assert any(entry.get("token") for entry in models.values()), "нет примера модели со своим token"
     assert any(entry.get("token") == "" for entry in models.values()), (
         'нет примера модели с token: "" (адрес без авторизации)'
     )

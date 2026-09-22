@@ -5,15 +5,12 @@
 файле), а не сконструированные вручную — иначе тест проверял бы придуманный
 текст ошибки, а не то, что реально прилетает из загрузчика.
 """
+
 import os
 
 import pytest
 
-_BACKEND = (
-    'backend:\n'
-    '  api_mode: chat_completions\n'
-    '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
-)
+_BACKEND = 'backend:\n  api_mode: chat_completions\n  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
 
 
 def _load_and_catch(base_path: str) -> ValueError:
@@ -42,8 +39,7 @@ def isolated_cwd(tmp_path, monkeypatch):
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: tmp_path / "config.local.yml")
     monkeypatch.setattr("gc_core.config.user_config_path", lambda: tmp_path / "base.yml")
     return cwd
 
@@ -59,7 +55,8 @@ def test_broken_slot_in_active_profile_names_key_and_profile_file(isolated_cwd, 
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND + "models:\n  flash: {}\n" "profile: work\n", encoding="utf-8",
+        _BACKEND + "models:\n  flash: {}\nprofile: work\n",
+        encoding="utf-8",
     )
     profiles_dir = tmp_path / "profiles"
     profiles_dir.mkdir()
@@ -77,8 +74,7 @@ def test_broken_slot_in_active_profile_names_key_and_profile_file(isolated_cwd, 
     # Совет чинить называет И ключ, И полный путь файла профиля в ОДНОЙ строке.
     assert f"поправить slots.default в:  {profile}" in text
     # Запуск без профиля — своим бинарём (program), не жёстко "gc-cli".
-    assert text.rstrip().endswith(
-        'запустить без профиля, ничего не потеряв:  gc-ua --profile ""')
+    assert text.rstrip().endswith('запустить без профиля, ничего не потеряв:  gc-ua --profile ""')
     # Порядок советов: починка → без профиля.
     assert text.index("поправить slots.default") < text.index('--profile ""')
     # Откат (`gc-cli --reset-config`) подменяет БАЗУ — сломан профиль, база ни при
@@ -96,7 +92,7 @@ def test_relative_config_path_shown_as_absolute(isolated_cwd, tmp_path, monkeypa
 
     base_abs = isolated_cwd / "config.yml"
     base_abs.write_text(
-        _BACKEND + 'models:\n  gpt:\n    url: "http://host"\n' 'profile: "work"\n',
+        _BACKEND + 'models:\n  gpt:\n    url: "http://host"\nprofile: "work"\n',
         encoding="utf-8",
     )
     profiles_dir = isolated_cwd / "profiles"
@@ -106,7 +102,7 @@ def test_relative_config_path_shown_as_absolute(isolated_cwd, tmp_path, monkeypa
 
     relative = os.path.join(".", "config.yml")
     exc = _load_and_catch(relative)
-    assert "не задан токен" in str(exc)   # предпосылка: ошибка про адрес/токен, не про схему
+    assert "не задан токен" in str(exc)  # предпосылка: ошибка про адрес/токен, не про схему
     text = explain_broken_config(relative, exc, program="gc-ua")
 
     assert relative not in text
@@ -185,7 +181,7 @@ def test_schema_error_on_the_pointer_is_not_a_missing_profile(isolated_cwd, tmp_
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
-    base.write_text(_BACKEND + "models:\n  flash: {}\n" "profile: 123\n", encoding="utf-8")
+    base.write_text(_BACKEND + "models:\n  flash: {}\nprofile: 123\n", encoding="utf-8")
     profiles_dir = tmp_path / "profiles"
     profiles_dir.mkdir()
     profile = profiles_dir / "work.yml"
@@ -213,8 +209,7 @@ def test_schema_error_explanation_does_not_leak_the_token(isolated_cwd, tmp_path
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND
-        + "models:\n"
+        _BACKEND + "models:\n"
         "  flash:\n"
         '    model: "google/gemini-2.5-flash"\n'
         '    url: "http://own/v1/chat/completions"\n'
@@ -224,7 +219,8 @@ def test_schema_error_explanation_does_not_leak_the_token(isolated_cwd, tmp_path
         '        Authorization: "Bearer ANOTHER"\n'
         "slots:\n"
         '  default: "flash"\n',
-        encoding="utf-8")
+        encoding="utf-8",
+    )
 
     try:
         load_config_ex(str(base))
@@ -246,8 +242,7 @@ def test_empty_profile_override_means_no_profile_at_all(isolated_cwd, tmp_path):
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
-    base.write_text(_BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost\n" "profile: work\n",
-                    encoding="utf-8")
+    base.write_text(_BACKEND + "models:\n  flash: {}\nslots:\n  max: ghost\nprofile: work\n", encoding="utf-8")
     profiles_dir = tmp_path / "profiles"
     profiles_dir.mkdir()
     (profiles_dir / "work.yml").write_text("slots:\n  default: flash\n", encoding="utf-8")
@@ -354,8 +349,7 @@ def test_profile_not_found_suggests_running_without_profile(isolated_cwd, tmp_pa
     assert "(активен)" not in text
 
 
-def test_dangling_pointer_in_project_overlay_names_the_overlay_not_the_base(
-        isolated_cwd, tmp_path):
+def test_dangling_pointer_in_project_overlay_names_the_overlay_not_the_base(isolated_cwd, tmp_path):
     """Ревью (H2б): указатель на удалённый профиль лежит в проектном
     `.gc/config.yml` — объяснение называло базу («поправить файл: <база>») и
     советовало `--reset-config`, который проектный слой не трогает. Виновник —
@@ -444,8 +438,7 @@ def test_schema_error_in_the_base_still_offers_the_reset(tmp_path, monkeypatch):
     from gc_core.onboarding import explain_broken_config
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: tmp_path / "config.local.yml")
     base = tmp_path / "base.yml"
     base.write_text(_BACKEND + "agent:\n  max_steps: many\n", encoding="utf-8")
     monkeypatch.setattr("gc_core.config.user_config_path", lambda: base)
@@ -468,26 +461,22 @@ def test_advice_carries_the_config_flag_of_the_session(isolated_cwd, tmp_path, m
     (пробелы в путях)."""
     from gc_core.onboarding import explain_broken_config
 
-    monkeypatch.setattr("gc_core.config.user_config_path",
-                        lambda: tmp_path / "home-config.yml")
+    monkeypatch.setattr("gc_core.config.user_config_path", lambda: tmp_path / "home-config.yml")
     based = tmp_path / "with space"
     based.mkdir()
     base = based / "cfg.yml"
     base.write_text(
-        _BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost\n" "profile: work\n",
+        _BACKEND + "models:\n  flash: {}\nslots:\n  max: ghost\nprofile: work\n",
         encoding="utf-8",
     )
     (based / "profiles").mkdir()
-    (based / "profiles" / "work.yml").write_text("slots:\n  default: flash\n",
-                                                 encoding="utf-8")
+    (based / "profiles" / "work.yml").write_text("slots:\n  default: flash\n", encoding="utf-8")
 
     exc = _load_and_catch(str(base))
     text = explain_broken_config(str(base), exc, program="gc-ua")
 
-    assert (f'запустить без профиля, ничего не потеряв:  '
-            f'gc-ua --config "{base}" --profile ""') in text
-    assert (f'откатить конфиг к шаблону (старый уйдёт в бэкап):  '
-            f'gc-cli --config "{base}" --reset-config') in text
+    assert (f'запустить без профиля, ничего не потеряв:  gc-ua --config "{base}" --profile ""') in text
+    assert (f'откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --config "{base}" --reset-config') in text
     # Короткие формы без --config целятся в другой файл — их быть не должно.
     assert 'gc-ua --profile ""' not in text.replace(f'gc-ua --config "{base}"', "")
     assert "gc-cli --reset-config" not in text.replace(f'gc-cli --config "{base}"', "")
@@ -499,8 +488,7 @@ def test_reset_is_not_offered_for_the_bundled_template(tmp_path, monkeypatch):
     from gc_core.onboarding import explain_broken_config
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path",
-                        lambda: tmp_path / "config.local.yml")
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: tmp_path / "config.local.yml")
     base = tmp_path / "config.default.yml"
     base.write_text(_BACKEND + "agent:\n  max_steps: many\n", encoding="utf-8")
 
@@ -526,7 +514,7 @@ def test_two_broken_keys_in_different_files_get_one_line_each(isolated_cwd, tmp_
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost2\n" "profile: work\n",
+        _BACKEND + "models:\n  flash: {}\nslots:\n  max: ghost2\nprofile: work\n",
         encoding="utf-8",
     )
     profiles_dir = tmp_path / "profiles"
@@ -543,8 +531,7 @@ def test_two_broken_keys_in_different_files_get_one_line_each(isolated_cwd, tmp_
     # Порядок — как в закрытом списке подозреваемых (slots.default раньше slots.max).
     assert text.index("slots.default") < text.index("slots.max")
     # Один из виновников — база: откат уместен и идёт последним.
-    assert text.rstrip().endswith(
-        "откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
+    assert text.rstrip().endswith("откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli --reset-config")
     assert text.index('--profile ""') < text.index("--reset-config")
 
 
@@ -557,7 +544,7 @@ def test_assign_keys_get_their_own_fix_line(isolated_cwd, tmp_path):
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND + "models:\n  flash: {}\n" "slots:\n  max: ghost\n" "profile: work\n",
+        _BACKEND + "models:\n  flash: {}\nslots:\n  max: ghost\nprofile: work\n",
         encoding="utf-8",
     )
     profiles_dir = tmp_path / "profiles"
@@ -585,7 +572,8 @@ def test_two_broken_keys_in_same_file_share_one_line(isolated_cwd, tmp_path):
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND + "models:\n  flash: {}\n" "profile: work\n", encoding="utf-8",
+        _BACKEND + "models:\n  flash: {}\nprofile: work\n",
+        encoding="utf-8",
     )
     profiles_dir = tmp_path / "profiles"
     profiles_dir.mkdir()
@@ -612,7 +600,8 @@ def test_pydantic_validation_error_gets_readable_prefix(tmp_path):
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND + "this_field_does_not_exist_in_schema: 123\n", encoding="utf-8",
+        _BACKEND + "this_field_does_not_exist_in_schema: 123\n",
+        encoding="utf-8",
     )
 
     exc = _load_and_catch(str(base))
@@ -621,5 +610,5 @@ def test_pydantic_validation_error_gets_readable_prefix(tmp_path):
     text = explain_broken_config(str(base), exc)
 
     assert "конфиг не проходит схему:" in text
-    assert "validation error for AppConfig" not in text   # дампа больше нет
+    assert "validation error for AppConfig" not in text  # дампа больше нет
     assert "input_value" not in text

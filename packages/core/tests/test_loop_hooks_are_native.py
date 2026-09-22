@@ -12,6 +12,7 @@
 ``arun_agent`` ни один хук не передаётся синхронным именем, — а не перечисляет
 известные случаи, которые уже починили.
 """
+
 import ast
 import inspect
 
@@ -64,18 +65,12 @@ def test_compaction_hooks_arrive_as_coroutines():
     Их ``processing_responses`` не импортирует — они приходят параметрами, и
     предыдущий тест их не видит. Проверяем на стороне отправителя.
     """
-    src = (REPO / "packages/core/src/gc_core/agent_executor.py").read_text(
-        encoding="utf-8"
-    )
+    src = (REPO / "packages/core/src/gc_core/agent_executor.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
 
     passed = {}
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "arun_agent"
-        ):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "arun_agent":
             for kw in node.keywords:
                 if kw.arg and kw.arg.endswith("_hook"):
                     passed[kw.arg] = ast.unparse(kw.value)

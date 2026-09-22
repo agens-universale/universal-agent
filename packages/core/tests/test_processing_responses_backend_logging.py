@@ -16,9 +16,7 @@ def teardown_module(_module) -> None:
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+        proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
 
 
 def _stub_tools_modules() -> None:
@@ -77,12 +75,8 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
             {"model": "CodeChat", "messages": [{"role": "user", "content": "ping"}], "tools": []},
         )
 
-    monkeypatch.setattr(
-        processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers)
-    )
-    monkeypatch.setattr(
-        processing_module, "create_call_data_completions", _fake_create_call_data
-    )
+    monkeypatch.setattr(processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers))
+    monkeypatch.setattr(processing_module, "create_call_data_completions", _fake_create_call_data)
     monkeypatch.setattr(
         processing_module,
         "arequest_chat_completions_with_policy",
@@ -113,11 +107,13 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(caplog, m
 
     with caplog.at_level(logging.ERROR):
         try:
-            run_coro(processing_module._arequest_backend_canonical(
-                [{"role": "user", "content": "hello", "id": "m_1"}],
-                state,
-                ctx,
-            ))
+            run_coro(
+                processing_module._arequest_backend_canonical(
+                    [{"role": "user", "content": "hello", "id": "m_1"}],
+                    state,
+                    ctx,
+                )
+            )
             assert False, "Expected KeyError('choices')"
         except KeyError as exc:
             assert str(exc) == "'choices'"

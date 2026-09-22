@@ -1,6 +1,7 @@
 """Physical I/O port for the tool layer: LocalFsBackend (host) and HarborBackend
 (task container). Tools keep validation/envelopes; backends only answer "where
 does this byte live / where does this command run"."""
+
 import os
 import shlex
 from abc import ABC, abstractmethod
@@ -83,23 +84,15 @@ class ExecResult:
             # "exited with status None" — падаем на конструировании, как раньше.
             raise TypeError("ExecResult: return_code обязателен (None означает timeout)")
         if self.stdout_stream is None:
-            self.stdout_stream = CapturedStream(
-                head=self.stdout or "", total_chars=len(self.stdout or "")
-            )
+            self.stdout_stream = CapturedStream(head=self.stdout or "", total_chars=len(self.stdout or ""))
         else:
             self.stdout = self.stdout_stream.text
         if self.stderr_stream is None:
-            self.stderr_stream = CapturedStream(
-                head=self.stderr or "", total_chars=len(self.stderr or "")
-            )
+            self.stderr_stream = CapturedStream(head=self.stderr or "", total_chars=len(self.stderr or ""))
         else:
             self.stderr = self.stderr_stream.text
-        self.stdout_hit_capture_cap = (
-            bool(self.stdout_hit_capture_cap) or self.stdout_stream.truncated
-        )
-        self.stderr_hit_capture_cap = (
-            bool(self.stderr_hit_capture_cap) or self.stderr_stream.truncated
-        )
+        self.stdout_hit_capture_cap = bool(self.stdout_hit_capture_cap) or self.stdout_stream.truncated
+        self.stderr_hit_capture_cap = bool(self.stderr_hit_capture_cap) or self.stderr_stream.truncated
 
 
 def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
@@ -132,7 +125,6 @@ def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
     )
 
 
-
 def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
     """``argv`` (плюс необязательный ``stdin``) → строка для POSIX-шелла.
 
@@ -145,6 +137,7 @@ def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
     if stdin is not None:
         command = f"printf '%s' {shlex.quote(stdin)} | {command}"
     return command
+
 
 def _sync_exec_message(backend: object, name: str) -> str:
     return (
@@ -222,8 +215,7 @@ class FsBackend(ABC):
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None) -> dict:
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None, env: Optional[dict] = None) -> dict:
         """Запустить команду фоном и НЕ ждать её: вернуть как минимум ``pid``.
 
         Вывод команды не сохраняется: у фонового процесса не должно быть ни
@@ -239,9 +231,7 @@ class FsBackend(ABC):
         он нужнее всего. Теперь поверхность порта одна, и сторож паритета
         обёртки ловит пропажу сразу.
         """
-        raise BackgroundNotSupportedError(
-            f"{type(self).__name__} не умеет запускать команды фоном"
-        )
+        raise BackgroundNotSupportedError(f"{type(self).__name__} не умеет запускать команды фоном")
 
     # Кэш ответов проб. Заполняет ЕДИНСТВЕННЫЙ писатель —
     # ``awarm_capabilities``; подклассы могут задать ответы заранее через
@@ -449,9 +439,7 @@ class FsBackend(ABC):
         host-side prune, so every backend yields the same tree for the same rules.
         """
         entries = [WalkEntry(rel, is_dir) for rel, is_dir in await self.walk(path)]
-        return prune_flat_entries(
-            entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
-        )
+        return prune_flat_entries(entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
 
     async def iter_walk_entries(
         self,
@@ -463,9 +451,7 @@ class FsBackend(ABC):
     ) -> AsyncIterator[WalkEntry]:
         """``iter_walk`` order over ``walk_entries`` (sizes preserved)."""
         for entry in iter_walk_entries_from_flat(
-            await self.walk_entries(
-                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
-            ),
+            await self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
             should_descend=should_descend,
             join=self.join,
             root=path,
@@ -502,16 +488,26 @@ class FsBackend(ABC):
     # форму: их синхронные двойники были обёртками ``run_coro_blocking``, то
     # есть заводили второй loop, а из-под живого — морозили поток вызывающего
     # на всё время команды (минуты). Умолчание ниже поэтому отказывает громко.
-    def exec(self, command: str, *, cwd: Optional[str] = None,
-             timeout: Optional[int] = None,
-             env: Optional[dict] = None,
-             capture_max_chars: Optional[int] = None) -> ExecResult:
+    def exec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         raise SyncExecNotSupportedError(_sync_exec_message(self, "exec"))
 
-    def exec_raw(self, command: str, *, cwd: Optional[str] = None,
-                 timeout: Optional[int] = None,
-                 env: Optional[dict] = None,
-                 capture_max_chars: Optional[int] = None) -> ExecResult:
+    def exec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """Механический POSIX: без инициализации окружения образа.
 
         Вход для ЧУЖИХ синхронных реализаций, как и ``exec``. Канал модели
@@ -524,11 +520,16 @@ class FsBackend(ABC):
             kwargs["capture_max_chars"] = capture_max_chars
         return self.exec(command, **kwargs)
 
-    def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                  cwd: Optional[str] = None,
-                  timeout: Optional[int] = None,
-                  env: Optional[dict] = None,
-                  capture_max_chars: Optional[int] = None) -> ExecResult:
+    def exec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """Run a program from an argv list, optionally feeding ``stdin``.
 
         Default builds a POSIX shell string (valid for sandbox backends whose
@@ -554,11 +555,17 @@ class FsBackend(ABC):
             fn = self.exec
         return fn(command, **kwargs)
 
-    def run_python(self, code: str, *, cwd: Optional[str] = None,
-                   timeout: Optional[int] = None,
-                   env: Optional[dict] = None,
-                   capture_max_chars: Optional[int] = None) -> ExecResult:
+    def run_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """См. ``exec``: синхронная форма — вход для чужих реализаций."""
         raise SyncExecNotSupportedError(_sync_exec_message(self, "run_python"))
+
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...

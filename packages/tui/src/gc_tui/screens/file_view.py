@@ -1,4 +1,5 @@
 """FileViewerScreen — постраничный read-only просмотр текстового файла (`/view`)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -142,7 +143,9 @@ class FileViewerScreen(Screen):
 
     def _bootstrap(self) -> None:
         result = open_for_view(
-            self._raw_path, cwd=self._cwd, settings=self._settings,
+            self._raw_path,
+            cwd=self._cwd,
+            settings=self._settings,
         )
         if isinstance(result, OpenErr):
             self._error = result.message
@@ -160,7 +163,9 @@ class FileViewerScreen(Screen):
         self._start_line = saved if saved is not None else 1
         if self._total_lines is not None:
             self._start_line = clamp_start_line(
-                self._start_line, total_lines=self._total_lines, page=self._page,
+                self._start_line,
+                total_lines=self._total_lines,
+                page=self._page,
             )
         self._reload_window()
 
@@ -191,7 +196,9 @@ class FileViewerScreen(Screen):
         self._page = new_page
         if self._total_lines is not None:
             self._start_line = clamp_start_line(
-                self._start_line, total_lines=self._total_lines, page=self._page,
+                self._start_line,
+                total_lines=self._total_lines,
+                page=self._page,
             )
         self._reload_window()
 
@@ -204,7 +211,8 @@ class FileViewerScreen(Screen):
             return
         self._flush_pending_delta()
         self._move_timer = self.set_timer(
-            _MOVE_THROTTLE_SEC, self._on_move_throttle_tick,
+            _MOVE_THROTTLE_SEC,
+            self._on_move_throttle_tick,
         )
 
     def _on_move_throttle_tick(self) -> None:
@@ -212,7 +220,8 @@ class FileViewerScreen(Screen):
         if self._pending_delta:
             self._flush_pending_delta()
             self._move_timer = self.set_timer(
-                _MOVE_THROTTLE_SEC, self._on_move_throttle_tick,
+                _MOVE_THROTTLE_SEC,
+                self._on_move_throttle_tick,
             )
 
     def _flush_pending_delta(self) -> None:
@@ -234,7 +243,9 @@ class FileViewerScreen(Screen):
         new_start = max(1, self._start_line + delta)
         if self._total_lines is not None:
             new_start = clamp_start_line(
-                new_start, total_lines=self._total_lines, page=self._page,
+                new_start,
+                total_lines=self._total_lines,
+                page=self._page,
             )
         if new_start == self._start_line and delta > 0:
             return
@@ -267,7 +278,9 @@ class FileViewerScreen(Screen):
                     self._show_error()
                     return
             self._start_line = clamp_start_line(
-                self._start_line, total_lines=self._total_lines, page=self._page,
+                self._start_line,
+                total_lines=self._total_lines,
+                page=self._page,
             )
             window = read_window(
                 self._path,

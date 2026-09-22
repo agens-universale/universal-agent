@@ -50,7 +50,10 @@ def _probe(tmp_path):
     # мимо нашего бутстрапа, и проверка потеряла бы смысл.
     res = subprocess.run(
         [sys.executable, "-S", "-c", _PROBE],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert res.returncode == 0, res.stderr
     return json.loads(res.stdout.strip().splitlines()[-1])

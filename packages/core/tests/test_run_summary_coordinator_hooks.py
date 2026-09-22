@@ -189,9 +189,7 @@ def test_no_orphan_outputs_in_current_after_function_call_output(monkeypatch, ct
 
     out_ids = [m.get("call_id") for m in batch if m.get("type") == "function_call_output"]
     assert out_ids == ["ok"]
-    assert all(
-        batch[i].get("type") == "function_call" for i in range(0, len(batch), 2)
-    )
+    assert all(batch[i].get("type") == "function_call" for i in range(0, len(batch), 2))
 
 
 def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):

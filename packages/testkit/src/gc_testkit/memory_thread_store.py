@@ -18,6 +18,7 @@
 Реализации на базе конверт нужен ровно так же: ``seq`` — это ordering key
 хвостового читателя TUI, а не деталь формата файла.
 """
+
 from __future__ import annotations
 
 import copy
@@ -105,18 +106,14 @@ class MemoryThreadStore(ThreadStoreBase):
         # (``ThreadSession.known_message_keys``) и снимает снимок ДО вызова,
         # чтобы по разнице понять, что дописать в свою ``history_messages``.
         # Защитная копия молча задвоила бы историю на следующем батче.
-        known = (
-            known_keys
-            if known_keys is not None
-            else {make_message_key(m) for m in self._payloads(bucket)}
-        )
+        known = known_keys if known_keys is not None else {make_message_key(m) for m in self._payloads(bucket)}
 
         seq = start_seq
         written = 0
         for message in messages:
             key = make_message_key(message)
             if key in known:
-                continue          # идемпотентность: батч персистится дважды
+                continue  # идемпотентность: батч персистится дважды
             seq += 1
             # Пополняем ТОЛЬКО фактически записанным. Досыпать заодно всё, что
             # уже лежит в хранилище, нельзя: снимок вызывающего перестанет
@@ -130,9 +127,7 @@ class MemoryThreadStore(ThreadStoreBase):
         self._hit("save_meta")
         # Штамп записи — обязанность ХРАНИЛИЩА, а не вызывающего, и он один
         # на все реализации: ``ThreadStoreBase.stamp_meta``.
-        self._meta[self._key(system_id, thread_id)] = self.stamp_meta(
-            copy.deepcopy(meta)
-        )
+        self._meta[self._key(system_id, thread_id)] = self.stamp_meta(copy.deepcopy(meta))
 
     def patch_runtime_flag(
         self,
@@ -145,14 +140,10 @@ class MemoryThreadStore(ThreadStoreBase):
     ) -> None:
         self._hit("patch_runtime_flag")
         key = self._key(system_id, thread_id)
-        meta = self.apply_runtime_flag(
-            self._meta.setdefault(key, {}), flag, active=active
-        )
+        meta = self.apply_runtime_flag(self._meta.setdefault(key, {}), flag, active=active)
         self._meta[key] = self.stamp_meta(meta)
 
-    def update_runtime_meta(
-        self, system_id: str, thread_id: str, patch: Dict[str, Any]
-    ) -> None:
+    def update_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
         self._hit("update_runtime_meta")
         key = self._key(system_id, thread_id)
         meta = self.merge_runtime_meta(self._meta.setdefault(key, {}), patch)
@@ -221,9 +212,7 @@ class MemoryThreadStore(ThreadStoreBase):
         trace.append(record)
         return copy.deepcopy(record)
 
-    def read_subagent_trace(
-        self, system_id: str, thread_id: str
-    ) -> List[SubagentTraceRecord]:
+    def read_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
         self._hit("read_subagent_trace")
         return copy.deepcopy(self._traces.get(self._key(system_id, thread_id), []))
 

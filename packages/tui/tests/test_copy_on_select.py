@@ -1,4 +1,5 @@
 """Copy-on-select / Ctrl+Shift+C: единый copy_out, без stop при пустом selection."""
+
 from __future__ import annotations
 
 import pytest
@@ -17,6 +18,7 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -35,8 +37,7 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
         # Копирование ловим на транспорте, а не на OSC 52: с 2026-08-04 терминалу
         # последовательность шлётся только в SSH и как запасной путь, локально
         # работает нативная запись (см. services/clipboard_ops._send_osc52).
-        monkeypatch.setattr(clipboard_ops, "write_clipboard",
-                            lambda text: copied.append(text) or True)
+        monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: copied.append(text) or True)
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "стартуй"
         await pilot.press("enter")
@@ -57,8 +58,7 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
         # результат, а не фиксированную паузу.
         from gc_testkit.tui_support import wait_until
 
-        await wait_until(pilot, lambda: copied == ["фрагмент"],
-                         "текст ушёл в системный буфер")
+        await wait_until(pilot, lambda: copied == ["фрагмент"], "текст ушёл в системный буфер")
         assert stop_called["flag"] is False
 
 

@@ -214,11 +214,7 @@ def test_config_default_max_matches_applies_when_caller_omits(tmp_path: Path):
 
 def test_explicit_max_matches_wins_over_config_default(tmp_path: Path):
     _write_dat_files(tmp_path, 5)
-    res = json.loads(
-        _tool({"default_max_matches": 2})(
-            path=str(tmp_path), query="*.dat", max_matches=4
-        )
-    )
+    res = json.loads(_tool({"default_max_matches": 2})(path=str(tmp_path), query="*.dat", max_matches=4))
     assert res["ok"] is True
     assert res["count"] == 4
     assert res["max_matches"] == 4
@@ -227,9 +223,7 @@ def test_explicit_max_matches_wins_over_config_default(tmp_path: Path):
 def test_config_hard_max_matches_clamps_requested(tmp_path: Path):
     _write_dat_files(tmp_path, 5)
     res = json.loads(
-        _tool({"default_max_matches": 2, "hard_max_matches": 2})(
-            path=str(tmp_path), query="*.dat", max_matches=50
-        )
+        _tool({"default_max_matches": 2, "hard_max_matches": 2})(path=str(tmp_path), query="*.dat", max_matches=50)
     )
     assert res["ok"] is True
     assert res["max_matches"] == 2
@@ -257,9 +251,7 @@ def test_find_files_by_name_config_rejects_non_positive_and_unknown_keys():
     with pytest.raises(ValidationError):
         FsFindFilesByNameConfig.model_validate({"default_max_visited": 10})
     with pytest.raises(ValidationError):
-        FsFindFilesByNameConfig.model_validate(
-            {"default_max_matches": 50, "hard_max_matches": 10}
-        )
+        FsFindFilesByNameConfig.model_validate({"default_max_matches": 50, "hard_max_matches": 10})
 
 
 def test_tool_description_uses_live_config_limits():
@@ -350,9 +342,7 @@ def test_glob_auto_detection_rule_is_documented():
     Само поведение (скобки = класс символов) осознанное, литерального режима у
     тула нет; значит модель должна хотя бы знать об этом из описания.
     """
-    schema_desc = FindFilesByName.tool_description()["parameters"]["properties"]["query"][
-        "description"
-    ]
+    schema_desc = FindFilesByName.tool_description()["parameters"]["properties"]["query"]["description"]
     prompt_desc = FindFilesByName.prompt_description()
 
     for text in (schema_desc, prompt_desc):
@@ -361,6 +351,7 @@ def test_glob_auto_detection_rule_is_documented():
 
 
 # --- размер из обхода вместо getsize на совпадение ------------------------------
+
 
 def test_size_from_walk_spares_getsize():
     import json

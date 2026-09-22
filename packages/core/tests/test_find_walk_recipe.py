@@ -30,7 +30,16 @@ def test_prune_group_is_shared_by_both_builders():
     assert files_argv[5:16] == group
     # Ссылки перечисляются наравне с обычными файлами.
     assert files_argv[16:] == [
-        "-prune", "-o", "(", "-type", "f", "-o", "-type", "l", ")", "-print0",
+        "-prune",
+        "-o",
+        "(",
+        "-type",
+        "f",
+        "-o",
+        "-type",
+        "l",
+        ")",
+        "-print0",
     ]
 
 

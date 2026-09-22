@@ -1,4 +1,5 @@
 """Agent reply с fenced-кодом → multi-widget mount (prose + code-block-panel)."""
+
 import json
 from pathlib import Path
 
@@ -7,15 +8,32 @@ import pytest
 
 def _write_thread_with_agent_reply(tmp_path, tid, content):
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 2}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 2}
+        ),
+        encoding="utf-8",
+    )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps({"type": "message", "seq": 1, "ts_utc": "2026-05-26T12:00:00+00:00",
-                    "payload": {"id": "u1", "role": "user", "content": "вопрос"}}) + "\n"
-        + json.dumps({"type": "message", "seq": 2, "ts_utc": "2026-05-26T12:00:01+00:00",
-                      "payload": {"id": "a1", "role": "assistant", "content": content}}) + "\n",
-        encoding="utf-8")
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "2026-05-26T12:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "вопрос"},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "message",
+                "seq": 2,
+                "ts_utc": "2026-05-26T12:00:01+00:00",
+                "payload": {"id": "a1", "role": "assistant", "content": content},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.asyncio
@@ -33,10 +51,7 @@ async def test_prose_only_reply_renders_one_static_with_bullet(tmp_path):
         await pilot.pause(0.3)
 
         scr = pilot.app.screen
-        agent_rows = [
-            r for r in scr.query(TraceRow)
-            if r.has_class("line-agent")
-        ]
+        agent_rows = [r for r in scr.query(TraceRow) if r.has_class("line-agent")]
         # Один prose-блок → один TraceRow; первый имеет prefix '● '.
         assert len(agent_rows) == 1
         assert agent_rows[0]._prefix == "● "
@@ -59,10 +74,7 @@ async def test_reply_with_fenced_block_mounts_separate_panels(tmp_path):
         await pilot.pause(0.3)
 
         scr = pilot.app.screen
-        prose_rows = [
-            r for r in scr.query(TraceRow)
-            if r.has_class("line-agent")
-        ]
+        prose_rows = [r for r in scr.query(TraceRow) if r.has_class("line-agent")]
         code_panels = scr.query(".code-block-panel")
         # 2 prose-TraceRow + 1 code-panel.
         assert len(prose_rows) == 2
@@ -80,11 +92,7 @@ async def test_continuation_widgets_have_cont_class(tmp_path):
     # Проза теперь режется на отдельные prose-блоки ТОЛЬКО границей code/table
     # (пустые строки сохраняются внутри одного блока, 0ff36ad8). Разделяем три
     # prose-рана code-блоками, чтобы получить 3 отдельные line-agent строки.
-    content = (
-        "Первый параграф.\n```text\na\n```\n"
-        "Второй параграф.\n```text\nb\n```\n"
-        "Третий параграф."
-    )
+    content = "Первый параграф.\n```text\na\n```\nВторой параграф.\n```text\nb\n```\nТретий параграф."
     _write_thread_with_agent_reply(tmp_path, tid, content)
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -94,10 +102,7 @@ async def test_continuation_widgets_have_cont_class(tmp_path):
 
         scr = pilot.app.screen
         # TraceRow'ы prose-блоков в порядке появления в DOM.
-        prose_rows = [
-            r for r in scr.query(TraceRow)
-            if r.has_class("line-agent")
-        ]
+        prose_rows = [r for r in scr.query(TraceRow) if r.has_class("line-agent")]
         assert len(prose_rows) == 3
         # Первый: line-agent без line-agent-cont.
         assert not prose_rows[0].has_class("line-agent-cont")
@@ -126,5 +131,6 @@ async def test_unknown_lang_falls_back_to_code_block_color(tmp_path):
         code_panels = scr.query(".code-block-panel")
         assert len(code_panels) == 1
         from textual.widgets import Static
+
         body = code_panels[0].query_one(".block-body", Static)
         assert "some content here" in body.visual.plain

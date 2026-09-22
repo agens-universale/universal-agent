@@ -16,6 +16,7 @@
 скрытое время жизни, протечка между арендаторами сервера с разными наборами
 MCP-серверов, переживание между тестами.
 """
+
 from typing import Any, Dict
 
 from gc_core.tools.connect_mcp.registry import ToolsCache
@@ -39,9 +40,9 @@ def test_rebind_keeps_the_payload():
     cache = ToolsCache(_cfg(servers))
     cache._data = {"mcp_srv_tool": {"tool": {}, "metadata": {}}}
     cache._cache_key = cache._make_cache_key(servers)
-    cache._fetched_at = time.time()   # «только что», иначе TTL честно истёк
+    cache._fetched_at = time.time()  # «только что», иначе TTL честно истёк
 
-    cache.rebind(_cfg(dict(servers)))          # новый словарь, тот же набор
+    cache.rebind(_cfg(dict(servers)))  # новый словарь, тот же набор
 
     assert cache._data is not None, "rebind выбросил содержимое"
     assert cache._is_valid(cache._make_cache_key(servers), ttl=3600) is True
@@ -91,18 +92,15 @@ def test_subagents_take_the_cache_from_parent_ctx():
 
     from gc_testkit.paths import REPO
 
-    src = (
-        REPO / "packages/core/src/gc_core/tools/subagents/runner.py"
-    ).read_text(encoding="utf-8")
+    src = (REPO / "packages/core/src/gc_core/tools/subagents/runner.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
 
     # Имя асинхронное: сборки детей идут из уже работающего loop, поэтому
     # зовут abuild_tools_data (синхронная там подняла бы ещё один loop в потоке).
     builds = [
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Name)
-        and n.func.id == "abuild_tools_data"
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "abuild_tools_data"
     ]
     assert len(builds) == 2, f"ожидалось 2 вызова abuild_tools_data, нашлось {len(builds)}"
 

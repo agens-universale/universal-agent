@@ -2,6 +2,7 @@
 с сохранением комментариев. Бизнес-логики нет — кроме `write_profile_pointer`:
 склейку примитивов указателя (якорь → значение → валидация стека) держим здесь
 одну на всех, потому что её потребители порознь уже разъезжались."""
+
 import re
 from pathlib import Path
 
@@ -69,7 +70,7 @@ def set_scalar(text: str, key: str, value: str) -> str:
     match = pattern.search(text)
     if match is None:
         raise KeyError(key)
-    new_line = f'{match.group("indent")}{key}: {quote_scalar(value)}'
+    new_line = f"{match.group('indent')}{key}: {quote_scalar(value)}"
     return text[: match.start()] + new_line + text[match.end() :]
 
 
@@ -317,8 +318,7 @@ def _find_child_anchor(text: str, parent_dotted: str, key: str):
 # инлайновый мэппинг `{}`, в обоих случаях с необязательным трейлинг-комментом.
 # Всё прочее в этой позиции — рукописный НЕПУСТОЙ инлайновый мэппинг: у его
 # записей нет своих строк, и построчный писатель их не тронет.
-_EMPTY_PARENT_REST_RE = re.compile(
-    r"^(?:[ \t]*\{[ \t]*\})?(?P<comment>[ \t]*#.*)?[ \t]*$")
+_EMPTY_PARENT_REST_RE = re.compile(r"^(?:[ \t]*\{[ \t]*\})?(?P<comment>[ \t]*#.*)?[ \t]*$")
 
 
 def _empty_parent_tail(rest: str, parent_dotted: str) -> str:
@@ -342,9 +342,7 @@ def _empty_parent_tail(rest: str, parent_dotted: str) -> str:
     return match.group("comment") or ""
 
 
-def upsert_mapping_entry(
-    text: str, parent_dotted: str, key: str, block_lines: list[str]
-) -> str:
+def upsert_mapping_entry(text: str, parent_dotted: str, key: str, block_lines: list[str]) -> str:
     """Вставить/заменить запись словаря (алиас реестра, слот, привязку) целым
     блоком под родительским якорем `parent_dotted` (например ``"models"`` или
     ``"assign.subagents"``).
@@ -389,22 +387,25 @@ def upsert_mapping_entry(
             # не доедет: `_empty_parent_tail` отказывает. `block_end` здесь и
             # граница, и точка вставки — откатывать его нечем и незачем.
             tail = _empty_parent_tail(p_rest, parent_dotted)
-            return (text[:p_start] + f"{p_indent}{parent_key}:{tail}\n"
-                    + text[p_end:block_end] + new_block + text[block_end:])
+            return (
+                text[:p_start]
+                + f"{p_indent}{parent_key}:{tail}\n"
+                + text[p_end:block_end]
+                + new_block
+                + text[block_end:]
+            )
         return _splice(text, _trim_trailing_noise(text, p_end, block_end), new_block)
     entry_start = _attached_comment_start(text, k_start, k_indent)
     entry_end = _trim_trailing_noise(
-        text, k_start,
-        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
+        text, k_start, _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
+    )
     return text[:entry_start] + new_block + text[entry_end:]
 
 
 def _has_content(segment: str) -> bool:
     """Есть ли в фрагменте хоть одна строка с реальным содержимым (не пустая,
     не комментарий) — тем же критерием, что цикл в `section_end`."""
-    return any(
-        line.strip() and not line.strip().startswith("#") for line in segment.splitlines()
-    )
+    return any(line.strip() and not line.strip().startswith("#") for line in segment.splitlines())
 
 
 def _trim_trailing_noise(text: str, start: int, end: int) -> int:
@@ -453,8 +454,8 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
     parent_key = parent_dotted.rsplit(".", 1)[-1]
     entry_start = _attached_comment_start(text, k_start, k_indent)
     entry_end = _trim_trailing_noise(
-        text, k_start,
-        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
+        text, k_start, _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
+    )
     block_end = _exclude_next_attached_comment(text, section_end(text, p_end, p_indent))
     remaining = text[p_end:entry_start] + text[entry_end:block_end]
     if not _has_content(remaining):
@@ -462,8 +463,7 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
         # описывает секцию, а не удаляемую запись; `remaining` — висячие комменты
         # внутри секции, тоже не её (свой, прикреплённый, уже ушёл в `entry_start`).
         tail = _empty_parent_tail(p_rest, parent_dotted)
-        return (text[:p_start] + f"{p_indent}{parent_key}: {{}}{tail}\n"
-                + remaining + text[block_end:])
+        return text[:p_start] + f"{p_indent}{parent_key}: {{}}{tail}\n" + remaining + text[block_end:]
     return text[:entry_start] + text[entry_end:]
 
 
@@ -511,8 +511,7 @@ def _value_scalar(value_text: str):
         return value_text.strip()
 
 
-def carry_entry_comments(text: str, parent_dotted: str, key: str,
-                         block_lines: list[str]) -> list[str]:
+def carry_entry_comments(text: str, parent_dotted: str, key: str, block_lines: list[str]) -> list[str]:
     """`block_lines` с комментариями СТАРОЙ записи `key` из `text`: прикреплённый
     комментарий записи — первыми строками (ровно тем каналом, который контракт
     `upsert_mapping_entry` и предлагает вызывающему), трейлинг-комментарии —
@@ -533,11 +532,10 @@ def carry_entry_comments(text: str, parent_dotted: str, key: str,
     except KeyError:
         return list(block_lines)
     entry_start = _attached_comment_start(text, k_start, k_indent)
-    attached = [line[len(k_indent):].rstrip("\r\n")
-                for _s, _e, line in _lines_with_offsets(text[entry_start:k_start])]
+    attached = [line[len(k_indent) :].rstrip("\r\n") for _s, _e, line in _lines_with_offsets(text[entry_start:k_start])]
     entry_end = _trim_trailing_noise(
-        text, k_start,
-        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
+        text, k_start, _exclude_next_attached_comment(text, section_end(text, k_end, k_indent))
+    )
     old_comments = _collect_trailing_comments(text[k_start:entry_end])
     out = [_reattach_trailing_comment(line, old_comments) for line in block_lines]
     return attached + out
@@ -552,8 +550,7 @@ def _collect_trailing_comments(entry_text: str) -> list[tuple]:
             continue
         value, comment = _split_trailing_comment(match.group("rest"))
         if comment.strip():
-            old_comments.append((_key_scalar(match.group("key").strip()),
-                                 _value_scalar(value), comment.rstrip("\r\n")))
+            old_comments.append((_key_scalar(match.group("key").strip()), _value_scalar(value), comment.rstrip("\r\n")))
     return old_comments
 
 
@@ -655,6 +652,7 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
     их запись меняет САМ СОСТАВ стека — активирует или переносит поломку — и
     поблажка здесь подменяла бы отказ чужой причиной (регресс L19)."""
     from gc_core.config import _default_config_path, validate_config_text_with_sections
+
     path = Path(path)
     is_base = path.resolve() == Path(base_path).resolve()
     lenient_prebroken = name == ""
@@ -662,13 +660,16 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
         candidate = f"profile: {quote_scalar(name)}\n"
         if is_base:
             validate_config_text_with_sections(
-                candidate, base_path=path, extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                candidate, base_path=path, extra_candidates=extra_candidates, lenient_prebroken=lenient_prebroken
+            )
         else:
             validate_config_text_with_sections(
-                candidate, base_path=base_path, target=path,
+                candidate,
+                base_path=base_path,
+                target=path,
                 extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                lenient_prebroken=lenient_prebroken,
+            )
         create_pointer_file(path, name)
         return
     text = read_user_text(path)
@@ -684,15 +685,19 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(
-                candidate, base_path=path, extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                candidate, base_path=path, extra_candidates=extra_candidates, lenient_prebroken=lenient_prebroken
+            )
     else:
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(
-                candidate, base_path=base_path, target=path,
+                candidate,
+                base_path=base_path,
+                target=path,
                 extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                lenient_prebroken=lenient_prebroken,
+            )
+
     write_text(path, text, validate=validate)
 
 
@@ -867,7 +872,7 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
         if not body[:1].isspace() or not _KEY_LINE_RE.match(body):
             break
         end += 1
-    out = [lines[i] for i in range(cstart, start)]            # описание — как есть
+    out = [lines[i] for i in range(cstart, start)]  # описание — как есть
     out += [_uncomment(lines[i]) for i in range(start, end)]  # шапка + поля — раскомментированы
     return "".join(out)
 

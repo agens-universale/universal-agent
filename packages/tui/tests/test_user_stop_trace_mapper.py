@@ -1,4 +1,5 @@
 """TUI: user-stop statuses → error row, not success."""
+
 from __future__ import annotations
 
 import json

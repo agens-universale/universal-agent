@@ -25,9 +25,7 @@ def test_compact_text_happy_path():
         return_value="compressed body",
     ) as mocked:
         res = run_coro(compaction.acompact_text("very long original text", ctx))
-    assert res == CompactionResult(
-        ok=True, text="compressed body", error_type=None, error_message=None
-    )
+    assert res == CompactionResult(ok=True, text="compressed body", error_type=None, error_message=None)
     assert mocked.called
 
 
@@ -122,9 +120,7 @@ def test_compact_text_uses_prompt_template_as_system():
         captured["label"] = request_label
         return "compressed"
 
-    with patch(
-        "gc_core.summarize.llm.arequest_chat_completion_text", side_effect=fake_call
-    ):
+    with patch("gc_core.summarize.llm.arequest_chat_completion_text", side_effect=fake_call):
         run_coro(compaction.acompact_text("text body", ctx))
 
     msgs = captured["messages"]

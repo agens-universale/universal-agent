@@ -1,4 +1,5 @@
 """UI-модели TUI MVP — §3 спеки. Без textual."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ class TaskSummary:
     """Строка списка задач (tui3_impl §10.1)."""
 
     thread_id: str
-    status: Optional[Status]   # None — исход не записан (легаси / прогон без чистого финиша)
+    status: Optional[Status]  # None — исход не записан (легаси / прогон без чистого финиша)
     updated_at: str
     messages_count: int
     skill_id: Optional[str]

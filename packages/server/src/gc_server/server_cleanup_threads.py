@@ -46,7 +46,9 @@ def _cleanup_threads_loop(
                 # тредов не печатал ничего — громкость была устроена наоборот.
                 logger.info(
                     "чистка тредов: удалено %d старше %d дн. из %s",
-                    stats["removed_meta"], ttl_days, threads_dir,
+                    stats["removed_meta"],
+                    ttl_days,
+                    threads_dir,
                 )
         except Exception as e:
             logger.warning("threads cleanup failed: %r", e)
@@ -120,7 +122,9 @@ def register_cleanup_threads_on_startup(
         # видеть, что именно чистится и с каким сроком.
         logger.info(
             "чистка тредов включена: каталог %s, ttl %d дн., интервал %d с",
-            threads_dir, ttl_days, interval_seconds,
+            threads_dir,
+            ttl_days,
+            interval_seconds,
         )
 
         threading.Thread(
@@ -202,6 +206,6 @@ def register_swarm_cleanup_on_startup(
         ).start()
         logger.info(
             "swarm janitor registered: interval=%ds ttl=%.1fh",
-            interval_seconds, ttl_hours,
+            interval_seconds,
+            ttl_hours,
         )
-

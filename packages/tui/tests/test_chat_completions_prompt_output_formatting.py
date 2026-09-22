@@ -1,4 +1,5 @@
 """A: Output formatting nudge — секция в системных промптах chat_completions."""
+
 import re
 
 from gc_testkit.paths import ASSETS
@@ -11,7 +12,7 @@ def _read_prompt(name: str) -> str:
 def _section(body: str, header: str) -> str:
     """Текст секции от заголовка до следующего markdown-заголовка (## или ###)."""
     start = body.index(header)
-    rest = body[start + len(header):]
+    rest = body[start + len(header) :]
     m = re.search(r"\n#{2,3} ", rest)
     return rest[: m.start()] if m else rest
 

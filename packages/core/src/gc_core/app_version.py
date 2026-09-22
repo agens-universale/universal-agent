@@ -4,6 +4,7 @@
 uv-receipt.toml сознательно НЕ используется: не содержит коммита (проверено
 живьём 2026-07-11), а direct_url.json пишет любой PEP 610-установщик.
 """
+
 from __future__ import annotations
 
 import json
@@ -74,11 +75,11 @@ DIST_NAME = PROFILE_DISTS[0]
 
 class InstallSource(NamedTuple):
     url: str
-    ref: Optional[str]      # requested_revision; None = дефолтная ветка источника
-    commit: Optional[str]   # зарезолвленный коммит установки
-    editable: bool          # dev-установка из исходников
-    dist: str = DIST_NAME   # имя установленного дистрибутива-профиля
-    subdirectory: Optional[str] = None   # PEP 610: подкаталог манифеста в репо
+    ref: Optional[str]  # requested_revision; None = дефолтная ветка источника
+    commit: Optional[str]  # зарезолвленный коммит установки
+    editable: bool  # dev-установка из исходников
+    dist: str = DIST_NAME  # имя установленного дистрибутива-профиля
+    subdirectory: Optional[str] = None  # PEP 610: подкаталог манифеста в репо
 
 
 def installed_dist() -> str:
@@ -94,6 +95,7 @@ def installed_dist() -> str:
     процессе: агент до перезапуска показывал бы профиль, которого уже нет.
     """
     from importlib import metadata
+
     for name in PROFILE_DISTS:
         try:
             metadata.distribution(name)
@@ -105,6 +107,7 @@ def installed_dist() -> str:
 
 def agent_version() -> str:
     from importlib import metadata
+
     try:
         return metadata.version(installed_dist())
     except metadata.PackageNotFoundError:
@@ -140,6 +143,7 @@ def display_version(*, long: bool = False) -> str:
 
 def _read_direct_url_text() -> Optional[str]:
     from importlib import metadata
+
     try:
         dist = metadata.distribution(installed_dist())
     except metadata.PackageNotFoundError:

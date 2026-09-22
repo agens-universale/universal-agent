@@ -1,5 +1,6 @@
 """Интерактивный визард первого запуска (презентация + оркестрация).
 IO абстрагирован через WizardIO → тестируется без реального TTY."""
+
 import getpass
 import re
 import sys
@@ -109,28 +110,26 @@ def _interpret(raw: str, models, shown) -> tuple:
         return "ask", raw
     if len(found) <= _LIST_SHOWN:
         return "view", (found, f"найдено {len(found)} из {len(models)} · * — весь каталог")
-    return "view", (found[:_LIST_SHOWN],
-                    f"показаны {_LIST_SHOWN} из {len(found)} совпадений · "
-                    f"уточните запрос · * — весь каталог")
+    return "view", (
+        found[:_LIST_SHOWN],
+        f"показаны {_LIST_SHOWN} из {len(found)} совпадений · уточните запрос · * — весь каталог",
+    )
 
 
 @dataclass
 class WizardIO:
-    reader: Callable[[str, bool], str]   # (prompt, secret) -> str
+    reader: Callable[[str, bool], str]  # (prompt, secret) -> str
     printer: Callable[[str], None]
 
 
 @dataclass(frozen=True)
 class _Field:
-    leaf: str          # ключ-якорь для config-writer
+    leaf: str  # ключ-якорь для config-writer
     hint: str
-    kind: str          # "endpoint" | "auth" | "model"
+    kind: str  # "endpoint" | "auth" | "model"
 
 
-_FIELDS = tuple(
-    _Field(fs.key, fs.hint, kind=fs.kind)
-    for fs in _of.ONBOARDING_FIELDS
-)
+_FIELDS = tuple(_Field(fs.key, fs.hint, kind=fs.kind) for fs in _of.ONBOARDING_FIELDS)
 
 
 def _collect_auth(io: WizardIO, values: dict) -> None:
@@ -146,7 +145,7 @@ def _collect_auth(io: WizardIO, values: dict) -> None:
             values["Authorization"] = header
             io.printer(f"  записано: Authorization: {mask_authorization(header)}")
     elif choice == 2:
-        values["Authorization"] = ""      # чистит сентинел → политика довольна
+        values["Authorization"] = ""  # чистит сентинел → политика довольна
         io.printer(f"  {_of.NO_AUTH_NOTE}")
     # 3 → пропуск (ничего не пишем, остаётся pending)
 
@@ -215,9 +214,7 @@ def _ask_as_is(io: WizardIO, query: str) -> tuple:
     io.printer("")
     io.printer("  таких у провайдера нет.")
     io.printer(f"  взять «{query}» как есть?")
-    raw = io.reader(
-        "  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): ", False
-    ).strip()
+    raw = io.reader("  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): ", False).strip()
     if not raw:
         return "keep", ""
     folded = raw.casefold()
@@ -234,7 +231,7 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
     Цикл тонкий: решение об вводе принимает `_interpret`, а здесь остаётся
     печать и удержание состояния показа."""
     shown, note = _view_initial(models)
-    pending = None                  # ввод, полученный ответом на «взять как есть»
+    pending = None  # ввод, полученный ответом на «взять как есть»
     while True:
         if pending is None:
             io.printer("")
@@ -242,8 +239,7 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
             if note:
                 io.printer(f"  {note}")
             io.printer("")
-            raw = io.reader(f"  > (номер 1–{len(shown)} или часть имени): ",
-                            False).strip()
+            raw = io.reader(f"  > (номер 1–{len(shown)} или часть имени): ", False).strip()
         else:
             raw, pending = pending, None
         kind, payload = _interpret(raw, models, shown)
@@ -277,9 +273,9 @@ def _fetch_models(config: dict, values: dict, fetch=None):
     несуществующий `your-backend:PORT` и ждал таймаута, чтобы сказать «список не
     получен» — при пустом адресе шаг честно говорит это сразу."""
     from gc_core.model_picker import fetch_models
+
     fetch = fetch or fetch_models
-    endpoint = onboarding.configured_endpoint(
-        _effective(values, config, "completions_url"))
+    endpoint = onboarding.configured_endpoint(_effective(values, config, "completions_url"))
     auth = _effective(values, config, "Authorization", header=True)
     if auth == onboarding.TOKEN_SENTINEL:
         auth = None
@@ -388,12 +384,13 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
             while True:
                 raw = io.reader("  > ", False).strip()
                 if not raw:
-                    break                        # Enter → пропустить (остаётся pending/текущее)
+                    break  # Enter → пропустить (остаётся pending/текущее)
                 if _valid_endpoint_url(raw):
                     values[field.leaf] = raw
                     break
-                io.printer(f"  «{raw}» не похоже на URL (нужны http(s):// и хост). "
-                           f"Введите ещё раз или Enter — пропустить.")
+                io.printer(
+                    f"  «{raw}» не похоже на URL (нужны http(s):// и хост). Введите ещё раз или Enter — пропустить."
+                )
             continue
     if review_all:
         # Уровни не входят в требования запуска (`_FIELD_CHECKS`), и удлинять ими
@@ -412,11 +409,13 @@ def _rule_header(io: WizardIO) -> None:
 def default_io() -> WizardIO:
     def reader(prompt: str, secret: bool) -> str:
         return getpass.getpass(prompt) if secret else input(prompt)
+
     return WizardIO(reader=reader, printer=lambda m: print(m, file=sys.stderr))
 
 
 def _reload_config() -> dict:
     from gc_core.config import load_config
+
     return load_config(None)
 
 
@@ -483,8 +482,9 @@ def _summary_lines(config: dict) -> list[str]:
     return lines
 
 
-def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
-        deactivate_profile: bool = False) -> bool:
+def run(
+    config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None, deactivate_profile: bool = False
+) -> bool:
     _rule_header(io)
     if deactivate_profile:
         # Тот же текст, что на экране подтверждения TUI (`_of` — общий дом), и
@@ -505,15 +505,13 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
         # ради починки, и оставить конфиг несобираемым потому, что все поля он
         # пропустил, значит не сделать ровно то, что обещано строкой выше.
         if values or deactivate_profile:
-            missing = onboarding.write_wizard_values(
-                config_path, values, deactivate_profile=deactivate_profile)
+            missing = onboarding.write_wizard_values(config_path, values, deactivate_profile=deactivate_profile)
             wrote = True
             if missing:
                 # Правило «всё или ничего» — про ПЛОСКУЮ запись; записи реестра ушли
                 # раньше отдельной транзакцией, поэтому файл уже не нетронут. Говорим
                 # о том, чего не хватает, а не о судьбе всего конфига.
-                io.printer("\n  [ошибка] не записаны поля: "
-                           f"{', '.join(missing)} — впишите их в конфиг вручную")
+                io.printer(f"\n  [ошибка] не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную")
                 refused = True
     except onboarding.PartialWriteError as exc:
         # Часть записи уже на диске — обещать нетронутый файл нельзя (то же
@@ -521,8 +519,10 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
         # `write_wizard_values` — читаем её ответ (`written`), а не выводим состав
         # из её порядка записи: догадка разъедется с писателем на первой же правке
         # порядка, и человек прочтёт про снятый профиль там, где его не снимали.
-        io.printer(f"\n  [ошибка] остальное не записано: {exc} — при этом уже: "
-                   + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written))
+        io.printer(
+            f"\n  [ошибка] остальное не записано: {exc} — при этом уже: "
+            + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written)
+        )
         refused = True
     except (ValueError, OSError) as exc:
         # OSError — штатный отказ записи (диск, права, win-лок), не невозможный
@@ -559,8 +559,7 @@ def run(config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None,
             fate = " — ваши ответы записаны, поломка мимо них осталась"
         else:
             fate = " — записывать было нечего, файл остался в прежнем виде"
-        io.printer("\n  [ошибка] вы ответили на все вопросы, но конфиг всё ещё "
-                   f"не загружается{fate}:")
+        io.printer(f"\n  [ошибка] вы ответили на все вопросы, но конфиг всё ещё не загружается{fate}:")
         io.printer(onboarding.explain_broken_config(str(config_path), exc))
         return False
     if onboarding.is_unconfigured(fresh):

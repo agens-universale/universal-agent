@@ -1,6 +1,7 @@
 """HarborBackend maps Harbor exec timeouts to ExecResult(timed_out=True) and keeps
 the output streamed before the timeout (spec 2026-09-06 harbor-exec-timeout-partial-output).
 """
+
 import asyncio
 import contextlib
 import contextvars
@@ -187,9 +188,7 @@ async def test_harbor_backend_timeout_output_exactly_at_cap_without_more_is_not_
 async def test_harbor_backend_timeout_respects_per_call_cap(loop_in_thread):
     env = StreamingEnv(TIMEOUT, chunks=[("x" * 100, "stdout")])
 
-    result = await HarborBackend(env, loop_in_thread)._aexec_impl(
-        "cmd", timeout=10, capture_max_chars=30
-    )
+    result = await HarborBackend(env, loop_in_thread)._aexec_impl("cmd", timeout=10, capture_max_chars=30)
 
     assert result.stdout == "x" * 30
     assert result.stdout_hit_capture_cap is True

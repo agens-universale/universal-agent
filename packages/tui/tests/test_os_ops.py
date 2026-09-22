@@ -1,4 +1,5 @@
 """os_ops: macOS/Linux/Windows адаптер."""
+
 from unittest.mock import MagicMock, patch
 
 from gc_tui.services import os_ops

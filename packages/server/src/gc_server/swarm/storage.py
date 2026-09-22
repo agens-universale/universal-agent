@@ -180,9 +180,7 @@ def load_swarm_messages(
     return result
 
 
-def load_swarm_stdout_stderr(
-    threads_dir: str, swarm_id: str
-) -> Tuple[List[str], List[str]]:
+def load_swarm_stdout_stderr(threads_dir: str, swarm_id: str) -> Tuple[List[str], List[str]]:
     """
     Прочитать stdout.log и stderr.log, если они есть.
     """
@@ -211,7 +209,6 @@ __all__ = [
     "load_swarm_stdout_stderr",
     "save_swarm_meta",
 ]
-
 
 
 def delete_swarm_meta(threads_dir: str, swarm_id: str) -> None:

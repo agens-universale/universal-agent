@@ -52,14 +52,14 @@ class Sleep(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        return f'''Tool name: exec_sleep
+        return f"""Tool name: exec_sleep
 Tool description: Pauses execution for the given number of seconds. Use when waiting for external processes, rate limits, or delayed availability.
 Input schema: {{"type":"object","properties":{{"seconds":{{"type":"number","description":"Sleep duration in seconds (0 to {cls.max_seconds})."}}}},"required":["seconds"],"additionalProperties":false}}
 Maximum sleep duration: {cls.max_seconds} seconds (3 minutes).
 
 Return format (JSON string):
 {{"tool":"exec_sleep","ok":true|false,"seconds":<requested>|null,"slept_seconds":<actual>|null,"error":null|{{"type":"...","message":"..."}}}}
-'''
+"""
 
     async def acall(self, seconds: float | int | None = None, **kwargs) -> str:
         """Нативный сон: ни loop, ни поток из пула не заняты.
@@ -73,7 +73,6 @@ Return format (JSON string):
             return rejection
         await asyncio.sleep(seconds)
         return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
-
 
     def _reject_bad_seconds(self, seconds: float | int | None) -> "str | None":
         """Готовый отказ, если аргумент негоден. Общий для обоих входов.

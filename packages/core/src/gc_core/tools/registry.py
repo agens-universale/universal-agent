@@ -34,9 +34,7 @@ except ModuleNotFoundError:
     from gc_core.tools.exec.simple_fetch_url import FetchUrl
 
 
-def _tool_entry(
-    tool_cls: type, config_dict: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+def _tool_entry(tool_cls: type, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     # Deep-copy: inject_tool_fields / strict schema mutate the spec in place.
     # Several tools return a shared class-level parameters dict from
     # tool_description(); without a copy the second build_tools_data() in the
@@ -120,19 +118,11 @@ def _apply_stop_tools(
     if not isinstance(stop_tools_cfg, list):
         return tools_data
 
-    stop_tools = {
-        tool_name.strip()
-        for tool_name in stop_tools_cfg
-        if isinstance(tool_name, str) and tool_name.strip()
-    }
+    stop_tools = {tool_name.strip() for tool_name in stop_tools_cfg if isinstance(tool_name, str) and tool_name.strip()}
     if not stop_tools:
         return tools_data
 
-    return {
-        tool_name: tool_data
-        for tool_name, tool_data in tools_data.items()
-        if tool_name not in stop_tools
-    }
+    return {tool_name: tool_data for tool_name, tool_data in tools_data.items() if tool_name not in stop_tools}
 
 
 def _collect_builtin_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:

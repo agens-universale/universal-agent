@@ -1,4 +1,5 @@
 """TuiApp — Textual application."""
+
 from __future__ import annotations
 
 import threading
@@ -39,8 +40,9 @@ _BOOT_FROZEN_FLAT = {
 }
 
 
-def _maybe_auto_check(config: dict, state: dict, now: float, installed_commit,
-                      *, check, record_result, on_available, on_result=None) -> None:
+def _maybe_auto_check(
+    config: dict, state: dict, now: float, installed_commit, *, check, record_result, on_available, on_result=None
+) -> None:
     """Ядро авто-проверки обновления при старте (спека D, Task 8; персист-вердикт).
 
     Два сигнала:
@@ -60,9 +62,9 @@ def _maybe_auto_check(config: dict, state: dict, now: float, installed_commit,
 
     resolved = resolved_source()
     if resolved is None:
-        return                                   # dev/неизвестный источник — обновлений нет
+        return  # dev/неизвестный источник — обновлений нет
     if update_available_from_state(state, installed_commit):
-        on_available(False)                      # персист-вердикт: строка без toast
+        on_available(False)  # персист-вердикт: строка без toast
     if not auto_check_enabled(config):
         return
     try:
@@ -70,7 +72,7 @@ def _maybe_auto_check(config: dict, state: dict, now: float, installed_commit,
     except Exception:
         result = None
     if result is None:
-        record_result(now, None, installed_commit)   # только стамп; прошлый remote сохраняется
+        record_result(now, None, installed_commit)  # только стамп; прошлый remote сохраняется
         if on_result is not None:
             on_result(CheckResult("unknown", None, "не удалось проверить"))
         return
@@ -78,11 +80,12 @@ def _maybe_auto_check(config: dict, state: dict, now: float, installed_commit,
     if on_result is not None:
         on_result(result)
     if result.status == "update":
-        on_available(True)                       # свежая находка → toast + строка
+        on_available(True)  # свежая находка → toast + строка
 
 
-def _run_auto_check_safely(config: dict, state: dict, now: float, installed_commit,
-                           *, check, record_result, on_available, on_result=None) -> None:
+def _run_auto_check_safely(
+    config: dict, state: dict, now: float, installed_commit, *, check, record_result, on_available, on_result=None
+) -> None:
     """Best-effort обёртка воркера: авто-чек обновления НИКОГДА не роняет старт.
 
     Воркер стартует при каждом запуске TUI с дефолтным `exit_on_error=True`, а
@@ -91,9 +94,16 @@ def _run_auto_check_safely(config: dict, state: dict, now: float, installed_comm
     shutdown-гонке) иначе дошло бы до Textual `_handle_exception` и уронило
     приложение — поэтому глотаем всё здесь."""
     try:
-        _maybe_auto_check(config, state, now, installed_commit,
-                          check=check, record_result=record_result,
-                          on_available=on_available, on_result=on_result)
+        _maybe_auto_check(
+            config,
+            state,
+            now,
+            installed_commit,
+            check=check,
+            record_result=record_result,
+            on_available=on_available,
+            on_result=on_result,
+        )
     except Exception:
         pass
 
@@ -125,8 +135,12 @@ class TuiApp(App):
         Binding("f3", "diff", "/diff"),
         Binding("f4", "notices", "/notices"),
         Binding("f5", "config", "/config"),
-        Binding("f6", "settings", "/settings", priority=True),  # у TextArea свой f6=select_line — без priority хоткей мёртв при фокусе в инпуте
-        Binding("f7", "buffer", "Буфер сессии", priority=True),  # TextArea f7=select_all — без priority F7 в инпуте не откроет буфер
+        Binding(
+            "f6", "settings", "/settings", priority=True
+        ),  # у TextArea свой f6=select_line — без priority хоткей мёртв при фокусе в инпуте
+        Binding(
+            "f7", "buffer", "Буфер сессии", priority=True
+        ),  # TextArea f7=select_all — без priority F7 в инпуте не откроет буфер
         Binding("ctrl+slash", "help", "Help"),
         Binding("ctrl+s", "sessions", "/sessions"),
         # priority: TextArea перехватывает Ctrl+D как delete-right.
@@ -174,16 +188,16 @@ class TuiApp(App):
         self._stream_sink = StreamSink()
         self._subagent_progress_sink = None  # QueueSubagentProgressSink; set in executor build
         self._mcp_progress = None
-        self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
-        self._mcp_status = None        # per-server status dict — для startup_notices
+        self._mcp_snapshot = None  # boot-дискавери для /mcp (сервер→статус/тулы)
+        self._mcp_status = None  # per-server status dict — для startup_notices
         self._registered_tool_names = None  # имена тулов до stop_tools — валидатор notices
-        self.active_runner = None      # AgentRunner | None
-        self._runner_stale = False   # конфиг изменился при живом run → пересборка после завершения
+        self.active_runner = None  # AgentRunner | None
+        self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
         self.last_runner_error: Optional[str] = None
         self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
-        self.last_stop_requested: bool = False   # юзер /stop по живому прогону → терминал «stopped»
-        self._onboarding_mode = None          # None | "auto" | "review"; ставит tui/__init__.py
+        self.last_stop_requested: bool = False  # юзер /stop по живому прогону → терминал «stopped»
+        self._onboarding_mode = None  # None | "auto" | "review"; ставит tui/__init__.py
         # Лестница загрузки приземлилась на ступень «без профиля» — финал мастера
         # обязан снять указатель (ставит tui/__init__.py). Один признак, а не весь
         # `RepairLoad`: приложению от лестницы нужен ровно этот ответ.
@@ -192,7 +206,7 @@ class TuiApp(App):
         # None — деградации не было). Тем же приёмом и по той же причине, что и
         # признак выше: рантайм-уведомление под мастером недостижимо.
         self._onboarding_degraded = None
-        self._config_path = None              # путь к конфигу на диске; задаётся снаружи после __init__
+        self._config_path = None  # путь к конфигу на диске; задаётся снаружи после __init__
         # Мтайм-набор активного указателя (спека §3.3): база/managed/проектный конфиг +
         # оба кандидатных пути активного профиля. Расширение прежнего одиночного
         # _config_mtime — тот же снимок, что строит load_config_ex, но снятый дёшево
@@ -210,18 +224,22 @@ class TuiApp(App):
         # по диску, и после появления тёзки «прежнее» значение уже не восстановить.
         self._profile_source: Optional[tuple] = None
         from gc_core.model_router import CircuitBreaker
+
         # Сессионный предохранитель моделей (спека §8) — владелец: сессия-тред;
         # персист/restore — persist_circuit_breaker()/load_circuit_breaker() (meta треда).
         self._circuit_breaker = CircuitBreaker()
-        self._onboarding_config_path = None   # куда писать конфиг (user_config_path)
-        self._upgrade_info = None             # upgrade_gate.UpgradeInfo | None; ставит tui/__init__.py
-        self._voice_autostart_pending = False  # спавн voice-сервиса уже пошёл, вердикт ждём фоном; ставит tui/__init__.py
+        self._onboarding_config_path = None  # куда писать конфиг (user_config_path)
+        self._upgrade_info = None  # upgrade_gate.UpgradeInfo | None; ставит tui/__init__.py
+        self._voice_autostart_pending = (
+            False  # спавн voice-сервиса уже пошёл, вердикт ждём фоном; ставит tui/__init__.py
+        )
         self._voice_autostart_failed = False  # вердикт фонового подъёма — не поднялся; ставит _on_voice_autostart_done
-        self._update_available = False        # async авто-чек нашёл новую версию (brand-строка + /notices)
-        self._update_check_result = None      # CheckResult сессии: питает глиф хаба и секцию «Обновление»
-        self._update_checking = False         # стартовый авто-чек в полёте (глиф хаба — «…»)
+        self._update_available = False  # async авто-чек нашёл новую версию (brand-строка + /notices)
+        self._update_check_result = None  # CheckResult сессии: питает глиф хаба и секцию «Обновление»
+        self._update_checking = False  # стартовый авто-чек в полёте (глиф хаба — «…»)
         from gc_tui.services.file_view import ViewPositionStore
         from gc_tui.state import TuiState
+
         self.tui_state = TuiState()
         self.view_positions = ViewPositionStore()
         # Один id на процесс TUI — для exclusive session lock (session-lock SPEC).
@@ -242,6 +260,7 @@ class TuiApp(App):
 
     def on_mount(self) -> None:
         from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
+
         set_terminal_title(format_terminal_title())
         if self._voice_autostart_pending:
             self._start_voice_autostart()
@@ -268,6 +287,7 @@ class TuiApp(App):
         иначе тост мог бы соврать «не запустился» про сервис, который просто ещё
         поднимается."""
         from gc_tui.voice_runtime.autostart import ensure_voice_service
+
         cfg = self._config
 
         def _work() -> None:
@@ -278,7 +298,7 @@ class TuiApp(App):
             try:
                 self.call_from_thread(self._on_voice_autostart_done, ok)
             except Exception:
-                pass   # приложение уже закрылось — некому показывать тост
+                pass  # приложение уже закрылось — некому показывать тост
 
         threading.Thread(target=_work, daemon=True, name="voice-autostart").start()
 
@@ -307,23 +327,23 @@ class TuiApp(App):
         installed = src.commit if src else None
 
         def _on_available(fresh: bool) -> None:
-            self._update_available = True     # постоянный сигнал: brand-строка + запись в /notices
+            self._update_available = True  # постоянный сигнал: brand-строка + запись в /notices
             if self.is_running:
                 if fresh:
-                    self.notify(_AUTO_UPDATE_NOTICE, severity="information")   # toast только при свежей находке
+                    self.notify(_AUTO_UPDATE_NOTICE, severity="information")  # toast только при свежей находке
                 # M3: главный экран, а не активный (self.screen) — иначе, если авто-чек
                 # приходит, пока сверху онбординг/PostUpdate/Settings, строка в карточке
                 # так и не появится за всю сессию.
                 scr = self._main_screen()
                 if scr is not None and hasattr(scr, "refresh_update_notice"):
-                    scr.refresh_update_notice()                # дорисовать строку в brand-блоке
+                    scr.refresh_update_notice()  # дорисовать строку в brand-блоке
 
         def _on_result(result) -> None:
-            self._update_check_result = result   # вердикт сессии: хаб настроек и секция берут его
+            self._update_check_result = result  # вердикт сессии: хаб настроек и секция берут его
             self._refresh_update_glyph()
 
         def _done() -> None:
-            self._update_checking = False        # проверка завершилась (в т.ч. по гейту/ошибке)
+            self._update_checking = False  # проверка завершилась (в т.ч. по гейту/ошибке)
             self._refresh_update_glyph()
 
         self._update_checking = True
@@ -332,7 +352,10 @@ class TuiApp(App):
         def _work() -> None:
             try:
                 _run_auto_check_safely(
-                    config, state, time.time(), installed,
+                    config,
+                    state,
+                    time.time(),
+                    installed,
                     check=check_for_update,
                     record_result=record_check_result,
                     on_available=lambda fresh: self.call_from_thread(_on_available, fresh),
@@ -342,8 +365,8 @@ class TuiApp(App):
                 try:
                     self.call_from_thread(_done)
                 except Exception:
-                    pass       # выход из приложения во время чека: event-loop уже закрыт,
-                               # а поток жив — call_from_thread бросил бы RuntimeError
+                    pass  # выход из приложения во время чека: event-loop уже закрыт,
+                    # а поток жив — call_from_thread бросил бы RuntimeError
 
         self.run_worker(_work, thread=True, name="auto-update-check")
 
@@ -356,12 +379,14 @@ class TuiApp(App):
 
     def _needs_onboarding(self) -> bool:
         from gc_core import onboarding
+
         return self._onboarding_mode == "review" or (
             self._onboarding_mode == "auto" and onboarding.is_unconfigured(self._config or {})
         )
 
     def get_default_screen(self) -> Screen:
         from gc_tui.screens.onboarding import OnboardingScreen
+
         if self._needs_onboarding():
             return OnboardingScreen(
                 config=self._config or {},
@@ -385,13 +410,16 @@ class TuiApp(App):
         if self._upgrade_info is None:
             return
         from gc_tui.screens.post_update import PostUpdateScreen
+
         if any(isinstance(s, PostUpdateScreen) for s in self.screen_stack):
             return
-        self.push_screen(PostUpdateScreen(
-            upgrade=self._upgrade_info,
-            config=self._config or {},
-            config_path=self._config_path,
-        ))
+        self.push_screen(
+            PostUpdateScreen(
+                upgrade=self._upgrade_info,
+                config=self._config or {},
+                config_path=self._config_path,
+            )
+        )
 
     def set_config_path(self, path: Optional[str]) -> None:
         """Единая точка присвоения `_config_path`: путь + снимок мтайм-набора (спека
@@ -441,6 +469,7 @@ class TuiApp(App):
         if not self._config_path:
             return {}
         from gc_core.config import profile_mtime_set
+
         try:
             return profile_mtime_set(self._config_path, self._active_profile_name_for_mtime())
         except OSError:
@@ -473,6 +502,7 @@ class TuiApp(App):
         `TypeError`/`KeyError` — дефект кода, и под видом «профиль больше не
         собирается» он жил бы до первого чтения логов."""
         from gc_core.config import load_config_ex
+
         name = self._profile_override
         if name is None:
             return load_config_ex(self._config_path)[0]
@@ -505,6 +535,7 @@ class TuiApp(App):
         from gc_core.thread_store import resolve_threads_dir
 
         from gc_tui.runtime_config import carry_over_runtime_fields
+
         cfg = self._load_base_config()
         apply_cli_overrides(cfg)
         # launch_root и прочие поля рантайма TUI в файле конфига отсутствуют: без переноса
@@ -516,7 +547,7 @@ class TuiApp(App):
         old_source = self._profile_source
         self._config = cfg
         self._threads_dir = resolve_threads_dir(cfg)
-        self._session_profile_cache = None   # база сменилась — пере-мерж под сессионный профиль устарел
+        self._session_profile_cache = None  # база сменилась — пере-мерж под сессионный профиль устарел
         self.sanitize_session_profile()
         # Снимок — ПОСЛЕ санации и ДЕЙСТВУЮЩИМ именем (`_compute_mtime_set` →
         # `_active_profile_name_for_mtime`: сессионный оверрайд, если он пережил
@@ -581,11 +612,14 @@ class TuiApp(App):
         try:
             self.reload_config()
         except Exception as exc:
-            push_runtime_notice(Notice(
-                "warning", "config_reload_failed",
-                f"config.yml не перечитан, окно осталось на прежней базе: {exc}",
-                ("config.yml",),
-            ))
+            push_runtime_notice(
+                Notice(
+                    "warning",
+                    "config_reload_failed",
+                    f"config.yml не перечитан, окно осталось на прежней базе: {exc}",
+                    ("config.yml",),
+                )
+            )
 
     def screen_config(self) -> dict:
         """Единая точка доступа к базе для ОТКРЫТИЯ экранов (/config, /mcp, /diff,
@@ -610,6 +644,7 @@ class TuiApp(App):
         сессия могла выбрать другой профиль, и тогда база — его пере-мерж
         (`_session_base_config`, закэшированный)."""
         from gc_tui.session_settings import apply_overrides
+
         cfg = dict(self._session_base_config())
         apply_overrides(cfg, self._session_overrides)
         return cfg
@@ -650,16 +685,20 @@ class TuiApp(App):
         from gc_core.config import apply_cli_overrides, load_config_ex
 
         from gc_tui.runtime_config import carry_over_runtime_fields
+
         try:
             cfg, meta = load_config_ex(self._config_path, profile_override=name)
         except Exception as exc:
             fallback = self._config or {}
             self._session_profile_cache = (key, fallback)
-            push_runtime_notice(Notice(
-                "warning", "session_profile_remerge_failed",
-                f'профиль "{name}" из сессии временно недоступен ({exc}) — используется прежняя база',
-                (),
-            ))
+            push_runtime_notice(
+                Notice(
+                    "warning",
+                    "session_profile_remerge_failed",
+                    f'профиль "{name}" из сессии временно недоступен ({exc}) — используется прежняя база',
+                    (),
+                )
+            )
             return fallback
         apply_cli_overrides(cfg)
         carry_over_runtime_fields(self._config or {}, cfg)
@@ -679,11 +718,14 @@ class TuiApp(App):
         models = cfg.get("models") or {}
         urls = sorted({str(entry.get("url")) for entry in models.values() if entry.get("url")})
         urls_text = ", ".join(urls) if urls else "—"
-        push_runtime_notice(Notice(
-            "info", "project_profile_activated",
-            f'профиль "{name}" — проектный ({ref.path}); модели: {urls_text}',
-            (str(ref.path),),
-        ))
+        push_runtime_notice(
+            Notice(
+                "info",
+                "project_profile_activated",
+                f'профиль "{name}" — проектный ({ref.path}); модели: {urls_text}',
+                (str(ref.path),),
+            )
+        )
 
     def sanitize_session_profile(self) -> None:
         """§9.4 (ветка «выбран сессией»): сессионный оверрайд профиля, ставший
@@ -712,15 +754,20 @@ class TuiApp(App):
             try:
                 self.persist_session_overrides()
             except OSError:
-                pass   # тред недоступен — в памяти уже чисто, персист догонит позже
+                pass  # тред недоступен — в памяти уже чисто, персист догонит позже
             # Причина, а не один её частный случай: «не найден» посылало искать
             # пропажу, когда файл лежит на месте и не читается (профиль в UTF-16,
             # неразбираемый YAML) — человек шёл не туда и не находил чинить что.
             # Причина самодостаточна («<путь>: …»), тот же приём, что у соседа
             # `session_profile_remerge_failed`.
-            push_runtime_notice(Notice(
-                "warning", "session_profile_stale",
-                f'профиль "{name}" из сессии снят ({exc}) — действует "{acting}"', ()))
+            push_runtime_notice(
+                Notice(
+                    "warning",
+                    "session_profile_stale",
+                    f'профиль "{name}" из сессии снят ({exc}) — действует "{acting}"',
+                    (),
+                )
+            )
             self.invalidate_runner()
 
     def probe_profile_assembly(self, name: str) -> None:
@@ -738,8 +785,8 @@ class TuiApp(App):
         (`toggles.profile_picker_options`) ставит он же. Вторая редакция правила
         разошлась бы с первой — витрина звала бы Enter туда, где Enter отказывает."""
         from gc_core.config import load_config_ex
-        load_config_ex(self._config_path, profile_override=name,
-                       apply_to_process=False)
+
+        load_config_ex(self._config_path, profile_override=name, apply_to_process=False)
 
     def switch_session_profile(self, name: str) -> None:
         """Переключить профиль сессии (спека §9.1/§9.3): применяет как обычный
@@ -771,10 +818,10 @@ class TuiApp(App):
         live = runner is not None and runner.is_running()
         self.invalidate_runner()
         if live:
-            what = (f'профиль "{name}"' if name else "отключение профиля")
-            push_runtime_notice(Notice(
-                "info", "profile_switch_deferred",
-                f"{what} применится после завершения текущей задачи", ()))
+            what = f'профиль "{name}"' if name else "отключение профиля"
+            push_runtime_notice(
+                Notice("info", "profile_switch_deferred", f"{what} применится после завершения текущей задачи", ())
+            )
 
     def _notice_profile_source_change(self, old_source: Optional[tuple]) -> None:
         """Спека §3.1: у активного профиля сменился ФАЙЛ-источник при том же имени.
@@ -801,12 +848,15 @@ class TuiApp(App):
         # (`main.py:4025`, `settings.py:2214`): своего словаря здесь не заводим.
         old_ru = "проектный" if old_kind == "project" else "глобальный"
         new_ru = "проектный" if new_kind == "project" else "глобальный"
-        push_runtime_notice(Notice(
-            "warning", "profile_source_changed",
-            f'профиль "{new_name}" теперь берётся из другого файла: '
-            f"{new_path} ({new_ru}) вместо {old_path} ({old_ru})",
-            (new_path, old_path),
-        ))
+        push_runtime_notice(
+            Notice(
+                "warning",
+                "profile_source_changed",
+                f'профиль "{new_name}" теперь берётся из другого файла: '
+                f"{new_path} ({new_ru}) вместо {old_path} ({old_ru})",
+                (new_path, old_path),
+            )
+        )
 
     def _notice_boot_frozen_diff(self, old_cfg: dict, new_cfg: dict) -> None:
         """Спека §3.2: boot-frozen-ключи разошлись между старой и новой эффективной
@@ -818,17 +868,21 @@ class TuiApp(App):
         свежесозданный `TuiApp` в тестах с частичным словарём) — это не смена
         значения пользователем, шуметь не о чем."""
         changed = [
-            dotted for dotted in BOOT_FROZEN_KEYS
+            dotted
+            for dotted in BOOT_FROZEN_KEYS
             if old_cfg.get(_BOOT_FROZEN_FLAT[dotted]) is not None
             and old_cfg.get(_BOOT_FROZEN_FLAT[dotted]) != new_cfg.get(_BOOT_FROZEN_FLAT[dotted])
         ]
         if not changed:
             return
-        push_runtime_notice(Notice(
-            "info", "boot_frozen_pending",
-            f'{", ".join(changed)} — вступит в силу со следующего запуска',
-            tuple(changed),
-        ))
+        push_runtime_notice(
+            Notice(
+                "info",
+                "boot_frozen_pending",
+                f"{', '.join(changed)} — вступит в силу со следующего запуска",
+                tuple(changed),
+            )
+        )
 
     def _notice_level_switch_deferred(self, value: str) -> None:
         """/level посреди хода (спека Task 15, симметрично `switch_session_profile`,
@@ -838,9 +892,11 @@ class TuiApp(App):
         уровне. Тот же тон и механизм, что у профиля, своё имя события."""
         runner = self.active_runner
         if runner is not None and runner.is_running():
-            push_runtime_notice(Notice(
-                "info", "level_switch_deferred",
-                f'уровень "{value}" применится после завершения текущей задачи', ()))
+            push_runtime_notice(
+                Notice(
+                    "info", "level_switch_deferred", f'уровень "{value}" применится после завершения текущей задачи', ()
+                )
+            )
 
     def _level_provider(self) -> str:
         """Активный уровень для `ModelRouter` (спека §6.4): читает сессионный слой
@@ -861,6 +917,7 @@ class TuiApp(App):
         from pathlib import Path
 
         from gc_core.config_modules.profiles import find_active_ref
+
         name = self.effective_config().get("profile") or None
         return find_active_ref(name, Path(os.getcwd()), Path(self._config_path or ""))
 
@@ -875,6 +932,7 @@ class TuiApp(App):
         на каждый вызов, а не читают executor."""
         from gc_core.config import cli_forces_legacy_model
         from gc_core.model_router import ModelRouter
+
         cfg = self.effective_config()
         return ModelRouter(
             cfg,
@@ -891,6 +949,7 @@ class TuiApp(App):
             return
         from gc_tui.services.stores.file_store import FileTaskStore
         from gc_tui.session_settings import to_breaker_meta_patch
+
         store = FileTaskStore(threads_dir=self._threads_dir, system=self._system)
         store.update_tui_meta(task_id, to_breaker_meta_patch(self._circuit_breaker.snapshot()))
 
@@ -1003,6 +1062,7 @@ class TuiApp(App):
             return
         from gc_tui.services.stores.file_store import FileTaskStore
         from gc_tui.session_settings import to_meta_patch
+
         store = FileTaskStore(threads_dir=self._threads_dir, system=self._system)
         store.update_tui_meta(task_id, to_meta_patch(self._session_overrides))
 
@@ -1072,14 +1132,14 @@ class TuiApp(App):
         сборка заморозила бы event-loop Textual. Передаём фабрику; AgentRunner
         построит executor в своём worker-потоке при первом start().
         """
-        if (self.active_runner is not None and self._runner_stale
-                and not self.active_runner.is_running()):
+        if self.active_runner is not None and self._runner_stale and not self.active_runner.is_running():
             _release_runner(self.active_runner)
             self.active_runner = None
             self._runner_stale = False
         if self.active_runner is not None:
             return self.active_runner
         from gc_tui.services.agent_runner import AgentRunner
+
         factory = self._executor_factory or self._build_real_executor
 
         # runner_ref заполняется сразу после конструктора: callback должен
@@ -1109,7 +1169,8 @@ class TuiApp(App):
             self.last_terminal_outcome = outcome
 
         self.active_runner = AgentRunner(
-            executor_factory=factory, on_error=_on_runner_error,
+            executor_factory=factory,
+            on_error=_on_runner_error,
             on_complete=_on_runner_complete,
         )
         runner_ref.append(self.active_runner)
@@ -1123,20 +1184,24 @@ class TuiApp(App):
         from gc_core.run_context import acreate_run_context
 
         from gc_tui.services.mcp_progress import McpProgress
+
         cfg = self.effective_config()
         cfg["console_trace"] = False
         from gc_tui.services.prompt_assets import tui_special_instructions_path
+
         cfg["chat_completions_special_instructions_path"] = tui_special_instructions_path()
         # TUI adaptive bounce: сигнал в общий run_agent (только TUI ставит его).
         # CLI/server/swarm не ставят → строгий контракт. Управляется tui.text_answer_mode.
         cfg["text_answer_mode"] = cfg.get("tui_text_answer_mode", "judge")
         from gc_tui.toggles import apply_finish_gate_mode
-        apply_finish_gate_mode(cfg)   # /gate: off глушит судью только в TUI (спека §3)
+
+        apply_finish_gate_mode(cfg)  # /gate: off глушит судью только в TUI (спека §3)
         auth = build_auth_connector(cfg)
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
         self._mcp_progress = progress
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
+
         self._stream_pump = StreamPump(
             self._stream_sink,
             signal=lambda: self.call_from_thread(self._stream_signal),
@@ -1166,7 +1231,9 @@ class TuiApp(App):
 
             try:
                 return await acreate_run_context(
-                    cfg, auth_connector=auth, on_progress=progress.update,
+                    cfg,
+                    auth_connector=auth,
+                    on_progress=progress.update,
                     on_stream_delta=self._stream_pump.on_delta,
                     is_tui=True,
                     level_provider=self._level_provider,
@@ -1184,15 +1251,18 @@ class TuiApp(App):
         ctx = asyncio.run(_abuild_ctx())
         # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
         from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
+
         _attach_diff(ctx, cfg)
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.tools.subagents.progress import QueueSubagentProgressSink
+
         self._subagent_progress_sink = QueueSubagentProgressSink()
         ctx.subagent_progress_sink = self._subagent_progress_sink
         # Снапшот MCP «сервер→статус/тулы» app-уровнево — чтобы /mcp показывал
         # результат boot-дискавери сразу, не дожидаясь первого сообщения.
         from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
+
         self._mcp_snapshot = build_mcp_tools_snapshot(cfg, ctx.tools_data, ctx.mcp_status)
         self._mcp_status = ctx.mcp_status
         self._registered_tool_names = getattr(ctx, "registered_tool_names", None)
@@ -1222,6 +1292,7 @@ class TuiApp(App):
         Цель — базовый TraceScreen (не top-modal). Sync ack через return
         ``call_from_thread``: без mounted нельзя звать wait() (I2).
         """
+
         def _show() -> bool:
             screen = self._main_screen()
             if screen is None:
@@ -1276,8 +1347,7 @@ class TuiApp(App):
         Без ведущего ↑: NoticesScreen._notice_text сам подставляет глиф уровня (ℹ)."""
         if not self._update_available:
             return []
-        return [Notice("info", "update_available",
-                       "доступна новая версия · /settings → Обновление")]
+        return [Notice("info", "update_available", "доступна новая версия · /settings → Обновление")]
 
     def collect_notices(self) -> List[Notice]:
         """Стартовые + runtime-уведомления (эфемерные, не сбрасываются при просмотре)."""
@@ -1306,6 +1376,7 @@ class TuiApp(App):
         """config/diff открываются с главного экрана И с экрана уведомлений. Сами
         config/diff/справка — конечные: с них только F1-справка и Esc назад."""
         from gc_tui.screens.notices import NoticesScreen
+
         return isinstance(self.screen, (TraceScreen, NoticesScreen))
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
@@ -1335,12 +1406,14 @@ class TuiApp(App):
             return action in ("back", "interrupt", "focus_next", "focus_previous")
         if action == "diff":
             from gc_tui.screens.sessions import SessionsScreen
+
             # На /sessions Ctrl+D — массовое удаление; action_diff это учитывает.
             return self._can_open_tool() or isinstance(self.screen, SessionsScreen)
         return True
 
     def action_help(self) -> None:
         from gc_tui.screens.help import HelpScreen
+
         # Справка доступна с любого экрана, КРОМЕ самой справки (без help-на-help).
         if isinstance(self.screen, HelpScreen):
             return
@@ -1353,9 +1426,13 @@ class TuiApp(App):
             self.notify("threads_dir не задан", severity="warning")
             return
         from gc_tui.screens.sessions import SessionsScreen
-        self.push_screen(SessionsScreen(
-            threads_dir=self._threads_dir, system=self._system,
-        ))
+
+        self.push_screen(
+            SessionsScreen(
+                threads_dir=self._threads_dir,
+                system=self._system,
+            )
+        )
 
     def action_config(self) -> None:
         main = self._main_screen()
@@ -1390,6 +1467,7 @@ class TuiApp(App):
 
     def action_notices(self) -> None:
         from gc_tui.screens.notices import NoticesScreen
+
         if isinstance(self.screen, NoticesScreen):
             return
         self.push_screen(NoticesScreen())

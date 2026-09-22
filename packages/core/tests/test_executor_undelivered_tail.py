@@ -11,6 +11,7 @@
 `acreate_run_context` и `AgentExecutor.arun`, подменены только цикл агента и
 снос MCP (двойник кладёт сообщение ровно в окно сноса).
 """
+
 import importlib
 import types
 
@@ -71,11 +72,18 @@ def test_tail_becomes_a_turn_with_the_same_ids_and_display_fields():
     """Из хвоста собирается ход с теми же полями, что у обычного запроса."""
     from gc_core.agent_executor import undelivered_as_arun_args
 
-    texts, extra = undelivered_as_arun_args([
-        {"role": "user", "content": "текст", "id": "m_1"},
-        {"role": "user", "content": "обёртка навыка", "id": "m_2",
-         "display_content": "чистый текст", "skill_loaded": "review"},
-    ])
+    texts, extra = undelivered_as_arun_args(
+        [
+            {"role": "user", "content": "текст", "id": "m_1"},
+            {
+                "role": "user",
+                "content": "обёртка навыка",
+                "id": "m_2",
+                "display_content": "чистый текст",
+                "skill_loaded": "review",
+            },
+        ]
+    )
 
     assert texts == ["текст", "обёртка навыка"]
     assert extra == {

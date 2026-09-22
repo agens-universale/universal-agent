@@ -9,11 +9,19 @@ def clear_gc_env(monkeypatch):
     """Очистить env-переменные реестра для гермитичности тестов."""
     for key in (
         "GC_HOME",
-        "GC_STATE_DIR", "GC_CONFIG_DIR", "GC_CACHE_DIR", "GC_DATA_DIR",
-        "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+        "GC_STATE_DIR",
+        "GC_CONFIG_DIR",
+        "GC_CACHE_DIR",
+        "GC_DATA_DIR",
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
         "MCP_DEBUG",
         "SERVER_CONFIG_PATH",
-        "SWARM_AGENTMD_PATH", "SWARM_THREADS_DIR", "SWARM_SKILLS_DIR",
+        "SWARM_AGENTMD_PATH",
+        "SWARM_THREADS_DIR",
+        "SWARM_SKILLS_DIR",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -68,11 +76,21 @@ def test_mcp_debug_default_false(clear_gc_env):
     assert e.mcp_debug is False
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("1", True), ("true", True), ("TRUE", True), ("yes", True),
-    ("y", True), ("on", True),
-    ("0", False), ("false", False), ("", False), ("garbage", False),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("TRUE", True),
+        ("yes", True),
+        ("y", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+        ("garbage", False),
+    ],
+)
 def test_mcp_debug_truthy_strings(clear_gc_env, monkeypatch, raw, expected):
     monkeypatch.setenv("MCP_DEBUG", raw)
     e = EnvVars()
@@ -221,9 +239,7 @@ def test_gc_paths_gc_home_collapses_all(clear_gc_env, monkeypatch, tmp_path):
     assert paths["data"] == tmp_path
 
 
-def test_gc_paths_pointed_state_dir_overrides_gc_home(
-    clear_gc_env, monkeypatch, tmp_path
-):
+def test_gc_paths_pointed_state_dir_overrides_gc_home(clear_gc_env, monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "linux")
     custom_state = tmp_path / "state"
     _isolate_env(monkeypatch, gc_home=tmp_path / "home", gc_state_dir=custom_state)
@@ -245,9 +261,7 @@ def test_effective_config_dir_default_when_usable(clear_gc_env, monkeypatch, tmp
     assert effective_config_dir() == tmp_path / ".config" / "gc"
 
 
-def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(
-    clear_gc_env, monkeypatch, tmp_path
-):
+def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(clear_gc_env, monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     _isolate_env(monkeypatch)
@@ -256,9 +270,7 @@ def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(
     assert effective_config_dir() == tmp_path / ".gc"
 
 
-def test_effective_config_dir_respects_gc_home_no_fallback(
-    clear_gc_env, monkeypatch, tmp_path
-):
+def test_effective_config_dir_respects_gc_home_no_fallback(clear_gc_env, monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "linux")
     _isolate_env(monkeypatch, gc_home=tmp_path / "home")
     # явный GC_HOME — фоллбэка нет, даже если каталог «нельзя создать»

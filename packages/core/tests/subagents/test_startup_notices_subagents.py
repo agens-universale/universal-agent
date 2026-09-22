@@ -3,6 +3,7 @@
 Молча пропущенный файл — та же беда, что `stop_tools` с опечаткой: оператор
 что-то написал, оно не сработало, и в логе он это не увидит.
 """
+
 from gc_core.startup_notices import collect_startup_notices
 
 
@@ -81,9 +82,9 @@ class TestEachProblemSurfaces:
         assert "subagents_dir_missing" in _codes(cfg)
 
     def test_required_tools_ban_ignored(self, tmp_path):
-        _write(tmp_path, "a.md",
-               "---\nname: subagent_alpha\ndescription: Альфа.\n"
-               "stop_tools: [turn_finish]\n---\nРоль.\n")
+        _write(
+            tmp_path, "a.md", "---\nname: subagent_alpha\ndescription: Альфа.\nstop_tools: [turn_finish]\n---\nРоль.\n"
+        )
         msg = _msg({"subagents_dir": str(tmp_path)}, "subagent_required_tools_kept")
         assert "turn_finish" in msg
 
@@ -117,12 +118,8 @@ class TestResilience:
         def _boom(*_a, **_kw):
             raise RuntimeError("дискавери сломался")
 
-        monkeypatch.setattr(
-            "gc_core.tools.subagents.registry.resolve_subagent_definitions", _boom
-        )
-        assert mod.collect_startup_notices(
-            {"subagents_dir": str(tmp_path)}, set(), None, is_tui=True
-        ) == []
+        monkeypatch.setattr("gc_core.tools.subagents.registry.resolve_subagent_definitions", _boom)
+        assert mod.collect_startup_notices({"subagents_dir": str(tmp_path)}, set(), None, is_tui=True) == []
 
     def test_discovery_is_memoized_not_repeated(self, tmp_path):
         # Коллектор зовёт дискавери на старте; повтор не должен читать диск снова.

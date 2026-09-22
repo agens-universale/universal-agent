@@ -61,8 +61,7 @@ def require_state_schema_version(payload: Mapping[str, Any], *, context: str) ->
     version = payload.get("state_schema_version")
     if version != STATE_SCHEMA_VERSION:
         raise StateSchemaError(
-            f"Unsupported {context}: state_schema_version={version!r}, "
-            f"expected {STATE_SCHEMA_VERSION!r}."
+            f"Unsupported {context}: state_schema_version={version!r}, expected {STATE_SCHEMA_VERSION!r}."
         )
 
 

@@ -14,6 +14,7 @@
 Тест сторожит именно это свойство, а не форму реализации: важно, на каком
 потоке оказалось тело хука, а не какими словами оно написано.
 """
+
 import asyncio
 import inspect
 import threading
@@ -36,9 +37,7 @@ async def test_async_hook_runs_on_the_loop_thread():
         seen.append(_thread_name())
 
     await _acall_blocking_hook(ahook)
-    assert seen == [loop_thread], (
-        f"корутинный хук уехал в поток {seen} вместо loop-потока {loop_thread}"
-    )
+    assert seen == [loop_thread], f"корутинный хук уехал в поток {seen} вместо loop-потока {loop_thread}"
 
 
 @pytest.mark.asyncio
@@ -99,10 +98,7 @@ def test_coordinator_hooks_are_coroutines():
     missing = [n for n in expected if not hasattr(RunSummaryCoordinator, n)]
     assert not missing, f"нет async-двойников: {missing}"
 
-    not_async = [
-        n for n in expected
-        if not inspect.iscoroutinefunction(getattr(RunSummaryCoordinator, n))
-    ]
+    not_async = [n for n in expected if not inspect.iscoroutinefunction(getattr(RunSummaryCoordinator, n))]
     assert not not_async, f"объявлены, но не корутинные: {not_async}"
 
 
@@ -123,9 +119,9 @@ def test_no_sync_twins_left():
         "turn_end_compact_if_needed",
     ):
         assert not hasattr(RunSummaryCoordinator, name), f"вернулся синхронный {name}"
-        assert inspect.iscoroutinefunction(
-            getattr(RunSummaryCoordinator, "a" + name)
-        ), f"a{name} перестал быть корутинным"
+        assert inspect.iscoroutinefunction(getattr(RunSummaryCoordinator, "a" + name)), (
+            f"a{name} перестал быть корутинным"
+        )
 
 
 def test_loop_receives_coroutine_hooks():
@@ -166,6 +162,5 @@ def test_loop_receives_coroutine_hooks():
 
     sync_names = {arg: attr for arg, attr in seen.items() if not attr.startswith("a")}
     assert not sync_names, (
-        f"в цикл уезжают синхронные хуки {sync_names} — компакция снова займёт "
-        f"поток из пула; нужны корутинные двойники"
+        f"в цикл уезжают синхронные хуки {sync_names} — компакция снова займёт поток из пула; нужны корутинные двойники"
     )

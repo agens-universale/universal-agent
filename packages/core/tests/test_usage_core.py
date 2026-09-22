@@ -15,6 +15,7 @@ from gc_core.usage.report import format_money, format_tokens, render_cost_report
 
 # ---------------- normalize ----------------
 
+
 def test_normalize_chat_completions_shape():
     s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 20})
     assert (s.input, s.output, s.cached) == (100, 20, 0)
@@ -46,8 +47,7 @@ def test_normalize_partial_fills_zero():
 
 def test_normalize_cached_openai_style():
     # RouterAI/OpenAI: prompt_tokens_details.cached_tokens
-    u = {"prompt_tokens": 14722, "completion_tokens": 50,
-         "prompt_tokens_details": {"cached_tokens": 14464}}
+    u = {"prompt_tokens": 14722, "completion_tokens": 50, "prompt_tokens_details": {"cached_tokens": 14464}}
     s = normalize_usage(u)
     assert (s.input, s.output, s.cached) == (14722, 50, 14464)
 
@@ -99,8 +99,7 @@ def test_normalize_rejects_broken_cost():
 
 def test_normalize_byok_is_not_billed():
     # При BYOK неизвестно, комиссия в cost или полная цена — факту не доверяем.
-    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10,
-                         "cost": 0.0058, "is_byok": True})
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.0058, "is_byok": True})
     assert s.billed is False
     assert s.cost is None
 
@@ -108,8 +107,7 @@ def test_normalize_byok_is_not_billed():
 def test_normalize_byok_string_true_is_not_billed():
     # Провайдер может прислать is_byok строкой ("true"), а не bool — guard должен
     # быть устойчив к обеим формам.
-    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10,
-                         "cost": 0.0058, "is_byok": "true"})
+    s = normalize_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.0058, "is_byok": "true"})
     assert s.billed is False
     assert s.cost is None
 
@@ -120,6 +118,7 @@ def test_normalize_indexing_still_works():
 
 
 # ---------------- account ----------------
+
 
 def test_account_add_and_totals():
     acc = UsageAccount()
@@ -164,7 +163,7 @@ def test_account_meta_roundtrip():
 def test_add_records_billed_shelf():
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.5, billed=True, currency="$")
-    acc.add(CATEGORY_MAIN, 2000, 200)          # без цены
+    acc.add(CATEGORY_MAIN, 2000, 200)  # без цены
     b = acc.by_category[CATEGORY_MAIN]
     assert b["calls"] == 2
     assert b["billed_calls"] == 1
@@ -225,11 +224,19 @@ def test_old_meta_without_new_fields_reads_as_unbilled():
 
 def test_legacy_meta_cost_reads_as_unknown_currency():
     # meta, записанные версией без валюты: голое число ложится в «неизвестна».
-    old = {"by_category": {"main": {
-        "input": 1000, "output": 100, "calls": 1,
-        "billed_calls": 1, "billed_input": 1000, "billed_output": 100,
-        "cost": 0.75,
-    }}}
+    old = {
+        "by_category": {
+            "main": {
+                "input": 1000,
+                "output": 100,
+                "calls": 1,
+                "billed_calls": 1,
+                "billed_input": 1000,
+                "billed_output": 100,
+                "cost": 0.75,
+            }
+        }
+    }
     acc = UsageAccount.from_meta(old)
     assert acc.by_category["main"][MONEY_FIELD] == {LEGACY_CURRENCY: 0.75}
 
@@ -281,7 +288,7 @@ def test_delta_epsilon_does_not_create_category():
     base = UsageAccount()
     base.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.1 + 0.2, billed=True, currency="$")
     now = UsageAccount.from_meta(base.to_meta())
-    now.by_category[CATEGORY_MAIN][MONEY_FIELD]["$"] = 0.3   # ноль с точностью до эпсилон
+    now.by_category[CATEGORY_MAIN][MONEY_FIELD]["$"] = 0.3  # ноль с точностью до эпсилон
     assert now.delta_from(base).is_empty()
 
 
@@ -323,6 +330,7 @@ def test_label_to_category_subagent_prefix():
 
 
 # ---------------- context ----------------
+
 
 def test_usage_scope_records_to_account():
     acc = UsageAccount()
@@ -458,10 +466,8 @@ def test_compute_cost_multi_currency():
     assert "$" in r_usd.by_currency
 
 
-_PRICING_RUB = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
-                "input": 100, "output": 200}
-_PRICING_OFF = {"enabled": False, "currency": "₽", "per_tokens": 1_000_000,
-                "input": 100, "output": 200}
+_PRICING_RUB = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000, "input": 100, "output": 200}
+_PRICING_OFF = {"enabled": False, "currency": "₽", "per_tokens": 1_000_000, "input": 100, "output": 200}
 _PRICING_NO_RATES = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000}
 
 
@@ -481,18 +487,18 @@ def test_unbilled_category_uses_tariff():
     r = compute_cost(acc, _PRICING_RUB, "m")
     cat = r.categories[0]
     assert cat.cost_source == "tariff"
-    assert cat.parts == [CostPart(120.0, "₽", "tariff")]   # 1M*100 + 0.1M*200
+    assert cat.parts == [CostPart(120.0, "₽", "tariff")]  # 1M*100 + 0.1M*200
 
 
 def test_mixed_category_splits_fact_and_tariff():
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
-    acc.add(CATEGORY_MAIN, 500_000, 50_000)                # без цены
+    acc.add(CATEGORY_MAIN, 500_000, 50_000)  # без цены
     r = compute_cost(acc, _PRICING_RUB, "m")
     cat = r.categories[0]
     assert cat.cost_source == "mixed"
     assert CostPart(7.5, "$", "provider") in cat.parts
-    assert CostPart(60.0, "₽", "tariff") in cat.parts      # 0.5M*100 + 0.05M*200
+    assert CostPart(60.0, "₽", "tariff") in cat.parts  # 0.5M*100 + 0.05M*200
     assert r.multi_currency is True
 
 
@@ -614,8 +620,12 @@ def test_ru_endpoint_and_rub_tariff_collapse_into_one_currency():
 
 def test_ru_endpoint_with_usd_tariff_still_splits():
     # Если тариф задан в долларах, валюты по-прежнему две — это не регресс.
-    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
-               "models": {"m": {"input": 100, "output": 200, "currency": "$"}}}
+    pricing = {
+        "enabled": True,
+        "currency": "₽",
+        "per_tokens": 1_000_000,
+        "models": {"m": {"input": 100, "output": 200, "currency": "$"}},
+    }
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)
     acc.add(CATEGORY_MAIN, 500_000, 50_000)
@@ -652,6 +662,7 @@ def test_ru_endpoint_report_has_single_total_without_subtotals():
 
 
 # ---------------- report formatting ----------------
+
 
 def test_format_tokens():
     assert format_tokens(500) == "500"
@@ -706,7 +717,7 @@ def test_report_category_without_any_price_shows_dash_not_dash_question():
     # «?» переезжает на строку total и в легенду («—?» читается странно).
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=7.5, billed=True)  # факт
-    acc.add(CATEGORY_FINISH_GATE, 1000, 100)                              # без цены вовсе
+    acc.add(CATEGORY_FINISH_GATE, 1000, 100)  # без цены вовсе
     text = render_cost_report(compute_cost(acc, _PRICING_NO_RATES, "m"), model_name="m")
     lines = {line.split()[0]: line for line in text.splitlines() if line.strip()}
     assert lines["finish_gate"].rstrip().endswith("—")
@@ -723,19 +734,39 @@ def test_subtotal_label_reflects_sources_not_currency():
 
     report = CostReport(
         categories=[
-            CategoryCost(category="main", input=1_000_000, output=100_000, cached=0,
-                         calls=1, missing_usage_calls=0,
-                         parts=[CostPart(7.5, "$", "provider")]),
-            CategoryCost(category="other", input=500_000, output=50_000, cached=0,
-                         calls=1, missing_usage_calls=0,
-                         parts=[CostPart(60.0, "$", "tariff")]),
-            CategoryCost(category="finish_gate", input=200_000, output=20_000, cached=0,
-                         calls=1, missing_usage_calls=0,
-                         parts=[CostPart(24.0, "₽", "tariff")]),
+            CategoryCost(
+                category="main",
+                input=1_000_000,
+                output=100_000,
+                cached=0,
+                calls=1,
+                missing_usage_calls=0,
+                parts=[CostPart(7.5, "$", "provider")],
+            ),
+            CategoryCost(
+                category="other",
+                input=500_000,
+                output=50_000,
+                cached=0,
+                calls=1,
+                missing_usage_calls=0,
+                parts=[CostPart(60.0, "$", "tariff")],
+            ),
+            CategoryCost(
+                category="finish_gate",
+                input=200_000,
+                output=20_000,
+                cached=0,
+                calls=1,
+                missing_usage_calls=0,
+                parts=[CostPart(24.0, "₽", "tariff")],
+            ),
         ],
         by_currency={"$": 67.5, "₽": 24.0},
-        total_input=1_700_000, total_output=170_000,
-        total_calls=3, has_cost=True,
+        total_input=1_700_000,
+        total_output=170_000,
+        total_calls=3,
+        has_cost=True,
     )
     text = render_cost_report(report, model_name="m")
     assert "67.5 $ (факт + расчёт)" in text
@@ -755,11 +786,11 @@ def test_report_joins_currencies_with_plus():
     # «+» в ячейке категории — соединитель слагаемых, а не признак неполноты.
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 1_000_000, 100_000, 0, cost=2.0, billed=True, currency="$")
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)      # остаток по рублёвому тарифу
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)  # остаток по рублёвому тарифу
     text = render_cost_report(compute_cost(acc, _PRICING_RUB, "m"), model_name="m")
     main = next(line for line in text.splitlines() if line.startswith("main"))
     assert "2.00 $+~" in main
-    assert "?" not in text                          # неполноты здесь нет
+    assert "?" not in text  # неполноты здесь нет
 
 
 def test_render_with_pricing_and_missing():

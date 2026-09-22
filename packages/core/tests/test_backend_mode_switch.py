@@ -35,9 +35,7 @@ def _restore_tools_and_dependents() -> None:
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+        proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
 
 
 def _stub_tools_modules() -> None:
@@ -106,7 +104,15 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
         completions_calls = []
 
         def _mock_responses_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None, config_proxy=None,
+            data,
+            headers,
+            url,
+            verify=True,
+            cert=None,
+            use_retry=True,
+            logger=None,
+            timeout=None,
+            config_proxy=None,
         ):
             responses_calls.append(
                 {
@@ -138,7 +144,15 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
             )
 
         def _mock_completions_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None, config_proxy=None,
+            data,
+            headers,
+            url,
+            verify=True,
+            cert=None,
+            use_retry=True,
+            logger=None,
+            timeout=None,
+            config_proxy=None,
         ):
             completions_calls.append(
                 {
@@ -225,12 +239,13 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                         logger=kwargs.get("logger"),
                     ), payload
 
-                with patch.object(
-                    processing_module, "arequest_backend", side_effect=_mock_responses_backend
-                ), patch.object(
-                    processing_module,
-                    "arequest_chat_completions_with_policy",
-                    side_effect=_mock_chat_completions_policy,
+                with (
+                    patch.object(processing_module, "arequest_backend", side_effect=_mock_responses_backend),
+                    patch.object(
+                        processing_module,
+                        "arequest_chat_completions_with_policy",
+                        side_effect=_mock_chat_completions_policy,
+                    ),
                 ):
                     executor = agent_executor_module.AgentExecutor(ctx)
                     thread_id = "switch_mode_1"
@@ -254,9 +269,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
 
                     threads_dir = resolve_threads_dir(config_dict)
                     meta_after_chat = load_thread_meta(threads_dir, "cli", thread_id)
-                    self.assertEqual(
-                        meta_after_chat.get("backend_api_mode"), "chat_completions"
-                    )
+                    self.assertEqual(meta_after_chat.get("backend_api_mode"), "chat_completions")
                     self.assertEqual(
                         meta_after_chat.get("chat_completions_system_prompt_rendered"),
                         "SYSTEM PROMPT FOR CHAT COMPLETIONS",

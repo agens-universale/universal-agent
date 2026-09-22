@@ -112,9 +112,7 @@ def _registry_entry(
     cfg = server_cfg if isinstance(server_cfg, dict) else {}
     transport = cfg.get("transport") or ""
     url = "" if transport in ("stdio", "stream_stdio") else (cfg.get("url") or "")
-    server_display_name = (
-        cfg.get("server-name") or cfg.get("serever-name") or server_name
-    )
+    server_display_name = cfg.get("server-name") or cfg.get("serever-name") or server_name
     server_description = cfg.get("description") or ""
     normalized = _normalize_tool(
         server_name,
@@ -127,19 +125,13 @@ def _registry_entry(
     return {"tool": normalized["_spec"], "metadata": normalized["_metadata"]}
 
 
-def _apply_tools_whitelist(
-    server_name: str, server_cfg: Dict[str, Any], tools_raw: list
-) -> list:
+def _apply_tools_whitelist(server_name: str, server_cfg: Dict[str, Any], tools_raw: list) -> list:
     """Отфильтровать tools_raw по mcp.servers.<name>.whitelist (если enabled)."""
     wl = server_cfg.get("whitelist") if isinstance(server_cfg, dict) else None
     if not isinstance(wl, dict) or not wl.get("enabled"):
         return tools_raw
-    allowed = {
-        str(t).strip() for t in (wl.get("tools") or []) if str(t).strip()
-    }
-    present = {
-        str(t.get("name")) for t in tools_raw if isinstance(t, dict)
-    }
+    allowed = {str(t).strip() for t in (wl.get("tools") or []) if str(t).strip()}
+    present = {str(t.get("name")) for t in tools_raw if isinstance(t, dict)}
     missing = sorted(allowed - present)
     if missing:
         logger.warning(
@@ -147,11 +139,7 @@ def _apply_tools_whitelist(
             server_name,
             ", ".join(missing),
         )
-    filtered = [
-        t
-        for t in tools_raw
-        if isinstance(t, dict) and str(t.get("name")) in allowed
-    ]
+    filtered = [t for t in tools_raw if isinstance(t, dict) and str(t.get("name")) in allowed]
     if len(filtered) != len(tools_raw):
         logger.info(
             "[MCP] %s: %d of %d tools whitelisted",
@@ -177,13 +165,9 @@ async def _afetch_tools_sdk(
     в отдельном потоке. Здесь — асинхронные точки напрямую.
     """
     if effective_transport == "stream_sse":
-        return await alist_tools_stream_sse(
-            url=url, server_cfg=server_cfg, token=token, timeout=timeout
-        )
+        return await alist_tools_stream_sse(url=url, server_cfg=server_cfg, token=token, timeout=timeout)
     if effective_transport == "stream_http":
-        return await alist_tools_stream_http(
-            url=url, server_cfg=server_cfg, token=token, timeout=timeout
-        )
+        return await alist_tools_stream_http(url=url, server_cfg=server_cfg, token=token, timeout=timeout)
     return await alist_tools_stream_stdio(server_cfg=server_cfg, timeout=timeout)
 
 
@@ -218,9 +202,7 @@ async def _adiscover_one(
 
         url = server_cfg.get("url")
         transport = server_cfg.get("transport")
-        if transport not in (
-            "http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"
-        ):
+        if transport not in ("http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"):
             raise ValueError(f"неподдерживаемый transport: {transport!r}")
         if transport in ("stdio", "stream_stdio"):
             if not server_cfg.get("command"):
@@ -258,9 +240,7 @@ async def _adiscover_one(
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
     except Exception as exc:
-        reason = _humanize_discovery_error(
-            exc, server_cfg if isinstance(server_cfg, dict) else {}
-        )
+        reason = _humanize_discovery_error(exc, server_cfg if isinstance(server_cfg, dict) else {})
         logger.warning("MCP discovery failed for %s: %s", server_name, exc)
         print(f"[MCP] {server_name}: недоступен — {reason} (пропущен)")
         return [], {
@@ -344,9 +324,7 @@ async def _abuild_tools_registry(
     if not items:
         return all_tools, status_map
 
-    results = await _adiscover_all(
-        items, timeout=discovery_timeout_sec, on_progress=on_progress, os_backend=os_backend
-    )
+    results = await _adiscover_all(items, timeout=discovery_timeout_sec, on_progress=on_progress, os_backend=os_backend)
 
     for name, cfg in items:
         if name in results:
@@ -360,9 +338,7 @@ async def _abuild_tools_registry(
             base = tool.get("name")
             if not base:
                 continue
-            all_tools[f"mcp_{name}_{base}"] = _registry_entry(
-                name, server_cfg=cfg, tool=tool
-            )
+            all_tools[f"mcp_{name}_{base}"] = _registry_entry(name, server_cfg=cfg, tool=tool)
     return all_tools, status_map
 
 
@@ -455,12 +431,7 @@ class ToolsCache:
             return None
 
     def _is_valid(self, cache_key: Optional[str], ttl: int) -> bool:
-        if (
-            cache_key is None
-            or self._data is None
-            or self._fetched_at is None
-            or self._cache_key != cache_key
-        ):
+        if cache_key is None or self._data is None or self._fetched_at is None or self._cache_key != cache_key:
             return False
 
         return (time.time() - self._fetched_at) < ttl

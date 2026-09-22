@@ -5,6 +5,7 @@
 от задачи (bounce → подтолкнуть к тулам). Переиспользует существующего finish-gate-
 судью, подавая текст как «отчёт»; контекст (intent + log + trace_digest) судья
 собирает сам. Сбой судьи → bounce (строгий fallback)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,12 +27,8 @@ class TextAnswerDecision:
 async def ajudge_text_answer(ctx: Any, state: Any, assistant_text: str) -> ValidationResult | None:
     """Результат валидатора для текст-ответа; None → ошибка (→ generic bounce)."""
     try:
-        current = records_to_jsonl_lines(
-            deserialize_list(getattr(state, "current_user_intent", []) or [])
-        )
-        context_log = records_to_jsonl_lines(
-            deserialize_list(getattr(state, "user_intent_log", []) or [])
-        )
+        current = records_to_jsonl_lines(deserialize_list(getattr(state, "current_user_intent", []) or []))
+        context_log = records_to_jsonl_lines(deserialize_list(getattr(state, "user_intent_log", []) or []))
         return await avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
@@ -68,7 +65,3 @@ async def ashould_return_text_answer(ctx: Any, state: Any, assistant_text: str) 
             return TextAnswerDecision(True)
         return TextAnswerDecision(False, build_text_answer_reject_feedback(result))
     return TextAnswerDecision(False)
-
-
-
-

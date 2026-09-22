@@ -56,14 +56,10 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
             "The trace already closes the request; fix the finish-turn tool arguments "
             "without repeating steps that already succeeded in the trace."
         )
-        lines.extend(
-            _bullet_block("Report does not match trace or intent:", result.report_mismatches)
-        )
+        lines.extend(_bullet_block("Report does not match trace or intent:", result.report_mismatches))
         if not result.report_mismatches:
             lines.extend(_bullet_block(_CONFLICTS_TITLE, result.conflicts))
-        lines.append(
-            "Align solution_type, task_report, handoff, and comment with what is visible in the trace."
-        )
+        lines.append("Align solution_type, task_report, handoff, and comment with what is visible in the trace.")
         return "\n".join(lines)
 
     if action == "continue_work":
@@ -71,9 +67,7 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
             lines.append(QUESTION_CONTINUE_HINT)
             lines.extend(_trace_gap_lines(result))
             return "\n".join(lines)
-        lines.append(
-            "The trace does not yet support current_user_requests; more work is required."
-        )
+        lines.append("The trace does not yet support current_user_requests; more work is required.")
         lines.extend(_trace_gap_lines(result))
         lines.append(
             "Take the missing step (use the appropriate tool), then finish the turn again "
@@ -87,17 +81,13 @@ def build_finish_gate_feedback(result: ValidationResult) -> str:
             lines.extend(_trace_gap_lines(result))
             lines.extend(_report_mismatch_lines(result))
             return "\n".join(lines)
-        lines.append(
-            "Close trace gaps first, then align the finish-turn report with the trace."
-        )
+        lines.append("Close trace gaps first, then align the finish-turn report with the trace.")
         lines.extend(_trace_gap_lines(result))
         lines.extend(_report_mismatch_lines(result))
         lines.append("Do not repeat steps that already appear successful in the trace.")
         return "\n".join(lines)
 
-    lines.append(
-        f"Unknown action={action!r}; fix the finish-turn report or continue working."
-    )
+    lines.append(f"Unknown action={action!r}; fix the finish-turn report or continue working.")
     return "\n".join(lines)
 
 

@@ -3,6 +3,7 @@
 Прежняя реализация заводила поток на каждую строку JSON-RPC — до 32 на один
 вызов тула — и при таймауте оставляла его висеть на readline навсегда.
 """
+
 import threading
 import time
 
@@ -21,7 +22,7 @@ class _SlowStream:
     def readline(self):
         if self._hang_after is not None and self._served >= self._hang_after:
             self.hanging.set()
-            time.sleep(30)          # имитируем молчащий сервер
+            time.sleep(30)  # имитируем молчащий сервер
             return ""
         if not self._lines:
             return ""
@@ -65,6 +66,7 @@ def test_one_thread_per_stream_not_per_line(monkeypatch):
 
 def test_timeout_returns_none_without_leaking_a_thread_per_call():
     """Молчащий сервер: таймаут отдаёт None, но потоки не копятся."""
+
     def _readers() -> int:
         # Считаем ИМЕННО читателей stdio, а не все потоки процесса. Глобальный
         # счётчик здесь врёт: соседние тесты (дискавери MCP) оставляют

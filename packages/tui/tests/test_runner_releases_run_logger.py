@@ -7,6 +7,7 @@
 отрисовки): около 0,6 МБ на тест, полный прогон в одном процессе рос до
 гигабайт и однажды был убит по нехватке памяти.
 """
+
 import asyncio
 import gc
 import logging
@@ -25,9 +26,7 @@ def _registered(logger) -> bool:
 
 
 def _run_logger(tmp_path, run_id):
-    logger, _, _ = create_run_logger(
-        {"logs_dump_dir": str(tmp_path), "save_logs": True}, run_id=run_id
-    )
+    logger, _, _ = create_run_logger({"logs_dump_dir": str(tmp_path), "save_logs": True}, run_id=run_id)
     return logger
 
 
@@ -85,9 +84,13 @@ def test_exited_app_is_collected(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    cfg = {"model": "M", "agent_md_path": str(tmp_path / "agent.md"),
-           "threads_data_path": str(tmp_path / "threads"),
-           "logs_dump_dir": str(tmp_path / "logs"), "mcp-servers": {}}
+    cfg = {
+        "model": "M",
+        "agent_md_path": str(tmp_path / "agent.md"),
+        "threads_data_path": str(tmp_path / "threads"),
+        "logs_dump_dir": str(tmp_path / "logs"),
+        "mcp-servers": {},
+    }
 
     async def _session():
         app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
@@ -111,5 +114,5 @@ def test_exited_app_is_collected(tmp_path):
     assert name not in logging.Logger.manager.loggerDict, "логгер прогона пережил приложение"
 
     gc.collect()
-    alive = ref() is not None     # не держим App в кадре упавшего assert
+    alive = ref() is not None  # не держим App в кадре упавшего assert
     assert not alive, "приложение пережило выход — его что-то держит"

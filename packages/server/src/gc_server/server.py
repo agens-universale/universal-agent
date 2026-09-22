@@ -49,8 +49,6 @@ except (ModuleNotFoundError, ImportError) as e:
     swarm_storage = None  # type: ignore[assignment]
 
 
-
-
 try:
     # Обе функции читают конфиг на импорте модуля: сломанный config_server.yml
     # (load_server_config сам не защищён — голый open/yaml.safe_load) или
@@ -61,9 +59,7 @@ try:
     SERVER_CONFIG: Dict[str, Any] = load_server_config()
     BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
 except (ValueError, OSError, yaml.YAMLError) as exc:
-    raise SystemExit(
-        f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
-    ) from exc
+    raise SystemExit(f"[gc] сервер не стартовал: конфиг не загружается ({exc})") from exc
 if _SWARM_MODULES_AVAILABLE and build_swarm_config is not None:
     SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
 else:
@@ -182,7 +178,8 @@ async def _shutdown_swarm_processes() -> None:
                 current_status = str(sm.get("status", "")).strip().lower()
                 if current_status not in swarm_lifecycle.FINAL_STATUSES:
                     swarm_storage.save_swarm_meta(
-                        threads_dir, swarm_id,
+                        threads_dir,
+                        swarm_id,
                         base_meta={
                             "system": existing.get("system"),
                             "task_id": existing.get("task_id"),
@@ -251,9 +248,7 @@ async def get_run_status(system: str, task_id: str):
     # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
     # завершённый с TTL 15 минут. Клиент, которому только что ответили
     # `queued`, иначе видел 404 или `completed` с результатом прошлого прогона.
-    building_since, run = agent_run_registry.get_status_snapshot(
-        system=sys_norm, task_id=task_norm
-    )
+    building_since, run = agent_run_registry.get_status_snapshot(system=sys_norm, task_id=task_norm)
     if building_since is not None:
         return {
             "status": "running",
@@ -336,9 +331,9 @@ def _context_build_wait_s(raw: Any) -> float:
     # NaN отсекается тем же сравнением — с ним оно ложно.
     if isinstance(raw, bool) or not 0 < value < float("inf"):
         logger.warning(
-            "server.context_build_wait_seconds=%r — нужно положительное конечное "
-            "число секунд, беру %g",
-            raw, _CONTEXT_BUILD_WAIT_DEFAULT_S,
+            "server.context_build_wait_seconds=%r — нужно положительное конечное число секунд, беру %g",
+            raw,
+            _CONTEXT_BUILD_WAIT_DEFAULT_S,
         )
         return _CONTEXT_BUILD_WAIT_DEFAULT_S
     return value
@@ -451,9 +446,7 @@ async def events_webhook(request: Request):
         # источник с ретраем по таймауту получал шторм на ту же задачу.
         # По истечении — честный 503: сообщение не принято, повторять клиенту.
         if ceiling is None:
-            ceiling = _context_build_wait_s(
-                (SERVER_CONFIG.get("server") or {}).get("context_build_wait_seconds")
-            )
+            ceiling = _context_build_wait_s((SERVER_CONFIG.get("server") or {}).get("context_build_wait_seconds"))
             deadline = asyncio.get_running_loop().time() + ceiling
         try:
             async with asyncio.timeout_at(deadline):
@@ -461,7 +454,9 @@ async def events_webhook(request: Request):
         except TimeoutError:
             logger.warning(
                 "context_build_wait_timeout system=%s task_id=%s ceiling_s=%g",
-                system, task_id, ceiling,
+                system,
+                task_id,
+                ceiling,
                 extra={
                     "event": "context_build_wait_timeout",
                     "system": system,
@@ -496,9 +491,7 @@ async def events_webhook(request: Request):
         # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на
         # всё это время, а с переездом прогоны стали тасками на общем loop,
         # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
-        ctx = await acreate_run_context(
-            config_dict, auth_connector=auth_connector, force_legacy=force_legacy
-        )
+        ctx = await acreate_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
 
         await agent_run_registry.astart_if_absent(
             system=system,
@@ -690,9 +683,7 @@ async def swarm_run(request: Request):
     # Здесь коэрсинг, а не отказ: в имени системы законны пробелы и регистр,
     # 400 сломал бы живых клиентов. У `task_id` наоборот отказ — коэрсинг
     # молча склеил бы разные задачи в один тред.
-    system = sanitize_system_id(
-        normalize_system(source_value, default_system=default_system)
-    )
+    system = sanitize_system_id(normalize_system(source_value, default_system=default_system))
     payload["system"] = system
     swarm_id = f"swarm_{system}_{task_id}"
 
@@ -834,7 +825,9 @@ async def get_swarm_status(system: str, task_id: str):
     # подтянет completion.json или проверит PID и обновит meta при необходимости.
     # См. swarm_spec.md §5.2 и шаг M2/1.5.
     meta = swarm_lifecycle.check_and_finalize(
-        threads_dir, sandbox_root_dir, swarm_id,
+        threads_dir,
+        sandbox_root_dir,
+        swarm_id,
         swarm_logs_dir=str(SWARM_CONFIG.get("swarm_logs_dir", "")),
     )
     if not meta:
@@ -895,12 +888,8 @@ async def get_swarm_logs(system: str, task_id: str):
     sandbox_root_dir = str(SWARM_CONFIG.get("sandbox_root_dir", ""))
     meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
     # Канал E (шаг 1.9): messages.jsonl лежит внутри sandbox-каталога.
-    messages = swarm_storage.load_swarm_messages(
-        threads_dir, swarm_id, sandbox_root_dir
-    )
-    stdout_lines, stderr_lines = swarm_storage.load_swarm_stdout_stderr(
-        threads_dir, swarm_id
-    )
+    messages = swarm_storage.load_swarm_messages(threads_dir, swarm_id, sandbox_root_dir)
+    stdout_lines, stderr_lines = swarm_storage.load_swarm_stdout_stderr(threads_dir, swarm_id)
 
     if not meta and not messages and not stdout_lines and not stderr_lines:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
@@ -943,7 +932,8 @@ def _normalize_log_level(raw) -> str:
     if level not in _UVICORN_LOG_LEVELS:
         logger.warning(
             "server.log_level=%r uvicorn не понимает (допустимы: %s) — беру info",
-            raw, ", ".join(sorted(_UVICORN_LOG_LEVELS)),
+            raw,
+            ", ".join(sorted(_UVICORN_LOG_LEVELS)),
         )
         return "info"
     return level
@@ -1006,4 +996,3 @@ def serve() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(serve())
-

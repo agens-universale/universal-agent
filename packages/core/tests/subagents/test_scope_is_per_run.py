@@ -8,6 +8,7 @@
 
 Два сценария ниже — ровно те, что воспроизводились на глобали.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace

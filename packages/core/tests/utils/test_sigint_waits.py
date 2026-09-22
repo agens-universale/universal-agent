@@ -6,15 +6,14 @@
 обработчик: Ctrl+C то снимал прогон при живом вопросе, то после обоих не делал
 вообще ничего.
 """
+
 import signal
 import threading
 
 import pytest
 from gc_core.utils.sigint_waits import intercept_sigint
 
-pytestmark = pytest.mark.skipif(
-    not hasattr(signal, "raise_signal"), reason="платформа без raise_signal"
-)
+pytestmark = pytest.mark.skipif(not hasattr(signal, "raise_signal"), reason="платформа без raise_signal")
 
 
 @pytest.fixture
@@ -37,11 +36,9 @@ def test_ctrl_c_goes_to_the_wait_still_open_after_an_earlier_one_left(base):
     first.__enter__()
     second.__enter__()
     try:
-        first.__exit__(None, None, None)         # A вышел раньше B
+        first.__exit__(None, None, None)  # A вышел раньше B
         signal.raise_signal(signal.SIGINT)
-        assert (a_hits, b_hits, base) == ([], [1], []), (
-            f"сигнал ушёл не тому: A={a_hits} B={b_hits} до-всех={base}"
-        )
+        assert (a_hits, b_hits, base) == ([], [1], []), f"сигнал ушёл не тому: A={a_hits} B={b_hits} до-всех={base}"
     finally:
         second.__exit__(None, None, None)
 

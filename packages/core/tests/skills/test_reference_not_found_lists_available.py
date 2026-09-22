@@ -1,5 +1,6 @@
 """При неверном slug ошибка load_reference/load_asset перечисляет доступные —
 чтобы модель само-исправилась, а не гадала имена дальше."""
+
 import pytest
 from gc_core.tools.skills.registry import SkillsRegistry
 
@@ -8,9 +9,7 @@ def _reg_with_refs(tmp_path):
     system = tmp_path / "system"
     skill = system / "qa-req-validation"
     (skill / "references").mkdir(parents=True)
-    (skill / "SKILL.md").write_text(
-        "---\nname: qa-req-validation\ndescription: d\n---\nbody\n", encoding="utf-8"
-    )
+    (skill / "SKILL.md").write_text("---\nname: qa-req-validation\ndescription: d\n---\nbody\n", encoding="utf-8")
     (skill / "references" / "quality_criteria.md").write_text("qc", encoding="utf-8")
     (skill / "references" / "report_templates.md").write_text("rt", encoding="utf-8")
     return SkillsRegistry(system_root=str(system))

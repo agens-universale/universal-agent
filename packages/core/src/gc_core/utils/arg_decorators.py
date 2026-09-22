@@ -77,6 +77,7 @@ def parse_json_object_argument(
         # бы на нём с TypeError вместо аккуратного отказа. Тот же приём, что в
         # ``security/dual_wrapper.dual_wrap``.
         if inspect.iscoroutinefunction(func):
+
             @wraps(func)
             async def _awrapper(self, *args: Any, **kwargs: Any):
                 early, kwargs = _parsed_or_error(self, kwargs)

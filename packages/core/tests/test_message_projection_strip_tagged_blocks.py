@@ -55,9 +55,7 @@ def test_strip_tagged_blocks_extra_tag():
 
 def test_strip_tagged_blocks_think_then_extra():
     text = "<think>t</think> mid <redacted_thinking>r</redacted_thinking> end"
-    assert (
-        strip_tagged_blocks(text, ("think", "redacted_thinking")) == "mid  end"
-    )
+    assert strip_tagged_blocks(text, ("think", "redacted_thinking")) == "mid  end"
 
 
 def test_strip_think_blocks_equals_tagged_think_only():

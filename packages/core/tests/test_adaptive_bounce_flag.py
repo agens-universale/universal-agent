@@ -1,4 +1,5 @@
 """Режим tui.text_answer_mode: схема (дефолт judge) + flatten в config_dict."""
+
 import pytest
 from gc_core.config_modules.tui import TuiConfig
 

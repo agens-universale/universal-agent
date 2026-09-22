@@ -6,6 +6,7 @@ bookkeeping: the local validator reads them to decide which keys may be omitted.
 JSON Schema that goes on the wire must stay standard — and tools_data must not be
 mutated by the transport, or the validator would lose the markers it depends on.
 """
+
 import copy
 import json
 

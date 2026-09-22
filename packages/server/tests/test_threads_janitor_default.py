@@ -16,6 +16,7 @@
 `docs/server.md` при этом обещает обратное: «любые ротации/очистки рекомендуется
 настраивать отдельно … вне этого приложения».
 """
+
 from __future__ import annotations
 
 import json
@@ -42,9 +43,7 @@ def _store_with_old_thread(tmp_path) -> tuple[str, str]:
     threads = tmp_path / "threads"
     threads.mkdir()
     meta = threads / "meta_generic_old.json"
-    meta.write_text(
-        json.dumps({"updated_at": "2026-07-01T00:00:00+00:00"}), encoding="utf-8"
-    )
+    meta.write_text(json.dumps({"updated_at": "2026-07-01T00:00:00+00:00"}), encoding="utf-8")
     (threads / "data_generic_old.jsonl").write_text("", encoding="utf-8")
     return str(threads), str(meta)
 

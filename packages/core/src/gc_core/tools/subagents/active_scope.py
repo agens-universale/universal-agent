@@ -43,9 +43,7 @@ class ChildInputScope:
         self._pending: List[Dict[str, Any]] = []
         self._on_enqueue: Optional[Callable[[Dict[str, Any]], None]] = None
 
-    def set_on_enqueue(
-        self, callback: Optional[Callable[[Dict[str, Any]], None]]
-    ) -> None:
+    def set_on_enqueue(self, callback: Optional[Callable[[Dict[str, Any]], None]]) -> None:
         self._on_enqueue = callback
 
     def enqueue(self, message: Dict[str, Any]) -> None:

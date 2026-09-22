@@ -1,4 +1,5 @@
 """'/new' создаёт новую задачу в текущем окне. При активном running — y/n confirm."""
+
 import json
 from pathlib import Path
 
@@ -12,13 +13,21 @@ async def test_new_when_idle_goes_to_empty_state(tmp_path):
 
     tid = "existing"
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps({"type": "message", "seq": 1, "ts_utc": "2026-05-21T12:00:00+00:00",
-                    "payload": {"id": "u1", "role": "user", "content": "x"}}) + "\n",
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "2026-05-21T12:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "x"},
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}
+        ),
         encoding="utf-8",
     )
 
@@ -52,6 +61,7 @@ async def test_new_when_running_asks_confirm(tmp_path):
 
         async def arun(self, messages, *, thread_id, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -90,13 +100,21 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
     from gc_tui.screens.confirm import ConfirmScreen
 
     class _Fake:
-        def __init__(self): self._evt = None
+        def __init__(self):
+            self._evt = None
+
         async def arun(self, messages, *, thread_id, **kw):
             import threading
-            self._evt = threading.Event(); self._evt.wait(timeout=3.0)
+
+            self._evt = threading.Event()
+            self._evt.wait(timeout=3.0)
+
         def stop_run(self):
-            if self._evt: self._evt.set()
-        def add_message(self, m): pass
+            if self._evt:
+                self._evt.set()
+
+        def add_message(self, m):
+            pass
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._executor_factory = lambda: _Fake()
@@ -122,13 +140,21 @@ async def test_new_confirm_yes_clears_runner_and_indicator(tmp_path):
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _Fake:
-        def __init__(self): self._evt = None
+        def __init__(self):
+            self._evt = None
+
         async def arun(self, messages, *, thread_id, **kw):
             import threading
-            self._evt = threading.Event(); self._evt.wait(timeout=3.0)
+
+            self._evt = threading.Event()
+            self._evt.wait(timeout=3.0)
+
         def stop_run(self):
-            if self._evt: self._evt.set()
-        def add_message(self, m): pass
+            if self._evt:
+                self._evt.set()
+
+        def add_message(self, m):
+            pass
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._executor_factory = lambda: _Fake()
@@ -141,7 +167,7 @@ async def test_new_confirm_yes_clears_runner_and_indicator(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.2)
         await pilot.press("y")
-        await pilot.pause(0.5)   # ≥1 poll-тик (250мс)
+        await pilot.pause(0.5)  # ≥1 poll-тик (250мс)
         assert app.active_runner is None
         assert len(pilot.app.screen.query(ThinkingIndicator)) == 0
         assert pilot.app.screen.query("#brand-block")

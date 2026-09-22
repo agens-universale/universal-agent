@@ -1,6 +1,7 @@
 """Пресет-лист адреса на общем контроллере (`preset_list_controller`): минимальный
 хост (Vertical с Input+якорем) — открытие, курсор, фильтр, выбор пресета, закрытие
 без дублей (Task 6)."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -30,9 +31,13 @@ class _Host(Vertical):
 
     def on_mount(self) -> None:
         from gc_tui.editors.preset_list import preset_list_controller
+
         self.ctrl = preset_list_controller(
-            self, presets=list(_PRESETS), row_class="test-preset-row",
-            input_id="host-url", hint=_HINT,
+            self,
+            presets=list(_PRESETS),
+            row_class="test-preset-row",
+            input_id="host-url",
+            hint=_HINT,
         )
 
 
@@ -40,6 +45,7 @@ def _harness(host):
     class _App(App):
         def compose(self) -> ComposeResult:
             yield host
+
     return _App()
 
 
@@ -80,7 +86,7 @@ async def test_pick_returns_selected_url_and_closes_list():
         await pilot.pause()
         host.ctrl.open()
         await pilot.pause()
-        host.ctrl.move(1)                     # -> Cloud.ru
+        host.ctrl.move(1)  # -> Cloud.ru
         picked = host.ctrl.pick()
         await pilot.pause()
         # pick() отдаёт сам пресет — хост решает, подставлять ли .url
@@ -116,6 +122,7 @@ async def test_hint_stops_promising_a_pick_when_the_filter_matches_nothing():
     Канон взят у соседнего списка (`FieldListController._refresh_rows` переключает
     `_MODEL_HINT`/`_MODEL_HINT_NO_MATCH` на каждый фильтр)."""
     from gc_tui.editors.preset_list import PRESET_HINT_NO_MATCH
+
     host = _Host()
     app = _harness(host)
     async with app.run_test() as pilot:
@@ -137,6 +144,7 @@ def test_preset_no_match_hint_and_the_wizard_footer_name_enter_alike():
     одну клавишу они звать не могут."""
     from gc_tui.editors.preset_list import PRESET_HINT_NO_MATCH
     from gc_tui.screens.onboarding import _FOOTER_PRESET_LIST_NO_MATCH
+
     assert "Enter — оставить свой адрес" in PRESET_HINT_NO_MATCH
     assert "Enter — оставить свой адрес" in _FOOTER_PRESET_LIST_NO_MATCH
 
@@ -173,7 +181,7 @@ async def test_close_removes_rows_but_keeps_the_hint():
         assert hint and "показать список" in str(hint[-1].render())
         host.ctrl.open()
         await pilot.pause()
-        host.ctrl.open()                       # повторный open() — без дублей строк
+        host.ctrl.open()  # повторный open() — без дублей строк
         await pilot.pause()
         rows = list(host.query(".test-preset-row"))
         assert len(rows) == 3
@@ -210,9 +218,9 @@ async def test_open_with_preset_url_in_field_highlights_that_preset():
         host.ctrl.reload()
         await pilot.pause()
         assert host.ctrl.is_open is True
-        assert host.ctrl._idx == 1                     # Cloud.ru — второй по счёту пресет
+        assert host.ctrl._idx == 1  # Cloud.ru — второй по счёту пресет
         picked = host.ctrl.pick()
-        assert picked.url == cloud_url                 # подстановка — no-op, поле не меняется
+        assert picked.url == cloud_url  # подстановка — no-op, поле не меняется
 
 
 async def test_initial_index_is_none_when_value_is_not_a_preset():
@@ -241,6 +249,7 @@ async def test_hint_calls_it_no_match_when_forced_open_has_no_highlight():
     читал `has_matches`, и здесь ВСЕ строки видны — хинт врал «Enter — подставить»,
     хотя `pick()` вернёт None (список просто свернётся, ничего не сохранив)."""
     from gc_tui.editors.preset_list import PRESET_HINT_NO_MATCH
+
     host = _Host()
     app = _harness(host)
     async with app.run_test() as pilot:
@@ -249,8 +258,8 @@ async def test_hint_calls_it_no_match_when_forced_open_has_no_highlight():
         host.query_one("#host-url", Input).value = own_url
         host.ctrl.open(forced=True)
         await pilot.pause()
-        assert host.ctrl.has_matches is True            # предусловие: строки все видны
-        assert host.ctrl.selected_item is None            # но ни одна не подсвечена
+        assert host.ctrl.has_matches is True  # предусловие: строки все видны
+        assert host.ctrl.selected_item is None  # но ни одна не подсвечена
         hint = str(host.query_one(".host-url-preset-hint").render())
         assert hint == PRESET_HINT_NO_MATCH
 
@@ -332,11 +341,11 @@ async def test_can_open_guards_an_empty_catalog():
     со строкой, обещающей Enter там, где выбирать нечего, и ↑/↓ формы оказались бы
     заперты в списке без единой строки."""
     from gc_tui.editors.preset_list import preset_list_controller
+
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
-        ctrl = preset_list_controller(host, presets=[], row_class="test-preset-row",
-                                      input_id="host-url", hint=_HINT)
+        ctrl = preset_list_controller(host, presets=[], row_class="test-preset-row", input_id="host-url", hint=_HINT)
         assert ctrl._can_open("") is False
 
 
@@ -349,12 +358,14 @@ async def test_empty_catalog_promises_nothing_under_the_field():
     охраняет `bool(presets)` в `can_open` — но охрана касалась только раскрытия, а
     строка проговаривалась всё равно (находка независимого ревью 2026-08-18)."""
     from gc_tui.editors.preset_list import preset_list_controller
+
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
-        host.ctrl = preset_list_controller(host, presets=[], row_class="test-preset-row",
-                                           input_id="host-url", hint=_HINT)
-        host.ctrl.open()                       # отказ по пустому каталогу
+        host.ctrl = preset_list_controller(
+            host, presets=[], row_class="test-preset-row", input_id="host-url", hint=_HINT
+        )
+        host.ctrl.open()  # отказ по пустому каталогу
         await pilot.pause()
         assert host.ctrl.is_open is False
         assert not [w for w in host.query(".host-url-preset-hint") if not w._pruning]

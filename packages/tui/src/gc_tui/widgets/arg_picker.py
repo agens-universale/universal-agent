@@ -7,6 +7,7 @@
 непустым arg_options. 2-tuple — простое value+описание (`/export` и т.п.); 3-tuple
 добавляет status-колонку справа (`/profiles`, задача 10 — активный профиль,
 цветом OK; ✗-статус отказа — цветом ERR)."""
+
 from __future__ import annotations
 
 import textwrap
@@ -69,8 +70,9 @@ class ArgPicker(VerticalScroll):
         if self._hint_provider is not None:
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
-            children.append(Static(self._hint_text(self.selected_value()),
-                                   classes="palette-hint palette-keys", markup=False))
+            children.append(
+                Static(self._hint_text(self.selected_value()), classes="palette-hint palette-keys", markup=False)
+            )
         children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
         return Vertical(*children, classes="palette-footer")
 

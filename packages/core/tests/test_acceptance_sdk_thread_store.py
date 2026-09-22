@@ -19,6 +19,7 @@
 хранилище тредов; путь тула меряет ``test_acceptance_non_blocking``, у него
 заглушка делегирующая.
 """
+
 import asyncio
 
 import pytest
@@ -59,9 +60,15 @@ def _stub_turn_finish(monkeypatch):
 #: отвечает за него мгновенно. Ход 2 — финализатор. Ход 3 — судья.
 TURNS = [
     assistant_tool_call("exec_sleep", {"seconds": 0.05}, call_id="c1"),
-    assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer", "task_report": "готово", "handoff": "{}",
-    }, call_id="c2"),
+    assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": "готово",
+            "handoff": "{}",
+        },
+        call_id="c2",
+    ),
     judge_accept(),
 ]
 
@@ -127,14 +134,11 @@ async def test_sdk_run_writes_only_to_the_given_store(tmp_path, monkeypatch, sto
     assert answer, "агент не ответил"
 
     thread_files = [
-        p for p in tmp_path.rglob("*")
-        if p.is_file() and (
-            p.name.startswith(("data_", "meta_")) or "__pre_summary__" in p.name
-        )
+        p
+        for p in tmp_path.rglob("*")
+        if p.is_file() and (p.name.startswith(("data_", "meta_")) or "__pre_summary__" in p.name)
     ]
-    assert thread_files == [], (
-        f"прогон создал файлы треда вопреки чужому хранилищу: {thread_files}"
-    )
+    assert thread_files == [], f"прогон создал файлы треда вопреки чужому хранилищу: {thread_files}"
 
 
 async def test_sdk_run_persists_the_whole_thread(tmp_path, monkeypatch, store):
@@ -261,6 +265,7 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
                 self.awaited += 1
                 await asyncio.sleep(0.005)
                 return getattr(self.inner, name)(*args, **kwargs)
+
             return method
 
         from gc_core.thread_store_base import CONTRACT_METHODS as _NAMES
@@ -282,8 +287,7 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
                 await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
-    assert_loop_was_free(pulse.gaps, tick=pulse.step,
-                         label="хранилище с RTT 5 мс: ")
+    assert_loop_was_free(pulse.gaps, tick=pulse.step, label="хранилище с RTT 5 мс: ")
 
 
 async def test_broken_store_fails_loudly_at_wiring(tmp_path, monkeypatch):

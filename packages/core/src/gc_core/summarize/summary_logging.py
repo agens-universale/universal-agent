@@ -105,8 +105,7 @@ def log_compaction_started(
 ) -> None:
     if logger is not None:
         logger.info(
-            "summary_triggered reason=%s thread_id=%s trigger_volume=%s "
-            "serialized_chars=%s history_messages=%s",
+            "summary_triggered reason=%s thread_id=%s trigger_volume=%s serialized_chars=%s history_messages=%s",
             log_ctx.trigger_reason,
             log_ctx.thread_id,
             log_ctx.trigger_volume,
@@ -260,8 +259,7 @@ def log_compaction_completed(
             archive,
         )
         logger.info(
-            "summary_boundary phase=completed rule=%s rule_id=%s thread_id=%s "
-            "volume=%s%s%s",
+            "summary_boundary phase=completed rule=%s rule_id=%s thread_id=%s volume=%s%s%s",
             log_ctx.rule_label,
             log_ctx.trigger_reason,
             log_ctx.thread_id,
@@ -295,10 +293,7 @@ def log_compaction_completed(
     if not log_ctx.is_cli_mode:
         return
     _cli_print(f"Сжатие завершено: {log_ctx.rule_label}")
-    _cli_print(
-        f"  было={serialized_before} стало={serialized_after} "
-        f"коэффициент={compression_ratio}"
-    )
+    _cli_print(f"  было={serialized_before} стало={serialized_after} коэффициент={compression_ratio}")
     if archive:
         _cli_print(f"  архив треда: __pre_summary__{archive}")
 
@@ -331,9 +326,7 @@ def log_compaction_failed(
             },
         )
     if log_ctx.is_cli_mode:
-        _cli_print(
-            f"Ошибка суммаризации ({log_ctx.rule_label}): error={error}"
-        )
+        _cli_print(f"Ошибка суммаризации ({log_ctx.rule_label}): error={error}")
 
 
 def log_summary_slice_fallback(
@@ -346,8 +339,7 @@ def log_summary_slice_fallback(
     if logger is None:
         return
     logger.warning(
-        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s "
-        "raw_summary_chars=%s agent_gets_full_raw=true",
+        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s raw_summary_chars=%s agent_gets_full_raw=true",
         log_ctx.trigger_reason,
         log_ctx.thread_id,
         slice_mode,
@@ -384,8 +376,7 @@ def log_memory_patch_skipped_multi_batch(
     if logger is None:
         return
     logger.info(
-        "summary_memory_patch_skipped_multi_batch batches=%s "
-        "working_memory_not_updated_from_summary=true",
+        "summary_memory_patch_skipped_multi_batch batches=%s working_memory_not_updated_from_summary=true",
         batches,
     )
 

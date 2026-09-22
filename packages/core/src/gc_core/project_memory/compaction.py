@@ -3,6 +3,7 @@
 No file I/O. Caller (the tool) decides what to do with the compressed text.
 Used only from the append-overflow path in the project_memory tool.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -83,9 +84,7 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             consumer="memory_compaction",
         )
     except Exception as exc:
-        return CompactionResult(
-            ok=False, text="", error_type="backend_error", error_message=str(exc)
-        )
+        return CompactionResult(ok=False, text="", error_type="backend_error", error_message=str(exc))
 
     if not compressed:
         return CompactionResult(
@@ -94,8 +93,4 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             error_type="empty_response",
             error_message="backend returned empty compaction response.",
         )
-    return CompactionResult(
-        ok=True, text=compressed, error_type=None, error_message=None
-    )
-
-
+    return CompactionResult(ok=True, text=compressed, error_type=None, error_message=None)

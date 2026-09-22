@@ -1,21 +1,25 @@
 """Реестр команд: метаданные, lookup, closest-match (§4)."""
+
 from gc_tui.commands import Command, CommandRegistry, build_default_registry, closest_command
 
 
 def test_register_and_lookup():
     reg = CommandRegistry()
-    reg.register(Command(
-        name="task", aliases=(), args="[-t id] [-s skill]",
-        description="новая/подключение задачи",
-    ))
+    reg.register(
+        Command(
+            name="task",
+            aliases=(),
+            args="[-t id] [-s skill]",
+            description="новая/подключение задачи",
+        )
+    )
     assert reg.lookup("task") is not None
     assert reg.lookup("nonexistent") is None
 
 
 def test_alias_resolves_to_canonical():
     reg = CommandRegistry()
-    reg.register(Command(name="tasks", aliases=("history",), args="[-r]",
-                          description="список задач"))
+    reg.register(Command(name="tasks", aliases=("history",), args="[-r]", description="список задач"))
     cmd = reg.lookup("history")
     assert cmd is not None and cmd.name == "tasks"
 
@@ -33,8 +37,7 @@ def test_closest_match_none_for_far_input():
 
 def test_default_registry_includes_core_commands():
     reg = build_default_registry()
-    for n in ["sessions", "stop", "skills", "skill",
-              "status", "export", "help", "quit", "view"]:
+    for n in ["sessions", "stop", "skills", "skill", "status", "export", "help", "quit", "view"]:
         assert reg.lookup(n) is not None, f"missing /{n}"
 
 
@@ -50,11 +53,34 @@ def test_requires_args_optional_vs_required():
 def test_default_registry_is_exactly_keep_set():
     reg = build_default_registry()
     names = sorted(c.name for c in reg.list_commands())
-    assert names == sorted([
-        "sessions", "new", "stop", "skill", "skills",
-        "status", "config", "settings", "voice", "mcp", "notices", "diff", "view", "export", "help", "init", "compact", "quit",
-        "buffer", "level", "profiles", "rigor", "gate", "answers",
-    ])
+    assert names == sorted(
+        [
+            "sessions",
+            "new",
+            "stop",
+            "skill",
+            "skills",
+            "status",
+            "config",
+            "settings",
+            "voice",
+            "mcp",
+            "notices",
+            "diff",
+            "view",
+            "export",
+            "help",
+            "init",
+            "compact",
+            "quit",
+            "buffer",
+            "level",
+            "profiles",
+            "rigor",
+            "gate",
+            "answers",
+        ]
+    )
 
 
 def test_skill_descriptions_use_navyk_not_skill_word():
@@ -104,10 +130,19 @@ def test_command_hotkeys():
         "notices": "F4 · Ctrl+O",
         "new": "Ctrl+N",
         "config": "F5 · Ctrl+G",
-        "export": "", "compact": "", "init": "", "view": "",
-        "skills": "", "skill": "", "status": "",
-        "stop": "Ctrl+C", "mcp": "", "buffer": "F7", "quit": "Esc",
-        "gate": "", "answers": "",
+        "export": "",
+        "compact": "",
+        "init": "",
+        "view": "",
+        "skills": "",
+        "skill": "",
+        "status": "",
+        "stop": "Ctrl+C",
+        "mcp": "",
+        "buffer": "F7",
+        "quit": "Esc",
+        "gate": "",
+        "answers": "",
     }
     reg = build_default_registry()
     for name, key in expected.items():
@@ -117,15 +152,37 @@ def test_command_hotkeys():
 def test_default_registry_frequency_order():
     names = [c.name for c in build_default_registry().list_commands()]
     assert names == [
-        "help", "sessions", "diff", "view", "notices", "new", "config", "settings",
-        "voice", "export", "compact", "init", "skills", "skill", "status",
-        "stop", "mcp", "buffer", "quit", "level", "profiles", "rigor", "gate", "answers",
+        "help",
+        "sessions",
+        "diff",
+        "view",
+        "notices",
+        "new",
+        "config",
+        "settings",
+        "voice",
+        "export",
+        "compact",
+        "init",
+        "skills",
+        "skill",
+        "status",
+        "stop",
+        "mcp",
+        "buffer",
+        "quit",
+        "level",
+        "profiles",
+        "rigor",
+        "gate",
+        "answers",
     ]
 
 
 def test_hotkeys_match_app_bindings():
     """Каждый токен hotkey имеет совпадающую привязку в app.BINDINGS."""
     from gc_tui.app import TuiApp
+
     binding_keys = {b.key for b in TuiApp.BINDINGS}
     # Ctrl+T (/voice) гейтится вручную в TraceScreen.on_key (disabled input /
     # открытый пикер / transcribing-игнор) — не декларативный Binding.
@@ -178,7 +235,7 @@ def test_view_command_has_arg_file_flag():
     Флаг в реестре, а не имя команды в обработчике (системность)."""
     reg = build_default_registry()
     assert reg.lookup("view").arg_file is True
-    assert reg.lookup("help").arg_file is False   # дефолт не разлился
+    assert reg.lookup("help").arg_file is False  # дефолт не разлился
 
 
 def test_arg_file_and_is_toggle_are_mutually_exclusive():
@@ -196,6 +253,7 @@ def test_arg_file_and_is_toggle_are_mutually_exclusive():
 def test_toggle_descriptions_generated_from_specs():
     from gc_tui.commands import build_default_registry
     from gc_tui.toggles import TOGGLES
+
     reg = build_default_registry()
     for name in ("gate", "answers"):
         cmd = reg.lookup(name)
@@ -210,6 +268,7 @@ async def test_f6_opens_settings_with_input_focused():
     Регресс: у TextArea есть дефолтный биндинг f6=select_line — без priority на
     app-биндинге виджет перехватывал клавишу, и хоткей был мёртв (баг master)."""
     import pytest as _pytest
+
     _pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
@@ -227,5 +286,5 @@ def test_voice_command_registered_with_hotkey():
     reg = build_default_registry()
     cmd = reg.lookup("voice")
     assert cmd is not None
-    assert cmd.hotkey == "Ctrl+T"          # F1-справка генерится из реестра
+    assert cmd.hotkey == "Ctrl+T"  # F1-справка генерится из реестра
     assert not cmd.is_toggle and not cmd.requires_args

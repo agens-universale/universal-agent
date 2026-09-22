@@ -49,6 +49,7 @@ class ExecuteCommand(AbstractSimpleTool):
     """
     Tool to execute a CLI command on the system and return its output.
     """
+
     # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
@@ -58,21 +59,18 @@ class ExecuteCommand(AbstractSimpleTool):
         description = {
             "type": "function",
             "name": "exec_command",
-            "description": (
-                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
-            ),
+            "description": ("Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary."
+                        "description": "The command-line command to execute. Must be valid for the operating system and properly quoted, especially when paths contain spaces. Avoid interactive or destructive commands unless absolutely necessary.",
                     },
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {timeout_default} "
-                            "(agent.exec_timeout_sec)."
+                            f"Execution timeout in seconds. Default is {timeout_default} (agent.exec_timeout_sec)."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -121,18 +119,21 @@ class ExecuteCommand(AbstractSimpleTool):
                     },
                 },
                 "required": ["command"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         timeout_default = exec_timeout_from_config_dict(config_dict)
-        description = ('''Tool name: exec_command
+        description = (
+            """Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": ''' + str(timeout_default) + '''}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return the pid at once; for long-lived commands. Output is not captured."}}, "required": ["command"], "additionalProperties": false}
+Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": """
+            + str(timeout_default)
+            + """}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return the pid at once; for long-lived commands. Output is not captured."}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -179,7 +180,8 @@ Important Usage Rules:
     <bad-example>
     cd /foo/bar && pytest tests
     </bad-example>
-''')
+"""
+        )
         return description
 
     def _result(
@@ -326,7 +328,9 @@ Important Usage Rules:
             return await self._abackground(plan)
         try:
             res = await aexec_port(self._backend).aexec(
-                plan["command"], cwd=plan["cwd"], timeout=plan["timeout"],
+                plan["command"],
+                cwd=plan["cwd"],
+                timeout=plan["timeout"],
                 env=plan["env"],
             )
         except Exception as exc:
@@ -366,15 +370,16 @@ Important Usage Rules:
                 error={
                     "type": "background_not_supported",
                     "message": (
-                        "This backend cannot start background commands. "
-                        "Run the command in the foreground instead."
+                        "This backend cannot start background commands. Run the command in the foreground instead."
                     ),
                 },
             )
 
         try:
             started = await self._backend.aspawn_background(
-                plan["command"], cwd=cwd_used, env=plan["env"],
+                plan["command"],
+                cwd=cwd_used,
+                env=plan["env"],
             )
         except Exception as exc:
             return self._exec_failed(plan, exc)
@@ -446,12 +451,8 @@ Important Usage Rules:
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.
-        stdout_stream = as_captured_stream(
-            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
-        )
-        stderr_stream = as_captured_stream(
-            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
-        )
+        stdout_stream = as_captured_stream(getattr(res, "stdout_stream", None) or getattr(res, "stdout", ""))
+        stderr_stream = as_captured_stream(getattr(res, "stderr_stream", None) or getattr(res, "stderr", ""))
 
         if res.timed_out:
             return self._result(

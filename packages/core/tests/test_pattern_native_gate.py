@@ -1,4 +1,5 @@
 """Unit tests for is_grep_native_safe / is_safe_grep_include."""
+
 from gc_core.utils.pattern_native_gate import is_grep_native_safe, is_safe_grep_include
 
 
@@ -19,9 +20,7 @@ def test_literal_and_simple_ere_ok():
 
 
 def test_dotall_forbidden():
-    assert (
-        is_grep_native_safe("a.b", query_mode="python-re-dotall") is None
-    )
+    assert is_grep_native_safe("a.b", query_mode="python-re-dotall") is None
 
 
 def test_empty_forbidden():

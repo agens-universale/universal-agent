@@ -1,6 +1,7 @@
 """§3: межслойная половина пары. Каждый слой проверяется ДО слияния — иначе профиль или
 проектный конфиг, переопределив один адрес, уносит токен базы на чужой хост, а проверка
 итогового документа видит полную пару и молчит."""
+
 from pathlib import Path
 
 import pytest
@@ -32,14 +33,14 @@ def _write_yaml(path: Path, body: dict) -> None:
 
 
 _BASE_WITH_A_WHOLE_PAIR = {
-    "backend": {"api_mode": "chat_completions",
-                "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
+    "backend": {"api_mode": "chat_completions", "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
     "models": {"gc": {"url": "https://good/v1/chat/completions", "token": "sk-base"}},
 }
 
 
 def test_layer_with_half_a_pair_is_rejected_with_the_file_path():
     from gc_core.config_modules.model_registry import validate_registry_pairs
+
     raw = {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}}
     with pytest.raises(ValueError, match=r"/proj/\.gc/config\.yml.*models\.gc"):
         validate_registry_pairs(raw, source="/proj/.gc/config.yml")
@@ -47,20 +48,22 @@ def test_layer_with_half_a_pair_is_rejected_with_the_file_path():
 
 def test_layer_with_a_whole_pair_passes():
     from gc_core.config_modules.model_registry import validate_registry_pairs
-    validate_registry_pairs(
-        {"models": {"gc": {"url": "https://h/v1", "token": "sk"}}}, source="/p/config.yml")
+
+    validate_registry_pairs({"models": {"gc": {"url": "https://h/v1", "token": "sk"}}}, source="/p/config.yml")
 
 
 def test_explicit_null_is_not_a_key():
     """`url: null` в сыром документе — это НЕ «адрес задан»: слой снимает адрес, и токен
     без него становится половиной (§3, третий случай дизъюнкции)."""
     from gc_core.config_modules.model_registry import validate_registry_pairs
+
     with pytest.raises(ValueError, match="задан свой токен, но не задан адрес"):
         validate_registry_pairs({"models": {"gc": {"url": None, "token": "sk"}}})
 
 
 def test_document_without_registry_passes():
     from gc_core.config_modules.model_registry import validate_registry_pairs
+
     validate_registry_pairs({"backend": {"completions_url": "https://h/v1"}})
 
 
@@ -68,6 +71,7 @@ def test_cli_models_override_goes_through_the_rule():
     """`--models` задаёт весь реестр строкой и идёт мимо схемы (плоский config_dict
     заполняется после валидации) — правило прогоняется явно, иначе CLI обходит его."""
     from gc_core.config import apply_cli_overrides
+
     cfg = {}
     with pytest.raises(ValueError, match="--models.*задан свой адрес"):
         apply_cli_overrides(cfg, extra_overrides={"models": {"gc": {"url": "https://evil/v1"}}})
@@ -83,11 +87,9 @@ def test_project_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
-    _write_yaml(isolated_cwd / ".gc" / "config.yml",
-                {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
+    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
 
-    with pytest.raises(ValueError,
-                       match=r"\.gc[\\/]config\.yml: models\.gc: задан свой адрес"):
+    with pytest.raises(ValueError, match=r"\.gc[\\/]config\.yml: models\.gc: задан свой адрес"):
         load_config_ex(str(base))
 
 
@@ -98,8 +100,9 @@ def test_profile_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, dict(_BASE_WITH_A_WHOLE_PAIR, profile="work"))
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml",
-                {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml", {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}}
+    )
 
     with pytest.raises(ValueError, match=r"work\.yml: models\.gc: задан свой адрес"):
         load_config_ex(str(base))
@@ -114,8 +117,7 @@ def test_managed_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
-    _write_yaml(managed_config_path(),
-                {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
+    _write_yaml(managed_config_path(), {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
 
     with pytest.raises(ValueError, match=r"config\.local\.yml: models\.gc: задан свой адрес"):
         load_config_ex(str(base))
@@ -132,7 +134,7 @@ def test_pre_write_validator_accepts_what_the_loader_accepts(tmp_path):
     path = tmp_path / "work.yml"
     path.write_text(body, encoding="utf-8")
 
-    validate_profile_text(body)          # pre-write: принимает
+    validate_profile_text(body)  # pre-write: принимает
     assert load_profile_document(path)["models"]["gc"] == {"url": ""}
 
 
@@ -158,19 +160,19 @@ def test_base_config_half_a_pair_names_its_own_file(isolated_cwd, tmp_path):
     from gc_core.config import load_config_ex
 
     base = tmp_path / "base_config.yml"
-    _write_yaml(base, {
-        "backend": {"api_mode": "chat_completions",
-                    "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
-        "models": {"gc": {"url": "https://evil/v1/chat/completions"}},
-    })
+    _write_yaml(
+        base,
+        {
+            "backend": {"api_mode": "chat_completions", "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
+            "models": {"gc": {"url": "https://evil/v1/chat/completions"}},
+        },
+    )
 
-    with pytest.raises(ValueError,
-                       match=r"base_config\.yml: models\.gc: задан свой адрес"):
+    with pytest.raises(ValueError, match=r"base_config\.yml: models\.gc: задан свой адрес"):
         load_config_ex(str(base))
 
 
-def test_layer_removing_only_the_address_is_caught_on_the_merged_document(
-        isolated_cwd, tmp_path):
+def test_layer_removing_only_the_address_is_caught_on_the_merged_document(isolated_cwd, tmp_path):
     """§9.5, мина 1 через явный `null`: слой пишет `url: null` поверх базовой пары. САМ
     слой законен — он ничего не задаёт, и проверка слоя молчит правильно; половина
     рождается только в мерже, где остался свой токен базы без адреса. Ловит её точка A на
@@ -193,15 +195,16 @@ def test_weakened_transport_notice_reaches_the_startup_notices(isolated_cwd, tmp
     from gc_core.config import load_config_ex
 
     base = tmp_path / "base_config.yml"
-    _write_yaml(base, {
-        "backend": {"api_mode": "chat_completions",
-                    "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
-        "models": {"gc": {"model": "qwen/qwen3-coder", "backend": {"use_ssl": False}}},
-    })
+    _write_yaml(
+        base,
+        {
+            "backend": {"api_mode": "chat_completions", "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
+            "models": {"gc": {"model": "qwen/qwen3-coder", "backend": {"use_ssl": False}}},
+        },
+    )
 
     config_dict, _meta = load_config_ex(str(base))
-    assert ("запись gc ослабляет защиту запроса, который идёт с общим токеном"
-            in config_dict["compat_notices"])
+    assert "запись gc ослабляет защиту запроса, который идёт с общим токеном" in config_dict["compat_notices"]
 
 
 # --- ссылка ${ENV:…}, которая не подставилась, обязана называть себя ---
@@ -219,8 +222,7 @@ def _pair_error(entry: dict, env: dict, monkeypatch) -> str:
         monkeypatch.setenv(name, value)
     raw = {"models": {"corp": dict(entry)}}
     try:
-        validate_registry_pairs(resolve_env_placeholders(raw), source="config.yml",
-                                raw_source=raw)
+        validate_registry_pairs(resolve_env_placeholders(raw), source="config.yml", raw_source=raw)
     except ValueError as exc:
         return str(exc)
     return ""
@@ -230,9 +232,7 @@ def test_an_unresolved_reference_names_the_variable_not_the_config(monkeypatch):
     """Запись с плейсхолдерами в обоих концах пары — ПРАВИЛЬНАЯ форма (docs §«Секреты»).
     Пока переменные не экспортированы, ссылки схлопываются в "" и пара разваливается,
     но винить конфиг за это нельзя: человек забыл export, а не ошибся в файле."""
-    error = _pair_error(
-        {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
-        {}, monkeypatch)
+    error = _pair_error({"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"}, {}, monkeypatch)
     assert "PAIR_URL" in error and "PAIR_TOKEN" in error, error
     assert "задан свой токен, но не задан адрес" not in error, error
 
@@ -245,6 +245,11 @@ def test_a_literal_violation_still_speaks_about_the_config(monkeypatch):
 
 def test_a_resolved_reference_is_judged_by_its_value(monkeypatch):
     """Контроль: переменные заданы — пара цела, отказа нет."""
-    assert _pair_error(
-        {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
-        {"PAIR_URL": "https://h/v1", "PAIR_TOKEN": "sk-1"}, monkeypatch) == ""
+    assert (
+        _pair_error(
+            {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
+            {"PAIR_URL": "https://h/v1", "PAIR_TOKEN": "sk-1"},
+            monkeypatch,
+        )
+        == ""
+    )

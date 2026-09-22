@@ -2,6 +2,7 @@
 
 Enter → dismiss(trimmed str) (пустая строка = запрос отката к промпту).
 Esc → dismiss(None) (отмена). Образец — ConfirmScreen."""
+
 from __future__ import annotations
 
 from typing import Optional

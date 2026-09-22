@@ -17,6 +17,7 @@ id» не сработает. Заметнее всего на конфиге п
 счётчик владельцев остаётся поднятым, и пул этого loop не закроется уже
 никогда.
 """
+
 import asyncio
 
 import pytest
@@ -44,9 +45,7 @@ def test_run_coro_blocking_leaves_no_client_behind():
     for _ in range(5):
         run_coro_blocking(_touch_client())
 
-    assert async_http._clients == {}, (
-        f"клиенты одноразовых loop остались в реестре: {len(async_http._clients)}"
-    )
+    assert async_http._clients == {}, f"клиенты одноразовых loop остались в реестре: {len(async_http._clients)}"
 
 
 def test_the_client_is_actually_closed_not_just_forgotten():
@@ -91,8 +90,7 @@ async def test_holder_is_released_when_context_build_fails(monkeypatch):
 
     loop = asyncio.get_running_loop()
     assert async_http._holder_count(loop) == 0, (
-        f"счётчик владельцев завис на {async_http._holder_count(loop)} — "
-        f"пул этого loop уже не закроется"
+        f"счётчик владельцев завис на {async_http._holder_count(loop)} — пул этого loop уже не закроется"
     )
 
 
@@ -209,8 +207,7 @@ def test_registry_does_not_accumulate_dead_loops():
 
     alive = [k for k, (ref, _c) in async_http._clients.items() if ref() is not None]
     assert len(async_http._clients) <= len(alive) + 1, (
-        f"реестр копит мёртвые записи: всего {len(async_http._clients)}, "
-        f"живых {len(alive)}"
+        f"реестр копит мёртвые записи: всего {len(async_http._clients)}, живых {len(alive)}"
     )
 
 
@@ -248,6 +245,4 @@ def test_shared_sync_client_is_actually_used():
         httpx.Client = real_client
         NO_NETRC_SESSION._transport = real_transport
 
-    assert one_shots == [], (
-        "verify=True снова поднял одноразовый клиент — общий пул декоративен"
-    )
+    assert one_shots == [], "verify=True снова поднял одноразовый клиент — общий пул декоративен"

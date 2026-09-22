@@ -17,15 +17,11 @@ from gc_core.summarize.working_memory_gateway import parse_memory_deltas
 from gc_testkit import as_coro, run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
-_DIRTY_EXTRA = (
-    "<think>t</think><redacted_thinking>r</redacted_thinking>"
-)
+_DIRTY_EXTRA = "<think>t</think><redacted_thinking>r</redacted_thinking>"
 
 
 def test_fallback_aggregated_keeps_tool_output_as_is():
-    ctx = SimpleNamespace(
-        intent_scope=SimpleNamespace(max_summary_chars=0, max_tool_output_chars=10_000)
-    )
+    ctx = SimpleNamespace(intent_scope=SimpleNamespace(max_summary_chars=0, max_tool_output_chars=10_000))
     raw = "<think>hide</think>visible facts"
     assert build_fallback_aggregated_content(ctx=ctx, tool_output_raw=raw) == raw
 
@@ -50,13 +46,15 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
             completion_kwargs={},
         ),
     )
-    out = run_coro(summary_llm.arequest_summary_text(
-        ctx=ctx,
-        state=SimpleNamespace(),
-        messages=[{"role": "user", "content": "hi"}],
-        request_label="intent_scope:exec_command",
-        consumer="intent_scope",
-    ))
+    out = run_coro(
+        summary_llm.arequest_summary_text(
+            ctx=ctx,
+            state=SimpleNamespace(),
+            messages=[{"role": "user", "content": "hi"}],
+            request_label="intent_scope:exec_command",
+            consumer="intent_scope",
+        )
+    )
     assert out == "one-line summary"
     assert logged["output_text"] == "<think>r</think>one-line summary"
     assert logged["label"] == "intent_scope:exec_command"
@@ -89,8 +87,7 @@ def test_seed_subagent_keeps_assignment_as_is():
 
 def test_command_judge_uses_project_and_config_extra_tag():
     parsed = command_moderation._parse_judge_json(
-        _DIRTY_EXTRA
-        + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
+        _DIRTY_EXTRA + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
         tags=["redacted_thinking"],
     )
     assert parsed["verdict"] == "safe"
@@ -110,9 +107,7 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     )
     loaded = load_config(str(cfg_path))
 
-    monkeypatch.setattr(
-        summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None
-    )
+    monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None)
     ctx = SimpleNamespace(
         logger=object(),
         config_dict=loaded,
@@ -128,13 +123,15 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
 
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_summary)
     assert (
-        run_coro(summary_llm.arequest_summary_text(
-            ctx=ctx,
-            state=state,
-            messages=[{"role": "user", "content": "hi"}],
-            request_label="intent_scope:exec_command",
-            consumer="intent_scope",
-        ))
+        run_coro(
+            summary_llm.arequest_summary_text(
+                ctx=ctx,
+                state=state,
+                messages=[{"role": "user", "content": "hi"}],
+                request_label="intent_scope:exec_command",
+                consumer="intent_scope",
+            )
+        )
         == "one-line summary"
     )
 
@@ -160,23 +157,24 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
         return _DIRTY_EXTRA + json.dumps(finish_payload)
 
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_finish)
-    projected_finish = run_coro(summary_llm.arequest_auxiliary_completion_text(
-        ctx=ctx,
-        state=state,
-        messages=[{"role": "user", "content": "validate"}],
-        max_tokens=100,
-        request_label="intent_guard_finish_gate",
-        consumer="finish_gate",
-        log_prompt=False,
-    ))
+    projected_finish = run_coro(
+        summary_llm.arequest_auxiliary_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=[{"role": "user", "content": "validate"}],
+            max_tokens=100,
+            request_label="intent_guard_finish_gate",
+            consumer="finish_gate",
+            log_prompt=False,
+        )
+    )
     assert projected_finish == json.dumps(finish_payload)
     parsed_finish = parse_validator_response(projected_finish)
     assert parsed_finish is not None
     assert parsed_finish.action == "accept"
 
     parsed_judge = command_moderation._parse_judge_json(
-        _DIRTY_EXTRA
-        + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
+        _DIRTY_EXTRA + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
         tags=loaded["strip_tags_projection"]["tags"],
     )
     assert parsed_judge["verdict"] == "safe"
@@ -197,9 +195,7 @@ async def test_aux_always_strips_think_even_when_config_disables_it(tmp_path, mo
     loaded = load_config(str(cfg_path))
     assert loaded["strip_tags_projection"]["strip_think"] is False
 
-    monkeypatch.setattr(
-        summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None
-    )
+    monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None)
     ctx = SimpleNamespace(
         logger=object(),
         config_dict=loaded,
@@ -272,20 +268,14 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(monk
             seen_user_prompts.append(str(messages[-1].get("content") or ""))
         return valid_summary_xml_for_tests(seed="clean-history")
 
-    monkeypatch.setattr(
-        "gc_core.summarize.thread_summarizer.arequest_summary_text", _fake_request
-    )
-    monkeypatch.setattr(
-        "gc_core.summarize.summary_llm_steps.arequest_summary_text", _fake_request
-    )
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", _fake_request)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", _fake_request)
     empty = SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         as_coro(lambda **_k: empty),
     )
-    monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt"
-    )
+    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
 
     ctx = SimpleNamespace(
         logger=None,

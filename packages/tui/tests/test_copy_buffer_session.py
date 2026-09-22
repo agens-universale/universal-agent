@@ -4,6 +4,7 @@ SPEC 2026-07-25 §3.1 B2/B8: Ctrl+C копирует наружу и допис�
 сверху тем же payload (с cite); на экране буфера — не дописывает сам в себя.
 Регресс: Ctrl+C без выделения → stop (не push).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -68,6 +69,7 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -85,8 +87,7 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch
     async with app.run_test() as pilot:
         # Копирование ловим на транспорте: OSC 52 с 2026-08-04 шлётся только в
         # SSH, на Linux и как запасной путь (см. services/clipboard_ops).
-        monkeypatch.setattr(clipboard_ops, "write_clipboard",
-                            lambda text: copied.append(text) or True)
+        monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: copied.append(text) or True)
         store = _MockStore(existing_buffer="")
         monkeypatch.setattr(pilot.app.screen, "_store", store, raising=False)
         monkeypatch.setattr(pilot.app.screen, "_active_task_id", "TID2", raising=False)
@@ -96,8 +97,7 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch
         # нативная запись уходит в фоновый поток — ждём наблюдаемый результат
         from gc_testkit.tui_support import wait_until
 
-        await wait_until(pilot, lambda: copied == ["фрагмент"],
-                         "текст ушёл в системный буфер")
+        await wait_until(pilot, lambda: copied == ["фрагмент"], "текст ушёл в системный буфер")
         assert store.writes == [("TID2", {"copy_buffer": "фрагмент"})]
         assert stop_called["flag"] is False  # не стопаем
 
@@ -113,6 +113,7 @@ async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -156,6 +157,7 @@ async def test_push_session_buffer_blocked_on_copy_buffer_screen(tmp_path, monke
 
     class _MarkerScreen(Screen):
         """Screen-маркер: имитирует CopyBufferScreen (без TextArea)."""
+
         _is_copy_buffer_screen = True
 
         def __init__(self, store):

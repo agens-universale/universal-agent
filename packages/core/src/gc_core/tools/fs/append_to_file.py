@@ -15,7 +15,9 @@ from gc_core.utils.file_text import (
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
-def _validate_append_args(path, content, separator, create_if_missing, make_dirs, encoding) -> "tuple[str | None, dict | None]":
+def _validate_append_args(
+    path, content, separator, create_if_missing, make_dirs, encoding
+) -> "tuple[str | None, dict | None]":
     """(encoding_used, None) либо (None, error) на первом невалидном аргументе."""
     if not isinstance(content, str):
         return None, {"type": "invalid_argument", "field": "content"}
@@ -48,7 +50,6 @@ def _encode_chunk(chunk: str, encoding_used: str, is_create: bool):
 
 
 class AppendToFile(AbstractSimpleTool):
-
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         description = {
@@ -63,10 +64,7 @@ class AppendToFile(AbstractSimpleTool):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "The absolute path of the existing file to append to."
-                    },
+                    "path": {"type": "string", "description": "The absolute path of the existing file to append to."},
                     "content": {
                         "type": "string",
                         "description": (
@@ -85,11 +83,11 @@ class AppendToFile(AbstractSimpleTool):
                     },
                     "create_if_missing": {
                         "type": "boolean",
-                        "description": "If true, creates the file if it does not exist. Default false."
+                        "description": "If true, creates the file if it does not exist. Default false.",
                     },
                     "make_dirs": {
                         "type": "boolean",
-                        "description": "If true, creates parent directories when missing (used with create_if_missing). Default false."
+                        "description": "If true, creates parent directories when missing (used with create_if_missing). Default false.",
                     },
                     "encoding": {
                         "type": "string",
@@ -100,18 +98,18 @@ class AppendToFile(AbstractSimpleTool):
                             "Must match the existing file head; if the head cannot be decoded "
                             "as this encoding, append fails and the file is unchanged."
                         ),
-                    }
+                    },
                 },
                 "required": ["path", "content", "separator"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: fs_append_file
+        description = """Tool name: fs_append_file
 Tool description: Appends content to an existing file (e.g., for notes, logs, analysis results).
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute path to an existing file."}, "content": {"type": "string", "description": "Content to append."}, "separator": {"type": "string", "description": "Text put between the current file end and the new content. Prefer two newlines unless another separator is needed; empty string means no separation."}}, "required": ["path", "content", "separator"], "additionalProperties": false}
 
@@ -120,10 +118,11 @@ Usage:
 - **Chunking:** for large bodies, append in multiple steps; each `content` should be modest. Do not send an entire article or huge blob in one call.
 - Ideal for accumulating analysis notes, debugging logs, or review comments without overwriting previous data.
 - Do not use for modifying source code logic.
-'''
+"""
         return description
 
-    def _result(self,
+    def _result(
+        self,
         *,
         ok: bool,
         path: str,
@@ -160,7 +159,6 @@ Usage:
     ) -> str:
         return self._result(ok=False, path=path, separator=separator, error=error)
 
-
     async def _missing_target_error(self, path: str, create_if_missing: bool, make_dirs: bool) -> "dict | None":
         """Файла нет: можно ли создать (и родителя) — иначе готовая ошибка."""
         if not create_if_missing:
@@ -196,9 +194,7 @@ Usage:
         # CRLF (\r\n), normalize lone \n in the appended chunk to \r\n
         # so we don't mix line endings. LF files are written as-is.
         if b"\r\n" in head:
-            chunk = (
-                chunk.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
-            )
+            chunk = chunk.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
         await self._backend.append(path, chunk, encoding=encoding_used)
         return None
 
@@ -221,7 +217,9 @@ Usage:
                 error={"type": "invalid_argument", "field": "path"},
             )
 
-        encoding_used, arg_error = _validate_append_args(path, content, separator, create_if_missing, make_dirs, encoding)
+        encoding_used, arg_error = _validate_append_args(
+            path, content, separator, create_if_missing, make_dirs, encoding
+        )
         if arg_error is not None:
             sep_out = separator if isinstance(separator, str) else ""
             return self._result(ok=False, path=path, separator=sep_out, error=arg_error)
@@ -242,9 +240,7 @@ Usage:
         is_create = not exists or size == 0
         payload_bytes, encode_err = _encode_chunk(chunk, encoding_used, is_create)
         if encode_err is not None:
-            return self._result(
-                ok=False, path=path, separator=separator, error=encode_err
-            )
+            return self._result(ok=False, path=path, separator=separator, error=encode_err)
         assert payload_bytes is not None
 
         try:

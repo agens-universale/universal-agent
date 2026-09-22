@@ -1,4 +1,5 @@
 """TouchedJournal: per-trace path journal (spec 2026-07-21)."""
+
 from __future__ import annotations
 
 import json

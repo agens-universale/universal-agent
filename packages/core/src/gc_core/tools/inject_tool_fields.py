@@ -4,6 +4,7 @@
 Конфиг agent.inject_tool_fields: имя поля → description (строка в JSON Schema).
 Если секции нет или dict пустой — инжект не выполняется.
 """
+
 import copy
 import logging
 from typing import Any, Dict, List

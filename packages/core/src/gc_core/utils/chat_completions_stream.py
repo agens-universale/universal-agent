@@ -8,6 +8,7 @@
 (его ловит политика ретраев), ``iter_sse_data_lines`` и
 ``assemble_streamed_completion``.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
@@ -27,7 +28,7 @@ def iter_sse_data_lines(raw_lines: Iterable) -> Iterable[str]:
         line = (line or "").strip()
         if not line or not line.startswith("data:"):
             continue
-        data = line[len("data:"):].strip()
+        data = line[len("data:") :].strip()
         if data == "[DONE]":
             return
         yield data

@@ -12,15 +12,11 @@ def test_auxiliary_llm_completion_kwargs_matches_auxiliary_llm():
             completion_kwargs={"reasoning_effort": "none"},
         )
     )
-    assert summary_llm.auxiliary_llm_completion_kwargs(ctx) == {
-        "reasoning_effort": "none"
-    }
+    assert summary_llm.auxiliary_llm_completion_kwargs(ctx) == {"reasoning_effort": "none"}
 
 
 def test_auxiliary_llm_judge_max_tokens_from_auxiliary_llm():
-    ctx = SimpleNamespace(
-        auxiliary_llm=SimpleNamespace(judge_max_tokens=12345)
-    )
+    ctx = SimpleNamespace(auxiliary_llm=SimpleNamespace(judge_max_tokens=12345))
     assert summary_llm.auxiliary_llm_judge_max_tokens(ctx) == 12345
 
 
@@ -49,13 +45,15 @@ def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
         config_dict={},
         logger=None,
     )
-    out = run_coro(summary_llm.arequest_summary_text(
-        ctx=ctx,
-        state=SimpleNamespace(default_model="m"),
-        messages=[{"role": "user", "content": "hi"}],
-        request_label="summary_batch_1",
-        consumer="summary",
-    ))
+    out = run_coro(
+        summary_llm.arequest_summary_text(
+            ctx=ctx,
+            state=SimpleNamespace(default_model="m"),
+            messages=[{"role": "user", "content": "hi"}],
+            request_label="summary_batch_1",
+            consumer="summary",
+        )
+    )
 
     assert out == "summary ok"
     assert captured["max_tokens"] == 7777
@@ -78,14 +76,16 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
         ),
         config_dict={},
     )
-    run_coro(summary_llm.arequest_summary_text(
-        ctx=ctx,
-        state=SimpleNamespace(default_model="m"),
-        messages=[{"role": "user", "content": "hi"}],
-        request_label="summary_batch_1",
-        consumer="summary",
-        payload_overrides={"temperature": 0.2},
-    ))
+    run_coro(
+        summary_llm.arequest_summary_text(
+            ctx=ctx,
+            state=SimpleNamespace(default_model="m"),
+            messages=[{"role": "user", "content": "hi"}],
+            request_label="summary_batch_1",
+            consumer="summary",
+            payload_overrides={"temperature": 0.2},
+        )
+    )
     assert captured["payload_overrides"] == {
         "reasoning_effort": "none",
         "temperature": 0.2,
@@ -94,13 +94,15 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
 
 def test_request_summary_text_requires_auxiliary_llm_on_ctx():
     with pytest.raises(RuntimeError, match="auxiliary_llm"):
-        run_coro(summary_llm.arequest_summary_text(
-            ctx=SimpleNamespace(config_dict={}),
-            state=SimpleNamespace(default_model="m"),
-            messages=[{"role": "user", "content": "hi"}],
-            request_label="summary_batch_1",
-            consumer="summary",
-        ))
+        run_coro(
+            summary_llm.arequest_summary_text(
+                ctx=SimpleNamespace(config_dict={}),
+                state=SimpleNamespace(default_model="m"),
+                messages=[{"role": "user", "content": "hi"}],
+                request_label="summary_batch_1",
+                consumer="summary",
+            )
+        )
 
 
 def test_apply_payload_overrides_deep_merges_nested_dicts():
@@ -137,9 +139,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         "arequest_chat_completions_with_policy",
         _fake_policy,
     )
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     ctx = SimpleNamespace(
         config_dict={
@@ -154,18 +154,20 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         logger=None,
     )
 
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=SimpleNamespace(default_model="test-model"),
-        messages=[{"role": "user", "content": "hello"}],
-        max_tokens=321,
-        consumer="summary",
-        payload_overrides={
-            "reasoning_effort": "none",
-            "separate_reasoning": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        },
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=SimpleNamespace(default_model="test-model"),
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=321,
+            consumer="summary",
+            payload_overrides={
+                "reasoning_effort": "none",
+                "separate_reasoning": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        )
+    )
 
     payload = captured["payload"]
     assert payload["reasoning_effort"] == "none"

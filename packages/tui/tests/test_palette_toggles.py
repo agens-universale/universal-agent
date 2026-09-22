@@ -1,6 +1,7 @@
 """Toggle-строки палитры: состояние справа, ←/→/Enter в открытой палитре
 циклят и применяют значение МГНОВЕННО (спека 2026-07-18 §1 — черновик
 отменён); Enter текстом (палитра уже закрыта) — только инфо-флеш."""
+
 import pytest
 
 
@@ -8,7 +9,7 @@ def test_cycle_value_wraps_around():
     """Чистая функция цикла: ±1 по кортежу values, по кругу, без записи."""
     from gc_tui.toggles import cycle_value
 
-    assert cycle_value("gate", "on", 1) == "off"     # (idx2+1)%3 -> off
+    assert cycle_value("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
     assert cycle_value("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
     assert cycle_value("gate", "smart", 1) == "on"
     assert cycle_value("answers", "judge", 1) == "deny"
@@ -212,7 +213,7 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     app = TuiApp(config={})
     app._config_path = str(cfg_file)
     app.reload_config()
-    app._threads_dir = str(tmp_path / "threads")   # изолируем метаданные от реального gc-state
+    app._threads_dir = str(tmp_path / "threads")  # изолируем метаданные от реального gc-state
     app.tui_state.active_task_id = "t1"
 
     calls = {"n": 0}
@@ -231,6 +232,7 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  finish_gate_mode: "on"\n'
 
     from gc_tui.services.stores.file_store import FileTaskStore
+
     store = FileTaskStore(threads_dir=app._threads_dir, system=app._system)
     saved = (store.get_task_meta("t1").get("tui") or {}).get("session_settings")
     assert saved == {"tui.finish_gate_mode": "off"}
@@ -341,19 +343,15 @@ async def test_palette_arrow_applies_toggle_immediately_both_directions(tmp_path
 
         assert cfg_file.read_text(encoding="utf-8") == original
         palette = pilot.app.query_one(".palette")
-        rows_text = "\n".join(
-            r.render().plain for r in palette.query(".palette-toggle-row")
-        )
-        assert "●" in rows_text and rows_text.rstrip().endswith("smart")   # было "off"
+        rows_text = "\n".join(r.render().plain for r in palette.query(".palette-toggle-row"))
+        assert "●" in rows_text and rows_text.rstrip().endswith("smart")  # было "off"
         assert pilot.app.query(".palette")  # осталась открыта
 
         await pilot.press("right")
         await pilot.pause(0.05)
 
         assert cfg_file.read_text(encoding="utf-8") == original
-        rows_text = "\n".join(
-            r.render().plain for r in palette.query(".palette-toggle-row")
-        )
+        rows_text = "\n".join(r.render().plain for r in palette.query(".palette-toggle-row"))
         assert "●" in rows_text and rows_text.rstrip().endswith("on")
 
 
@@ -376,9 +374,7 @@ async def test_palette_enter_cycles_and_applies_keeps_palette_open(tmp_path):
         assert pilot.app.query(".palette")  # палитра осталась открыта
         assert cfg_file.read_text(encoding="utf-8") == original
         palette = pilot.app.query_one(".palette")
-        rows_text = "\n".join(
-            r.render().plain for r in palette.query(".palette-toggle-row")
-        )
+        rows_text = "\n".join(r.render().plain for r in palette.query(".palette-toggle-row"))
         assert "●" in rows_text and rows_text.rstrip().endswith("off")
         assert pilot.app.query_one("#cmdinput").text == "/gate"  # текст не сабмитится
 
@@ -471,9 +467,7 @@ async def test_typed_answers_command_shows_info_without_changing_value(tmp_path)
 async def test_typed_rigor_command_shows_info_without_changing_value(tmp_path):
     """То же для `/rigor` — паритет с `/gate`/`/answers` (пресетный тоггл)."""
     pytest.importorskip("textual")
-    app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n'
-    )
+    app, cfg_file = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
     original = cfg_file.read_text(encoding="utf-8")
 
     async with app.run_test() as pilot:
@@ -554,10 +548,10 @@ def _reg_with_gate_answers(monkeypatch):
     monkeypatch.setitem(TOGGLES, "answers", replace(TOGGLES["answers"], palette_default=True))
 
     reg = CommandRegistry()
-    reg.register(Command("gate", (), "", f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}",
-                          is_toggle=True))
-    reg.register(Command("answers", (), "", f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}",
-                          is_toggle=True))
+    reg.register(Command("gate", (), "", f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}", is_toggle=True))
+    reg.register(
+        Command("answers", (), "", f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}", is_toggle=True)
+    )
     return reg
 
 
@@ -576,7 +570,7 @@ def test_slider_row_plain_text_gate_track(monkeypatch):
 
     txt = pal._format_toggle_row(reg.lookup("gate")).plain
 
-    assert txt.rstrip().endswith("○ ○ ●  on")   # было "○ ●  on"
+    assert txt.rstrip().endswith("○ ○ ●  on")  # было "○ ●  on"
     assert "·" not in txt
 
 
@@ -596,8 +590,9 @@ def test_regular_and_toggle_rows_share_name_column(monkeypatch):
 
     reg = CommandRegistry()
     reg.register(Command("verylongcommand", (), "", "обычная команда"))
-    reg.register(Command("gate", (), "", "самопроверка выполнения задачи: закрыт ли запрос пользователя",
-                          is_toggle=True))
+    reg.register(
+        Command("gate", (), "", "самопроверка выполнения задачи: закрыт ли запрос пользователя", is_toggle=True)
+    )
     pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: "on")
 
     plain_row = pal._format_row(reg.lookup("verylongcommand"))
@@ -616,9 +611,9 @@ def test_slider_indicator_and_track_columns_align(monkeypatch):
     g = pal._format_toggle_row(reg.lookup("gate")).plain
     a = pal._format_toggle_row(reg.lookup("answers")).plain
 
-    assert g.rstrip().endswith("○ ○ ●  on") and "·" not in g   # было "○ ●  on"
+    assert g.rstrip().endswith("○ ○ ●  on") and "·" not in g  # было "○ ●  on"
     assert "○ ● ○" in a and a.rstrip().endswith("judge")
-    assert g.rindex("on") == a.rindex("judge")          # общая колонка подписей
+    assert g.rindex("on") == a.rindex("judge")  # общая колонка подписей
     assert len(g.split("on")[0]) == len(a.split("judge")[0])
 
 
@@ -643,13 +638,14 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
         return False if TOGGLES[name].preset_keys else None
 
     pal = CommandPalette(
-        reg, initial_filter="",
+        reg,
+        initial_filter="",
         toggle_state=lambda n: state[n],
         toggle_extra=_extra,
     )
 
     col, base_w, extra_w, label_w = pal._toggle_columns()
-    assert base_w == 5 and extra_w == 3   # тройки(5) + custom-резерв(3) — общие для всех строк
+    assert base_w == 5 and extra_w == 3  # тройки(5) + custom-резерв(3) — общие для всех строк
 
     rigor_row = pal._format_toggle_row(reg.lookup("rigor"))
     gate_row = pal._format_toggle_row(reg.lookup("gate"))
@@ -682,14 +678,10 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     # у хвоста строки (трек между head и подписью — семантические цвета,
     # не задет).
     gate_value_start = gate_plain.rindex("on")
-    assert any(
-        p.DIM.lower() in str(s.style).lower() and s.start <= gate_value_start < s.end
-        for s in gate_row.spans
-    )
+    assert any(p.DIM.lower() in str(s.style).lower() and s.start <= gate_value_start < s.end for s in gate_row.spans)
     answers_value_start = answers_plain.rindex("deny")
     assert any(
-        p.DIM.lower() in str(s.style).lower() and s.start <= answers_value_start < s.end
-        for s in answers_row.spans
+        p.DIM.lower() in str(s.style).lower() and s.start <= answers_value_start < s.end for s in answers_row.spans
     )
 
     # Родитель /rigor НЕ дымится DIM-ом (обычный toggle-стиль строки).
@@ -712,16 +704,14 @@ def test_filtered_dedups_child_matching_filter(monkeypatch):
 
     child = tg.ToggleSpec(
         dotted="tui.zz_child",
-        values=(tg.ToggleValue("a", "hint a", p.INK),
-                tg.ToggleValue("b", "hint b", p.ACCENT)),
+        values=(tg.ToggleValue("a", "hint a", p.INK), tg.ToggleValue("b", "hint b", p.ACCENT)),
         state=lambda cfg: "a",
         label="дочерний фиктивный тоггл",
         summary="демо",
         palette_default=False,
     )
     parent = tg.ToggleSpec(
-        values=(tg.ToggleValue("x", "hint x", p.INK),
-                tg.ToggleValue("y", "hint y", p.ACCENT)),
+        values=(tg.ToggleValue("x", "hint x", p.INK), tg.ToggleValue("y", "hint y", p.ACCENT)),
         state=lambda cfg: "x",
         label="родительский фиктивный тоггл",
         summary="демо",
@@ -737,11 +727,11 @@ def test_filtered_dedups_child_matching_filter(monkeypatch):
     state = {"zzparent": "x", "zzchild": "a"}
     pal = CommandPalette(reg, toggle_state=lambda n: state[n])
 
-    pal.set_filter("zz")   # startswith -> матчит ОБА: zzparent И zzchild
+    pal.set_filter("zz")  # startswith -> матчит ОБА: zzparent И zzchild
 
     names = [c.name for c in pal._visible_toggle_rows()]
-    assert names == ["zzparent", "zzchild"]     # один экземпляр, не два
-    assert pal._owning_preset("zzchild") == "zzparent"   # оформлен как ребёнок группы
+    assert names == ["zzparent", "zzchild"]  # один экземпляр, не два
+    assert pal._owning_preset("zzchild") == "zzparent"  # оформлен как ребёнок группы
     child_row = pal._format_toggle_row(reg.lookup("zzchild"))
     assert child_row.plain.startswith(" /zzchild") and not child_row.plain.startswith("  /zzchild")
 
@@ -763,16 +753,14 @@ def test_filtered_dedups_child_matching_filter_registered_before_parent(monkeypa
 
     child = tg.ToggleSpec(
         dotted="tui.zz_child",
-        values=(tg.ToggleValue("a", "hint a", p.INK),
-                tg.ToggleValue("b", "hint b", p.ACCENT)),
+        values=(tg.ToggleValue("a", "hint a", p.INK), tg.ToggleValue("b", "hint b", p.ACCENT)),
         state=lambda cfg: "a",
         label="дочерний фиктивный тоггл",
         summary="демо",
         palette_default=False,
     )
     parent = tg.ToggleSpec(
-        values=(tg.ToggleValue("x", "hint x", p.INK),
-                tg.ToggleValue("y", "hint y", p.ACCENT)),
+        values=(tg.ToggleValue("x", "hint x", p.INK), tg.ToggleValue("y", "hint y", p.ACCENT)),
         state=lambda cfg: "x",
         label="родительский фиктивный тоггл",
         summary="демо",
@@ -783,15 +771,15 @@ def test_filtered_dedups_child_matching_filter_registered_before_parent(monkeypa
     monkeypatch.setitem(tg.TOGGLES, "zzparent", parent)
 
     reg = CommandRegistry()
-    reg.register(Command("zzchild", (), "", "ребёнок", is_toggle=True))    # ребёнок ПЕРВЫМ
+    reg.register(Command("zzchild", (), "", "ребёнок", is_toggle=True))  # ребёнок ПЕРВЫМ
     reg.register(Command("zzparent", (), "", "родитель", is_toggle=True))  # родитель ВТОРЫМ
     state = {"zzparent": "x", "zzchild": "a"}
     pal = CommandPalette(reg, toggle_state=lambda n: state[n])
 
-    pal.set_filter("zz")   # startswith -> матчит ОБА: zzchild И zzparent
+    pal.set_filter("zz")  # startswith -> матчит ОБА: zzchild И zzparent
 
     names = [c.name for c in pal._visible_toggle_rows()]
-    assert names == ["zzparent", "zzchild"]     # один экземпляр, СРАЗУ после родителя
+    assert names == ["zzparent", "zzchild"]  # один экземпляр, СРАЗУ после родителя
 
 
 def test_slider_colors_semantic(monkeypatch):
@@ -803,7 +791,7 @@ def test_slider_colors_semantic(monkeypatch):
 
     text = pal._format_toggle_row(reg.lookup("answers"))
     knob_styles = [str(s.style) for s in text.spans]
-    assert any(p.RUN_COLOR.lower() in st.lower() for st in knob_styles)   # judge амбер
+    assert any(p.RUN_COLOR.lower() in st.lower() for st in knob_styles)  # judge амбер
 
     text2 = pal._format_toggle_row(reg.lookup("gate"))
     knob_styles2 = [str(s.style) for s in text2.spans if "bold" in str(s.style).lower()]
@@ -842,7 +830,7 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(tmp_path, m
         # (2) описание усечено многоточием (ветка сужения реально сработала).
         assert "…" in gate_row and "…" in answers_row
         # (3) слайдер+подпись присутствуют целиком, не усечены.
-        assert gate_row.rstrip().endswith("○ ○ ●  on")   # было "○ ●  on"
+        assert gate_row.rstrip().endswith("○ ○ ●  on")  # было "○ ●  on"
         assert "○ ● ○" in answers_row and answers_row.rstrip().endswith("judge")
 
 
@@ -855,7 +843,7 @@ def test_toggle_hint_shows_value_meaning(monkeypatch):
     черновика не существует; про Esc в toggle-hint не пишем — спека §6)."""
     reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
-    pal._selected = len(pal._visible_rows())              # первая тоггл-строка (gate)
+    pal._selected = len(pal._visible_rows())  # первая тоггл-строка (gate)
 
     hint = pal._toggle_hint(reg.lookup("gate"))
 
@@ -886,7 +874,7 @@ def test_toggle_hint_carries_scope_inline(monkeypatch):
     (см. первый guard), поэтому hint содержит область целиком."""
     reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
-    pal._selected = len(pal._visible_rows())              # первая тоггл-строка (gate)
+    pal._selected = len(pal._visible_rows())  # первая тоггл-строка (gate)
 
     hint = pal._toggle_hint(reg.lookup("gate"))
 
@@ -903,30 +891,29 @@ def test_fit_hint_priority_truncation():
     from gc_tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
 
     value, keys = "on", _HINT_KEYS_TOGGLE
-    hint = ("самопроверка не даст закончить, пока запрос не закрыт · "
-            "для сложных задач, где важна полнота")
+    hint = "самопроверка не даст закончить, пока запрос не закрыт · для сложных задач, где важна полнота"
 
     full = _fit_hint(value, hint, keys, width=200)
     assert "для сложных задач" in full
-    assert "в текущей сессии" in full                      # область на месте
+    assert "в текущей сессии" in full  # область на месте
 
     w120 = _fit_hint(value, hint, keys, width=120)
-    assert "для сложных задач" not in w120                 # 1) хвост ушёл первым
+    assert "для сложных задач" not in w120  # 1) хвост ушёл первым
     assert "самопроверка" in w120
-    assert "в текущей сессии" in w120                       # область ещё цела в клавишах
+    assert "в текущей сессии" in w120  # область ещё цела в клавишах
 
     w90 = _fit_hint(value, hint, keys, width=90)
-    assert "в текущей сессии" not in w90                    # 2) область ушла ЦЕЛЫМ куском
-    assert "в теку" not in w90                              # не обрывок
+    assert "в текущей сессии" not in w90  # 2) область ушла ЦЕЛЫМ куском
+    assert "в теку" not in w90  # не обрывок
     assert _HINT_KEYS_TOGGLE_MEDIUM in w90
     assert "самопроверка" in w90
 
     w80 = _fit_hint(value, hint, keys, width=80)
-    assert _HINT_KEYS_TOGGLE_MEDIUM not in w80              # 3) клавиши сжались дальше
+    assert _HINT_KEYS_TOGGLE_MEDIUM not in w80  # 3) клавиши сжались дальше
     assert _HINT_KEYS_TOGGLE_SHORT in w80
 
     w30 = _fit_hint(value, hint, keys, width=30)
-    assert "…" in w30 and len(w30) <= 30                    # 4) многоточие на смысле
+    assert "…" in w30 and len(w30) <= 30  # 4) многоточие на смысле
 
 
 @pytest.mark.asyncio
@@ -960,9 +947,9 @@ async def test_toggle_hint_scope_visible_wide_and_gracefully_truncated_narrow(tm
         palette = pilot.app.query_one(".palette")
         hint_narrow = palette.query_one(".palette-hint").render().plain
 
-        assert "в текущей сессии" not in hint_narrow             # ушла ЦЕЛЫМ куском
-        assert "в теку" not in hint_narrow                       # не обрывок
-        assert "переключить" in hint_narrow                      # клавиши-механика жива
+        assert "в текущей сессии" not in hint_narrow  # ушла ЦЕЛЫМ куском
+        assert "в теку" not in hint_narrow  # не обрывок
+        assert "переключить" in hint_narrow  # клавиши-механика жива
 
 
 def test_non_toggle_hint_unchanged():
@@ -993,9 +980,7 @@ def test_five_value_toggle_works_generically(monkeypatch):
 
     five = tg.ToggleSpec(
         dotted="tui.fake_mode",
-        values=tuple(
-            tg.ToggleValue(f"v{i}", f"подсказка {i} · режим {i}", p.ACCENT) for i in range(5)
-        ),
+        values=tuple(tg.ToggleValue(f"v{i}", f"подсказка {i} · режим {i}", p.ACCENT) for i in range(5)),
         state=lambda cfg: "v2",
         label="фиктивный тоггл",
         summary="пять значений",
@@ -1007,7 +992,7 @@ def test_five_value_toggle_works_generically(monkeypatch):
 
     txt = pal._format_toggle_row(reg.lookup("fake")).plain
     assert "○ ○ ● ○ ○" in txt and txt.rstrip().endswith("v2")
-    assert tg.cycle_value("fake", "v4", 1) == "v0"          # цикл по кругу
+    assert tg.cycle_value("fake", "v4", 1) == "v0"  # цикл по кругу
     hint = pal._toggle_hint(reg.lookup("fake"))
     assert hint.startswith("v2 — подсказка 2")
 
@@ -1096,7 +1081,7 @@ async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
 
         regular_count = len(palette._visible_rows())
         total_rows = regular_count + expected
-        for _ in range(total_rows + 1):   # больше одного полного оборота
+        for _ in range(total_rows + 1):  # больше одного полного оборота
             await pilot.press("down")
             await pilot.pause(0.02)
             assert len(_names()) == expected
@@ -1123,13 +1108,19 @@ async def test_group_separator_between_two_preset_groups(tmp_path, monkeypatch):
 
     group_a = tg.ToggleSpec(
         values=(tg.ToggleValue("x", "hint x", p.INK), tg.ToggleValue("y", "hint y", p.ACCENT)),
-        state=lambda cfg: "x", label="группа A", summary="демо",
-        preset_keys=("tui.zz_a_child",), palette_default=True,
+        state=lambda cfg: "x",
+        label="группа A",
+        summary="демо",
+        preset_keys=("tui.zz_a_child",),
+        palette_default=True,
     )
     group_b = tg.ToggleSpec(
         values=(tg.ToggleValue("p", "hint p", p.INK), tg.ToggleValue("q", "hint q", p.ACCENT)),
-        state=lambda cfg: "p", label="группа B", summary="демо",
-        preset_keys=("tui.zz_b_child",), palette_default=True,
+        state=lambda cfg: "p",
+        label="группа B",
+        summary="демо",
+        preset_keys=("tui.zz_b_child",),
+        palette_default=True,
     )
     monkeypatch.setitem(tg.TOGGLES, "zzgroupa", group_a)
     monkeypatch.setitem(tg.TOGGLES, "zzgroupb", group_b)
@@ -1147,7 +1138,7 @@ async def test_group_separator_between_two_preset_groups(tmp_path, monkeypatch):
         await pilot.pause()
 
         seps = list(pal.query(".palette-group-sep"))
-        assert len(seps) == 1                          # ровно один — между группами
+        assert len(seps) == 1  # ровно один — между группами
 
         toggle_rows = list(pal.query(".palette-toggle-row"))
         assert [r.render().plain.split()[0] for r in toggle_rows] == ["/zzgroupa", "/zzgroupb"]

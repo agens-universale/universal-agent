@@ -38,14 +38,17 @@ def test_is_pid_alive_existing_pid_returns_true(monkeypatch):
 def test_is_pid_alive_lookup_error_returns_false(monkeypatch):
     def raise_lookup(pid, sig):
         raise ProcessLookupError
+
     monkeypatch.setattr(os, "kill", raise_lookup)
     assert lc._is_pid_alive(12345) is False
 
 
 def test_is_pid_alive_permission_error_returns_true(monkeypatch):
     """Чужой процесс — не наш, но он точно жив."""
+
     def raise_perm(pid, sig):
         raise PermissionError
+
     monkeypatch.setattr(os, "kill", raise_perm)
     assert lc._is_pid_alive(1) is True
 
@@ -101,9 +104,7 @@ def test_determine_status_non_int_exit_code_failed():
 
 
 def test_final_statuses_contains_expected():
-    assert frozenset(
-        {"completed", "failed", "timeout", "unknown_failed"}
-    ) == lc.FINAL_STATUSES
+    assert frozenset({"completed", "failed", "timeout", "unknown_failed"}) == lc.FINAL_STATUSES
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,8 @@ def dirs(tmp_path):
 def _seed_meta(threads_dir: str, sid: str, status: str, **extra):
     """Helper для создания meta.json с заданным статусом."""
     storage.save_swarm_meta(
-        threads_dir, sid,
+        threads_dir,
+        sid,
         base_meta={"system": "g", "task_id": sid.split("_", 1)[-1]},
         swarm_meta_patch={"id": sid, "status": status, **extra},
     )
@@ -154,12 +156,16 @@ def test_already_final_unchanged(dirs):
 def test_completion_exit_zero_becomes_completed(dirs):
     threads, sandbox = dirs
     _seed_meta(threads, "g_t2", "running", pid=1)
-    _write_completion(threads, "g_t2", {
-        "exit_code": 0,
-        "finished_at": "2026-06-04T11:00:00Z",
-        "error_type": "",
-        "error_message": "",
-    })
+    _write_completion(
+        threads,
+        "g_t2",
+        {
+            "exit_code": 0,
+            "finished_at": "2026-06-04T11:00:00Z",
+            "error_type": "",
+            "error_message": "",
+        },
+    )
     r = lc.check_and_finalize(threads, sandbox, "g_t2")
     sm = r["swarm_meta"]
     assert sm["status"] == "completed"
@@ -171,10 +177,16 @@ def test_completion_exit_zero_becomes_completed(dirs):
 def test_completion_exit_nonzero_becomes_failed(dirs):
     threads, sandbox = dirs
     _seed_meta(threads, "g_t3", "running", pid=1)
-    _write_completion(threads, "g_t3", {
-        "exit_code": 1, "finished_at": "x",
-        "error_type": "cli_error", "error_message": "boom",
-    })
+    _write_completion(
+        threads,
+        "g_t3",
+        {
+            "exit_code": 1,
+            "finished_at": "x",
+            "error_type": "cli_error",
+            "error_message": "boom",
+        },
+    )
     r = lc.check_and_finalize(threads, sandbox, "g_t3")
     sm = r["swarm_meta"]
     assert sm["status"] == "failed"
@@ -185,10 +197,16 @@ def test_completion_exit_nonzero_becomes_failed(dirs):
 def test_completion_timeout_becomes_timeout(dirs):
     threads, sandbox = dirs
     _seed_meta(threads, "g_t4", "running", pid=1)
-    _write_completion(threads, "g_t4", {
-        "exit_code": 124, "finished_at": "x",
-        "error_type": "timeout", "error_message": "killed",
-    })
+    _write_completion(
+        threads,
+        "g_t4",
+        {
+            "exit_code": 124,
+            "finished_at": "x",
+            "error_type": "timeout",
+            "error_message": "killed",
+        },
+    )
     r = lc.check_and_finalize(threads, sandbox, "g_t4")
     assert r["swarm_meta"]["status"] == "timeout"
 
@@ -196,9 +214,11 @@ def test_completion_timeout_becomes_timeout(dirs):
 def test_dead_pid_no_completion_becomes_unknown_failed(dirs, monkeypatch):
     threads, sandbox = dirs
     _seed_meta(threads, "g_t5", "running", pid=99999)
+
     # Мокаем os.kill чтобы он бросал ProcessLookupError (PID мёртв).
     def kill_dead(pid, sig):
         raise ProcessLookupError
+
     monkeypatch.setattr(os, "kill", kill_dead)
 
     r = lc.check_and_finalize(threads, sandbox, "g_t5")
@@ -231,9 +251,16 @@ def test_check_and_finalize_idempotent_on_already_final(dirs):
     """Повторный вызов для финального sworm'а — никаких изменений."""
     threads, sandbox = dirs
     _seed_meta(threads, "g_t8", "running", pid=1)
-    _write_completion(threads, "g_t8", {
-        "exit_code": 0, "finished_at": "x", "error_type": "", "error_message": "",
-    })
+    _write_completion(
+        threads,
+        "g_t8",
+        {
+            "exit_code": 0,
+            "finished_at": "x",
+            "error_type": "",
+            "error_message": "",
+        },
+    )
     r1 = lc.check_and_finalize(threads, sandbox, "g_t8")
     updated_at_1 = r1["updated_at"]
     r2 = lc.check_and_finalize(threads, sandbox, "g_t8")
@@ -269,8 +296,10 @@ def test_parse_iso_deadline_invalid_returns_none():
 
 def test_kill_process_tree_nonexistent_pid_does_not_raise(monkeypatch):
     """Если pid не существует — silent return."""
+
     def raise_lookup(*args, **kwargs):
         raise ProcessLookupError
+
     monkeypatch.setattr("os.killpg", raise_lookup)
     # Не должно бросить.
     lc._kill_process_tree(99999)
@@ -284,7 +313,9 @@ def test_kill_process_tree_zero_pid_noop():
 def test_kill_process_tree_sigterm_then_sigkill(monkeypatch):
     """SIGTERM послан → grace period → SIGKILL если жив."""
     import signal as sig_mod
+
     sent_signals = []
+
     def fake_killpg(pid, sigval):
         sent_signals.append(sigval)
 
@@ -300,7 +331,9 @@ def test_kill_process_tree_sigterm_then_sigkill(monkeypatch):
 
 def test_kill_process_tree_no_sigkill_if_died_during_grace(monkeypatch):
     import signal as sig_mod
+
     sent_signals = []
+
     def fake_killpg(pid, sigval):
         sent_signals.append(sigval)
 
@@ -358,12 +391,21 @@ def test_check_and_finalize_deadline_passed_but_process_already_dead(dirs, monke
     threads, sandbox = dirs
     past = "2020-01-01T00:00:00+00:00"
     _seed_meta(threads, "g_tdead", "running", pid=99999, deadline_at=past)
-    _write_completion(threads, "g_tdead", {
-        "exit_code": 0, "finished_at": "x", "error_type": "", "error_message": "",
-    })
+    _write_completion(
+        threads,
+        "g_tdead",
+        {
+            "exit_code": 0,
+            "finished_at": "x",
+            "error_type": "",
+            "error_message": "",
+        },
+    )
+
     # PID мёртв.
     def kill_dead(pid, sig):
         raise ProcessLookupError
+
     monkeypatch.setattr("os.kill", kill_dead)
     killed = []
     monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
@@ -395,14 +437,16 @@ def test_get_dir_size_mb_returns_none_for_missing_dir():
 
 
 def test_get_dir_size_mb_returns_zero_for_empty_dir(tmp_path):
-    d = tmp_path / "empty"; d.mkdir()
+    d = tmp_path / "empty"
+    d.mkdir()
     size_mb = lc._get_dir_size_mb(str(d))
     # du -sb считает блок каталога (~4 KB); os.walk fallback — 0.
     assert 0.0 <= size_mb < 0.01
 
 
 def test_get_dir_size_mb_counts_files(tmp_path):
-    d = tmp_path / "f"; d.mkdir()
+    d = tmp_path / "f"
+    d.mkdir()
     # 2 MB файл.
     (d / "blob.bin").write_bytes(b"x" * (2 * 1024 * 1024))
     size_mb = lc._get_dir_size_mb(str(d))
@@ -415,11 +459,13 @@ def test_disk_limit_kills_process_when_exceeded(dirs, monkeypatch):
     # Создаём sandbox path с большим файлом.
     sb_path = os.path.join(sandbox, "g_d1")
     os.makedirs(sb_path)
-    (open(os.path.join(sb_path, "big.bin"), "wb")
-     .write(b"x" * (3 * 1024 * 1024)))
+    (open(os.path.join(sb_path, "big.bin"), "wb").write(b"x" * (3 * 1024 * 1024)))
     _seed_meta(
-        threads, "g_d1", "running",
-        pid=12345, sandbox_path=sb_path,
+        threads,
+        "g_d1",
+        "running",
+        pid=12345,
+        sandbox_path=sb_path,
         limits={"disk_mb": 1},  # 1MB limit, файл 3MB → violation
     )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
@@ -442,9 +488,7 @@ def test_disk_limit_not_enforced_without_heavy_checks(dirs, monkeypatch):
     sb_path = os.path.join(sandbox, "g_d2")
     os.makedirs(sb_path)
     open(os.path.join(sb_path, "big.bin"), "wb").write(b"x" * (3 * 1024 * 1024))
-    _seed_meta(threads, "g_d2", "running",
-               pid=12345, sandbox_path=sb_path,
-               limits={"disk_mb": 1})
+    _seed_meta(threads, "g_d2", "running", pid=12345, sandbox_path=sb_path, limits={"disk_mb": 1})
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     # heavy_checks=False по умолчанию.
@@ -457,9 +501,7 @@ def test_disk_limit_skipped_when_below_threshold(dirs, monkeypatch):
     sb_path = os.path.join(sandbox, "g_d3")
     os.makedirs(sb_path)
     open(os.path.join(sb_path, "small.bin"), "wb").write(b"x" * 100)  # 100 байт
-    _seed_meta(threads, "g_d3", "running",
-               pid=12345, sandbox_path=sb_path,
-               limits={"disk_mb": 100})
+    _seed_meta(threads, "g_d3", "running", pid=12345, sandbox_path=sb_path, limits={"disk_mb": 100})
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     r = lc.check_and_finalize(threads, sandbox, "g_d3", heavy_checks=True)
@@ -468,9 +510,7 @@ def test_disk_limit_skipped_when_below_threshold(dirs, monkeypatch):
 
 def test_disk_limit_skipped_when_no_sandbox_path(dirs, monkeypatch):
     threads, sandbox = dirs
-    _seed_meta(threads, "g_d4", "running",
-               pid=12345,
-               limits={"disk_mb": 1})  # без sandbox_path
+    _seed_meta(threads, "g_d4", "running", pid=12345, limits={"disk_mb": 1})  # без sandbox_path
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     r = lc.check_and_finalize(threads, sandbox, "g_d4", heavy_checks=True)
@@ -485,8 +525,7 @@ def test_disk_limit_skipped_when_no_sandbox_path(dirs, monkeypatch):
 def test_memory_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
     """psutil показывает RSS > memory_mb → kill + failed."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_m1", "running", pid=12345,
-               limits={"memory_mb": 100})  # 100 MB
+    _seed_meta(threads, "g_m1", "running", pid=12345, limits={"memory_mb": 100})  # 100 MB
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     killed = []
     monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
@@ -500,8 +539,11 @@ def test_memory_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
         rss = 200 * 1024 * 1024  # 200 MB
 
     class FakeProcess:
-        def __init__(self, pid): pass
-        def memory_info(self): return FakeMemInfo()
+        def __init__(self, pid):
+            pass
+
+        def memory_info(self):
+            return FakeMemInfo()
 
     monkeypatch.setattr(lc.psutil, "Process", FakeProcess)
 
@@ -515,8 +557,7 @@ def test_memory_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
 def test_memory_limit_skipped_without_psutil(dirs, monkeypatch):
     """Без psutil — memory check просто пропускается, нет ошибки."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_m2", "running", pid=12345,
-               limits={"memory_mb": 1})  # entry: 1 MB very low
+    _seed_meta(threads, "g_m2", "running", pid=12345, limits={"memory_mb": 1})  # entry: 1 MB very low
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     monkeypatch.setattr(lc, "_PSUTIL_AVAILABLE", False)
 
@@ -527,8 +568,7 @@ def test_memory_limit_skipped_without_psutil(dirs, monkeypatch):
 def test_memory_limit_handles_psutil_no_such_process(dirs, monkeypatch):
     """psutil.NoSuchProcess → не падаем, идём дальше."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_m3", "running", pid=12345,
-               limits={"memory_mb": 100})
+    _seed_meta(threads, "g_m3", "running", pid=12345, limits={"memory_mb": 100})
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     if not lc._PSUTIL_AVAILABLE:
@@ -536,6 +576,7 @@ def test_memory_limit_handles_psutil_no_such_process(dirs, monkeypatch):
 
     def raise_nope(pid):
         raise lc.psutil.NoSuchProcess(pid)
+
     monkeypatch.setattr(lc.psutil, "Process", raise_nope)
 
     r = lc.check_and_finalize(threads, sandbox, "g_m3", heavy_checks=True)
@@ -549,8 +590,7 @@ def test_memory_limit_handles_psutil_no_such_process(dirs, monkeypatch):
 
 def test_cpu_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
     threads, sandbox = dirs
-    _seed_meta(threads, "g_c1", "running", pid=12345,
-               limits={"cpu_percent": 50})
+    _seed_meta(threads, "g_c1", "running", pid=12345, limits={"cpu_percent": 50})
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     killed = []
     monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
@@ -559,11 +599,18 @@ def test_cpu_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
     if not lc._PSUTIL_AVAILABLE:
         pytest.skip("psutil не установлен")
 
-    class FakeMemInfo: rss = 1  # tiny
+    class FakeMemInfo:
+        rss = 1  # tiny
+
     class FakeProcess:
-        def __init__(self, pid): pass
-        def memory_info(self): return FakeMemInfo()
-        def cpu_percent(self, interval=None): return 95.0  # 95%
+        def __init__(self, pid):
+            pass
+
+        def memory_info(self):
+            return FakeMemInfo()
+
+        def cpu_percent(self, interval=None):
+            return 95.0  # 95%
 
     monkeypatch.setattr(lc.psutil, "Process", FakeProcess)
 
@@ -580,9 +627,14 @@ def test_resource_limits_not_checked_when_heavy_false(dirs, monkeypatch):
     sb_path = os.path.join(sandbox, "g_h1")
     os.makedirs(sb_path)
     open(os.path.join(sb_path, "big.bin"), "wb").write(b"x" * (5 * 1024 * 1024))
-    _seed_meta(threads, "g_h1", "running",
-               pid=12345, sandbox_path=sb_path,
-               limits={"disk_mb": 1, "memory_mb": 1, "cpu_percent": 1})
+    _seed_meta(
+        threads,
+        "g_h1",
+        "running",
+        pid=12345,
+        sandbox_path=sb_path,
+        limits={"disk_mb": 1, "memory_mb": 1, "cpu_percent": 1},
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     r = lc.check_and_finalize(threads, sandbox, "g_h1")  # heavy_checks=False default
@@ -592,6 +644,7 @@ def test_resource_limits_not_checked_when_heavy_false(dirs, monkeypatch):
 # ---------------------------------------------------------------------------
 # _persist_agent_artifacts: сохранение agent logs/threads из песочницы на хост
 # ---------------------------------------------------------------------------
+
 
 def _make_fake_sandbox(tmp_path, swarm_id):
     """Создать sandbox/<id>/.gc/{logs,threads} с файлами-маркерами."""
@@ -606,6 +659,7 @@ def _make_fake_sandbox(tmp_path, swarm_id):
 def test_persist_agent_artifacts_default_under_threads_dir(tmp_path):
     """Без настроенного swarm_logs_dir — копирует .gc/logs в threads_dir/<id>/agent_logs."""
     from gc_server.swarm.lifecycle import _persist_agent_artifacts
+
     swarm_id = "generic_t1"
     sb = _make_fake_sandbox(tmp_path, swarm_id)
     threads_dir = str(tmp_path / "threads")
@@ -616,6 +670,7 @@ def test_persist_agent_artifacts_default_under_threads_dir(tmp_path):
 def test_persist_agent_artifacts_configured_dir(tmp_path):
     """С настроенным swarm_logs_dir — копирует в <swarm_logs_dir>/<id>/."""
     from gc_server.swarm.lifecycle import _persist_agent_artifacts
+
     swarm_id = "generic_t2"
     sb = _make_fake_sandbox(tmp_path, swarm_id)
     threads_dir = str(tmp_path / "threads")
@@ -629,4 +684,5 @@ def test_persist_agent_artifacts_configured_dir(tmp_path):
 def test_persist_agent_artifacts_missing_sandbox_noop(tmp_path):
     """Пустой sandbox_path — no-op, без ошибок."""
     from gc_server.swarm.lifecycle import _persist_agent_artifacts
+
     _persist_agent_artifacts(str(tmp_path / "threads"), "x", "")  # не падает

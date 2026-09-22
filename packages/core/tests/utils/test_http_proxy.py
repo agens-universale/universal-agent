@@ -4,7 +4,6 @@ Covers: config / env / empty / override / strip / NO_PROXY bypass on url.
 """
 
 
-
 class TestResolveProxies:
     """Resolver: (config_proxy, environ, url) → proxies dict | None."""
 

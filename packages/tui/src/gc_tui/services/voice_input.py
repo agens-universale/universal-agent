@@ -5,6 +5,7 @@ transcribe-потоком; колбэки on_* маршалятся на UI-по
 (App.call_from_thread). Зависимости инъектируются — тестируется без
 микрофона, сети и Textual.
 """
+
 from __future__ import annotations
 
 import threading
@@ -13,7 +14,7 @@ from typing import Any, Callable, Dict, Optional
 
 from gc_tui.voice.errors import VoiceError
 
-MIN_SECONDS = 0.5   # короче — случайное нажатие: молчаливая отмена
+MIN_SECONDS = 0.5  # короче — случайное нажатие: молчаливая отмена
 
 IDLE = "idle"
 RECORDING = "recording"
@@ -46,8 +47,8 @@ class VoiceInputFlow:
         self.state = IDLE
         self._recorder: Any = None
         self._stt_started_at: float = 0.0
-        self._band_peak: float = 0.0   # бегущий пик спектра для АРУ эквалайзера
-        self._band_display: list = [0.0] * 7   # EMA-сглаженные высоты для плавности
+        self._band_peak: float = 0.0  # бегущий пик спектра для АРУ эквалайзера
+        self._band_display: list = [0.0] * 7  # EMA-сглаженные высоты для плавности
 
     @staticmethod
     def _spawn_thread(fn: Callable[[], None]) -> None:
@@ -100,7 +101,7 @@ class VoiceInputFlow:
         bands = getattr(self._recorder, "band_levels", None)
         if bands is None:
             bands = (getattr(self._recorder, "level", 0.0),) * 7
-        gated = tuple(b if b > 0.003 else 0.0 for b in bands)   # шумовой гейт
+        gated = tuple(b if b > 0.003 else 0.0 for b in bands)  # шумовой гейт
         peak_raw = max(gated)
         self._band_peak = max(peak_raw, self._band_peak * 0.975, 0.02)
         norm = [min(1.0, b / self._band_peak) for b in gated]
@@ -109,9 +110,7 @@ class VoiceInputFlow:
         # (высота ⡀), чтобы эквалайзер выглядел полным, а не 1–2 столбцами.
         n = len(norm)
         smoothed = [
-            max(norm[i],
-                0.4 * (norm[i - 1] if i > 0 else 0.0),
-                0.4 * (norm[i + 1] if i + 1 < n else 0.0))
+            max(norm[i], 0.4 * (norm[i - 1] if i > 0 else 0.0), 0.4 * (norm[i + 1] if i + 1 < n else 0.0))
             for i in range(n)
         ]
         if peak_raw > 0.003:
@@ -163,8 +162,7 @@ class VoiceInputFlow:
 
         Ровно одна точка, где двигается состояние картинки: рендер её только читает."""
         self._advance_bands()
-        if self.state == RECORDING \
-                and self.elapsed_seconds >= self._cfg.get("max_seconds", 120):
+        if self.state == RECORDING and self.elapsed_seconds >= self._cfg.get("max_seconds", 120):
             self.stop_and_transcribe()
 
     def stop_and_transcribe(self) -> None:
@@ -186,7 +184,7 @@ class VoiceInputFlow:
             text = self._transcribe(pcm, self._cfg)
         except VoiceError as exc:
             self._ui_call(self._finish, None, str(exc))
-        except Exception as exc:   # неожиданный сбой не должен вешать стадию
+        except Exception as exc:  # неожиданный сбой не должен вешать стадию
             self._ui_call(self._finish, None, f"голосовой ввод: {exc}")
         else:
             self._ui_call(self._finish, text, None)

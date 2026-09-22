@@ -1,4 +1,5 @@
 """Pending-реплика × stream_reset (компакция треда во время бегущего run)."""
+
 import json
 import threading
 from pathlib import Path
@@ -23,31 +24,52 @@ async def test_pending_record_survives_stream_reset(tmp_path):
     tid = "t-compact"
     # Существующий тред (thread_store-формат): 1 user-сообщение + meta.
     with open(tmp_path / f"data_cli_{tid}.jsonl", "w", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "type": "message", "thread_id": tid, "system": "cli",
-            "seq": 1, "ts": "2026-06-11T10:00:00+00:00",
-            "payload": {"id": "u1", "role": "user", "content": "ранний вопрос"},
-        }, ensure_ascii=False) + "\n")
+        f.write(
+            json.dumps(
+                {
+                    "type": "message",
+                    "thread_id": tid,
+                    "system": "cli",
+                    "seq": 1,
+                    "ts": "2026-06-11T10:00:00+00:00",
+                    "payload": {"id": "u1", "role": "user", "content": "ранний вопрос"},
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
     meta_path = tmp_path / f"meta_cli_{tid}.json"
-    meta_path.write_text(json.dumps({
-        "thread_id": tid, "system_id": "cli",
-        "updated_at": "2026-06-11T10:00:00+00:00", "messages_count": 1,
-    }), encoding="utf-8")
+    meta_path.write_text(
+        json.dumps(
+            {
+                "thread_id": tid,
+                "system_id": "cli",
+                "updated_at": "2026-06-11T10:00:00+00:00",
+                "messages_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     class _Fake:
         """Блокируется до stop_run; ничего не пишет (пишем «компакцию» сами)."""
+
         async def arun(self, messages, *, thread_id, **kw):
             self._evt = threading.Event()
             self._evt.wait(timeout=30.0)
+
         def stop_run(self):
             if getattr(self, "_evt", None):
                 self._evt.set()
-        def add_message(self, m): pass
+
+        def add_message(self, m):
+            pass
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     fake = _Fake()
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
+
         async def wait_until(cond, what):
             for _ in range(200):
                 if cond():
@@ -65,12 +87,10 @@ async def test_pending_record_survives_stream_reset(tmp_path):
         inp.text = "не подтверждено"
         await pilot.press("enter")
         await wait_until(
-            lambda: any(r["content"] == "не подтверждено"
-                        for r in _read_pending(tmp_path, tid)),
+            lambda: any(r["content"] == "не подтверждено" for r in _read_pending(tmp_path, tid)),
             "pending-запись в meta",
         )
-        pending_widgets = [w for w in pilot.app.query(UserReplyContainer)
-                           if w._text == "не подтверждено"]
+        pending_widgets = [w for w in pilot.app.query(UserReplyContainer) if w._text == "не подтверждено"]
         assert len(pending_widgets) == 1
         assert pending_widgets[0].state == "pending"
 
@@ -78,32 +98,42 @@ async def test_pending_record_survives_stream_reset(tmp_path):
         # meta обновлена in-place (last_summary_archive_suffix → новая эпоха;
         # остальные ключи, включая tui.pending_user_messages, сохраняются —
         # как в thread_store.archive_and_compact_summary_payload).
-        (tmp_path / f"data_cli_{tid}.jsonl").write_text(json.dumps({
-            "type": "message", "thread_id": tid, "system": "cli",
-            "seq": 1, "ts": "2026-06-11T11:00:00+00:00",
-            "payload": {"id": "s1", "role": "assistant", "content": "после-сжатия"},
-        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "thread_id": tid,
+                    "system": "cli",
+                    "seq": 1,
+                    "ts": "2026-06-11T11:00:00+00:00",
+                    "payload": {"id": "s1", "role": "assistant", "content": "после-сжатия"},
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta.update({
-            "updated_at": "2026-06-11T11:00:00+00:00",
-            "messages_count": 1,
-            "last_summarized_at": "2026-06-11T11:00:00+00:00",
-            "last_summary_archive_suffix": "2026-06-11T11-00-00",
-        })
+        meta.update(
+            {
+                "updated_at": "2026-06-11T11:00:00+00:00",
+                "messages_count": 1,
+                "last_summarized_at": "2026-06-11T11:00:00+00:00",
+                "last_summary_archive_suffix": "2026-06-11T11-00-00",
+            }
+        )
         meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
         def trace_text():
             trace = pilot.app.query_one("#trace")
             return "\n".join(str(c.render()) for c in trace.walk_children())
 
-        await wait_until(lambda: "после-сжатия" in trace_text(),
-                         "stream_reset-ререндер")
+        await wait_until(lambda: "после-сжатия" in trace_text(), "stream_reset-ререндер")
 
         # I1: GC на stream_reset — truly-orphaned remount failed без re-attach.
         await wait_until(
             lambda: any(
-                w._text == "не подтверждено" and w.state == "failed"
-                for w in pilot.app.query(UserReplyContainer)
+                w._text == "не подтверждено" and w.state == "failed" for w in pilot.app.query(UserReplyContainer)
             ),
             "failed pending после stream_reset",
         )

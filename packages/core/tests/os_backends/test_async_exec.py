@@ -3,6 +3,7 @@
 Прежняя реализация держала по два дренажных потока на каждый вызов: pipe
 нельзя не читать — заполненный буфер блокирует запись в дочернем процессе.
 """
+
 import asyncio
 import sys
 import threading
@@ -27,8 +28,8 @@ async def test_two_commands_run_concurrently():
     port = aexec_port(LocalFsBackend())
     started = time.monotonic()
     a, b = await asyncio.gather(
-        port.aexec(f'{sys.executable} -c "import time; time.sleep(0.3); print(\'a\')"'),
-        port.aexec(f'{sys.executable} -c "import time; time.sleep(0.3); print(\'b\')"'),
+        port.aexec(f"{sys.executable} -c \"import time; time.sleep(0.3); print('a')\""),
+        port.aexec(f"{sys.executable} -c \"import time; time.sleep(0.3); print('b')\""),
     )
     elapsed = time.monotonic() - started
 
@@ -40,7 +41,7 @@ async def test_no_helper_threads_per_call():
     """Ради этого всё и делалось: дренажных потоков на вызов больше нет."""
     port = aexec_port(LocalFsBackend())
     before = threading.active_count()
-    await port.aexec(f'{sys.executable} -c "print(\'x\' * 100000)"')
+    await port.aexec(f"{sys.executable} -c \"print('x' * 100000)\"")
     assert threading.active_count() == before
 
 
@@ -53,7 +54,7 @@ async def test_timeout_kills_process():
 
 async def test_stderr_captured_separately():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec(f'{sys.executable} -c "import sys; sys.stderr.write(\'беда\')"')
+    res = await port.aexec(f"{sys.executable} -c \"import sys; sys.stderr.write('беда')\"")
     assert "беда" in res.stderr
     assert res.stdout == ""
 
@@ -62,7 +63,7 @@ async def test_output_is_bounded_and_flagged():
     """Буфер ограничен, но процесс не виснет: хвост дочитывается в никуда."""
     backend = LocalFsBackend(exec_output_capture_max_chars=100)
     port = aexec_port(backend)
-    res = await port.aexec(f'{sys.executable} -c "print(\'y\' * 50000)"')
+    res = await port.aexec(f"{sys.executable} -c \"print('y' * 50000)\"")
 
     assert len(res.stdout) <= 100
     assert res.stdout_hit_capture_cap is True
@@ -83,6 +84,7 @@ async def test_argv_form_needs_no_shell():
 
 async def test_sync_backend_gets_adapter():
     """Чужой FsBackend работает без единой правки у его автора."""
+
     class _Legacy:
         def exec(self, command, *, cwd=None, timeout=None, env=None):
             return ExecResult(stdout="legacy", stderr="", return_code=0)
@@ -111,7 +113,7 @@ async def test_native_and_adapted_paths_agree():
     напрямую, чужой синхронный — через ``SyncExecAdapter``. Оба обязаны дать
     один результат.
     """
-    cmd = f'{sys.executable} -c "print(\'паритет\')"'
+    cmd = f"{sys.executable} -c \"print('паритет')\""
     native = LocalFsBackend()
     assert aexec_port(native) is native
     native_res = await native.aexec(cmd)
@@ -122,13 +124,17 @@ async def test_native_and_adapted_paths_agree():
         def __init__(self) -> None:
             self._inner = LocalFsBackend()
 
-        def exec(self, command, *, cwd=None, timeout=None, env=None,
-                 capture_max_chars=None):
+        def exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
             # Адаптер зовёт это в БРОШЕННОМ потоке, где своего loop нет.
-            return asyncio.run(self._inner.aexec(
-                command, cwd=cwd, timeout=timeout, env=env,
-                capture_max_chars=capture_max_chars,
-            ))
+            return asyncio.run(
+                self._inner.aexec(
+                    command,
+                    cwd=cwd,
+                    timeout=timeout,
+                    env=env,
+                    capture_max_chars=capture_max_chars,
+                )
+            )
 
     port = aexec_port(_Legacy())
     assert isinstance(port, SyncExecAdapter)
@@ -159,9 +165,7 @@ async def test_captured_survives_drain_timeout():
     нельзя было понять, чем команда кончилась.
     """
     backend = LocalFsBackend(exec_output_capture_max_chars=1000)
-    res = await backend.aexec(
-        f"{sys.executable} -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10
-    )
+    res = await backend.aexec(f"{sys.executable} -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10)
 
     assert res.stdout_hit_capture_cap is True
     assert len(res.stdout) == 1000, "захваченное потеряно вместе с отменой дренажа"
@@ -170,12 +174,9 @@ async def test_captured_survives_drain_timeout():
     assert stream.truncated is True
     assert stream.head == "A" * 500, "начало потока потеряно"
     assert stream.tail.endswith("\n"), (
-        "хвост не настоящий: у `print` в конце перевод строки, и он обязан "
-        "доехать — ради этого голова+хвост и делались"
+        "хвост не настоящий: у `print` в конце перевод строки, и он обязан доехать — ради этого голова+хвост и делались"
     )
-    assert stream.total_chars > 200000, (
-        f"счётчик считает только снимок, а не весь поток: {stream.total_chars}"
-    )
+    assert stream.total_chars > 200000, f"счётчик считает только снимок, а не весь поток: {stream.total_chars}"
 
 
 async def test_background_child_is_not_a_timeout():

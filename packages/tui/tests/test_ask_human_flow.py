@@ -1,4 +1,5 @@
 """ask_human flow: detection → banner mount → user answer → banner unmount."""
+
 import json
 
 import pytest
@@ -40,8 +41,7 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
     fake.run(["используй скилл skill-creator"], thread_id=tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"})
     app._executor_factory = lambda: fake
     # Fix D: без живого runner-а recovery-блок снял бы banner. Здесь мы тестируем
     # live-flow → подсовываем live-stub.
@@ -56,10 +56,7 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
         assert len(banner) == 1
         rows = list(banner[0].query(TraceRow))
         assert rows, "баннер должен смонтировать блок-виджеты"
-        joined = " ".join(
-            (r._content.plain if hasattr(r._content, "plain") else str(r._content))
-            for r in rows
-        )
+        joined = " ".join((r._content.plain if hasattr(r._content, "plain") else str(r._content)) for r in rows)
         assert "Какого типа отчёт" in joined
         # Пока плашка видна — трейс-строка вопроса смонтирована, но скрыта
         # (без дубля на экране; позиция выше будущего ответа уже зафиксирована).
@@ -75,17 +72,28 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
         # Simulate function_call_output for ask_human arriving → banner unmounts
         import json as _json
         from pathlib import Path
+
         data = Path(tmp_path) / f"data_cli_{tid}.jsonl"
         with open(data, "a", encoding="utf-8") as f:
-            f.write(_json.dumps({
-                "type": "message", "seq": 99, "ts_utc": "2026-05-22T12:00:10+00:00",
-                "payload": {
-                    "id": "fco_ah", "type": "function_call_output", "call_id": "c2",
-                    "name": "ask_human",
-                    "output": _json.dumps({"tool": "ask_human", "ok": True,
-                                           "question": "...", "response": "A"}),
-                },
-            }) + "\n")
+            f.write(
+                _json.dumps(
+                    {
+                        "type": "message",
+                        "seq": 99,
+                        "ts_utc": "2026-05-22T12:00:10+00:00",
+                        "payload": {
+                            "id": "fco_ah",
+                            "type": "function_call_output",
+                            "call_id": "c2",
+                            "name": "ask_human",
+                            "output": _json.dumps(
+                                {"tool": "ask_human", "ok": True, "question": "...", "response": "A"}
+                            ),
+                        },
+                    }
+                )
+                + "\n"
+            )
         await pilot.pause(0.5)
 
         banner = pilot.app.query(AskHumanBanner)
@@ -94,9 +102,7 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
         # полная, ответ юзера не висит без контекста.
         q_row = scr.query_one(".ask-human-question")
         assert not q_row.has_class("hidden")
-        trace_text = " ".join(
-            f"{w._prefix}{w._content}" for w in scr.query(TraceRow)
-        )
+        trace_text = " ".join(f"{w._prefix}{w._content}" for w in scr.query(TraceRow))
         assert "ask_human:" not in trace_text  # тех-префикс убран — серая рамка с «? »
         assert "? " in trace_text
         assert "Какого типа отчёт" in trace_text
@@ -115,30 +121,62 @@ async def test_replay_unanswered_question_does_not_swallow_later_ones(tmp_path):
     recs = [
         {"id": "u1", "role": "user", "content": "старт"},
         # Q1 без output (переформулирован ниже).
-        {"id": "fc1", "type": "function_call", "call_id": "c1", "name": "turn_ask_human",
-         "arguments": json.dumps({"question": "ПЕРВЫЙ вопрос?"}, ensure_ascii=False)},
+        {
+            "id": "fc1",
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "turn_ask_human",
+            "arguments": json.dumps({"question": "ПЕРВЫЙ вопрос?"}, ensure_ascii=False),
+        },
         # Q2 с output.
-        {"id": "fc2", "type": "function_call", "call_id": "c2", "name": "turn_ask_human",
-         "arguments": json.dumps({"question": "ВТОРОЙ вопрос?"}, ensure_ascii=False)},
-        {"id": "fco2", "type": "function_call_output", "call_id": "c2", "name": "turn_ask_human",
-         "output": json.dumps({"tool": "turn_ask_human", "ok": True,
-                               "question": "ВТОРОЙ вопрос?", "response": "ответ2"},
-                              ensure_ascii=False)},
+        {
+            "id": "fc2",
+            "type": "function_call",
+            "call_id": "c2",
+            "name": "turn_ask_human",
+            "arguments": json.dumps({"question": "ВТОРОЙ вопрос?"}, ensure_ascii=False),
+        },
+        {
+            "id": "fco2",
+            "type": "function_call_output",
+            "call_id": "c2",
+            "name": "turn_ask_human",
+            "output": json.dumps(
+                {"tool": "turn_ask_human", "ok": True, "question": "ВТОРОЙ вопрос?", "response": "ответ2"},
+                ensure_ascii=False,
+            ),
+        },
         # Q3 с output.
-        {"id": "fc3", "type": "function_call", "call_id": "c3", "name": "turn_ask_human",
-         "arguments": json.dumps({"question": "ТРЕТИЙ вопрос?"}, ensure_ascii=False)},
-        {"id": "fco3", "type": "function_call_output", "call_id": "c3", "name": "turn_ask_human",
-         "output": json.dumps({"tool": "turn_ask_human", "ok": True,
-                               "question": "ТРЕТИЙ вопрос?", "response": "ответ3"},
-                              ensure_ascii=False)},
+        {
+            "id": "fc3",
+            "type": "function_call",
+            "call_id": "c3",
+            "name": "turn_ask_human",
+            "arguments": json.dumps({"question": "ТРЕТИЙ вопрос?"}, ensure_ascii=False),
+        },
+        {
+            "id": "fco3",
+            "type": "function_call_output",
+            "call_id": "c3",
+            "name": "turn_ask_human",
+            "output": json.dumps(
+                {"tool": "turn_ask_human", "ok": True, "question": "ТРЕТИЙ вопрос?", "response": "ответ3"},
+                ensure_ascii=False,
+            ),
+        },
     ]
-    lines = [json.dumps({"type": "message", "seq": i + 1,
-                         "ts_utc": f"2026-06-10T23:00:{i:02d}+00:00", "payload": p},
-                        ensure_ascii=False) for i, p in enumerate(recs)]
+    lines = [
+        json.dumps(
+            {"type": "message", "seq": i + 1, "ts_utc": f"2026-06-10T23:00:{i:02d}+00:00", "payload": p},
+            ensure_ascii=False,
+        )
+        for i, p in enumerate(recs)
+    ]
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "2026-06-10T23:00:09+00:00",
-                    "messages_count": len(recs)}), encoding="utf-8")
+        json.dumps({"thread_id": tid, "updated_at": "2026-06-10T23:00:09+00:00", "messages_count": len(recs)}),
+        encoding="utf-8",
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -167,23 +205,35 @@ async def test_replay_answered_question_keeps_question_row(tmp_path):
     tid = "ahq00000000000000000000000000001"
     recs = [
         {"id": "u1", "role": "user", "content": "поехали"},
-        {"id": "fc1", "type": "function_call", "call_id": "c1", "name": "ask_human",
-         "arguments": json.dumps({"question": "Какой вариант — A или B?"},
-                                 ensure_ascii=False)},
-        {"id": "fco1", "type": "function_call_output", "call_id": "c1",
-         "name": "ask_human",
-         "output": json.dumps({"tool": "ask_human", "ok": True,
-                               "question": "Какой вариант — A или B?",
-                               "response": "A"}, ensure_ascii=False)},
+        {
+            "id": "fc1",
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "ask_human",
+            "arguments": json.dumps({"question": "Какой вариант — A или B?"}, ensure_ascii=False),
+        },
+        {
+            "id": "fco1",
+            "type": "function_call_output",
+            "call_id": "c1",
+            "name": "ask_human",
+            "output": json.dumps(
+                {"tool": "ask_human", "ok": True, "question": "Какой вариант — A или B?", "response": "A"},
+                ensure_ascii=False,
+            ),
+        },
     ]
-    lines = [json.dumps({"type": "message", "seq": i + 1,
-                         "ts_utc": f"2026-06-10T21:00:0{i}+00:00", "payload": p},
-                        ensure_ascii=False) for i, p in enumerate(recs)]
-    (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n",
-                                                    encoding="utf-8")
+    lines = [
+        json.dumps(
+            {"type": "message", "seq": i + 1, "ts_utc": f"2026-06-10T21:00:0{i}+00:00", "payload": p},
+            ensure_ascii=False,
+        )
+        for i, p in enumerate(recs)
+    ]
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "2026-06-10T21:00:09+00:00",
-                    "messages_count": 3}), encoding="utf-8")
+        json.dumps({"thread_id": tid, "updated_at": "2026-06-10T21:00:09+00:00", "messages_count": 3}), encoding="utf-8"
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -192,9 +242,7 @@ async def test_replay_answered_question_keeps_question_row(tmp_path):
         await pilot.pause(0.3)
         assert scr._ask_human_banner is None
         assert not scr.query_one(".ask-human-question").has_class("hidden")
-        trace_text = " ".join(
-            f"{w._prefix}{w._content}" for w in scr.query(TraceRow)
-        )
+        trace_text = " ".join(f"{w._prefix}{w._content}" for w in scr.query(TraceRow))
         assert "ask_human:" not in trace_text  # тех-префикс убран
         assert "? Какой вариант — A или B?" in trace_text
 
@@ -218,8 +266,7 @@ async def test_ask_human_esc_clean_stops(tmp_path):
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
     fake.run(["используй скилл skill-creator"], thread_id=tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"})
     app._executor_factory = lambda: fake
     # Fix D: установить live-runner, чтобы recovery в attach_active_task не снял
     # banner. Тестируем Esc по живому ask_human.
@@ -257,8 +304,7 @@ async def test_ask_human_esc_closes_open_overlay_first(tmp_path):
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
     fake.run(["используй скилл skill-creator"], thread_id=tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"})
     app._executor_factory = lambda: fake
     runner = _StubLiveRunner()
     app.active_runner = runner
@@ -270,7 +316,7 @@ async def test_ask_human_esc_closes_open_overlay_first(tmp_path):
         assert len(pilot.app.query(AskHumanBanner)) == 1
 
         inp = pilot.app.query_one("#cmdinput")
-        inp.text = "/s"                      # открывает палитру команд
+        inp.text = "/s"  # открывает палитру команд
         await pilot.pause(0.2)
         assert scr._palette is not None
 
@@ -303,8 +349,7 @@ async def test_ask_human_esc_with_text_clears_input_first(tmp_path):
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
     fake.run(["используй скилл skill-creator"], thread_id=tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"})
     app._executor_factory = lambda: fake
     runner = _StubLiveRunner()
     app.active_runner = runner
@@ -354,10 +399,7 @@ async def test_ask_human_body_renders_markdown():
         rows = list(pilot.app.screen.query(TraceRow))
         assert rows, "баннер должен смонтировать блок-виджеты прозы"
         assert all(r._prefix != "● " for r in rows)  # нет маркера-реплики
-        joined = " ".join(
-            (r._content.plain if hasattr(r._content, "plain") else str(r._content))
-            for r in rows
-        )
+        joined = " ".join((r._content.plain if hasattr(r._content, "plain") else str(r._content)) for r in rows)
         assert "Вопрос" in joined and "жирный" in joined and "код" in joined
         assert "##" not in joined and "**" not in joined and "`" not in joined
 
@@ -377,6 +419,5 @@ async def test_ask_human_table_renders():
             yield AskHumanBanner(question=q)
 
     async with _A().run_test() as pilot:
-        tables = [w for w in pilot.app.screen.query(BlockPanel)
-                  if w.has_class("table-block")]
+        tables = [w for w in pilot.app.screen.query(BlockPanel) if w.has_class("table-block")]
         assert len(tables) == 1

@@ -1,4 +1,5 @@
 """Visual unified diff + truncation для Diff-TUI (не tool-output return_diff)."""
+
 from __future__ import annotations
 
 import difflib
@@ -81,12 +82,7 @@ def preview_change_lines(diff_text: str, *, limit: int = 3) -> tuple[list[str], 
     if not diff_text or not diff_text.strip():
         return [], 0
     all_lines = [ln for ln in diff_text.splitlines() if ln != ""]
-    change_lines = [
-        ln
-        for ln in all_lines
-        if ln.startswith(("+", "-"))
-        and not ln.startswith(("+++", "---"))
-    ]
+    change_lines = [ln for ln in all_lines if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---"))]
     chosen = change_lines if change_lines else all_lines
     head = chosen[: max(0, int(limit))]
     return head, max(0, len(chosen) - len(head))
@@ -115,9 +111,7 @@ def build_visual_diff(
     * ``truncate_diff`` применяется ко всему результату (D5).
     """
     if mode not in VISUAL_MODES:
-        raise ValueError(
-            f"unknown visual diff mode: {mode!r}; expected one of {VISUAL_MODES}"
-        )
+        raise ValueError(f"unknown visual diff mode: {mode!r}; expected one of {VISUAL_MODES}")
 
     old_lines = old.splitlines(keepends=True)
     new_lines = new.splitlines(keepends=True)

@@ -1,4 +1,5 @@
 """DiffTuiConfig defaults + flatten в config_dict."""
+
 from __future__ import annotations
 
 import pytest

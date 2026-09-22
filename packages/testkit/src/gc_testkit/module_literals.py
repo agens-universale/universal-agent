@@ -20,6 +20,7 @@
 
 Код возврата: 0 — всё сходится, 1 — есть битые ссылки.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,8 +41,18 @@ from gc_testkit.sources import ensure_sources_on_path
 #: попадали вовсе. Список-исключение переживает переезды: новый каталог с кодом
 #: подхватывается сам, а мусор перечислен явно и заметен.
 SKIP_DIRS = {
-    ".git", ".venv", ".idea", ".vscode", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    "__pycache__", "dist", "build", "node_modules", "docs",
+    ".git",
+    ".venv",
+    ".idea",
+    ".vscode",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "dist",
+    "build",
+    "node_modules",
+    "docs",
 }
 #: Отдельные файлы вне каталогов. Корневой conftest.py удалён 18.08.2026 —
 #: бутстрап sys.path делает плагин тест-кита. Список оставлен как механизм.
@@ -50,10 +61,8 @@ SCAN_FILES: list[str] = []
 
 def scan_dirs() -> list[Path]:
     """Каталоги верхнего уровня с кодом — вычисляются, а не перечисляются."""
-    return sorted(
-        d for d in REPO.iterdir()
-        if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
-    )
+    return sorted(d for d in REPO.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith("."))
+
 
 # Функции, чей строковый аргумент — путь к модулю или атрибуту модуля.
 # Имена логгеров — тоже ссылка на модуль: логгер обычно зовётся __name__, и
@@ -64,9 +73,9 @@ DOTTED_TARGET_CALLS = {
     "assertNoLogs": 0,
     "getLogger": 0,
     "import_module": 0,
-    "setattr": 0,      # monkeypatch.setattr("mod.attr", ...) — только строковая форма
-    "patch": 0,        # mock.patch("mod.attr")
-    "object": None,    # patch.object(mod, "name") — первый арг не строка, пропускаем
+    "setattr": 0,  # monkeypatch.setattr("mod.attr", ...) — только строковая форма
+    "patch": 0,  # mock.patch("mod.attr")
+    "object": None,  # patch.object(mod, "name") — первый арг не строка, пропускаем
     "ModuleType": 0,
     "find_spec": 0,
 }
@@ -76,7 +85,7 @@ DOTTED_TARGET_CALLS = {
 class Ref:
     file: str
     line: int
-    kind: str      # import_module | setattr | patch | ModuleType | sys_modules | prefix
+    kind: str  # import_module | setattr | patch | ModuleType | sys_modules | prefix
     literal: str
 
     def key(self) -> str:
@@ -134,8 +143,12 @@ def _touches_sys_modules(body: list) -> bool:
     """
     for stmt in body:
         for sub in ast.walk(stmt):
-            if (isinstance(sub, ast.Attribute) and sub.attr == "modules"
-                    and isinstance(sub.value, ast.Name) and sub.value.id == "sys"):
+            if (
+                isinstance(sub, ast.Attribute)
+                and sub.attr == "modules"
+                and isinstance(sub.value, ast.Name)
+                and sub.value.id == "sys"
+            ):
                 return True
     return False
 
@@ -168,10 +181,13 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
             # 3) sys.modules["literal"] — чтение, запись, удаление
             if isinstance(node, ast.Subscript):
                 v = node.value
-                if (isinstance(v, ast.Attribute) and v.attr == "modules"
-                        and isinstance(node.slice, ast.Constant)
-                        and isinstance(node.slice.value, str)
-                        and _looks_like_our_module(node.slice.value, ours)):
+                if (
+                    isinstance(v, ast.Attribute)
+                    and v.attr == "modules"
+                    and isinstance(node.slice, ast.Constant)
+                    and isinstance(node.slice.value, str)
+                    and _looks_like_our_module(node.slice.value, ours)
+                ):
                     refs.append(Ref(rel, node.lineno, "sys_modules", node.slice.value))
 
             # 4) monkeypatch.setitem(sys.modules, "literal", …) и sys.modules.get("literal")
@@ -181,28 +197,40 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                 if nm == "setitem" and len(node.args) >= 2:
                     tgt, key = node.args[0], node.args[1]
                     is_sysmods = isinstance(tgt, ast.Attribute) and tgt.attr == "modules"
-                    if (is_sysmods and isinstance(key, ast.Constant)
-                            and isinstance(key.value, str)
-                            and _looks_like_our_module(key.value, ours)):
+                    if (
+                        is_sysmods
+                        and isinstance(key, ast.Constant)
+                        and isinstance(key.value, str)
+                        and _looks_like_our_module(key.value, ours)
+                    ):
                         refs.append(Ref(rel, node.lineno, "sys_modules", key.value))
                 if nm == "get" and isinstance(fn, ast.Attribute) and node.args:
                     owner = fn.value
-                    if (isinstance(owner, ast.Attribute) and owner.attr == "modules"
-                            and isinstance(node.args[0], ast.Constant)
-                            and isinstance(node.args[0].value, str)
-                            and _looks_like_our_module(node.args[0].value, ours)):
+                    if (
+                        isinstance(owner, ast.Attribute)
+                        and owner.attr == "modules"
+                        and isinstance(node.args[0], ast.Constant)
+                        and isinstance(node.args[0].value, str)
+                        and _looks_like_our_module(node.args[0].value, ours)
+                    ):
                         refs.append(Ref(rel, node.lineno, "sys_modules", node.args[0].value))
                 if nm == "__import__" and node.args:
                     a = node.args[0]
-                    if (isinstance(a, ast.Constant) and isinstance(a.value, str)
-                            and _looks_like_our_module(a.value, ours)):
+                    if (
+                        isinstance(a, ast.Constant)
+                        and isinstance(a.value, str)
+                        and _looks_like_our_module(a.value, ours)
+                    ):
                         refs.append(Ref(rel, node.lineno, "import_module", a.value))
                 # uvicorn.run("server:app") — форма "модуль:атрибут"
                 if nm == "run" and node.args:
                     a = node.args[0]
-                    if (isinstance(a, ast.Constant) and isinstance(a.value, str)
-                            and ":" in a.value
-                            and _looks_like_our_module(a.value.split(":")[0], ours)):
+                    if (
+                        isinstance(a, ast.Constant)
+                        and isinstance(a.value, str)
+                        and ":" in a.value
+                        and _looks_like_our_module(a.value.split(":")[0], ours)
+                    ):
                         refs.append(Ref(rel, node.lineno, "asgi_target", a.value))
 
             # 4b) f-строки: f"tools.{sub}" — кодмод их НЕ видит (это JoinedStr,
@@ -211,8 +239,11 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
             # `tools.session`, а искался под `gc_core.tools.session`.
             if isinstance(node, ast.JoinedStr) and node.values:
                 first = node.values[0]
-                if (isinstance(first, ast.Constant) and isinstance(first.value, str)
-                        and _looks_like_our_module(first.value, ours, strict=True)):
+                if (
+                    isinstance(first, ast.Constant)
+                    and isinstance(first.value, str)
+                    and _looks_like_our_module(first.value, ours, strict=True)
+                ):
                     refs.append(Ref(rel, node.lineno, "fstring", first.value))
 
             # 4c) строки ВНУТРИ кортежа/списка/множества в двух формах цикла
@@ -236,16 +267,17 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                 seqs.append(node.iter)
             elif isinstance(node, ast.If) and _touches_sys_modules(node.body):
                 test = node.test
-                if isinstance(test, ast.Compare) and any(
-                    isinstance(op, (ast.In, ast.NotIn)) for op in test.ops
-                ):
+                if isinstance(test, ast.Compare) and any(isinstance(op, (ast.In, ast.NotIn)) for op in test.ops):
                     seqs.extend(test.comparators)
             for seq in seqs:
                 if not isinstance(seq, (ast.Tuple, ast.List, ast.Set)):
                     continue
                 for elt in seq.elts:
-                    if (isinstance(elt, ast.Constant) and isinstance(elt.value, str)
-                            and _looks_like_our_module(elt.value, ours, strict=True)):
+                    if (
+                        isinstance(elt, ast.Constant)
+                        and isinstance(elt.value, str)
+                        and _looks_like_our_module(elt.value, ours, strict=True)
+                    ):
                         refs.append(Ref(rel, elt.lineno, "sys_modules", elt.value))
 
             # 5) "literal" in sys.modules
@@ -312,12 +344,7 @@ def scan() -> tuple[list[Ref], list[tuple[Ref, str]]]:
     # чужом `mcp/server/__main__.py`, где `getLogger("server")` к нашей
     # раскладке отношения не имеет.
     _skip = SKIP_DIRS | {"__pycache__"}
-    paths = [
-        p
-        for d in scan_dirs()
-        for p in d.rglob("*.py")
-        if _skip.isdisjoint(p.parts)
-    ]
+    paths = [p for d in scan_dirs() for p in d.rglob("*.py") if _skip.isdisjoint(p.parts)]
     paths += [REPO / f for f in SCAN_FILES if (REPO / f).exists()]
 
     refs = collect(paths, ours)
@@ -353,12 +380,19 @@ def main() -> int:
         by_kind[r.kind] = by_kind.get(r.kind, 0) + 1
 
     if args.json:
-        print(json.dumps({"total": len(refs), "by_kind": by_kind,
-                          "problems": [{**asdict(r), "problem": m} for r, m in problems]},
-                         ensure_ascii=False, indent=1))
+        print(
+            json.dumps(
+                {
+                    "total": len(refs),
+                    "by_kind": by_kind,
+                    "problems": [{**asdict(r), "problem": m} for r, m in problems],
+                },
+                ensure_ascii=False,
+                indent=1,
+            )
+        )
     else:
-        print(f"строковых ссылок на наши модули: {len(refs)} в "
-              f"{len({r.file for r in refs})} файлах")
+        print(f"строковых ссылок на наши модули: {len(refs)} в {len({r.file for r in refs})} файлах")
         for k, n in sorted(by_kind.items(), key=lambda x: -x[1]):
             print(f"  {k:12s} {n:4d}")
         print()

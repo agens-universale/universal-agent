@@ -51,6 +51,7 @@ def _make_ctx(tools_data, use_local=True):
 def _subagent_tools_data():
     """Minimal tools_data entry for a subagent."""
     from gc_core.tools.subagents.registry import get_subagents_tools_data
+
     return get_subagents_tools_data()
 
 
@@ -64,6 +65,7 @@ class TestSubagentDispatch:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
+
             # `arun` корутинный: обычный return_value отдал бы MagicMock, и
             # `await` над ним падал бы, а не отдавал результат.
             async def _arun(*_a, **_kw):
@@ -97,6 +99,7 @@ class TestSubagentDispatch:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
+
             async def _arun(*_a, **_kw):
                 return "ok"
 

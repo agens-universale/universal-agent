@@ -203,9 +203,7 @@ def test_single_huge_line_not_sliced_by_read(tmp_path):
 def test_rejects_file_over_max_bytes(tmp_path):
     p = tmp_path / "huge.txt"
     p.write_bytes(b"x" * 200)
-    res = json.loads(
-        with_local_ctx(ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}})(path=str(p))
-    )
+    res = json.loads(with_local_ctx(ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}})(path=str(p)))
     assert res["ok"] is False
     assert res["error"]["type"] == "file_too_large"
     assert res["file_size_bytes"] == 200
@@ -220,9 +218,7 @@ def test_rejects_file_over_max_bytes(tmp_path):
 def test_reads_file_at_max_bytes_boundary(tmp_path):
     p = tmp_path / "ok.txt"
     p.write_bytes(b"y" * 100)
-    res = json.loads(
-        with_local_ctx(ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}})(path=str(p))
-    )
+    res = json.loads(with_local_ctx(ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}})(path=str(p)))
     assert res["ok"] is True
     assert res["file_size_bytes"] == 100
     assert len(res["content"]) == 100

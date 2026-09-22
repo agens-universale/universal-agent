@@ -5,6 +5,7 @@
 подходит: вместе с прокси включилось бы чтение ``~/.netrc``, чей Basic-auth
 перетирает явный Authorization и даёт 401.
 """
+
 import itertools
 import json
 from pathlib import Path
@@ -91,16 +92,14 @@ def test_broken_cidr_does_not_explode():
 #: в чистой установке пропускался ВЕСЬ файл, включая проверки выше, которые
 #: requests не нужны вовсе. Таблица делает эквивалентность проверяемой везде.
 _REFERENCE = json.loads(
-    (Path(__file__).parent / "fixtures" / "no_proxy_reference_requests.json")
-    .read_text(encoding="utf-8")
+    (Path(__file__).parent / "fixtures" / "no_proxy_reference_requests.json").read_text(encoding="utf-8")
 )["pairs"]
 
 
 def test_reference_covers_every_pair():
     """Эталон обязан покрывать всю решётку — иначе он тихо усохнет."""
     assert len(_REFERENCE) == len(_URLS) * len(_LISTS), (
-        f"в эталоне {len(_REFERENCE)} пар, а решётка даёт "
-        f"{len(_URLS) * len(_LISTS)} — пересними fixture"
+        f"в эталоне {len(_REFERENCE)} пар, а решётка даёт {len(_URLS) * len(_LISTS)} — пересними fixture"
     )
     assert any(r[2] for r in _REFERENCE) and not all(r[2] for r in _REFERENCE), (
         "эталон вырожден: все ответы одинаковые, сверять нечего"
@@ -126,6 +125,4 @@ def test_reference_still_matches_live_requests(url, no_proxy):
     """
     requests_utils = pytest.importorskip("requests.utils")
 
-    assert should_bypass_proxies(url, no_proxy) == requests_utils.should_bypass_proxies(
-        url, no_proxy=no_proxy
-    )
+    assert should_bypass_proxies(url, no_proxy) == requests_utils.should_bypass_proxies(url, no_proxy=no_proxy)

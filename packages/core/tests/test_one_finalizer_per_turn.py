@@ -1,14 +1,16 @@
 """Две кучи: work (не turn_finish) целиком, затем не больше одного turn_finish."""
+
 from gc_core.processing_responses import partition_work_then_finish
 from gc_testkit import run_coro
 
 
 def _async_noop(fn):
     """Корутинная заглушка: ядро зовёт хуки и диспетчер только async-именами."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def test_split_ask_human_defers_barrier_until_result_is_known():
@@ -29,7 +31,7 @@ def test_split_finish_then_action():
 def test_split_intermediate_not_finalizer():
     calls = [{"name": "turn_intermediate_reply"}, {"name": "turn_intermediate_reply"}]
     executed, skipped = partition_work_then_finish(calls)
-    assert executed == calls          # оба исполняются (не финализаторы)
+    assert executed == calls  # оба исполняются (не финализаторы)
     assert skipped == []
 
 
@@ -45,15 +47,14 @@ def test_process_tool_calls_skips_second_finish(monkeypatch):
     from gc_core import processing_responses as pr
 
     calls = []
-    monkeypatch.setattr(pr, "aapply_tool",
-                        _async_noop(lambda **kw: calls.append(kw["tool_name"]) or '{"ok": true}'))
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output",
-                        lambda res, **kw: res)
+    monkeypatch.setattr(pr, "aapply_tool", _async_noop(lambda **kw: calls.append(kw["tool_name"]) or '{"ok": true}'))
+    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
     monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:
         messages = []
+
         def __init__(self):
             self.session_compact_applied = False
             self.tool_calls = 0
@@ -81,8 +82,9 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
         order.append(kw["tool_name"])
         if kw["tool_name"] == "turn_ask_human":
             flushed = [m for batch in persisted for m in batch]
-            assert any(m.get("call_id") == "c1" for m in flushed), \
+            assert any(m.get("call_id") == "c1" for m in flushed), (
                 "session_memory output должен быть сфлашен ДО turn_ask_human"
+            )
         return '{"ok": true}'
 
     monkeypatch.setattr(pr, "aapply_tool", _async_noop(fake_apply))
@@ -94,6 +96,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
         messages = []
         discard_writes_after_stop = False
         stop_requested = False
+
         def __init__(self):
             self.session_compact_applied = False
             self.tool_calls = 0
@@ -104,12 +107,17 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
         {"type": "function_call", "name": "turn_ask_human", "call_id": "c2", "arguments": "{}"},
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, _State(), ctx, run_agent_func=None,
-        persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            _State(),
+            ctx,
+            run_agent_func=None,
+            persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+        )
+    )
     assert order == ["session_memory", "turn_ask_human"]
-    assert any(m.get("call_id") == "c1" for m in outs)   # output не потерян в возврате
+    assert any(m.get("call_id") == "c1" for m in outs)  # output не потерян в возврате
 
 
 def test_successful_ask_human_skips_later_finish(monkeypatch):
@@ -131,6 +139,7 @@ def test_successful_ask_human_skips_later_finish(monkeypatch):
         messages = []
         discard_writes_after_stop = False
         stop_requested = False
+
         def __init__(self):
             self.session_compact_applied = False
             self.tool_calls = 0
@@ -141,8 +150,13 @@ def test_successful_ask_human_skips_later_finish(monkeypatch):
         {"type": "function_call", "name": "turn_finish", "call_id": "c_fin", "arguments": "{}"},
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, _State(), ctx, run_agent_func=None,
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            _State(),
+            ctx,
+            run_agent_func=None,
+        )
+    )
     assert calls == ["turn_ask_human"]
     assert any(m.get("call_id") == "c_fin" and "skipped" in m["output"] for m in outs)

@@ -114,9 +114,7 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
         popen_kwargs["start_new_session"] = True
     else:
         # На Windows — отдельный process group, чтобы CTRL_BREAK работал по всей группе.
-        popen_kwargs["creationflags"] = getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        )
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     return subprocess.Popen(cmd, **popen_kwargs)
 
 
@@ -159,7 +157,7 @@ def _group_alive(pgid: int) -> bool:
     try:
         return _signal_group(pgid, 0)
     except PermissionError:
-        return True                    # кто-то есть, но сигналить ему нам нельзя
+        return True  # кто-то есть, но сигналить ему нам нельзя
 
 
 def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> bool:
@@ -174,7 +172,7 @@ def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> 
             if _signal_group(pgid, signal.SIGKILL if kill else signal.SIGTERM):
                 return True
         except OSError:
-            pass                       # группа недоступна (EPERM) — остаётся лидер
+            pass  # группа недоступна (EPERM) — остаётся лидер
     try:
         if proc.poll() is not None:
             return False
@@ -190,9 +188,7 @@ def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> 
     return True
 
 
-async def _await_exit(
-    proc: subprocess.Popen, timeout: float, pgid: Optional[int] = None
-) -> bool:
+async def _await_exit(proc: subprocess.Popen, timeout: float, pgid: Optional[int] = None) -> bool:
     """Дождаться смерти процесса, а с ``pgid`` — и всей его группы.
 
     ``True`` — успел, ``False`` — таймаут. Замена ``proc.wait(timeout)``,
@@ -214,9 +210,7 @@ async def _await_exit(
         await asyncio.sleep(min(_POLL_STEP_SEC, max(0.0, deadline - time.monotonic())))
 
 
-async def _aterminate_process_tree(
-    proc: subprocess.Popen, graceful_timeout: float = 5.0
-) -> None:
+async def _aterminate_process_tree(proc: subprocess.Popen, graceful_timeout: float = 5.0) -> None:
     """Убить процесс вместе со всей его группой (детьми), с эскалацией до KILL.
 
     ЕДИНСТВЕННАЯ форма терминации. Синхронный близнец снят: он отличался
@@ -560,30 +554,22 @@ class PersistentStdioSession:
             return True, obj
         return False, {}
 
-    async def _aread_matching_on(
-        self, proc: "subprocess.Popen", req_id: Any, timeout: float
-    ) -> Dict[str, Any]:
+    async def _aread_matching_on(self, proc: "subprocess.Popen", req_id: Any, timeout: float) -> Dict[str, Any]:
         """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            done, obj = self._match_line(
-                await _areadline_with_timeout(proc.stdout, timeout), req_id
-            )
+            done, obj = self._match_line(await _areadline_with_timeout(proc.stdout, timeout), req_id)
             if done:
                 return obj
         return {}
 
-    def _read_matching_on(
-        self, proc: "subprocess.Popen", req_id: Any, timeout: float
-    ) -> Dict[str, Any]:
+    def _read_matching_on(self, proc: "subprocess.Popen", req_id: Any, timeout: float) -> Dict[str, Any]:
         """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            done, obj = self._match_line(
-                _readline_with_timeout(proc.stdout, timeout), req_id
-            )
+            done, obj = self._match_line(_readline_with_timeout(proc.stdout, timeout), req_id)
             if done:
                 return obj
         return {}
@@ -805,7 +791,7 @@ class PersistentStdioRegistry:
                     # процесса, хук на который теперь стоит всегда.
                     await self._adrain_own_within_budget(_CANCEL_DRAIN_BUDGET_SEC)
                     raise
-                cancelled = exc            # отменилась сессия: гасим остальные
+                cancelled = exc  # отменилась сессия: гасим остальные
             except Exception:
                 pass
         if cancelled is not None:

@@ -23,6 +23,7 @@
 Тот же приём уже применён к ``skills_run_script``
 (``test_skills_run_script_native.py``).
 """
+
 import asyncio
 import json
 import time
@@ -101,9 +102,7 @@ async def test_sleep_does_not_occupy_a_pool_thread():
     await asyncio.gather(*hogs, return_exceptions=True)
 
     assert out["ok"] is True, out
-    assert spent < 0.5, (
-        f"сон ждал освобождения пула {spent:.2f}с — он всё ещё ходит в поток"
-    )
+    assert spent < 0.5, f"сон ждал освобождения пула {spent:.2f}с — он всё ещё ходит в поток"
 
 
 async def test_sleep_actually_waits():
@@ -160,9 +159,7 @@ async def test_ask_human_awaits_an_async_port_on_the_calling_loop():
 
     out = await tool.acall(question="как дела?")
 
-    assert seen["loop"] is asyncio.get_running_loop(), (
-        "порт встраивающего исполнился на чужом loop"
-    )
+    assert seen["loop"] is asyncio.get_running_loop(), "порт встраивающего исполнился на чужом loop"
     assert "ответ человека" in str(out)
 
 

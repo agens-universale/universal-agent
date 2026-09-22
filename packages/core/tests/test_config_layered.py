@@ -202,9 +202,7 @@ mcp:
     assert cfg["mcp-servers"]["fileserver"]["transport"] == "http"
 
 
-def test_explicit_config_pointing_to_project_local_no_recursion(
-    isolated_cwd, monkeypatch
-):
+def test_explicit_config_pointing_to_project_local_no_recursion(isolated_cwd, monkeypatch):
     """
     Если CLI запущен как `gc-cli --config <cwd>/.gc/config.yml`, layered loading
     не применяется (защита от рекурсии: иначе deep_merge мерджил бы файл сам с собой).
@@ -390,8 +388,7 @@ def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     assert cfg["agentsmd_override"] is False
 
 
-def test_hiding_the_project_layer_works_from_its_home_module(
-        global_config_file, isolated_cwd, monkeypatch):
+def test_hiding_the_project_layer_works_from_its_home_module(global_config_file, isolated_cwd, monkeypatch):
     """Проектный слой глушится подменой у ВЛАДЕЛЬЦА пути — и подмена обязана
     действовать на весь загрузчик.
 
@@ -409,11 +406,12 @@ def test_hiding_the_project_layer_works_from_its_home_module(
 
     cfg = config_mod.load_config(str(global_config_file))
 
-    assert cfg["max_steps"] == 50          # значение базы, слой скрыт
+    assert cfg["max_steps"] == 50  # значение базы, слой скрыт
 
 
 def test_pointing_the_managed_overlay_works_from_its_home_module(
-        global_config_file, isolated_cwd, monkeypatch, tmp_path):
+    global_config_file, isolated_cwd, monkeypatch, tmp_path
+):
     """То же для machine-managed оверлея: подмена у владельца
     (`mcp_runtime.paths`) действует и на слой, и на снимок свежести."""
     from gc_core import config as config_mod
@@ -424,4 +422,4 @@ def test_pointing_the_managed_overlay_works_from_its_home_module(
 
     cfg = config_mod.load_config(str(global_config_file))
 
-    assert cfg["max_steps"] == 777         # патч действует: оверлей взят отсюда
+    assert cfg["max_steps"] == 777  # патч действует: оверлей взят отсюда

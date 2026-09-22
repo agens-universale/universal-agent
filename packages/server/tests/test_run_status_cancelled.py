@@ -4,6 +4,7 @@
 ``get_run_status`` его не читал, и клиент видел ``completed`` с пустым
 результатом. Отличить остановку uvicorn от отказа агента было нельзя.
 """
+
 import inspect
 
 from gc_server import server
@@ -12,9 +13,7 @@ from gc_server import server
 def test_cancelled_run_has_its_own_status():
     src = inspect.getsource(server)
 
-    assert '"status": "cancelled"' in src, (
-        "статус снятого прогона снова не отдаётся наружу"
-    )
+    assert '"status": "cancelled"' in src, "статус снятого прогона снова не отдаётся наружу"
 
 
 def test_cancelled_is_checked_before_error():

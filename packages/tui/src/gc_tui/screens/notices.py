@@ -1,4 +1,5 @@
 """NoticesScreen — список уведомлений: стартовые + runtime (read-only, F4/notices)."""
+
 from __future__ import annotations
 
 from typing import List
@@ -34,8 +35,7 @@ def _glyph(level: str) -> str:
 def _notice_text(n: Notice) -> Text:
     """Одно уведомление: цветной глиф + текст с выделенными тех. именами."""
     t = Text()
-    t.append(_glyph(n.level) + " ",
-             style=_WARN_STYLE if n.level == "warning" else _INFO_STYLE)
+    t.append(_glyph(n.level) + " ", style=_WARN_STYLE if n.level == "warning" else _INFO_STYLE)
     t.append(n.message)
     if n.highlights:
         t.highlight_words(n.highlights, style=_NAME_STYLE)

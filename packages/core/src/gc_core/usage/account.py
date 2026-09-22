@@ -35,8 +35,15 @@ _KNOWN_CATEGORIES = (
 # ``billed_*`` — подмножество вызовов, для которых известна фактическая цена;
 # токены не дублируются: тарифный остаток = input − billed_input и т.д.
 _FIELDS = (
-    "input", "output", "cached", "calls", "missing_usage_calls",
-    "billed_calls", "billed_input", "billed_output", "billed_cached",
+    "input",
+    "output",
+    "cached",
+    "calls",
+    "missing_usage_calls",
+    "billed_calls",
+    "billed_input",
+    "billed_output",
+    "billed_cached",
 )
 # Деньги ведутся отдельным словарём «валюта → сумма»: складывать суммы разных
 # валют нельзя, а валюта — свойство конкретного вызова (её знает провайдер

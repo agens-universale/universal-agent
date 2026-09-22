@@ -1,4 +1,5 @@
 """Общие хелперы счётчика уведомлений для карточки и футера TUI."""
+
 from __future__ import annotations
 
 from typing import List, Tuple
@@ -61,8 +62,7 @@ def _badge_counts_only(badge: str) -> str:
     Снимать хвост у готовой строки, а не пересобирать бейдж из `Notice`, —
     осознанно: сторож получает уже собранный текст, а формат хвоста здесь же,
     в `format_notices_badge`, и другого источника у него нет."""
-    return (badge[:-len(_BADGE_HINT_SUFFIX)]
-            if badge.endswith(_BADGE_HINT_SUFFIX) else badge)
+    return badge[: -len(_BADGE_HINT_SUFFIX)] if badge.endswith(_BADGE_HINT_SUFFIX) else badge
 
 
 def _wrapped_lines(text: str, width: int) -> List[str]:
@@ -75,7 +75,7 @@ def _wrapped_lines(text: str, width: int) -> List[str]:
     for line in text.split("\n"):
         wrapped = Text(line).wrap(console, width)
         if not wrapped:
-            out.append("")          # пустая строка — тоже ряд
+            out.append("")  # пустая строка — тоже ряд
             continue
         out.extend(seg.plain.rstrip() for seg in wrapped)
     return out
@@ -158,13 +158,13 @@ def footer_left_with_badge(commands: str, badge: str, *, width: int) -> str:
 
     shrunk = badge
     if _wrapped_rows(shrunk, width) > 1:
-        shrunk = _badge_counts_only(badge)          # подсказка уходит первой
+        shrunk = _badge_counts_only(badge)  # подсказка уходит первой
         if _wrapped_rows(shrunk, width) > 1:
-            shrunk = ""                             # не влезли и счётчики
+            shrunk = ""  # не влезли и счётчики
     if shrunk and shrunk != badge:
         text, rows = _footer_left_layout(commands, shrunk, width=width)
         if rows <= 2:
             return text
     badge_rows = 1 if shrunk else 0
-    kept = _wrapped_lines(commands, width)[:2 - badge_rows]
+    kept = _wrapped_lines(commands, width)[: 2 - badge_rows]
     return _clamp_two_rows("\n".join([*kept, shrunk] if shrunk else kept), width)

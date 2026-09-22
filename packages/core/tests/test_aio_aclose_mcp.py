@@ -4,6 +4,7 @@
 эти сессии только `finally` прогона. Агент, закрытый без прогона, оставлял
 долгоживущий stdio (браузер под `@playwright/mcp`) жить до выхода из процесса.
 """
+
 from types import SimpleNamespace
 
 
@@ -35,5 +36,5 @@ async def test_aclose_closes_sessions_owned_by_this_agent(monkeypatch):
     assert released == [True], "пул не отпущен"
     assert current_owner() != "agent-7", "владение не снято после закрытия"
 
-    await agent.aclose()                         # идемпотентно
+    await agent.aclose()  # идемпотентно
     assert released == [True]

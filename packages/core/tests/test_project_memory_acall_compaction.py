@@ -13,6 +13,7 @@
 проходит зелёным и с дефектом — ветку переполнения через ``acall`` не трогает
 ни один другой тест.
 """
+
 import json
 
 import pytest
@@ -42,9 +43,7 @@ def fake_compaction(monkeypatch):
 
     async def _acompact(text, ctx, state=None):
         seen["called"] = "async"
-        return compaction.CompactionResult(
-            ok=True, text="ужато", error_type=None, error_message=None
-        )
+        return compaction.CompactionResult(ok=True, text="ужато", error_type=None, error_message=None)
 
     monkeypatch.setattr(compaction, "acompact_text", _acompact)
     return seen
@@ -52,9 +51,7 @@ def fake_compaction(monkeypatch):
 
 async def test_acall_awaits_compaction_natively(memory_tool, fake_compaction):
     """Главная проверка: инлайн-вход ждёт корутинную компакцию."""
-    out = json.loads(
-        await memory_tool.acall(action="append", content="ещё один длинный кусок текста")
-    )
+    out = json.loads(await memory_tool.acall(action="append", content="ещё один длинный кусок текста"))
 
     assert out["ok"] is True, out
     assert fake_compaction["called"] == "async"
@@ -75,15 +72,11 @@ async def test_acall_compaction_does_not_start_a_nested_loop(memory_tool, monkey
     monkeypatch.setattr(asyncio, "run", _forbidden)
 
     async def _acompact(text, ctx, state=None):
-        return compaction.CompactionResult(
-            ok=True, text="ужато", error_type=None, error_message=None
-        )
+        return compaction.CompactionResult(ok=True, text="ужато", error_type=None, error_message=None)
 
     monkeypatch.setattr(compaction, "acompact_text", _acompact)
 
-    out = json.loads(
-        await memory_tool.acall(action="append", content="ещё один длинный кусок текста")
-    )
+    out = json.loads(await memory_tool.acall(action="append", content="ещё один длинный кусок текста"))
     assert out["ok"] is True, out
 
 

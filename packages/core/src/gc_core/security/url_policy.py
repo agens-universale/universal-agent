@@ -155,21 +155,25 @@ def enforce_url_policy(
                 return (yield)
             if mode == "ask":
                 from gc_core.security.confirm_port import request_confirm
+
                 # В поток, а не на event loop: режим `ask` здесь — умолчание, то
                 # есть обычный путь, а не край.
-                confirmed = (yield OffLoop(functools.partial(
-                    request_confirm,
-                    title="Политика URL",
-                    question=f"Разрешить запрос вне политики URL: {decision.url}?",
-                    fields=[
-                        ("Tool", _tool_name(func, args)),
-                        ("URL", decision.url),
-                        ("Reason", decision.reason or ""),
-                        ("Matched rule", decision.matched_rule or "-"),
-                    ],
-                    ctx=context.ctx,
-                    decision_key=f"url:{decision.url}",
-                ), on_interrupt=False))
+                confirmed = yield OffLoop(
+                    functools.partial(
+                        request_confirm,
+                        title="Политика URL",
+                        question=f"Разрешить запрос вне политики URL: {decision.url}?",
+                        fields=[
+                            ("Tool", _tool_name(func, args)),
+                            ("URL", decision.url),
+                            ("Reason", decision.reason or ""),
+                            ("Matched rule", decision.matched_rule or "-"),
+                        ],
+                        ctx=context.ctx,
+                        decision_key=f"url:{decision.url}",
+                    ),
+                    on_interrupt=False,
+                )
                 if confirmed:
                     audit_policy_decision(
                         context,

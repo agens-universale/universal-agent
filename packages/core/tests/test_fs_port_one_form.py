@@ -15,6 +15,7 @@
 * локальное чтение по-прежнему инлайн: поток дороже самой работы;
 * мостящий бэкенд ждёт НАТИВНО, не занимая ни поток, ни свой loop.
 """
+
 import asyncio
 import inspect
 import threading
@@ -23,10 +24,29 @@ from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 
 IO_METHODS = (
-    "exists", "lexists", "is_file", "is_dir", "is_symlink", "getsize",
-    "stat_info", "readable", "writable", "realpath", "is_hidden", "read",
-    "read_bytes", "read_head_bytes", "sha256_bytes", "write", "write_bytes",
-    "append", "copy", "makedirs", "listdir", "walk", "walk_entries",
+    "exists",
+    "lexists",
+    "is_file",
+    "is_dir",
+    "is_symlink",
+    "getsize",
+    "stat_info",
+    "readable",
+    "writable",
+    "realpath",
+    "is_hidden",
+    "read",
+    "read_bytes",
+    "read_head_bytes",
+    "sha256_bytes",
+    "write",
+    "write_bytes",
+    "append",
+    "copy",
+    "makedirs",
+    "listdir",
+    "walk",
+    "walk_entries",
 )
 GENERATORS = ("iter_lines", "iter_walk", "iter_files", "iter_walk_entries")
 
@@ -50,12 +70,8 @@ def test_the_port_has_exactly_one_form():
             f"{name} перестал быть корутиной — вернулась синхронная форма"
         )
     for name in IO_METHODS + GENERATORS:
-        assert not hasattr(FsBackend, "a" + name), (
-            f"вернулся двойник a{name}: у порта снова две формы"
-        )
-    assert not hasattr(FsBackend, "bridges_to_loop"), (
-        "флаг моста жил при двойниках; развилку теперь делает сам бэкенд"
-    )
+        assert not hasattr(FsBackend, "a" + name), f"вернулся двойник a{name}: у порта снова две формы"
+    assert not hasattr(FsBackend, "bridges_to_loop"), "флаг моста жил при двойниках; развилку теперь делает сам бэкенд"
 
 
 async def test_local_backend_reads_inline_without_a_thread(tmp_path):
@@ -126,9 +142,7 @@ async def test_bridging_backend_waits_natively_without_a_thread():
         async def _aawait(self, coro):
             if asyncio.get_running_loop() is self._loop:
                 return await coro
-            return await asyncio.wrap_future(
-                asyncio.run_coroutine_threadsafe(coro, self._loop)
-            )
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, self._loop))
 
         async def read(self, path):
             async def _remote():

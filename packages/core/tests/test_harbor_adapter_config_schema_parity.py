@@ -8,6 +8,7 @@ KeyError. Building on top of ``flatten_app_config(AppConfig())`` makes that impo
 
 Layering under test: schema defaults < bench defaults < profile overrides < runtime.
 """
+
 import sys
 
 from gc_core.config import flatten_app_config

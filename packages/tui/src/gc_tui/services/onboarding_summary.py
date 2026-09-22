@@ -5,12 +5,13 @@
 обе строки-ленты видны одновременно, сверху и снизу тела, и разный шаг между ними
 читался бы случайностью. Прежние три пробела были единственным таким местом в проекте
 (смок владельца 2026-08-06)."""
+
 from __future__ import annotations
 
 from typing import Optional
 from urllib.parse import urlparse
 
-_CAP = 28   # кап на длину хоста и id модели
+_CAP = 28  # кап на длину хоста и id модели
 
 
 def _host_port(url: str) -> str:
@@ -30,11 +31,10 @@ def _token(auth: Optional[str]) -> str:
         return "—"
     if auth == "":
         return "нет"
-    return "Bearer"          # никогда не литерал
+    return "Bearer"  # никогда не литерал
 
 
-def summary_line(*, url: str, auth: Optional[str], model: str, mcp_count: int,
-                 voice: str = "") -> str:
+def summary_line(*, url: str, auth: Optional[str], model: str, mcp_count: int, voice: str = "") -> str:
     server = _host_port(url)
     tok = _token(auth)
     mdl = _clip(model) if model else "—"

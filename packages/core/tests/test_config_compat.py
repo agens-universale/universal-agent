@@ -1,4 +1,5 @@
 """compat-слой: rename/remove устаревших ключей ДО pydantic-валидации."""
+
 from gc_core.config_modules import compat as compat
 
 
@@ -14,8 +15,8 @@ def test_rename_does_not_override_explicit_new_value(monkeypatch):
     monkeypatch.setattr(compat, "RENAMES", {"backend.old_url": "backend.new_url"})
     raw = {"backend": {"old_url": "http://old", "new_url": "http://new"}}
     facts = compat.apply_compat(raw)
-    assert raw["backend"]["new_url"] == "http://new"      # явный новый побеждает
-    assert "old_url" not in raw["backend"]                 # старый убран из raw
+    assert raw["backend"]["new_url"] == "http://new"  # явный новый побеждает
+    assert "old_url" not in raw["backend"]  # старый убран из raw
     # M4a: при конфликте explicit_new текст факта говорит об «отброшенном» старом
     assert facts and "устарел" in facts[0] and "отброшено" in facts[0]
 
@@ -82,8 +83,7 @@ def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
 
     global_cfg = tmp_path / "global.yml"
     global_cfg.write_text(
-        "backend:\n  api_mode: chat_completions\n"
-        "chat_completions:\n  llm:\n    max_tokens: 1111\n",
+        "backend:\n  api_mode: chat_completions\nchat_completions:\n  llm:\n    max_tokens: 1111\n",
         encoding="utf-8",
     )
     proj = tmp_path / "proj"
@@ -107,10 +107,9 @@ def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
 def test_load_config_survives_renamed_key(monkeypatch, tmp_path):
     monkeypatch.setattr(compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"})
     from gc_core.config import load_config
+
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(
-        "backend:\n  legacy_url: \"http://x/v1/chat/completions\"\n",
-        encoding="utf-8")
-    config_dict = load_config(str(cfg_file))   # без compat здесь упал бы extra=forbid
+    cfg_file.write_text('backend:\n  legacy_url: "http://x/v1/chat/completions"\n', encoding="utf-8")
+    config_dict = load_config(str(cfg_file))  # без compat здесь упал бы extra=forbid
     assert config_dict["completions_url"] == "http://x/v1/chat/completions"
     assert config_dict["compat_notices"]

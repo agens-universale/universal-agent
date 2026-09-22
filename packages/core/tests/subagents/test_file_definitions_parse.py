@@ -3,6 +3,7 @@
 Файл — YAML-frontmatter + тело-роль. Тело подставляется в `<specific_role>`
 общего шаблона промпта, поэтому пустое тело бессмысленно и отвергается.
 """
+
 import pytest
 from gc_core.tools.subagents.custom.file_definitions import (
     MAX_DESCRIPTION_LEN,
@@ -135,9 +136,7 @@ class TestListNormalization:
         assert parse_subagent_file("/a/x.md", text).tools == ("fs_read_file",)
 
     def test_dedup_keeps_first_order(self):
-        text = MINIMAL.replace(
-            "---\nname:", "---\ntools: [b_tool, a_tool, b_tool]\nname:"
-        )
+        text = MINIMAL.replace("---\nname:", "---\ntools: [b_tool, a_tool, b_tool]\nname:")
         assert parse_subagent_file("/a/x.md", text).tools == ("b_tool", "a_tool")
 
     def test_empty_list_is_valid_and_distinct_from_absent(self):

@@ -21,9 +21,11 @@ def test_unavailable_in_headless_denies(monkeypatch):
 
 def test_tui_always_available_and_routes_to_banner():
     answered = {}
+
     def banner(**kw):
         answered.update(kw)
         return "once"
+
     ctx = _ctx(is_tui=True, tui_confirm=banner)
     assert confirm_available(ctx) is True
     assert request_confirm(title="t", question="q?", fields=[("k", "v")], ctx=ctx) is True
@@ -39,11 +41,16 @@ def test_cli_disabled_when_ask_human_in_stop_tools(monkeypatch):
 def _tui_ctx(choice, store=None):
     # is_tui ctx с tui_confirm, возвращающим заданный choice; счётчик вызовов.
     calls = {"n": 0}
+
     def tui_confirm(*, title, question, fields):
         calls["n"] += 1
         return choice
+
     ctx = types.SimpleNamespace(
-        is_tui=True, tui_confirm=tui_confirm, config_dict={}, permission_store=store,
+        is_tui=True,
+        tui_confirm=tui_confirm,
+        config_dict={},
+        permission_store=store,
     )
     return ctx, calls
 
@@ -53,7 +60,7 @@ def test_choice_once_allows_and_records_run_only():
     ctx, calls = _tui_ctx("once", store)
     assert cp.request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="write:/x") is True
     assert calls["n"] == 1
-    assert store.session_rules() == {}                 # once не в session
+    assert store.session_rules() == {}  # once не в session
     # повтор того же ключа — без нового вопроса (run-кэш)
     assert cp.request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="write:/x") is True
     assert calls["n"] == 1
@@ -80,7 +87,7 @@ def test_no_decision_key_always_asks():
     ctx, calls = _tui_ctx("once", store)
     cp.request_confirm(title="t", question="q", fields=[], ctx=ctx)
     cp.request_confirm(title="t", question="q", fields=[], ctx=ctx)
-    assert calls["n"] == 2                              # без ключа — кэш не работает
+    assert calls["n"] == 2  # без ключа — кэш не работает
 
 
 def test_headless_fail_closed_without_tty(monkeypatch):

@@ -6,6 +6,7 @@
 экран «залипает»). Контекст-менеджер возвращает режим после subprocess.
 Кросс-платформенный no-op вне Windows / без консоли.
 """
+
 from gc_core.utils import win_console as wc
 
 
@@ -15,16 +16,16 @@ def test_restores_saved_mode(monkeypatch):
     monkeypatch.setattr(wc, "_set_input_mode", lambda m: calls.__setitem__("set", m))
     with wc.preserve_console_mode():
         pass
-    assert calls["set"] == 0x1B7   # режим восстановлен после блока
+    assert calls["set"] == 0x1B7  # режим восстановлен после блока
 
 
 def test_noop_when_no_console(monkeypatch):
     calls = {}
-    monkeypatch.setattr(wc, "_get_input_mode", lambda: None)   # консоли нет
+    monkeypatch.setattr(wc, "_get_input_mode", lambda: None)  # консоли нет
     monkeypatch.setattr(wc, "_set_input_mode", lambda m: calls.__setitem__("set", m))
     with wc.preserve_console_mode():
         pass
-    assert "set" not in calls   # нечего восстанавливать — не трогаем
+    assert "set" not in calls  # нечего восстанавливать — не трогаем
 
 
 def test_restores_even_on_exception(monkeypatch):
@@ -36,7 +37,7 @@ def test_restores_even_on_exception(monkeypatch):
             raise RuntimeError("boom")
     except RuntimeError:
         pass
-    assert calls["set"] == 0x1B7   # восстановили даже при исключении
+    assert calls["set"] == 0x1B7  # восстановили даже при исключении
 
 
 def test_get_input_mode_none_off_windows(monkeypatch):

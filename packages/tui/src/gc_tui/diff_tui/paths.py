@@ -1,4 +1,5 @@
 """Канонизация путей и tracking-perimeter для Diff-TUI (cache-mode)."""
+
 from __future__ import annotations
 
 import hashlib
@@ -95,9 +96,7 @@ def canonical_path_key(
     ci = _case_insensitive()
     if not is_within_any_root(resolved, [root, *extras], case_insensitive=ci):
         return None
-    if is_protected_from_tracking(
-        resolved, launch_root, protected_extra=protected_extra
-    ):
+    if is_protected_from_tracking(resolved, launch_root, protected_extra=protected_extra):
         return None
 
     if is_within_root(resolved, root, case_insensitive=ci):

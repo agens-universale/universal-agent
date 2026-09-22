@@ -17,11 +17,7 @@ from gc_core.intent_log.serialize import serialize
 
 
 def utc_now_ts() -> str:
-    return (
-        datetime.now(UTC)
-        .replace(microsecond=0)
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
+    return datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _open_turn(user_turn_seq: int) -> int:

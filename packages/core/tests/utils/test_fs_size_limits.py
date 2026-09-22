@@ -41,9 +41,18 @@ def test_find_in_files_max_bytes_ignores_read_mutate_keys():
 
 
 def test_find_in_files_max_bytes_invalid_fallbacks():
-    assert fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": 0}}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    assert fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    assert fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": -5}}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    assert (
+        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": 0}}})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
+    assert (
+        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
+    assert (
+        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": -5}}})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
     # Non-mapping find_in_files section → default
     assert fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": 42}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     # find_in_files present but without max_file_bytes → default
@@ -53,8 +62,6 @@ def test_find_in_files_max_bytes_invalid_fallbacks():
 def test_check_file_size():
     assert check_file_size(10, 100) is None
     err = check_file_size(101, 100, operation="search_files")
-    assert err == file_too_large_error(
-        actual_bytes=101, max_bytes=100, operation="search_files"
-    )
+    assert err == file_too_large_error(actual_bytes=101, max_bytes=100, operation="search_files")
     assert err["type"] == "file_too_large"
     assert "search_files" in err["message"]

@@ -1,4 +1,5 @@
 """TraceScreen Esc confirm-hint в footer-left (clear / stop); выход — модалка."""
+
 import pytest
 
 
@@ -137,8 +138,7 @@ async def test_exit_modal_yes_calls_app_exit(monkeypatch):
 
     async with TuiApp().run_test() as pilot:
         called = {"flag": False}
-        monkeypatch.setattr(pilot.app, "exit",
-                            lambda *a, **k: called.__setitem__("flag", True))
+        monkeypatch.setattr(pilot.app, "exit", lambda *a, **k: called.__setitem__("flag", True))
         pilot.app.active_runner = None
         pilot.app.query_one("#cmdinput").text = ""
         await pilot.press("escape")
@@ -155,8 +155,11 @@ async def test_esc_during_active_run_with_events_shows_stop_hint():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     async with TuiApp().run_test() as pilot:
         pilot.app.active_runner = _FakeRunner()
@@ -179,8 +182,11 @@ async def test_esc_during_run_with_text_shows_clear_hint_not_stop():
     stopped = {"n": 0}
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: stopped.__setitem__("n", stopped["n"] + 1)
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            stopped.__setitem__("n", stopped["n"] + 1)
 
     async with TuiApp().run_test() as pilot:
         pilot.app.active_runner = _FakeRunner()
@@ -193,7 +199,7 @@ async def test_esc_during_run_with_text_shows_clear_hint_not_stop():
         await pilot.press("escape")
         await pilot.pause()
         assert pilot.app.query_one("#cmdinput").text == ""
-        assert stopped["n"] == 0                      # run не тронут
+        assert stopped["n"] == 0  # run не тронут
         # Следующий Esc (пустое поле) — уже стоп-ветка.
         await pilot.press("escape")
         await pilot.pause()
@@ -207,8 +213,11 @@ async def test_esc_during_run_zero_events_with_text_clears_first():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -218,7 +227,7 @@ async def test_esc_during_run_zero_events_with_text_clears_first():
         pilot.app.query_one("#cmdinput").text = "новый текст"
         await pilot.press("escape")
         await pilot.pause()
-        assert scr._esc_confirm_kind == "clear"       # не мгновенная отмена
+        assert scr._esc_confirm_kind == "clear"  # не мгновенная отмена
         assert pilot.app.query_one("#cmdinput").text == "новый текст"
 
 
@@ -229,8 +238,11 @@ async def test_esc_during_active_run_zero_events_cancels_immediately():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
-        def is_running(self) -> bool: return True
-        def stop(self) -> None: pass
+        def is_running(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen

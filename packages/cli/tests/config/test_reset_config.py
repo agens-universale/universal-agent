@@ -5,6 +5,7 @@
 
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-14-brief.md.
 """
+
 import sys
 from pathlib import Path
 
@@ -13,13 +14,14 @@ from gc_core import onboarding_config_writer as ocw
 
 # --- config_sync.reset_config: бэкап + содержимое = шаблон + профили пережили ---
 
+
 def test_reset_config_replaces_with_template_and_backs_up_old(tmp_path):
     cfg = tmp_path / "config.yml"
-    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n',
-                    encoding="utf-8")
+    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n', encoding="utf-8")
     template = tmp_path / "config.default.yml"
-    template.write_text('profile: ""\nlevel: default\nbackend:\n  completions_url: "http://sentinel"\n',
-                        encoding="utf-8")
+    template.write_text(
+        'profile: ""\nlevel: default\nbackend:\n  completions_url: "http://sentinel"\n', encoding="utf-8"
+    )
 
     report = config_sync.reset_config(cfg, template, timestamp="20260727-1200")
 
@@ -33,8 +35,7 @@ def test_reset_config_does_not_touch_profile_files(tmp_path):
     """Профили (`~/.gc/profiles/*`) переживают сброс базового config.yml — reset_config
     трогает ровно один файл (`path`), профили — соседние файлы в другой директории."""
     cfg = tmp_path / "config.yml"
-    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n',
-                    encoding="utf-8")
+    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n', encoding="utf-8")
     template = tmp_path / "config.default.yml"
     template.write_text('profile: ""\n', encoding="utf-8")
     profile_file = tmp_path / "profiles" / "work.yml"
@@ -54,9 +55,9 @@ def test_reset_config_prunes_old_backups(tmp_path):
     template.write_text("backend: {}\n", encoding="utf-8")
     for i in range(12):
         config_sync.reset_config(cfg, template, timestamp=f"2026072{i:02d}-0000")
-        cfg.write_text("backend: {}\n", encoding="utf-8")   # переписан на прежнее значение для след. итерации
+        cfg.write_text("backend: {}\n", encoding="utf-8")  # переписан на прежнее значение для след. итерации
     baks = sorted((cfg.parent / "backups").glob("config.yml.bak-*"))
-    assert len(baks) == 10          # keep=10, старые вычищены
+    assert len(baks) == 10  # keep=10, старые вычищены
 
 
 # --- CLI --reset-config: y/N, отказ без TTY, отказы на bundled/отсутствующий файл ---
@@ -122,9 +123,10 @@ def test_run_reset_config_refuses_project_local(monkeypatch, tmp_path, capsys):
     gc_dir = tmp_path / ".gc"
     gc_dir.mkdir()
     local_cfg = gc_dir / "config.yml"
-    local_cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
+    local_cfg.write_text('backend:\n  completions_url: "http://x"\n', encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(local_cfg)))
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(local_cfg))
     called = []
     monkeypatch.setattr(cli.config_sync, "reset_config", lambda *a, **k: called.append(1))
@@ -137,6 +139,7 @@ def test_run_reset_config_refuses_project_local(monkeypatch, tmp_path, capsys):
 
 def test_run_reset_config_refuses_bundled_template(monkeypatch, capsys):
     from gc_core.config import _default_config_path
+
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args())
     monkeypatch.setattr(cli, "user_config_path", lambda: Path(_default_config_path()))
     assert cli._run_reset_config() == 1
@@ -154,6 +157,7 @@ def test_run_reset_config_refuses_missing_file(monkeypatch, tmp_path, capsys):
 
 
 # --- onboarding.is_unconfigured: реестр моделей закрывает требование даже с плейсхолдерами ---
+
 
 def test_is_unconfigured_true_when_everything_placeholder():
     config = {
@@ -230,7 +234,7 @@ def test_ensure_pointer_anchor_inserts_when_missing(tmp_path):
 
     out = cfg.read_text(encoding="utf-8")
     assert 'profile: ""' in out
-    assert 'completions_url: "http://real/v1"' in out   # существующее содержимое цело
+    assert 'completions_url: "http://real/v1"' in out  # существующее содержимое цело
 
 
 def test_ensure_pointer_anchor_is_idempotent(tmp_path):
@@ -250,15 +254,13 @@ def test_ensure_pointer_anchor_is_idempotent(tmp_path):
 
 def test_ensure_pointer_anchor_noop_when_anchor_already_present(tmp_path):
     cfg = tmp_path / "config.yml"
-    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n',
-                    encoding="utf-8")
+    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n', encoding="utf-8")
     template = tmp_path / "config.default.yml"
     template.write_text(_TEMPLATE, encoding="utf-8")
 
     ocw.ensure_pointer_anchor(cfg, template)
 
-    assert cfg.read_text(encoding="utf-8") == (
-        'profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n')
+    assert cfg.read_text(encoding="utf-8") == ('profile: "work"\nbackend:\n  completions_url: "http://real/v1"\n')
 
 
 def test_ensure_pointer_anchor_then_write_values_sets_value(tmp_path):
@@ -276,6 +278,7 @@ def test_ensure_pointer_anchor_then_write_values_sets_value(tmp_path):
 
 
 # --- create_pointer_file: единственный случай, когда writer создаёт файл ---
+
 
 def test_create_pointer_file_writes_single_line(tmp_path):
     target = tmp_path / "project" / ".gc" / "config.yml"

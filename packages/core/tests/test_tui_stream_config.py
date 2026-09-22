@@ -3,6 +3,7 @@
 resolve_tui_stream_enabled: явный tui_stream (True/False) побеждает; иначе legacy
 top-level stream; иначе дефолт True. tui.stream по умолчанию None (не задан) —
 чтобы отличить «явно выключил» от «не трогал» и уважать legacy backend.stream."""
+
 from gc_core.config import resolve_tui_stream_enabled
 from gc_core.config_modules.tui import TuiConfig
 

@@ -1,4 +1,5 @@
 """T15: technical user message после undo + UX ack/CTA helpers."""
+
 from __future__ import annotations
 
 import pytest
@@ -50,9 +51,7 @@ def test_format_approve_ack_and_cta():
     assert format_approve_ack(0) is None
     assert format_pending_cta(["src/a.py"]) == "src/a.py\nF3/diff"
     assert format_pending_cta(["a.py", "b.py"]) == "a.py\nb.py\nF3/diff"
-    assert format_pending_cta([f"f{i}.py" for i in range(1, 6)]) == (
-        "f1.py\nf2.py\nf3.py\nf4.py\nf5.py\nF3/diff"
-    )
+    assert format_pending_cta([f"f{i}.py" for i in range(1, 6)]) == ("f1.py\nf2.py\nf3.py\nf4.py\nf5.py\nF3/diff")
     assert format_pending_cta([f"f{i}.py" for i in range(1, 8)]) == (
         "f1.py\nf2.py\nf3.py\nf4.py\nf5.py\n(5 из 7) F3/diff"
     )
@@ -217,9 +216,7 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
         assert feedback == [(["src/foo.py"], [])]
         assert scr._status == "Отменено: src/foo.py"
         msgs, _keys, _seq = load_thread_messages(str(threads_dir), "cli", tid)
-        technical = [
-            m for m in msgs if is_technical_user_message_text(m.get("content", ""))
-        ]
+        technical = [m for m in msgs if is_technical_user_message_text(m.get("content", ""))]
         assert len(technical) == 1
         assert "src/foo.py" in technical[0]["content"]
         assert "Changes reverted" in technical[0]["content"]

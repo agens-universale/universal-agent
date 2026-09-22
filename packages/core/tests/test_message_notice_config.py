@@ -51,18 +51,12 @@ project_memory:
 def test_app_config_rejects_unknown_keys_in_notice_sections():
     with pytest.raises(ValidationError):
         AppConfig.model_validate(
-            {
-                "tool_usage_notice": [
-                    {"tool_name": "x", "step_messages_count": 3, "notice_message": "n", "extra": 1}
-                ]
-            }
+            {"tool_usage_notice": [{"tool_name": "x", "step_messages_count": 3, "notice_message": "n", "extra": 1}]}
         )
 
 
 def test_project_memory_notice_from_config_dict_from_params():
-    cfg = project_memory_from_config_dict(
-        {"project_memory_params": {"check_interval_messages": 3}}
-    )
+    cfg = project_memory_from_config_dict({"project_memory_params": {"check_interval_messages": 3}})
     assert cfg.check_interval_messages == 3
 
 
@@ -118,9 +112,7 @@ tool_usage_notice:
 
 def test_project_memory_notice_enabled_from_nested_and_flat_config():
     assert not project_memory_notice_enabled({})
-    assert project_memory_notice_enabled(
-        {"project_memory_params": {"enable_project_memory_notice": True}}
-    )
+    assert project_memory_notice_enabled({"project_memory_params": {"enable_project_memory_notice": True}})
     assert project_memory_notice_enabled({"enable_project_memory_notice": True})
 
 

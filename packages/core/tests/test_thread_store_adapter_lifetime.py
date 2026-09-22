@@ -6,6 +6,7 @@
 синхронного хранилища без `archive_and_replace` уходила в `reset` + `append`, а
 `reset` по контракту сносит трассу субагентов.
 """
+
 import gc
 import weakref
 
@@ -31,7 +32,11 @@ async def test_replace_keeps_the_subagent_trace_of_a_sync_store():
     port = athread_store(MemoryThreadStore())
     await port.aappend_messages("sys", "t1", [{"role": "user", "content": "было"}])
     await port.aappend_subagent_trace(
-        "sys", "t1", parent_call_id="c1", child_run_id="r1", kind="user",
+        "sys",
+        "t1",
+        parent_call_id="c1",
+        child_run_id="r1",
+        kind="user",
         payload={"content": "вопрос ребёнку"},
     )
     replace = getattr(port, "areplace_messages", None)

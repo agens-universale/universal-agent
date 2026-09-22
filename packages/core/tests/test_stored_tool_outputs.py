@@ -394,20 +394,22 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
         return "abcdefghij"
 
     monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
-    out = run_coro(aprocess_tool_calls(
-        messages=[
-            {
-                "id": "fc_1",
-                "type": "function_call",
-                "call_id": "call_42",
-                "name": "some_tool",
-                "arguments": "{}",
-            }
-        ],
-        state=state,
-        ctx=ctx,
-        run_agent_func=lambda *_args, **_kwargs: None,
-    ))
+    out = run_coro(
+        aprocess_tool_calls(
+            messages=[
+                {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_42",
+                    "name": "some_tool",
+                    "arguments": "{}",
+                }
+            ],
+            state=state,
+            ctx=ctx,
+            run_agent_func=lambda *_args, **_kwargs: None,
+        )
+    )
     assert len(out) == 1
     payload = json.loads(out[0]["output"])
     assert payload["type"] == "stored_tool_output"

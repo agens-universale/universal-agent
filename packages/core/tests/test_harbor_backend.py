@@ -30,12 +30,14 @@ class FakeEnv:
 
     async def upload_file(self, src, dst):
         from pathlib import Path
+
         data = Path(src).read_bytes()
         self.uploaded.append((str(src), dst))
         self.uploaded_bytes.append(data)
 
     async def download_file(self, src, dst):
         from pathlib import Path
+
         Path(dst).write_bytes(b"old-content")
         self.downloaded.append((src, str(dst)))
 
@@ -168,6 +170,7 @@ async def test_listdir_raises_file_not_found_on_nonzero_rc(loop_in_thread):
 async def test_append_creates_file_if_missing(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
+
     # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
     # simulate missing file via a custom exec that fails "test -e" but succeeds otherwise.
     async def fake_exec(command, **kw):
@@ -182,6 +185,7 @@ async def test_append_creates_file_if_missing(loop_in_thread):
     assert env.uploaded[0][1].startswith("/work/new.txt.gc-append-tmp.")
     assert any(">>" in c and "/work/new.txt" in c for c in env.calls)
 
+
 async def test_append_concatenates_existing_content(loop_in_thread):
     env = FakeEnv()
     uploaded_payloads = []
@@ -192,6 +196,7 @@ async def test_append_concatenates_existing_content(loop_in_thread):
 
     async def fake_upload_file(src, dst):
         from pathlib import Path
+
         uploaded_payloads.append((dst, Path(src).read_bytes()))
         env.uploaded.append((str(src), dst))
 
@@ -206,6 +211,7 @@ async def test_append_concatenates_existing_content(loop_in_thread):
     assert payload == b"more"
     assert any("cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls)
     assert not any(c.startswith("test -e") for c in env.calls)
+
 
 async def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
@@ -299,9 +305,7 @@ def test_build_harbor_shell_command_quotes_user_inner():
 
     from gc_core.backends.harbor import _BASHRC_EXEC_INIT
 
-    wired = build_harbor_shell_command(
-        "echo hi", cwd="/work", env={"FOO": "bar baz"}, exec_init="bashrc"
-    )
+    wired = build_harbor_shell_command("echo hi", cwd="/work", env={"FOO": "bar baz"}, exec_init="bashrc")
     assert wired.startswith("cd /work && env FOO='bar baz' bash -c ")
     inner = shlex.split(wired)[-1]
     assert inner.startswith(_BASHRC_EXEC_INIT)
@@ -355,6 +359,7 @@ async def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
     assert any(dst == "/work/a.txt" for _, dst in env.uploaded)
     assert any(".gc-append-tmp." in dst for _, dst in env.uploaded)
 
+
 async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
     """Harbor text-write must encode on host and upload raw bytes (not force utf-8)."""
     env = FakeEnv()
@@ -407,9 +412,7 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread)
     sample = await backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
-    assert any(
-        c.startswith("head -c 3 ") and c.endswith("| base64") for c in env.calls
-    )
+    assert any(c.startswith("head -c 3 ") and c.endswith("| base64") for c in env.calls)
 
 
 async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
@@ -489,6 +492,7 @@ async def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
 
 # --- walk_entries: prune внутри find, размер из -printf %s ----------------------
 
+
 async def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
@@ -548,8 +552,7 @@ def test_harbor_declares_the_async_port_and_skips_the_adapter(loop_in_thread):
     port = aexec_port(backend)
 
     assert port is backend, (
-        "Harbor снова заворачивается в SyncExecAdapter — значит запуск команды "
-        "опять уходит в поток из общего пула"
+        "Harbor снова заворачивается в SyncExecAdapter — значит запуск команды опять уходит в поток из общего пула"
     )
     assert not isinstance(port, SyncExecAdapter)
 
@@ -576,17 +579,12 @@ async def test_aexec_runs_without_taking_a_thread(loop_in_thread):
 
     threading.Thread.start = _counting_start
     try:
-        results = await asyncio.gather(
-            *(backend.aexec(f"echo {i}") for i in range(5))
-        )
+        results = await asyncio.gather(*(backend.aexec(f"echo {i}") for i in range(5)))
     finally:
         threading.Thread.start = real_start
 
     assert [r.stdout for r in results] == [f"ran:echo {i}" for i in range(5)]
-    assert spawned == [], (
-        f"пять асинхронных запусков завели потоки {spawned} — путь снова идёт "
-        "через пул"
-    )
+    assert spawned == [], f"пять асинхронных запусков завели потоки {spawned} — путь снова идёт через пул"
 
 
 async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thread):
@@ -614,17 +612,11 @@ async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thre
     env.calls.clear()
     argv = ["grep", "-n", "TOKEN", "/work/a b.py"]
     await backend.aexec_argv(argv)
-    assert env.calls == [
-        build_harbor_shell_command(argv_to_posix_command(argv), cwd=None, env=None)
-    ]
+    assert env.calls == [build_harbor_shell_command(argv_to_posix_command(argv), cwd=None, env=None)]
 
     env.calls.clear()
     await backend.arun_python("print(1)")
-    assert env.calls == [
-        build_harbor_shell_command(
-            backend._python_command("print(1)"), cwd=None, env=None
-        )
-    ]
+    assert env.calls == [build_harbor_shell_command(backend._python_command("print(1)"), cwd=None, env=None)]
 
 
 async def test_fs_helpers_use_raw_channel(loop_in_thread):

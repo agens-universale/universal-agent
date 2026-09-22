@@ -1,5 +1,6 @@
 """format_relative_local — Rule A, локальное время. now инъектируется.
 Времена — середина суток, чтобы сдвиг локали не флипал календарную дату."""
+
 from datetime import UTC, datetime, timedelta
 
 from gc_tui.services.relative_time import format_relative_local

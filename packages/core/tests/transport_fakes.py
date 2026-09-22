@@ -10,6 +10,7 @@
 подсматривал бы за транспортом по-своему, и следующий переезд пришлось бы
 чинить в восьми файлах вместо одного.
 """
+
 from __future__ import annotations
 
 import json
@@ -53,9 +54,7 @@ def json_response(payload: dict, status: int = 200) -> Callable[[httpx.Request],
 
 
 def stream_response(body: str, status: int = 200) -> Callable[[httpx.Request], httpx.Response]:
-    return lambda request: httpx.Response(
-        status, text=body, headers={"content-type": "text/event-stream"}
-    )
+    return lambda request: httpx.Response(status, text=body, headers={"content-type": "text/event-stream"})
 
 
 def install_transport(

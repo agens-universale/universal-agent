@@ -28,6 +28,7 @@
 Живая часть (реальный сервер, реальный браузер, замер handshake) остаётся
 ручной, на стенде приёмки — сюда попадает то, что воспроизводится в процессе.
 """
+
 import asyncio
 import json
 import sys
@@ -39,6 +40,7 @@ from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport
 
 # --- M-1/M-2: не обещаем того, чего не делаем ------------------------------
+
 
 def test_initialize_promises_nothing_we_cannot_serve():
     """В ``initialize`` не объявлено ни одной способности.
@@ -105,8 +107,7 @@ async def test_the_gate_would_catch_a_regression(monkeypatch):
 
     payload = json.loads(json.dumps(_INIT_PAYLOAD))
     payload["params"]["capabilities"] = {"roots": {"listChanged": True}}
-    monkeypatch.setitem(transport_mod._INIT_PAYLOAD["params"],
-                        "capabilities", payload["params"]["capabilities"])
+    monkeypatch.setitem(transport_mod._INIT_PAYLOAD["params"], "capabilities", payload["params"]["capabilities"])
 
     request = aget_transport(_stdio_cfg())
     started = time.monotonic()
@@ -139,9 +140,7 @@ async def test_unsolicited_notification_is_not_mistaken_for_the_answer():
     request = aget_transport(_stdio_cfg(CHATTY="1"))
     _headers, body = await request("", {}, dict(_INIT_PAYLOAD), 30.0)
 
-    assert body.get("method") != "notifications/message", (
-        "уведомление сервера принято за ответ на initialize"
-    )
+    assert body.get("method") != "notifications/message", "уведомление сервера принято за ответ на initialize"
     assert body.get("result"), f"настоящий ответ не прочитан: {body!r}"
     assert body.get("id") == _INIT_PAYLOAD["id"], "ответ с чужим id"
 
@@ -161,16 +160,19 @@ def test_response_to_a_foreign_id_is_skipped():
         def __init__(self, lines):
             self.stdout = _Reader(lines)
 
-    proc = _Proc([
-        json.dumps({"jsonrpc": "2.0", "method": "notifications/message"}).encode() + b"\n",
-        json.dumps({"jsonrpc": "2.0", "id": 77, "result": {"чужое": True}}).encode() + b"\n",
-        json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"наше": True}}).encode() + b"\n",
-    ])
+    proc = _Proc(
+        [
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/message"}).encode() + b"\n",
+            json.dumps({"jsonrpc": "2.0", "id": 77, "result": {"чужое": True}}).encode() + b"\n",
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"наше": True}}).encode() + b"\n",
+        ]
+    )
     got = asyncio.run(_aread_response(proc, 5.0, 1))
     assert got.get("result") == {"наше": True}, f"взят не тот ответ: {got!r}"
 
 
 # --- M-4: закрытие из чужой задачи не трогает чужую сессию -----------------
+
 
 class _FakeStack:
     """Контекст-менеджер сессии: помнит, закрывали ли его."""
@@ -237,6 +239,7 @@ async def test_sessions_of_different_owners_do_not_collide():
 
 # --- M-10: транспорты -------------------------------------------------------
 
+
 @pytest.mark.parametrize("transport", ["http", "sse", "stdio"])
 def test_every_declared_transport_resolves(transport):
     """Все три транспорта отдают функцию запроса.
@@ -292,9 +295,7 @@ async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch)
     monkeypatch.setattr(mcp_registry.ToolsCache, "aget_tools", _slow_discovery)
 
     for name in ("get_all_tools", "_build_tools_registry"):
-        assert not hasattr(mcp_registry, name), (
-            f"{name} вернулся в реестр — это синхронный вход в дискавери"
-        )
+        assert not hasattr(mcp_registry, name), f"{name} вернулся в реестр — это синхронный вход в дискавери"
     assert not hasattr(mcp_api, "get_all_tools")
 
     ticks = 0
@@ -307,9 +308,11 @@ async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch)
 
     beat = asyncio.create_task(_heartbeat())
     try:
-        with pytest.raises(ValueError):        # реестр пуст → тул неизвестен
+        with pytest.raises(ValueError):  # реестр пуст → тул неизвестен
             await mcp_api.acall_mcp_tool(
-                "mcp_srv_tool", {}, {"srv": {"transport": "stdio", "command": "x"}},
+                "mcp_srv_tool",
+                {},
+                {"srv": {"transport": "stdio", "command": "x"}},
                 tools_registry=None,
             )
     finally:

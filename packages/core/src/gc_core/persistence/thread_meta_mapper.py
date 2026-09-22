@@ -41,12 +41,8 @@ class ThreadMetaMapper:
         shared = getattr(state, "shared", None)
         if isinstance(shared, SharedStateData):
             out["shared"] = serialize_shared_block(shared)
-        out["user_intent_log"] = serialize_for_meta(
-            getattr(state, "user_intent_log", []) or []
-        )
-        out["current_user_intent"] = serialize_for_meta(
-            getattr(state, "current_user_intent", []) or []
-        )
+        out["user_intent_log"] = serialize_for_meta(getattr(state, "user_intent_log", []) or [])
+        out["current_user_intent"] = serialize_for_meta(getattr(state, "current_user_intent", []) or [])
         out["user_turn_seq"] = int(getattr(state, "user_turn_seq", 0) or 0)
         out["dialog_steps_offset"] = int(getattr(state, "dialog_steps_offset", 0) or 0)
         usage = getattr(state, "usage", None)

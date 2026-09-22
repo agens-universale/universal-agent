@@ -77,10 +77,7 @@ def render_cost_report(report: CostReport, *, model_name: str | None = None, tit
         lines.append(_category_row(c, show_cost=show_cost, mark_tariff=mark_tariff))
 
     lines.append("─" * (62 if show_cost else 40))
-    total_row = (
-        f"{'total':<20}{format_tokens(report.total_input):>10}"
-        f"{format_tokens(report.total_output):>10}"
-    )
+    total_row = f"{'total':<20}{format_tokens(report.total_input):>10}{format_tokens(report.total_output):>10}"
     if show_cost:
         total_row += f"{_total_cost_cell(report):>22}"
     lines.append(total_row)
@@ -125,15 +122,9 @@ def _usage_caveat_lines(report: CostReport) -> list[str]:
     lines: list[str] = []
     if report.total_cached > 0:
         share = report.total_cached / report.total_input * 100 if report.total_input else 0
-        lines.append(
-            f"из них cached input: {format_tokens(report.total_cached)} "
-            f"({share:.0f}% — по cache-ставке)"
-        )
+        lines.append(f"из них cached input: {format_tokens(report.total_cached)} ({share:.0f}% — по cache-ставке)")
     if report.total_missing_usage_calls > 0:
-        lines.append(
-            f"⚠ {report.total_missing_usage_calls} вызов(ов) без usage не учтены "
-            f"(итог — нижняя граница)"
-        )
+        lines.append(f"⚠ {report.total_missing_usage_calls} вызов(ов) без usage не учтены (итог — нижняя граница)")
     return lines
 
 
@@ -225,9 +216,7 @@ def _category_usage_entry(c: Any, *, has_cost: bool) -> dict[str, Any]:
         entry["missing_usage_calls"] = c.missing_usage_calls
     if has_cost:
         entry["cost_source"] = c.cost_source
-        entry["cost_parts"] = [
-            {"amount": p.amount, "currency": p.currency, "source": p.source} for p in c.parts
-        ]
+        entry["cost_parts"] = [{"amount": p.amount, "currency": p.currency, "source": p.source} for p in c.parts]
         entry["unpriced"] = c.unpriced
         if len(c.parts) == 1:
             entry["cost"] = c.parts[0].amount

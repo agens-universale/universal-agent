@@ -49,8 +49,7 @@ def _run_with_retries(func, args, kwargs, policy: _RetryPolicy, *, req_logger, u
             if not policy.retriable(attempt, exc):
                 req_logger.log(
                     policy.no_more_retries_log_level,
-                    "%s failed (attempt %s/%s, no more retries). "
-                    "url=%s error=%r",
+                    "%s failed (attempt %s/%s, no more retries). url=%s error=%r",
                     policy.operation_name,
                     attempt,
                     policy.max_attempts,
@@ -60,8 +59,7 @@ def _run_with_retries(func, args, kwargs, policy: _RetryPolicy, *, req_logger, u
                 raise
             req_logger.log(
                 policy.retry_log_level,
-                "%s failed (attempt %s/%s). Retrying in %.1f sec "
-                "url=%s error=%r",
+                "%s failed (attempt %s/%s). Retrying in %.1f sec url=%s error=%r",
                 policy.operation_name,
                 attempt,
                 policy.max_attempts,
@@ -109,9 +107,7 @@ def retry_with_backoff(
     def decorator(func: Callable[..., _T]) -> Callable[..., _T]:
         sig = inspect.signature(func)
         params = sig.parameters
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-        )
+        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
         param_names = set(params.keys())
 
         @functools.wraps(func)
@@ -122,9 +118,7 @@ def retry_with_backoff(
             kwargs = _call_kwargs(kwargs, param_names, has_var_keyword, req_logger)
             if not use_retry or max_attempts <= 1:
                 return func(*args, **kwargs)
-            return _run_with_retries(
-                func, args, kwargs, policy, req_logger=req_logger, url_for_log=url_for_log
-            )
+            return _run_with_retries(func, args, kwargs, policy, req_logger=req_logger, url_for_log=url_for_log)
 
         return wrapper
 

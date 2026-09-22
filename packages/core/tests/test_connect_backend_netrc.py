@@ -44,9 +44,7 @@ def test_explicit_authorization_survives_netrc(tmp_path, monkeypatch):
     original = NO_NETRC_SESSION._transport
     NO_NETRC_SESSION._transport = httpx.MockTransport(handler)
     try:
-        NO_NETRC_SESSION.post(
-            "http://example.com/v1", headers={"Authorization": "Bearer REAL"}
-        )
+        NO_NETRC_SESSION.post("http://example.com/v1", headers={"Authorization": "Bearer REAL"})
     finally:
         NO_NETRC_SESSION._transport = original
 

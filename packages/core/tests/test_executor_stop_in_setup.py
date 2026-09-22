@@ -11,6 +11,7 @@
 Каркас как в `test_executor_undelivered_tail.py`: настоящие
 `acreate_run_context` и `AgentExecutor.arun`, подменён только цикл агента.
 """
+
 import importlib
 import types
 
@@ -36,10 +37,12 @@ async def _executor(monkeypatch, tmp_path, seen: list):
         # Настоящий цикл спрашивает стоп через `check_stop` — фиксируем ответ,
         # каким его видит ход, которому передали управление.
         check_stop = kw.get("check_stop")
-        seen.append({
-            "batch": [m.get("content") if isinstance(m, dict) else m for m in messages],
-            "stopped": bool(check_stop()) if callable(check_stop) else None,
-        })
+        seen.append(
+            {
+                "batch": [m.get("content") if isinstance(m, dict) else m for m in messages],
+                "stopped": bool(check_stop()) if callable(check_stop) else None,
+            }
+        )
         return {"finished": True}
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
@@ -66,17 +69,14 @@ async def test_stop_in_the_setup_of_a_second_turn_is_not_lost(monkeypatch, tmp_p
             ex.stop_run()
         return await real_session.afrom_config(**kw)
 
-    monkeypatch.setattr(
-        ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
-    )
+    monkeypatch.setattr(ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread))
 
     await ex.arun(["второй"], thread_id="t", system="cli")
 
     assert reads, "подмена чтения треда не сработала — стоп не был позван"
     assert seen[-1]["batch"] == ["второй"], f"второй ход не состоялся: {seen}"
     assert seen[-1]["stopped"] is True, (
-        "стоп в сетапе потерян: ход стартовал, не зная о нём, и доиграет "
-        f"целиком — с вызовами модели и тулов ({seen})"
+        f"стоп в сетапе потерян: ход стартовал, не зная о нём, и доиграет целиком — с вызовами модели и тулов ({seen})"
     )
 
 
@@ -90,11 +90,9 @@ async def test_stop_between_turns_does_not_leak_into_the_next_one(monkeypatch, t
     ex, _ = await _executor(monkeypatch, tmp_path, seen)
 
     await ex.arun(["первый"], thread_id="t", start_new_thread=True, system="cli")
-    ex.stop_run()                    # ход уже завершён, ничего не идёт
+    ex.stop_run()  # ход уже завершён, ничего не идёт
 
     await ex.arun(["второй"], thread_id="t", system="cli")
 
     assert [t["batch"] for t in seen] == [["первый"], ["второй"]], seen
-    assert seen[-1]["stopped"] is False, (
-        f"следующий запрос остановлен стопом от прошлого, остывшего хода: {seen}"
-    )
+    assert seen[-1]["stopped"] is False, f"следующий запрос остановлен стопом от прошлого, остывшего хода: {seen}"

@@ -84,11 +84,7 @@ def test_using_supercoder_mentions_all_other_skill_ids():
 
 @pytest.mark.parametrize(
     "skill_id, slug",
-    sorted(
-        (skill_id, slug)
-        for skill_id, slugs in EXPECTED_REFERENCES.items()
-        for slug in slugs
-    ),
+    sorted((skill_id, slug) for skill_id, slugs in EXPECTED_REFERENCES.items() for slug in slugs),
 )
 def test_reference_file_present(skill_id, slug):
     ref = PACK_DIR / skill_id / "references" / f"{slug}.md"

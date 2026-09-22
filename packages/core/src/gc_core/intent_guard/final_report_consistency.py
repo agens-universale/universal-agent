@@ -79,15 +79,11 @@ def _normalize_handoff_in_finish_args(args: Dict[str, Any]) -> Dict[str, Any]:
 def _load_guard_prompt(prompt_path: str | None = None) -> str:
     path = prompt_path or DEFAULT_INTENT_GUARD_PROMPT_PATH
     if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Intent guard prompt file not found: {path}"
-        )
+        raise FileNotFoundError(f"Intent guard prompt file not found: {path}")
     # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
     prompt = read_user_text(path).strip()
     if not prompt:
-        raise ValueError(
-            f"Intent guard prompt file is empty: {path}"
-        )
+        raise ValueError(f"Intent guard prompt file is empty: {path}")
     return prompt
 
 
@@ -104,11 +100,7 @@ def _clip_retry_draft(raw: str, *, max_chars: int = _FINISH_GATE_RETRY_DRAFT_MAX
         return text
     head = max_chars // 2
     tail = max_chars - head
-    return (
-        text[:head]
-        + "\n... [TRUNCATED FOR RETRY PROMPT] ...\n"
-        + text[-tail:]
-    )
+    return text[:head] + "\n... [TRUNCATED FOR RETRY PROMPT] ...\n" + text[-tail:]
 
 
 def _build_finish_gate_user_prompt(payload: Dict[str, Any]) -> str:
@@ -189,9 +181,7 @@ async def avalidate_final_report_vs_user_intent(
     ``consumer`` — canonical id этого судейского вызова (спека §5.1). По умолчанию
     ``"finish_gate"``; ``text_answer_judge`` переиспользует эту же воронку под своим id.
     """
-    args = _normalize_handoff_in_finish_args(
-        _parse_finish_handoff_args(finish_handoff_arguments)
-    )
+    args = _normalize_handoff_in_finish_args(_parse_finish_handoff_args(finish_handoff_arguments))
     active_user_requests = [str(x) for x in current_user_requests if isinstance(x, str)]
     user_context = [str(x) for x in (context_user_messages or []) if isinstance(x, str)]
 
@@ -203,11 +193,7 @@ async def avalidate_final_report_vs_user_intent(
         )
 
     ctx_cfg = getattr(ctx, "config_dict", {}) or {}
-    guard_prompt_path = (
-        ctx_cfg.get("chat_completions_intent_guard_prompt_path")
-        if isinstance(ctx_cfg, dict)
-        else None
-    )
+    guard_prompt_path = ctx_cfg.get("chat_completions_intent_guard_prompt_path") if isinstance(ctx_cfg, dict) else None
     system_prompt = _load_guard_prompt(guard_prompt_path)
     is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {
@@ -233,8 +219,7 @@ async def avalidate_final_report_vs_user_intent(
     logger = getattr(ctx, "logger", None)
     if logger is not None:
         logger.warning(
-            "finish_gate first reply unparseable; retrying with JSON-only prompt "
-            "previous_chars=%s",
+            "finish_gate first reply unparseable; retrying with JSON-only prompt previous_chars=%s",
             len(raw or ""),
         )
 
@@ -253,5 +238,3 @@ async def avalidate_final_report_vs_user_intent(
     if parsed_retry is not None:
         return parsed_retry
     return fail_open_validation_result()
-
-

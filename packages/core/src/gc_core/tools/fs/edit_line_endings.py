@@ -55,9 +55,7 @@ def match_span(content: str, search: str, idx: int) -> tuple[int, int, int]:
     return idx, start_line, end_line
 
 
-def collect_literal_matches(
-    content: str, search: str, first_index: int
-) -> list[tuple[int, int, int]]:
+def collect_literal_matches(content: str, search: str, first_index: int) -> list[tuple[int, int, int]]:
     """All non-overlapping matches of ``search``, starting from a known first hit."""
     if first_index < 0:
         return []
@@ -101,11 +99,7 @@ def resolve_edit_line_endings(content: str, search: str, replace: str) -> EditLi
         # Miss in every style: hand the anchor back untouched for the miss report.
         return EditLineEndings(search, replace, file_eol, -1, False)
 
-    target_eol = (
-        detect_line_ending(resolved_search)
-        or line_ending_at(content, idx)
-        or file_eol
-    )
+    target_eol = detect_line_ending(resolved_search) or line_ending_at(content, idx) or file_eol
     resolved_replace = convert_line_endings(replace, target_eol)
     eol_adapted = resolved_search != search or resolved_replace != replace
     return EditLineEndings(resolved_search, resolved_replace, file_eol, idx, eol_adapted)

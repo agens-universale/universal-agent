@@ -4,6 +4,7 @@ No knowledge of state, ctx, prompts, backend. Path is given by caller.
 All operations serialized in-process via threading.Lock; cross-process
 correctness is on the atomic os.replace.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -157,11 +158,7 @@ def append(
             raise ProjectMemoryError("io_error", str(exc)) from exc
         existing_stripped = existing.strip()
         delta_stripped = delta.strip()
-        new_text = (
-            f"{existing_stripped}\n\n{delta_stripped}"
-            if existing_stripped
-            else delta_stripped
-        )
+        new_text = f"{existing_stripped}\n\n{delta_stripped}" if existing_stripped else delta_stripped
         if len(new_text) > max_chars:
             raise ProjectMemoryError(
                 "limit_exceeded",

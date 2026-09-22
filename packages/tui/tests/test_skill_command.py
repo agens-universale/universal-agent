@@ -1,4 +1,5 @@
 """/skills загружает реестр; /skill <id> открывает описание в Viewer."""
+
 import pytest
 
 
@@ -14,6 +15,7 @@ class _FakeReg:
 async def test_skills_command_lists_from_registry(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_core.tools.skills import registry as reg_mod
+
     monkeypatch.setattr(reg_mod, "get_skills_registry", lambda cfg=None: _FakeReg())
 
     from gc_tui.app import TuiApp
@@ -31,5 +33,3 @@ async def test_skills_command_lists_from_registry(tmp_path, monkeypatch):
         assert "supercoder" in text
         assert "codebase" in text
         assert "недоступны" not in text
-
-

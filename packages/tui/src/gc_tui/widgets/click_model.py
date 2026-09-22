@@ -9,6 +9,7 @@ BlockPanel).
 Симметрия распространяется и на гейт security-confirm: экран события не
 открывает НИ Enter, НИ Ctrl+клик, пока баннер ждёт ответа (`confirm_is_active`).
 """
+
 from __future__ import annotations
 
 from typing import Optional

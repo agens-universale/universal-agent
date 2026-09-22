@@ -5,6 +5,7 @@ file is the oracle — the same base tool driven by an in-memory FakeBackend mus
 an IDENTICAL envelope and IDENTICAL resulting file content for the same input.
 `_run_both` feeds one case through both backends.
 """
+
 import json
 
 import pytest
@@ -94,6 +95,7 @@ def test_identical_to_base(tmp_path, case):
     # make_dirs case: place the file in a subdir that does not exist yet
     if _id == "missing_file_create_true_parent_absent_make_dirs_false":
         import os
+
         subdir = tmp_path / "no_such_dir"
         base_path = str(subdir / "f.txt")
         harbor_path = "/work/no_such_dir/f.txt"
@@ -113,6 +115,7 @@ def test_identical_to_base(tmp_path, case):
         # File absent; parent exists on real fs (tmp_path).
         # Seed FakeBackend with a sentinel so is_dir("/work") returns True.
         import os
+
         f = tmp_path / "f.txt"
         # No file on disk (existing_content is None)
         files = {"/work/.keep": ""}  # sentinel: makes is_dir("/work") == True
@@ -130,6 +133,7 @@ def test_identical_to_base(tmp_path, case):
 
     if _id == "make_dirs":
         import os
+
         subdir = tmp_path / "deep" / "nested"
         base_path = str(subdir / "f.txt")
         harbor_path = "/work/deep/nested/f.txt"
@@ -160,9 +164,7 @@ def test_default_separator_inserts_double_newline(tmp_path):
 
 def test_explicit_empty_separator_appends_flush(tmp_path):
     """Passing separator='' must join with no separator at all."""
-    b_env, b_content, h_env, h_content = _run_both(
-        tmp_path, EXISTING_CONTENT, content="appended", separator=""
-    )
+    b_env, b_content, h_env, h_content = _run_both(tmp_path, EXISTING_CONTENT, content="appended", separator="")
     assert h_content == EXISTING_CONTENT + "appended"
     assert h_content == b_content
 

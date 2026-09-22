@@ -1,4 +1,5 @@
 """Парсер recommended_mcp/config.yml."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -114,9 +115,7 @@ def load_agent_dep_dir(path: Path) -> Path:
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         return default_agent_dep_dir()
     if not isinstance(raw, str):
-        raise ManifestError(
-            f"'agent_dep_dir' must be a string in {path}, got {type(raw).__name__}"
-        )
+        raise ManifestError(f"'agent_dep_dir' must be a string in {path}, got {type(raw).__name__}")
     return Path(raw).expanduser().resolve()
 
 
@@ -167,13 +166,9 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")
     if install.type == "source" and install.source is None:
-        raise ManifestError(
-            f"mcp '{name}' install.type=source requires install.source in {source}"
-        )
+        raise ManifestError(f"mcp '{name}' install.type=source requires install.source in {source}")
     if install.type == "pypi" and not install.package:
-        raise ManifestError(
-            f"mcp '{name}' install.type=pypi requires install.package in {source}"
-        )
+        raise ManifestError(f"mcp '{name}' install.type=pypi requires install.package in {source}")
 
     run_raw = raw.get("run")
     run: RunSpec | None = None
@@ -202,14 +197,15 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
             cwd=run_cwd,
         )
         if run.type == "command" and not run.command:
-            raise ManifestError(
-                f"mcp '{name}' run.type=command requires run.command in {source}"
-            )
+            raise ManifestError(f"mcp '{name}' run.type=command requires run.command in {source}")
 
     description = str(raw.get("description", "")).strip()
 
     return MCPEntry(
-        name=name, path=Path(path_str), install=install, run=run,
+        name=name,
+        path=Path(path_str),
+        install=install,
+        run=run,
         optional=bool(raw.get("optional", False)),
         description=description,
     )

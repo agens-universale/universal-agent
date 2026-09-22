@@ -1,4 +1,5 @@
 """AsyncAgent — тонкая обёртка над acreate_run_context + AgentExecutor.arun."""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,9 +36,7 @@ class AsyncAgent:
     ходами дешевле, чем собирать заново.
     """
 
-    def __init__(
-        self, executor: AgentExecutor, subscribers: set[asyncio.Queue]
-    ) -> None:
+    def __init__(self, executor: AgentExecutor, subscribers: set[asyncio.Queue]) -> None:
         self._executor = executor
         # Живые подписчики stream(). Пустой набор — дельты никуда не копятся.
         self._subscribers = subscribers
@@ -179,9 +178,7 @@ class AsyncAgent:
                 texts, fields = undelivered_as_arun_args(tail)
                 # Тот же тред, но не с чистого листа: `start_new_thread`
                 # первого хода стёр бы то, что этот ход должен продолжить.
-                result = await self._executor.arun(
-                    texts, **{**kwargs, **fields, "start_new_thread": False}
-                )
+                result = await self._executor.arun(texts, **{**kwargs, **fields, "start_new_thread": False})
         except asyncio.CancelledError:
             self._drop_tail([*in_flight, *_take_tail(self._executor)], "cancelled", kwargs)
             raise
@@ -204,7 +201,9 @@ class AsyncAgent:
             return
         logger.warning(
             "run_tail_dropped thread_id=%s ending=%s count=%d",
-            kwargs.get("thread_id"), ending, len(tail),
+            kwargs.get("thread_id"),
+            ending,
+            len(tail),
             extra={
                 "event": "run_tail_dropped",
                 "thread_id": kwargs.get("thread_id"),
@@ -214,9 +213,7 @@ class AsyncAgent:
             },
         )
 
-    async def stream(
-        self, prompt: str | list[str], **kwargs: Any
-    ) -> AsyncIterator[tuple]:
+    async def stream(self, prompt: str | list[str], **kwargs: Any) -> AsyncIterator[tuple]:
         """Ход агента с живыми дельтами: ``(kind, text)``.
 
         ``kind``: ``"answer"`` — текст ответа, ``"think"`` — рассуждение,
@@ -255,7 +252,7 @@ class AsyncAgent:
             # заявленные 0.2 с, а через все три секунды прогона, и LLM-вызовы
             # с тулами продолжали идти.
             cancelled = True
-            self._executor.stop_run()      # кооперативно: дать ходу закрыться
+            self._executor.stop_run()  # кооперативно: дать ходу закрыться
             task.cancel()
             raise
         finally:

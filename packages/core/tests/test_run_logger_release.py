@@ -7,14 +7,14 @@
 заводит каждый агент и каждый субагент: рост линейный, а вместе с логгерами
 живут ОТКРЫТЫЕ ``FlushFileHandler``, то есть файловые дескрипторы.
 """
+
 import logging
 
 from gc_core.utils.logging_module import create_run_logger, release_run_logger
 
 
 def _cfg(tmp_path):
-    return {"save_logs": True, "console_trace": False,
-            "logs_dump_dir": str(tmp_path)}
+    return {"save_logs": True, "console_trace": False, "logs_dump_dir": str(tmp_path)}
 
 
 def test_release_removes_the_logger_from_the_registry(tmp_path):
@@ -24,9 +24,7 @@ def test_release_removes_the_logger_from_the_registry(tmp_path):
 
     release_run_logger(logger)
 
-    assert name not in logging.Logger.manager.loggerDict, (
-        "логгер прогона остался в реестре logging до конца процесса"
-    )
+    assert name not in logging.Logger.manager.loggerDict, "логгер прогона остался в реестре logging до конца процесса"
 
 
 def test_release_closes_the_file_handlers(tmp_path):

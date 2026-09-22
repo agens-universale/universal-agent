@@ -1,4 +1,5 @@
 """Отвеченный вопрос ask_human в трейсе — янтарный '?' + текст, без 'ask_human:'."""
+
 from gc_tui.palette import RUN_COLOR
 from gc_tui.services.trace_render import build_answered_question_widget
 

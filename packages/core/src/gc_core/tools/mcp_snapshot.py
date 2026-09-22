@@ -1,4 +1,5 @@
 """Снимок MCP «сервер → статус+тулы» из реестра tools_data (технический слой)."""
+
 from typing import Any, Dict
 
 

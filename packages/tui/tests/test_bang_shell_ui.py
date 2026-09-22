@@ -1,4 +1,5 @@
 """Smoke: bang-shell ветка submit не стартует агента и монтирует трейс."""
+
 from __future__ import annotations
 
 import pytest
@@ -50,9 +51,7 @@ async def test_bang_echo_mounts_trace_not_agent(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
-        await scr.on_command_text_area_submitted(
-            CommandTextArea.Submitted(value="! echo hello")
-        )
+        await scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! echo hello"))
         await pilot.pause()
         for _ in range(50):
             text = _trace_text(scr)
@@ -178,9 +177,7 @@ async def test_bang_clear_last_n(tmp_path, monkeypatch):
         scr = pilot.app.screen
         monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
         for word in ("alpha", "beta", "gamma"):
-            await scr.on_command_text_area_submitted(
-                CommandTextArea.Submitted(value=f"! echo {word}")
-            )
+            await scr.on_command_text_area_submitted(CommandTextArea.Submitted(value=f"! echo {word}"))
             await _await_bang_done(pilot, scr, word)
 
         await scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear 2"))

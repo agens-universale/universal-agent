@@ -33,9 +33,7 @@ class AmbiguousSkillId(Exception):
     def __init__(self, short_id: str, candidates: list[str]) -> None:
         self.short_id = short_id
         self.candidates = list(candidates)
-        super().__init__(
-            f"Skill id '{short_id}' is ambiguous; candidates: {self.candidates}"
-        )
+        super().__init__(f"Skill id '{short_id}' is ambiguous; candidates: {self.candidates}")
 
 
 def _system_skills_root() -> str:
@@ -56,6 +54,7 @@ def _user_skills_root() -> str:
     ~/.local/share/gc/skills/, на Windows ~/.gc/skills/.
     """
     from gc_core.config_modules.env_vars import gc_paths
+
     return str(gc_paths()["data"] / "skills")
 
 
@@ -65,6 +64,7 @@ def _project_skills_root() -> str:
     <cwd>/.gc/skills/. Считается на каждом вызове (cwd может меняться).
     """
     from gc_core.config_modules.env_vars import project_gc_dir
+
     return str(project_gc_dir() / "skills")
 
 
@@ -137,9 +137,7 @@ def _guess_content_type(filename: str) -> str:
     return "text/plain"
 
 
-async def _load_pack_manifest(
-    backend: FsBackend, pack_dir: str, dir_name: str
-) -> Dict[str, Any]:
+async def _load_pack_manifest(backend: FsBackend, pack_dir: str, dir_name: str) -> Dict[str, Any]:
     """
     Загрузить pack.yaml. Best-effort: при отсутствии файла или ошибке парсинга
     возвращает дефолты на основе имени директории.
@@ -250,7 +248,7 @@ class SkillsRegistry:
 
     def __init__(
         self,
-        skills_root: Optional[str] = None,    # legacy single-source
+        skills_root: Optional[str] = None,  # legacy single-source
         *,
         backend: FsBackend | None = None,
         system_root: Optional[str] = None,
@@ -261,26 +259,15 @@ class SkillsRegistry:
         self._backend = backend or LocalFsBackend()
         # Legacy: если передан skills_root и никаких новых — режим single-source.
         # В этом режиме все скиллы помечаются как source="user".
-        if (
-            skills_root is not None
-            and system_root is None
-            and user_root is None
-            and project_root is None
-        ):
+        if skills_root is not None and system_root is None and user_root is None and project_root is None:
             self._system_root = None
             self._user_root = skills_root
             self._project_root = None
             self._walk_packs_enabled = False
         else:
-            self._system_root = (
-                system_root if system_root is not None else _system_skills_root()
-            )
-            self._user_root = (
-                user_root if user_root is not None else _user_skills_root()
-            )
-            self._project_root = (
-                project_root if project_root is not None else _project_skills_root()
-            )
+            self._system_root = system_root if system_root is not None else _system_skills_root()
+            self._user_root = user_root if user_root is not None else _user_skills_root()
+            self._project_root = project_root if project_root is not None else _project_skills_root()
             self._walk_packs_enabled = True
         # Canonical id'ы скиллов / паков, исключаемых при загрузке.
         # Пакет (`pack-id`) убирает и bootstrap, и все inner. Flat-скилл
@@ -354,9 +341,7 @@ class SkillsRegistry:
         skill_id_segment = meta_id or dir_name
 
         # Canonical = pack_id:skill_id для pack-скиллов, иначе плоский.
-        canonical_id = (
-            f"{pack_id}:{skill_id_segment}" if pack_id else skill_id_segment
-        )
+        canonical_id = f"{pack_id}:{skill_id_segment}" if pack_id else skill_id_segment
 
         name = metadata.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -438,9 +423,7 @@ class SkillsRegistry:
         bootstrap_ids: Dict[str, str] = {}
         pack_sizes: Dict[str, int] = {}
         for pid, manifest in self._packs_by_id.items():
-            pack_sizes[pid] = sum(
-                1 for s in self._skills_by_id.values() if s.pack_id == pid
-            )
+            pack_sizes[pid] = sum(1 for s in self._skills_by_id.values() if s.pack_id == pid)
             bs = manifest.get("bootstrap_skill")
             if not (isinstance(bs, str) and bs.strip()):
                 continue
@@ -573,8 +556,7 @@ class SkillsRegistry:
         if skill is None and pack_part in (tail, normalized_tail):
             # Удвоённый namespace (pack==skill, напр. 'x:x') — модель угадала
             # форму pack:skill для flat-скилла. Безопасный bare-lookup по хвосту.
-            skill = (self._skills_by_id.get(tail)
-                     or self._skills_by_id.get(normalized_tail))
+            skill = self._skills_by_id.get(tail) or self._skills_by_id.get(normalized_tail)
         return skill
 
     def _alias_candidates(self, normalized: str) -> List[Skill]:
@@ -657,11 +639,7 @@ class SkillsRegistry:
             sid = e["id"]
             tail = sid.split(":", 1)[1] if ":" in sid else sid
             bare.setdefault(tail, []).append(sid)
-        pack_bootstrap = {
-            e["pack_id"]: e["id"]
-            for e in entries
-            if e.get("is_pack_bootstrap") and e.get("pack_id")
-        }
+        pack_bootstrap = {e["pack_id"]: e["id"] for e in entries if e.get("is_pack_bootstrap") and e.get("pack_id")}
         return SkillCatalog(
             canonical_ids=canonical,
             bare_to_canonical={k: tuple(sorted(v)) for k, v in bare.items()},
@@ -676,10 +654,7 @@ class SkillsRegistry:
         path = skill.references.get(slug)
         if not path:
             available = ", ".join(sorted(skill.references)) or "(no references)"
-            raise KeyError(
-                f"Reference '{slug}' not found for skill '{skill_id}'. "
-                f"Available references: {available}"
-            )
+            raise KeyError(f"Reference '{slug}' not found for skill '{skill_id}'. Available references: {available}")
 
         content = await self._backend.read(path)
 
@@ -703,10 +678,7 @@ class SkillsRegistry:
         path = skill.assets.get(slug)
         if not path:
             available = ", ".join(sorted(skill.assets)) or "(no assets)"
-            raise KeyError(
-                f"Asset '{slug}' not found for skill '{skill_id}'. "
-                f"Available assets: {available}"
-            )
+            raise KeyError(f"Asset '{slug}' not found for skill '{skill_id}'. Available assets: {available}")
 
         content = await self._backend.read(path)
 
@@ -727,17 +699,15 @@ class SkillsRegistry:
         available_scripts = skill.scripts
         normalized = (script_name or "").strip().replace("\\", "/")
         if normalized.startswith("scripts/"):
-            normalized = normalized[len("scripts/"):]
+            normalized = normalized[len("scripts/") :]
         if not normalized or normalized not in available_scripts:
             raise FileNotFoundError(
-                f"Script '{script_name}' not found for skill '{skill_id}'. "
-                f"Available scripts: {available_scripts}"
+                f"Script '{script_name}' not found for skill '{skill_id}'. Available scripts: {available_scripts}"
             )
         path = self._backend.join(self._backend.join(skill.root_path, "scripts"), normalized)
         if not await self._backend.is_file(path):
             raise FileNotFoundError(
-                f"Script '{script_name}' not found for skill '{skill_id}'. "
-                f"Available scripts: {available_scripts}"
+                f"Script '{script_name}' not found for skill '{skill_id}'. Available scripts: {available_scripts}"
             )
         return {
             "path": path,
@@ -772,15 +742,11 @@ def get_skills_registry(
         raw_disabled = config_dict.get("disable_skills")
         if isinstance(raw_disabled, list):
             disable_skills = [
-                str(item).strip()
-                for item in raw_disabled
-                if isinstance(item, (str, int)) and str(item).strip()
+                str(item).strip() for item in raw_disabled if isinstance(item, (str, int)) and str(item).strip()
             ]
 
     if skills_root is not None:
-        return SkillsRegistry(
-            skills_root=skills_root, disable_skills=disable_skills, backend=backend
-        )
+        return SkillsRegistry(skills_root=skills_root, disable_skills=disable_skills, backend=backend)
     return SkillsRegistry(disable_skills=disable_skills, backend=backend)
 
 

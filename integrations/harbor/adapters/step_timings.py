@@ -11,6 +11,7 @@ matching ``end`` is the call it was blocked on.
 counted twice. Routing is per thread (the agent loop and its subagents share one
 worker thread), so concurrent trials in one process keep separate sinks.
 """
+
 import json
 import threading
 import time
@@ -45,9 +46,7 @@ def _install_once() -> None:
             if sink is None:
                 return await orig_llm(messages, state, ctx, **kwargs)
             name = str(getattr(state, "default_model", None) or "llm")
-            return await sink.aspan(
-                "llm", name, state, lambda: orig_llm(messages, state, ctx, **kwargs)
-            )
+            return await sink.aspan("llm", name, state, lambda: orig_llm(messages, state, ctx, **kwargs))
 
         async def tool_wrapper(*args, **kwargs):
             sink = _sink()
@@ -133,13 +132,9 @@ class StepTimings:
             ok, error = False, f"{type(exc).__name__}: {exc}"[:300]
             raise
         finally:
-            self._close_span(
-                kind, depth, head, started, ok, error, nested=nested
-            )
+            self._close_span(kind, depth, head, started, ok, error, nested=nested)
 
-    def _open_span(
-        self, kind: str, name: str, state: Any, *, nested: bool
-    ) -> "tuple[int, dict, float]":
+    def _open_span(self, kind: str, name: str, state: Any, *, nested: bool) -> "tuple[int, dict, float]":
         depth = getattr(self._local, "depth", 0)
         with self._lock:
             self._seq += 1
@@ -197,9 +192,7 @@ class StepTimings:
             ok, error = False, f"{type(exc).__name__}: {exc}"[:300]
             raise
         finally:
-            self._close_span(
-                kind, depth, head, started, ok, error, nested=nested
-            )
+            self._close_span(kind, depth, head, started, ok, error, nested=nested)
 
     def _emit(self, record: dict) -> None:
         # Читаем дескриптор ПОД ТЕМ ЖЕ локом, под которым пишем. Снаружи была

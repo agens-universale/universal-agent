@@ -14,6 +14,7 @@ drift apart. Any step failure → False; never raise to tool callers.
 бэкенд, у ЧУЖОГО синхронного — ``SyncExecAdapter``. Пробы поэтому работают на
 любой сторонней реализации ``FsBackend``, не требуя от её автора корутин.
 """
+
 from __future__ import annotations
 
 import os
@@ -76,9 +77,7 @@ async def _arun_argv(
     merged = dict(_GREP_CLEAN_ENV)
     if env:
         merged.update(env)
-    return await _port(backend).aexec_argv(
-        list(argv), stdin=stdin, cwd=cwd, timeout=timeout, env=merged
-    )
+    return await _port(backend).aexec_argv(list(argv), stdin=stdin, cwd=cwd, timeout=timeout, env=merged)
 
 
 async def _awhich_bin(backend: FsBackend, name: str) -> Optional[str]:
@@ -130,7 +129,6 @@ def parse_find_printf_entries(stdout: str) -> List[WalkEntry]:
                 size = None
         out.append(WalkEntry(rel, is_dir, size))
     return out
-
 
 
 async def aprobe_has_find(backend: FsBackend) -> bool:
@@ -216,8 +214,7 @@ async def _aprobe_tree_and_file(backend: FsBackend, grep_bin: str, root: str, fp
         return False
     res = await _arun_argv(
         backend,
-        build_grep_argv_flags(grep_bin=grep_bin, fixed=True, case_insensitive=True)
-        + ["--", "BETA", fpath],
+        build_grep_argv_flags(grep_bin=grep_bin, fixed=True, case_insensitive=True) + ["--", "BETA", fpath],
         timeout=15,
     )
     if res.return_code != 0:
@@ -296,8 +293,7 @@ async def aprobe_grep_exclude_dir(backend: FsBackend) -> bool:
             return False
         res = await _arun_argv(
             backend,
-            build_grep_argv_flags(grep_bin=grep_bin, recursive=True)
-            + ["--exclude-dir=skip", "--", "secret", root],
+            build_grep_argv_flags(grep_bin=grep_bin, recursive=True) + ["--exclude-dir=skip", "--", "secret", root],
             timeout=15,
         )
         text = res.stdout or ""
@@ -322,8 +318,7 @@ async def aprobe_grep_include(backend: FsBackend) -> bool:
             return False
         res = await _arun_argv(
             backend,
-            build_grep_argv_flags(grep_bin=grep_bin, recursive=True, include="*.py")
-            + ["--", "secret", root],
+            build_grep_argv_flags(grep_bin=grep_bin, recursive=True, include="*.py") + ["--", "secret", root],
             timeout=15,
         )
         text = res.stdout or ""
@@ -353,7 +348,8 @@ async def aprobe_find_xargs_grep(backend: FsBackend) -> bool:
     try:
         if not root:
             return False
-        res = await _aexec(backend,
+        res = await _aexec(
+            backend,
             build_find_xargs_grep_command(
                 root,
                 exclude_dir_names=["skip"],
@@ -374,7 +370,8 @@ async def aprobe_find_xargs_grep(backend: FsBackend) -> bool:
             return False
 
         # -r step: find matches nothing → xargs must not invoke grep at all.
-        res = await _aexec(backend,
+        res = await _aexec(
+            backend,
             build_find_xargs_grep_command(
                 root,
                 exclude_dir_names=["skip"],

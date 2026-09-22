@@ -8,6 +8,7 @@ parametrized matrix below exercises every `__call__` branch (validation errors, 
 checks, sha stale, every edit outcome, dry_run, backup, diff, occurrence/scope
 variants). Any divergence on any case fails the suite.
 """
+
 import hashlib
 import json
 
@@ -22,8 +23,10 @@ CONTENT_SHA = hashlib.sha256(CONTENT.encode("utf-8")).hexdigest()
 
 def _edit(search, replace, **over):
     e = {
-        "search": search, "replace": replace,
-        "expected_matches": None, "occurrence": None,
+        "search": search,
+        "replace": replace,
+        "expected_matches": None,
+        "occurrence": None,
     }
     e.update(over)
     return e

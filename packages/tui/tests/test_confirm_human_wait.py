@@ -1,4 +1,5 @@
 """I2/C: present→ack→wait|deny; TraceScreen; always cancel; confirm-in-tool flush."""
+
 from __future__ import annotations
 
 import threading
@@ -11,10 +12,11 @@ from gc_testkit import run_coro
 
 def _async_noop(fn):
     """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
@@ -52,9 +54,7 @@ def test_tui_confirm_denies_without_wait_when_present_fails():
     """Present fail → wait не вызывается, сразу deny."""
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(
-        executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
-    )
+    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
     waited = {"n": 0}
     orig_wait = runner._confirm_event.wait
 
@@ -71,9 +71,7 @@ def test_tui_confirm_denies_without_wait_when_present_fails():
 def test_tui_confirm_waits_only_after_mounted_ack():
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(
-        executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
-    )
+    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
     result: list[str] = []
 
     def present(_t, _q, _f) -> bool:
@@ -96,9 +94,7 @@ def test_tui_confirm_timeout_auto_deny():
     """O11: нет ответа за timeout → deny_once, поток не висит вечно."""
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(
-        executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
-    )
+    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
     result: list[str] = []
     confirm = runner.make_tui_confirm(lambda *_a: True, timeout_sec=0.05)
 
@@ -116,9 +112,7 @@ def test_tui_confirm_stop_requested_denies_without_full_wait():
     """stop_requested во время wait → deny_once быстрее полного timeout."""
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(
-        executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
-    )
+    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
     result: list[str] = []
     confirm = runner.make_tui_confirm(lambda *_a: True, timeout_sec=30.0)
 
@@ -217,12 +211,14 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
         },
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages,
-        _State(),
-        ctx,
-        run_agent_func=None,
-        persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            _State(),
+            ctx,
+            run_agent_func=None,
+            persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+        )
+    )
     assert order == ["session_memory", "exec_python"]
     assert any(m.get("call_id") == "c1" for m in outs)

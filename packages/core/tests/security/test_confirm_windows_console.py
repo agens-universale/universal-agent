@@ -9,6 +9,7 @@
 `readline` делает то же, что `input()` в потоке, — ждёт Enter и забирает
 нажатия, — поэтому прежний путь краснеет по-настоящему, а не на заглушке.
 """
+
 import asyncio
 import collections
 import concurrent.futures
@@ -104,7 +105,7 @@ def console(monkeypatch):
     monkeypatch.setattr(sys, "stdin", fake)
     monkeypatch.setattr(path_policy, "_polling_console", lambda: fake, raising=False)
     yield fake
-    fake.close()                        # выпустить читателя, если он всё-таки ждёт
+    fake.close()  # выпустить читателя, если он всё-таки ждёт
     for thread in [t for t in threading.enumerate() if t.name.startswith(_THREAD)]:
         thread.join(5)
 
@@ -122,7 +123,7 @@ def test_keys_typed_before_the_question_do_not_answer_it(console, ask):
     console.type("y\r")
 
     answer = ask()
-    console.reading.wait(5)          # не дождались — значит, ответ взят сразу
+    console.reading.wait(5)  # не дождались — значит, ответ взят сразу
     time.sleep(0.3)
     assert not answer.done(), f"подтверждение ответило само: {answer.result()!r}"
     console.type("n\r")
@@ -137,19 +138,23 @@ def test_an_abandoned_question_leaves_the_keys_to_the_next_reader(console):
     from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
     async def _scenario() -> None:
-        waiting = asyncio.ensure_future(run_abandonable_in(
-            threading.BoundedSemaphore(1), path_policy.prompt_user_confirmation_choice,
-            _thread_name=_THREAD, **_QUESTION,
-        ))
-        while not console.reading.is_set():     # вопрос показан и ждёт
+        waiting = asyncio.ensure_future(
+            run_abandonable_in(
+                threading.BoundedSemaphore(1),
+                path_policy.prompt_user_confirmation_choice,
+                _thread_name=_THREAD,
+                **_QUESTION,
+            )
+        )
+        while not console.reading.is_set():  # вопрос показан и ждёт
             await asyncio.sleep(0.01)
-        waiting.cancel()                        # Ctrl+C: вопрос брошен
+        waiting.cancel()  # Ctrl+C: вопрос брошен
         with pytest.raises(asyncio.CancelledError):
             await waiting
-        await asyncio.sleep(0.3)                # брошенному — время заметить
+        await asyncio.sleep(0.3)  # брошенному — время заметить
 
     asyncio.run(_scenario())
-    console.type("ответ\r")                     # это уже для следующего вопроса
+    console.type("ответ\r")  # это уже для следующего вопроса
     time.sleep(0.4)
 
     assert console.remaining() == "ответ\r", "нажатия забрал брошенный вопрос y/n"

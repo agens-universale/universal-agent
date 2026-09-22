@@ -6,6 +6,7 @@ stripped); reasoning is surfaced via the ThinkingIndicator. The sink also tracks
 a self-counted progress counter and reasoning start/end timing for that indicator.
 Presentation layer — no business logic, not a substitute for the thread store.
 """
+
 from __future__ import annotations
 
 import re
@@ -23,7 +24,7 @@ class StreamSink:
         self._answer = ""
         self._chars = 0
         self._reasoning_started_at = None  # float | None
-        self._reasoning_ended_at = None    # float | None
+        self._reasoning_ended_at = None  # float | None
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
@@ -48,18 +49,12 @@ class StreamSink:
                 # Рассуждение закончилось: модель перешла к выводу. Без этого шаг
                 # «рассуждение → вызов» навсегда оставался бы в состоянии "thinking",
                 # потому что фазу закрывала только ветка ответа.
-                if (
-                    self._reasoning_started_at is not None
-                    and self._reasoning_ended_at is None
-                ):
+                if self._reasoning_started_at is not None and self._reasoning_ended_at is None:
                     self._reasoning_ended_at = self._clock()
             else:  # "answer" (default)
                 self._answer += text
                 self._chars += len(text)
-                if (
-                    self._reasoning_started_at is not None
-                    and self._reasoning_ended_at is None
-                ):
+                if self._reasoning_started_at is not None and self._reasoning_ended_at is None:
                     self._reasoning_ended_at = self._clock()
 
     def snapshot(self) -> tuple[str, str]:
@@ -114,7 +109,7 @@ def _reasoning_tail(think: str, maxlen: int) -> str:
     tail = one_line[-maxlen:]
     sp = tail.find(" ")
     if sp != -1:  # drop the leading partial word → start at a word boundary
-        tail = tail[sp + 1:]
+        tail = tail[sp + 1 :]
     return "…" + tail
 
 
@@ -125,9 +120,7 @@ def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
     return f"⠇ {tail}" if tail else ""
 
 
-def select_stream_render(
-    mode: str, clean_answer: str, reasoning_line: str
-) -> tuple[str, bool]:
+def select_stream_render(mode: str, clean_answer: str, reasoning_line: str) -> tuple[str, bool]:
     """Что показать в StreamBlock по режиму tui_stream_display.
     Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}."""
     if mode == "minimal":

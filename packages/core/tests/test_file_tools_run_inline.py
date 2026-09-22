@@ -29,6 +29,7 @@ test_aapply_tool_offloads_sync_tool_to_thread``.
 запускает subprocess на весь таймаут. У запуска процесса нативная асинхронная
 форма ЕСТЬ, и он идёт через неё — сторожит ``test_skills_run_script_native.py``.
 """
+
 import json
 import threading
 
@@ -107,9 +108,7 @@ FILE_TOOLS = [
 ]
 
 
-@pytest.mark.parametrize(
-    "tool_cls,build", FILE_TOOLS, ids=lambda v: v.__name__ if isinstance(v, type) else ""
-)
+@pytest.mark.parametrize("tool_cls,build", FILE_TOOLS, ids=lambda v: v.__name__ if isinstance(v, type) else "")
 async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, tmp_path):
     """``acall`` исполняет тело инлайн, не отдавая его в пул.
 
@@ -144,9 +143,9 @@ async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, 
         else:
             args[name] = "x"
     assert args or not [
-        p for p in inspect.signature(tool.acall).parameters.values()
-        if p.default is inspect.Parameter.empty
-        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+        p
+        for p in inspect.signature(tool.acall).parameters.values()
+        if p.default is inspect.Parameter.empty and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
     ], f"{tool_cls.__name__}: не удалось собрать аргументы — тест стал бы пустым"
 
     went_to_pool = []
@@ -161,7 +160,7 @@ async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, 
         try:
             await tool.acall(**args)
         except Exception:
-            pass          # исход тела не важен — важен маршрут
+            pass  # исход тела не важен — важен маршрут
     finally:
         asyncio.to_thread = real_to_thread
 
@@ -190,9 +189,7 @@ async def test_project_memory_acall_runs_file_work_on_the_calling_thread():
     probe._path = object()  # не None — иначе тул откажет до диспетчеризации
 
     assert await probe.acall(action="read") == "ok"
-    assert seen["thread"] == threading.get_ident(), (
-        "project_memory.acall увёл файловую работу в другой поток"
-    )
+    assert seen["thread"] == threading.get_ident(), "project_memory.acall увёл файловую работу в другой поток"
 
 
 def _tools_data(tool_cls):
@@ -231,6 +228,5 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
 
     assert json.loads(out)["ok"] is True
     assert went_to_pool == [], (
-        f"fs_read_file уехал в пул ({went_to_pool}) — диспетчер снова уводит "
-        "тул в поток вместо того, чтобы звать acall"
+        f"fs_read_file уехал в пул ({went_to_pool}) — диспетчер снова уводит тул в поток вместо того, чтобы звать acall"
     )

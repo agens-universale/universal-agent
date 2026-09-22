@@ -5,6 +5,7 @@ display_name — единый источник имени для пикера и
 normalize_prompt_title — collapse whitespace + truncate до LAST_ACTUAL_MAX,
 порог обновления last_actual — LAST_ACTUAL_MIN по уже нормализованной строке.
 """
+
 from gc_tui.services.session_title import (
     LAST_ACTUAL_MAX,
     LAST_ACTUAL_MIN,
@@ -15,6 +16,7 @@ from gc_tui.services.session_title import (
 )
 
 # ---- display_name -------------------------------------------------------
+
 
 def test_display_none_meta_is_unnamed():
     assert display_name(None) == "Без названия"
@@ -96,6 +98,7 @@ def test_task_subtitle_empty_without_task():
 
 # ---- normalize_prompt_title --------------------------------------------
 
+
 def test_normalize_collapses_whitespace():
     assert normalize_prompt_title("строка1\n строка2\t  три") == "строка1 строка2 три"
 
@@ -125,8 +128,10 @@ def test_threshold_min_is_30():
 # «имя обновляет только ход с реальной работой»).
 # ---------------------------------------------------------------------------
 
+
 def test_should_update_task_seeds_unconditionally_when_empty():
     from gc_tui.services.session_title import should_update_task
+
     assert should_update_task({}, turn_tool_calls=0) is True
     assert should_update_task(None, turn_tool_calls=0) is True
     assert should_update_task({"task": "   "}, turn_tool_calls=0) is True
@@ -134,12 +139,14 @@ def test_should_update_task_seeds_unconditionally_when_empty():
 
 def test_should_update_task_rejects_idle_turn_over_existing():
     from gc_tui.services.session_title import should_update_task
+
     meta = {"task": "починить парсер"}
     assert should_update_task(meta, turn_tool_calls=0) is False
 
 
 def test_should_update_task_allows_working_turn_over_existing():
     from gc_tui.services.session_title import should_update_task
+
     meta = {"task": "починить парсер"}
     assert should_update_task(meta, turn_tool_calls=1) is True
 
@@ -148,6 +155,9 @@ def test_task_subtitle_skips_candidate_equal_to_manual_title():
     """«Ctrl+R, Enter» без правок: title == task → дубль не показываем,
     но отличный last_actual остаётся подзаголовком (и в поиске)."""
     from gc_tui.services.session_title import task_subtitle
+
     assert task_subtitle({"title": "Написать тесты", "task": "Написать тесты"}) == ""
-    assert task_subtitle({"title": "Написать тесты", "task": "Написать тесты",
-                          "last_actual": "напиши тесты к скрипту"}) == "напиши тесты к скрипту"
+    assert (
+        task_subtitle({"title": "Написать тесты", "task": "Написать тесты", "last_actual": "напиши тесты к скрипту"})
+        == "напиши тесты к скрипту"
+    )

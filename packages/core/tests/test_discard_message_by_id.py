@@ -1,23 +1,32 @@
 """discard_message_by_id: точечное удаление записи по payload.id (откат
 осиротевшей реплики при быстрой отмене). id-идентификация однозначна даже при
 повторном вводе того же текста."""
+
 from gc_core.thread_store import ThreadSession, discard_message_by_id, load_thread_messages, save_thread_meta
 
 
 def _session(tmp_path):
     return ThreadSession(
-        threads_dir=str(tmp_path), system_id="cli", thread_id="t1",
-        history_messages=[], known_message_keys=set(), persisted_messages_count=0,
-        meta={}, previous_response_id=None, backend_api_mode="chat_completions",
+        threads_dir=str(tmp_path),
+        system_id="cli",
+        thread_id="t1",
+        history_messages=[],
+        known_message_keys=set(),
+        persisted_messages_count=0,
+        meta={},
+        previous_response_id=None,
+        backend_api_mode="chat_completions",
     )
 
 
 async def test_removes_only_matching_id(tmp_path):
     ts = _session(tmp_path)
     await ts.apersist_batch(
-        [{"role": "user", "content": "одинаковый", "id": "m_orphan"},
-         {"type": "function_call", "call_id": "c1", "name": "x", "arguments": "{}", "id": "a1"},
-         {"role": "user", "content": "одинаковый", "id": "m_resend"}],
+        [
+            {"role": "user", "content": "одинаковый", "id": "m_orphan"},
+            {"type": "function_call", "call_id": "c1", "name": "x", "arguments": "{}", "id": "a1"},
+            {"role": "user", "content": "одинаковый", "id": "m_resend"},
+        ],
         previous_response_id=None,
     )
     save_thread_meta(str(tmp_path), "cli", "t1", {"messages_count": 3})
@@ -26,9 +35,10 @@ async def test_removes_only_matching_id(tmp_path):
 
     msgs, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
     ids = [m.get("id") for m in msgs]
-    assert "m_orphan" not in ids                 # осиротевшая удалена
-    assert "m_resend" in ids and "a1" in ids     # повтор того же текста и вывод целы
+    assert "m_orphan" not in ids  # осиротевшая удалена
+    assert "m_resend" in ids and "a1" in ids  # повтор того же текста и вывод целы
     from gc_core.thread_store import load_thread_meta
+
     assert load_thread_meta(str(tmp_path), "cli", "t1")["messages_count"] == 2
 
 

@@ -22,9 +22,7 @@ from typing import Any
 _supervisor: Any = None
 
 
-def ensure_mcp_daemons(
-    config_dict: dict[str, Any], *, disable_hint: str | None = None
-) -> None:
+def ensure_mcp_daemons(config_dict: dict[str, Any], *, disable_hint: str | None = None) -> None:
     """Поднять недостающие MCP-daemon'ы перед запуском агента.
 
     Сбой автозапуска НЕ мешает фронтенду подняться. Автозапуск — удобство:
@@ -63,8 +61,7 @@ def ensure_mcp_daemons(
         _warn(
             f"автозапуск MCP пропущен: {exc}. "
             "Агент стартует без daemon-серверов; встроенные инструменты и "
-            "остальные MCP работают. Проверить: `gc-mcp list`."
-            + (f" {disable_hint}." if disable_hint else ""),
+            "остальные MCP работают. Проверить: `gc-mcp list`." + (f" {disable_hint}." if disable_hint else ""),
             code="mcp_autostart_skipped",
         )
 

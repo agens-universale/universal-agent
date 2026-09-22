@@ -4,6 +4,7 @@
 Экспортируемая функция:
 - get_skills_tools_data() -> Dict[str, Dict[str, Any]]
 """
+
 from __future__ import annotations
 
 import json
@@ -64,7 +65,6 @@ class SkillsListTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-
     async def acall(self, pack: Optional[str] = None, **kwargs: Any) -> str:
         pack = coalesce_optional_string(pack)
         try:
@@ -84,7 +84,6 @@ class SkillsListTool:
 class LoadSkillTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
-
 
     async def acall(self, skill_id: str, **kwargs: Any) -> str:
         try:
@@ -132,7 +131,6 @@ class RunSkillScriptTool:
         self._ctx = kwargs.get("ctx")
         self._config_dict = kwargs.get("config_dict") or {}
 
-
     @parse_json_object_argument(
         source_arg="args",
         target_arg="args_data",
@@ -148,9 +146,7 @@ class RunSkillScriptTool:
         **kwargs: Any,
     ) -> str:
         try:
-            resolved = await self._registry.resolve_script(
-                skill_id=skill_id, script_name=script_name or ""
-            )
+            resolved = await self._registry.resolve_script(skill_id=skill_id, script_name=script_name or "")
             if self._ctx is None or not hasattr(self._ctx, "os_backend"):
                 raise RuntimeError("skills_run_script requires a run context with os_backend")
             backend = self._ctx.os_backend
@@ -172,12 +168,10 @@ class RunSkillScriptTool:
                 timeout=exec_timeout_from_config_dict(self._config_dict),
             )
             stdout = as_captured_stream(
-                getattr(exec_result, "stdout_stream", None)
-                or getattr(exec_result, "stdout", "")
+                getattr(exec_result, "stdout_stream", None) or getattr(exec_result, "stdout", "")
             )
             stderr = as_captured_stream(
-                getattr(exec_result, "stderr_stream", None)
-                or getattr(exec_result, "stderr", "")
+                getattr(exec_result, "stderr_stream", None) or getattr(exec_result, "stderr", "")
             )
             result: Dict[str, Any] = {
                 "exit_code": exec_result.return_code,
@@ -263,7 +257,6 @@ class LoadReferenceTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-
     async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
             res = await self._registry.load_reference(skill_id=skill_id, slug=slug)
@@ -313,7 +306,6 @@ class LoadAssetTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-
     async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
             res = await self._registry.load_asset(skill_id=skill_id, slug=slug)
@@ -362,6 +354,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
     """
     Собрать словарь инструментов работы со скиллами в формате tools_data.
     """
+
     def _make_fabric(tool_cls: type):
         def fabric(**kwargs: Any):
             return tool_cls(skills_registry, **kwargs)
@@ -443,8 +436,8 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_load\n"
                 "Tool description: Loads a skill's instructions and metadata by id.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}}, "
-                "\"required\": [\"skill_id\"], \"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}}, '
+                '"required": ["skill_id"], "additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- This is the FIRST tool to call for a skill — before any skills_read_reference or skills_read_asset.\n"
@@ -495,7 +488,7 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
                                 "(this field is string-typed, not a nested object). "
                                 "The script receives the parsed object on stdin and must read it explicitly "
                                 "(keys are not converted to CLI flags or positionals). "
-                                "Example: '{\"input\":\"hello\",\"limit\":3}'."
+                                'Example: \'{"input":"hello","limit":3}\'.'
                             ),
                         },
                     },
@@ -507,17 +500,17 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_run_script\n"
                 "Tool description: Runs an explicitly selected Python script of a specific skill.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"script_name\": {\"type\": \"string\"}, \"argv\": {\"type\": \"string\"}, "
-                "\"args\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"script_name\"], "
-                "\"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}, '
+                '"script_name": {"type": "string"}, "argv": {"type": "string"}, '
+                '"args": {"type": "string"}}, "required": ["skill_id", "script_name"], '
+                '"additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- Use this tool when a skill defines executable logic in its scripts/ directory.\n"
                 "- Obtain the exact required script_name from skills_load; there is no default script.\n"
                 "- Prefer argv for argparse-style flags and positional arguments.\n"
                 "- args must decode to a JSON object; pass it as a string, not a nested object "
-                "(e.g. '{\"input\":\"hello\"}').\n"
+                '(e.g. \'{"input":"hello"}\').\n'
                 "- args is legacy stdin JSON and is used only when argv is absent.\n"
                 "- The result includes stdout, stderr, exit_code, and script_ok (false when exit_code != 0)."
             ),
@@ -559,9 +552,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_read_reference\n"
                 "Tool description: Loads a reference document for a skill by slug.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"slug\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"slug\"], "
-                "\"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}, '
+                '"slug": {"type": "string"}}, "required": ["skill_id", "slug"], '
+                '"additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- Prerequisite: call skills_load(skill_id) FIRST. This tool does NOT load the skill; "
@@ -609,9 +602,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
             "description": (
                 "Tool name: skills_read_asset\n"
                 "Tool description: Loads an asset file for a skill by slug.\n"
-                "Input schema: {\"type\": \"object\", \"properties\": {\"skill_id\": {\"type\": \"string\"}, "
-                "\"slug\": {\"type\": \"string\"}}, \"required\": [\"skill_id\", \"slug\"], "
-                "\"additionalProperties\": false}\n"
+                'Input schema: {"type": "object", "properties": {"skill_id": {"type": "string"}, '
+                '"slug": {"type": "string"}}, "required": ["skill_id", "slug"], '
+                '"additionalProperties": false}\n'
                 "\n"
                 "Usage:\n"
                 "- Prerequisite: call skills_load(skill_id) FIRST. This tool does NOT load the skill; "
@@ -639,4 +632,3 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
 __all__ = [
     "get_skills_tools_data",
 ]
-

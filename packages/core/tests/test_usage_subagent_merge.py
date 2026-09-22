@@ -47,18 +47,17 @@ async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
             return "role", "assignment"
 
     monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
-    monkeypatch.setattr(runner, "_build_child_ctx", as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr")))
+    monkeypatch.setattr(
+        runner, "_build_child_ctx", as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr"))
+    )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
+
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
-    )
-    monkeypatch.setattr(
-        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
-    )
+    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
+    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: "")
     monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
 
     async def _create(*a, **k):

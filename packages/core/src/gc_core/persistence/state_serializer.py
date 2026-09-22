@@ -74,9 +74,7 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
         state.last_run_usage = None
 
     state.user_intent_log = deserialize_list(state.__dict__.get("user_intent_log"))
-    state.current_user_intent = deserialize_list(
-        state.__dict__.get("current_user_intent")
-    )
+    state.current_user_intent = deserialize_list(state.__dict__.get("current_user_intent"))
     try:
         state.user_turn_seq = max(0, int(state.__dict__.get("user_turn_seq", 0) or 0))
     except (TypeError, ValueError):
@@ -108,9 +106,7 @@ class StateSerializer:
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (
-            shared is not None
-            and not isinstance(shared, dict)
-            and hasattr(shared, "working_memory")
+            shared is not None and not isinstance(shared, dict) and hasattr(shared, "working_memory")
         ):
             raw["shared"] = serialize_shared_block(shared)
 
@@ -126,9 +122,7 @@ class StateSerializer:
             raw["last_run_usage"] = last_run.to_meta()
 
         raw["user_intent_log"] = serialize_for_meta(raw.get("user_intent_log") or [])
-        raw["current_user_intent"] = serialize_for_meta(
-            raw.get("current_user_intent") or []
-        )
+        raw["current_user_intent"] = serialize_for_meta(raw.get("current_user_intent") or [])
         raw["user_turn_seq"] = int(raw.get("user_turn_seq", 0) or 0)
 
         raw["state_schema_version"] = STATE_SCHEMA_VERSION

@@ -68,14 +68,8 @@ def working_memory_limits_from_params(params: dict | None) -> dict[str, int]:
         params = {}
     return {
         "max_chars_goal": int(params.get("max_chars_goal", DEFAULT_MAX_CHARS_GOAL)),
-        "max_chars_constraints": int(
-            params.get("max_chars_constraints", DEFAULT_MAX_CHARS_CONSTRAINTS)
-        ),
+        "max_chars_constraints": int(params.get("max_chars_constraints", DEFAULT_MAX_CHARS_CONSTRAINTS)),
         "max_chars_state": int(params.get("max_chars_state", DEFAULT_MAX_CHARS_STATE)),
-        "max_chars_knowledge": int(
-            params.get("max_chars_knowledge", DEFAULT_MAX_CHARS_KNOWLEDGE)
-        ),
-        "total_budget_chars": int(
-            params.get("total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS)
-        ),
+        "max_chars_knowledge": int(params.get("max_chars_knowledge", DEFAULT_MAX_CHARS_KNOWLEDGE)),
+        "total_budget_chars": int(params.get("total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS)),
     }

@@ -3,6 +3,7 @@ import pytest
 
 def _as_coro(fn):
     """Обернуть синхронный двойник в корутину."""
+
     async def _wrapped(*a, **kw):
         return fn(*a, **kw)
 
@@ -31,7 +32,7 @@ async def test_consume_pending_prefix_injects_delivery(tmp_path, monkeypatch):
         query, patch = await scr._consume_pending_prefix("проверь требование")
         assert query == "DELIVERY[qa-req-validation]\nпроверь требование"
         assert patch == {"skills": ["qa-req-validation"]}
-        assert scr.app.tui_state.pending_skill_id is None   # сброшен
+        assert scr.app.tui_state.pending_skill_id is None  # сброшен
 
 
 @pytest.mark.asyncio
@@ -69,6 +70,7 @@ async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
     class _Fake:
         async def arun(self, messages, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
 
@@ -84,13 +86,13 @@ async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]
-        await scr._handle_command("skill coder сначала запусти что-нибудь")   # стартует run (inline)
+        await scr._handle_command("skill coder сначала запусти что-нибудь")  # стартует run (inline)
         for _ in range(60):
             r = scr.app.active_runner
             if r is not None and r.is_running():
                 break
             await pilot.pause(0.05)
-        await scr._cmd_use_skill("coder")                                     # /skill во время run'а
+        await scr._cmd_use_skill("coder")  # /skill во время run'а
         await pilot.pause(0.1)
         assert any(m.get("content") == "DELIVERY[coder]" for m in added), added
 
@@ -118,6 +120,7 @@ async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
         async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
 

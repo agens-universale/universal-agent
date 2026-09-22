@@ -71,11 +71,15 @@ def _stub_turn_finish(monkeypatch):
 #: Ход завершается ТОЛЬКО через turn_finish: голый текст ассистента цикл
 #: возвращает агенту (no-tool-call bounce), и сценарий бы не сошёлся.
 def _finish(task_report: str, call_id: str = "c9") -> dict:
-    return assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer",
-        "task_report": task_report,
-        "handoff": "{}",
-    }, call_id=call_id)
+    return assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": task_report,
+            "handoff": "{}",
+        },
+        call_id=call_id,
+    )
 
 
 TURNS = [
@@ -109,10 +113,7 @@ async def _run_once(tmp_path, monkeypatch):
     ctx = await _acreate(cfg) if _acreate else _rc.create_run_context(cfg)
     executor = AgentExecutor(ctx)
     _arun = getattr(executor, "arun", None)
-    answer = (
-        await _arun([PROMPT], thread_id="t1") if _arun
-        else executor.run([PROMPT], thread_id="t1")
-    )
+    answer = await _arun([PROMPT], thread_id="t1") if _arun else executor.run([PROMPT], thread_id="t1")
     return answer, run_thread_dump(cfg, "cli", "t1"), backend
 
 
@@ -187,8 +188,7 @@ async def test_async_run_matches_pre_migration_reference(tmp_path, monkeypatch):
     from pathlib import Path
 
     reference = json.loads(
-        (Path(__file__).parent / "fixtures" / "parity_reference_e66a1e90.json")
-        .read_text(encoding="utf-8")
+        (Path(__file__).parent / "fixtures" / "parity_reference_e66a1e90.json").read_text(encoding="utf-8")
     )
 
     answer, dump, backend = await _run_once(tmp_path, monkeypatch)

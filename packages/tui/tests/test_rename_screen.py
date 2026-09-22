@@ -1,4 +1,5 @@
 """RenameScreen: префилл, Enter → строка, Esc → None."""
+
 import pytest
 
 

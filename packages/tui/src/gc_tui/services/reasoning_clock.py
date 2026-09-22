@@ -12,6 +12,7 @@
 
 Презентационный слой: без Textual, без бизнес-логики. Часы инъектируемы (тесты).
 """
+
 from __future__ import annotations
 
 import time
@@ -27,13 +28,15 @@ from gc_core.constants.tool_names import (
 # Когнитивные тулы — «свой ум» (мысль/память/свой контекст), НЕ действия/внешний мир.
 # ev.tool_name = tool_id(wire); эти имена tool_id пропускает как есть → совпадают
 # с каноническими из constants.tool_names.
-COGNITIVE_TOOLS = frozenset({
-    SESSION_THINK_TOOL_NAME,          # session_think — явная мысль
-    SESSION_MEMORY_TOOL_NAME,         # session_memory — своя рабочая память
-    PROJECT_MEMORY_TOOL_NAME,         # project_memory — своя проектная память
-    READ_USER_INTENT_LOG_NAME,        # session_read_user_intent_log — рефлексия интента
-    READ_STORED_TOOL_OUTPUT_NAME,     # session_read_stored_tool_output — свой прежний вывод
-})
+COGNITIVE_TOOLS = frozenset(
+    {
+        SESSION_THINK_TOOL_NAME,  # session_think — явная мысль
+        SESSION_MEMORY_TOOL_NAME,  # session_memory — своя рабочая память
+        PROJECT_MEMORY_TOOL_NAME,  # project_memory — своя проектная память
+        READ_USER_INTENT_LOG_NAME,  # session_read_user_intent_log — рефлексия интента
+        READ_STORED_TOOL_OUTPUT_NAME,  # session_read_stored_tool_output — свой прежний вывод
+    }
+)
 
 
 class ReasoningClock:
@@ -42,8 +45,8 @@ class ReasoningClock:
         self._hold = hold
         self._active: set[str] = set()
         self._interval_start: float | None = None
-        self._episode: float = 0.0        # накоплено в текущем эпизоде
-        self._last_episode: float = 0.0   # длительность последнего завершённого эпизода
+        self._episode: float = 0.0  # накоплено в текущем эпизоде
+        self._last_episode: float = 0.0  # длительность последнего завершённого эпизода
         self._last_active_at: float | None = None
 
     def start(self, source_id: str) -> None:

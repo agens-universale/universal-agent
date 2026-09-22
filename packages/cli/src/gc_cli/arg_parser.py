@@ -203,19 +203,13 @@ write_guard_group.add_argument(
 write_guard_group.add_argument(
     "--no-write-guard",
     action="store_true",
-    help=(
-        "Явно отключить write_guard (эквивалент --write-guard false); "
-        "имеет приоритет над config.yml"
-    ),
+    help=("Явно отключить write_guard (эквивалент --write-guard false); имеет приоритет над config.yml"),
 )
 
 parser.add_argument(
     "--command-moderation",
     choices=["allow", "ask", "deny"],
-    help=(
-        "Режим exec_command/exec_python: allow без judge, "
-        "ask с подтверждением опасного, deny блокирует опасное"
-    ),
+    help=("Режим exec_command/exec_python: allow без judge, ask с подтверждением опасного, deny блокирует опасное"),
 )
 
 read_guard_group = parser.add_mutually_exclusive_group()
@@ -223,18 +217,12 @@ read_guard_group.add_argument(
     "--read-guard",
     type=_parse_bool_cli,
     choices=[True, False],
-    help=(
-        "Включить/выключить read_guard (true|false): ограничение чтения файлов "
-        "по allowed_read_roots/denied_*"
-    ),
+    help=("Включить/выключить read_guard (true|false): ограничение чтения файлов по allowed_read_roots/denied_*"),
 )
 read_guard_group.add_argument(
     "--no-read-guard",
     action="store_true",
-    help=(
-        "Явно отключить read_guard (эквивалент --read-guard false); "
-        "имеет приоритет над config.yml"
-    ),
+    help=("Явно отключить read_guard (эквивалент --read-guard false); имеет приоритет над config.yml"),
 )
 
 parser.add_argument(
@@ -266,10 +254,7 @@ parser.add_argument(
 parser.add_argument(
     "--agentsmd-override",
     action="store_true",
-    help=(
-        "Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив "
-        "глобальный и .gc/AGENTS.md слои"
-    ),
+    help=("Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив глобальный и .gc/AGENTS.md слои"),
 )
 
 parser.add_argument(

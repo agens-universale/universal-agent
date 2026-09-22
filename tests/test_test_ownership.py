@@ -88,7 +88,7 @@ def _testkit_pulls(dotted: str, _seen=None) -> set[str]:
     """
     if _seen is None:
         _seen = set()
-    if dotted in _seen:          # циклы между модулями тест-кита
+    if dotted in _seen:  # циклы между модулями тест-кита
         return set()
     _seen.add(dotted)
 
@@ -138,13 +138,9 @@ def test_suite_does_not_import_packages_above_it(dist):
     # сменили маску, сломали rglob — и сетка навсегда зелёная, хотя не
     # проверяет уже ничего. У соседей (`module_literals`, пины рецептов MCP,
     # снапшот-гейт) такой счётчик есть, здесь его забыли.
-    assert scanned, (
-        f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — "
-        "сетка ничего не проверяет"
-    )
+    assert scanned, f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — сетка ничего не проверяет"
 
     assert not offenders, (
         f"набор пакета {dist} импортирует чужие пакеты — автономный прогон "
-        f"проходит только потому, что они есть в общем окружении:\n  "
-        + "\n  ".join(offenders)
+        f"проходит только потому, что они есть в общем окружении:\n  " + "\n  ".join(offenders)
     )

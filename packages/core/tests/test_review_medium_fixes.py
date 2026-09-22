@@ -23,8 +23,7 @@ def test_config_errors_are_not_retryable():
 
     for exc_type in (httpx.UnsupportedProtocol, httpx.LocalProtocolError):
         assert not issubclass(exc_type, HTTP_TRANSPORT_ERRORS), (
-            f"{exc_type.__name__} снова считается сетевым сбоем — это ошибка "
-            f"конфигурации, её надо нести наверх сразу"
+            f"{exc_type.__name__} снова считается сетевым сбоем — это ошибка конфигурации, её надо нести наверх сразу"
         )
 
 
@@ -92,9 +91,7 @@ def test_an_owned_session_arms_the_exit_hook_too(monkeypatch):
     finally:
         reset_owner(token)
 
-    assert registered == [registry.close_everything], (
-        "у владельческой сессии нет подстраховки на выходе процесса"
-    )
+    assert registered == [registry.close_everything], "у владельческой сессии нет подстраховки на выходе процесса"
 
 
 def test_exit_hook_is_armed_once(monkeypatch):
@@ -140,9 +137,7 @@ async def test_simple_fetch_url_parses_html_off_the_loop(monkeypatch):
     import pathlib
 
     src = pathlib.Path(inspect.getsourcefile(mod)).read_text(encoding="utf-8")
-    assert "asyncio.to_thread(self._extract_simple_html_text" in src, (
-        "разбор HTML снова исполняется на loop"
-    )
+    assert "asyncio.to_thread(self._extract_simple_html_text" in src, "разбор HTML снова исполняется на loop"
 
 
 # --- L2: удалённый механизм не должен описываться как действующий ----------
@@ -170,6 +165,4 @@ def test_no_portal_left_in_core_sources():
             if "syncapiinsideeventloop" in low or "портал" in low:
                 offenders.append(f"{path.relative_to(root)}:{i}")
 
-    assert offenders == [], (
-        "вернулись упоминания снятого портала:\n  " + "\n  ".join(offenders)
-    )
+    assert offenders == [], "вернулись упоминания снятого портала:\n  " + "\n  ".join(offenders)

@@ -2,6 +2,7 @@
 
 §5/§6 tui3_impl. UI не знает деталей хранения (файлы / БД / удалённый API).
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -18,14 +19,10 @@ class TaskStore(Protocol):
         """Полный meta JSON задачи (для /status --raw)."""
         ...
 
-    def read_all_events(
-        self, task_id: str, system: str = "cli"
-    ) -> tuple[list[dict], TaskCursor]:
+    def read_all_events(self, task_id: str, system: str = "cli") -> tuple[list[dict], TaskCursor]:
         """Полный read для cold-start и stream_reset."""
         ...
 
-    def tail_events(
-        self, task_id: str, cursor: TaskCursor, system: str = "cli"
-    ) -> TailResult:
+    def tail_events(self, task_id: str, cursor: TaskCursor, system: str = "cli") -> TailResult:
         """Инкремент после cursor; stream_reset=True при смене storage_epoch."""
         ...

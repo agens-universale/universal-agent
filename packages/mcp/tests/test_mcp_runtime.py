@@ -1,4 +1,5 @@
 """Тесты отдельного MCP-runtime (venv в gc_paths)."""
+
 from __future__ import annotations
 
 import json
@@ -54,9 +55,12 @@ def test_augment_process_env_prepends_bin(tmp_path: Path, monkeypatch) -> None:
 
 def test_managed_config_path(monkeypatch, tmp_path):
     from gc_core.config_modules import env_vars
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": tmp_path / "cfg",
-                                                       "data": tmp_path / "d",
-                                                       "cache": tmp_path / "c",
-                                                       "state": tmp_path / "s"})
+
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {"config": tmp_path / "cfg", "data": tmp_path / "d", "cache": tmp_path / "c", "state": tmp_path / "s"},
+    )
     from gc_core.config_modules.env_vars import managed_config_path
+
     assert managed_config_path() == (tmp_path / "cfg" / "config.local.yml")

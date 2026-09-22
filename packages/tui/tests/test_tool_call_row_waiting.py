@@ -1,4 +1,5 @@
 """ToolCallRow waiting phase (D9): · without elapsed until execute starts."""
+
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
 
@@ -40,7 +41,10 @@ def test_set_waiting_demotes_running():
 
 def test_refresh_elapsed_noop_while_waiting():
     row = ToolCallRow(
-        call_id="c1", tool_name="t", args_summary="x", waiting=True,
+        call_id="c1",
+        tool_name="t",
+        args_summary="x",
+        waiting=True,
     )
     row.refresh_running_elapsed()
     assert "· 0с" not in str(row._render_content())

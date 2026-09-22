@@ -1,4 +1,5 @@
 """Классификация ошибок бэкенда для восстановления в цикле агента."""
+
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -199,9 +200,9 @@ _KNOWN_FINISH_KINDS = {
 
 
 class FinishDecision(NamedTuple):
-    accept: bool   # принять payload в историю (не крашиться/не ретраить транспорт)
+    accept: bool  # принять payload в историю (не крашиться/не ретраить транспорт)
     unknown: bool  # finish_reason незнакомый → залогировать warning
-    kind: str      # stop | tool_calls | length | blocked | unknown
+    kind: str  # stop | tool_calls | length | blocked | unknown
 
 
 def _finish_reason_key(finish_reason) -> str | None:
@@ -255,9 +256,7 @@ def normalize_finish_reason(
     """
     key = _finish_reason_key(finish_reason)
     if key is not None and key in _KNOWN_FINISH_KINDS:
-        return FinishDecision(
-            accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
-        )
+        return FinishDecision(accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key])
     if has_content or has_tool_calls or has_reasoning:
         return FinishDecision(accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN)
     return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)

@@ -106,9 +106,7 @@ def test_apply_calls_hooks_in_order():
     apply_sidecar_nested_actions(
         actions,
         mount_nested_tool=lambda **kw: seen.append(("tool", kw["tool_call_id"])),
-        finish_nested_tool=lambda **kw: seen.append(
-            ("finish", kw["tool_call_id"], kw["ok"])
-        ),
+        finish_nested_tool=lambda **kw: seen.append(("finish", kw["tool_call_id"], kw["ok"])),
         mount_nested_prose=lambda **kw: seen.append(("prose", kw["prose"])),
         mount_nested_summary=lambda **kw: seen.append(("summary", kw["prose"])),
     )
@@ -122,9 +120,16 @@ def test_apply_calls_hooks_in_order():
 def _todo_call(pid, cid, seq, todos):
     # arguments — JSON-строка: реальная форма function_call в data_subagents_*.jsonl
     # (processing_responses кладёт payload=dict(m) с сырыми аргументами модели).
-    return {"parent_call_id": pid, "seq": seq, "kind": "call",
-            "payload": {"call_id": cid, "name": "session_todo",
-                        "arguments": json.dumps({"todos": todos}, ensure_ascii=False)}}
+    return {
+        "parent_call_id": pid,
+        "seq": seq,
+        "kind": "call",
+        "payload": {
+            "call_id": cid,
+            "name": "session_todo",
+            "arguments": json.dumps({"todos": todos}, ensure_ascii=False),
+        },
+    }
 
 
 def test_session_todo_first_call_plans_nested_todo_action():
@@ -141,13 +146,11 @@ def test_session_todo_every_call_plans_nested_todo_action():
     и пустой список (рендерится строкой «чек-лист субагента очищен»)."""
     stream = [
         [{"content": "a", "status": "pending"}],
-        [{"content": "a", "status": "completed"}],                   # статусы
-        [{"content": "a", "status": "completed"},
-         {"content": "b", "status": "pending"}],                     # состав
-        [],                                                          # очистка
+        [{"content": "a", "status": "completed"}],  # статусы
+        [{"content": "a", "status": "completed"}, {"content": "b", "status": "pending"}],  # состав
+        [],  # очистка
     ]
-    records = [_todo_call("p1", f"c{i}", i, todos)
-               for i, todos in enumerate(stream, start=1)]
+    records = [_todo_call("p1", f"c{i}", i, todos) for i, todos in enumerate(stream, start=1)]
     actions = plan_sidecar_nested_actions(records)
     assert [a.kind for a in actions] == ["mount_nested_todo"] * 4
     assert actions[-1].todo_items == []
@@ -156,8 +159,11 @@ def test_session_todo_every_call_plans_nested_todo_action():
 def test_apply_routes_todo_action_to_callback():
     calls = []
     action = SidecarNestedAction(
-        kind="mount_nested_todo", parent_call_id="p1", tool_call_id="c1",
-        todo_items=[{"content": "a", "status": "pending"}])
+        kind="mount_nested_todo",
+        parent_call_id="p1",
+        tool_call_id="c1",
+        todo_items=[{"content": "a", "status": "pending"}],
+    )
     apply_sidecar_nested_actions(
         [action],
         mount_nested_tool=lambda **kw: calls.append(("tool", kw)),
@@ -180,18 +186,20 @@ def test_live_and_sidecar_channels_agree_on_todo_routing():
         [{"content": "a", "status": "completed"}],
         [],
     ]
-    records = [_todo_call("p1", f"c{i}", i, todos)
-               for i, todos in enumerate(stream, start=1)]
-    sidecar_kinds = [
-        "todo" if a.kind == "mount_nested_todo" else "tool"
-        for a in plan_sidecar_nested_actions(records)
-    ]
+    records = [_todo_call("p1", f"c{i}", i, todos) for i, todos in enumerate(stream, start=1)]
+    sidecar_kinds = ["todo" if a.kind == "mount_nested_todo" else "tool" for a in plan_sidecar_nested_actions(records)]
 
     events = [
         SubagentProgressEvent(
-            parent_call_id="p1", child_run_id="child_1", kind="tool_start",
-            step=i, max_steps=50, elapsed_ms=0, tool_name="session_todo",
-            tool_call_id=f"c{i}", todo_items=todos,
+            parent_call_id="p1",
+            child_run_id="child_1",
+            kind="tool_start",
+            step=i,
+            max_steps=50,
+            elapsed_ms=0,
+            tool_name="session_todo",
+            tool_call_id=f"c{i}",
+            todo_items=todos,
         )
         for i, todos in enumerate(stream, start=1)
     ]
@@ -214,8 +222,7 @@ def test_result_for_expanded_todo_call_is_noop():
     todos = [{"content": "a", "status": "pending"}]
     records = [
         _todo_call("p1", "c1", 1, todos),
-        {"parent_call_id": "p1", "seq": 2, "kind": "result",
-         "payload": {"call_id": "c1"}},
+        {"parent_call_id": "p1", "seq": 2, "kind": "result", "payload": {"call_id": "c1"}},
     ]
     actions = plan_sidecar_nested_actions(records)
     finish = [a for a in actions if a.kind == "finish_nested_tool"]
@@ -229,9 +236,12 @@ def test_result_for_expanded_todo_call_is_noop():
 def test_session_todo_garbage_arguments_plan_generic_tool_row():
     """Битые аргументы -> НЕ чек-лист: обычная tool-строка (статус вызова
     виден механикой), «чек-лист очищен» не рисуем."""
-    rec = {"parent_call_id": "p1", "seq": 1, "kind": "call",
-           "payload": {"call_id": "c1", "name": "session_todo",
-                       "arguments": "оборванный json{{{"}}
+    rec = {
+        "parent_call_id": "p1",
+        "seq": 1,
+        "kind": "call",
+        "payload": {"call_id": "c1", "name": "session_todo", "arguments": "оборванный json{{{"},
+    }
     actions = plan_sidecar_nested_actions([rec])
     assert [a.kind for a in actions] == ["mount_nested_tool"]
     assert "очищен" not in (actions[0].args_summary or "")

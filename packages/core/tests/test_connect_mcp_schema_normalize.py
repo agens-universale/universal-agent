@@ -6,6 +6,7 @@ parameter schemas that legitimately use `anyOf` / `oneOf` / `allOf` (e.g.
 validation impossible because the validator requires both `type` AND `anyOf`
 to match.
 """
+
 from __future__ import annotations
 
 from gc_core.tools.connect_mcp.agent_tools import _normalize_schema_recursive, normalize_tool_spec_for_agent
@@ -27,9 +28,7 @@ def test_normalize_preserves_anyof_without_forcing_type() -> None:
     # After fix: either no `type`, or `type` value compatible with anyOf — but NOT
     # an unrelated default like "string".
     if "type" in normalized:
-        assert normalized["type"] != "string", (
-            "type='string' contradicts anyOf=[integer, null] and breaks validation"
-        )
+        assert normalized["type"] != "string", "type='string' contradicts anyOf=[integer, null] and breaks validation"
 
 
 def test_normalize_preserves_oneof_without_forcing_type() -> None:
@@ -224,10 +223,9 @@ def test_nested_object_required_includes_all_properties_for_openai_strict() -> N
         },
     }
     normalized = normalize_tool_spec_for_agent(tool_spec, openai_strict=True)
-    cell_items = (
-        normalized["parameters"]["properties"]["workbook"]["properties"]["sheets"]["items"]
-        ["properties"]["cell_styles"]["items"]
-    )
+    cell_items = normalized["parameters"]["properties"]["workbook"]["properties"]["sheets"]["items"]["properties"][
+        "cell_styles"
+    ]["items"]
     assert set(cell_items["required"]) == {"range", "align", "bold"}
     assert cell_items["x-optional-keys"] == ["align", "bold"]
     assert set(normalized["parameters"]["required"]) == {"path", "workbook"}

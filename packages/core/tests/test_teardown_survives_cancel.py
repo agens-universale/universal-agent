@@ -12,6 +12,7 @@ stream-сессии не закрывались, владение не сним�
 Ради этой проверки уборка и вынесена из ``finally`` отдельной функцией: внутри
 ``finally`` свойство сверялось бы только с копией блока в тесте, то есть никак.
 """
+
 import asyncio
 
 import pytest
@@ -57,9 +58,7 @@ async def test_cancel_in_the_first_step_does_not_skip_the_rest(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await ae._aclose_mcp_and_release(object())
 
-    assert order == ["stdio", "stream", "owner"], (
-        f"уборка оборвалась на отмене: {order}"
-    )
+    assert order == ["stdio", "stream", "owner"], f"уборка оборвалась на отмене: {order}"
 
 
 async def test_cancel_in_the_second_step_still_releases_ownership(monkeypatch):
@@ -77,7 +76,7 @@ async def test_an_ordinary_error_does_not_stop_the_teardown(monkeypatch):
     order: list = []
     _wire(monkeypatch, order, stdio_raises=RuntimeError("сервер не отвечает"))
 
-    await ae._aclose_mcp_and_release(object())      # без исключения наружу
+    await ae._aclose_mcp_and_release(object())  # без исключения наружу
 
     assert order == ["stdio", "stream", "owner"], order
 

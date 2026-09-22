@@ -3,6 +3,7 @@
 кругового перехода — нет конфликта двух независимых прокруток (заголовок vs мета),
 из-за которого то нижняя, то верхняя строка пряталась под сгибом.
 """
+
 import json
 from pathlib import Path
 
@@ -35,12 +36,12 @@ async def test_skills_item_single_card_scrolls_both_wraps(monkeypatch):
         await pilot.press("end")
         await pilot.pause()
         scrolled.clear()
-        await pilot.press("down")               # круговой переход вниз → первый
+        await pilot.press("down")  # круговой переход вниз → первый
         await pilot.pause()
         await pilot.pause()
         assert list(listview.query(".card"))[0] in scrolled
         scrolled.clear()
-        await pilot.press("up")                 # круговой переход вверх → последний
+        await pilot.press("up")  # круговой переход вверх → последний
         await pilot.pause()
         await pilot.pause()
         assert list(listview.query(".card"))[-1] in scrolled
@@ -49,9 +50,17 @@ async def test_skills_item_single_card_scrolls_both_wraps(monkeypatch):
 def _seed_session(threads_dir, i):
     tid = f"{i:032d}"
     (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "system": "cli", "status": "stopped",
-                    "updated_at": f"2026-05-{i + 1:02d}T10:00:00+00:00",
-                    "messages_count": 1}), encoding="utf-8")
+        json.dumps(
+            {
+                "thread_id": tid,
+                "system": "cli",
+                "status": "stopped",
+                "updated_at": f"2026-05-{i + 1:02d}T10:00:00+00:00",
+                "messages_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.asyncio

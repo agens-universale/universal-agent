@@ -36,11 +36,7 @@ def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
     if not isinstance(cfg, dict):
         cfg = {}
     is_main = getattr(state, "parent_state_id", None) is None
-    key = (
-        "finish_gate_max_iterations"
-        if is_main
-        else "subagent_finish_gate_max_iterations"
-    )
+    key = "finish_gate_max_iterations" if is_main else "subagent_finish_gate_max_iterations"
     default = _DEFAULT_FINISH_GATE_MAIN if is_main else _DEFAULT_FINISH_GATE_SUB
     raw = cfg.get(key, default)
     try:
@@ -62,8 +58,6 @@ def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
         )
         return default
     return value
-
-
 
 
 @dataclass(frozen=True)
@@ -178,9 +172,7 @@ class FinishGateGuard:
         current_user_intent = records_to_jsonl_lines(
             deserialize_list(getattr(self._state, "current_user_intent", []) or [])
         )
-        user_intent_log = records_to_jsonl_lines(
-            deserialize_list(getattr(self._state, "user_intent_log", []) or [])
-        )
+        user_intent_log = records_to_jsonl_lines(deserialize_list(getattr(self._state, "user_intent_log", []) or []))
 
         digest_chars = _finish_gate_digest_chars(self._state, cfg)
 

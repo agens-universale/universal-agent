@@ -14,12 +14,12 @@ def test_replaces_sentinel_preserving_comment_and_indent():
     )
     out = w.set_scalar(text, "completions_url", "https://x/v1/chat/completions")
     assert '  completions_url: "https://x/v1/chat/completions"' in out
-    assert "# Впишите endpoint" in out          # комментарий сохранён
-    assert "use_ssl: false" in out              # соседние строки целы
+    assert "# Впишите endpoint" in out  # комментарий сохранён
+    assert "use_ssl: false" in out  # соседние строки целы
 
 
 def test_replaces_empty_value():
-    text = "agent:\n  model: \"\"\n"
+    text = 'agent:\n  model: ""\n'
     out = w.set_scalar(text, "model", "qwen3-coder")
     assert '  model: "qwen3-coder"' in out
 
@@ -60,27 +60,22 @@ def test_write_values_updates_file(tmp_path):
     assert missing == []
     assert '  completions_url: "https://x/v1"' in out
     assert '    Authorization: "Bearer sk-1"' in out
-    assert '  model: "gigacode_agent_v1.6_rc"' in out    # не тронут
+    assert '  model: "gigacode_agent_v1.6_rc"' in out  # не тронут
 
 
 # ── Task 5: §6.4 — write_values разворачивает закомментированный блок шаблона ──
 
+
 def test_uncomment_template_block_shape():
-    tpl = ("# Описание секции\n"
-           "# gizmo:\n"
-           "#   provider: openai\n"
-           "#   url: https://x\n")
+    tpl = "# Описание секции\n# gizmo:\n#   provider: openai\n#   url: https://x\n"
     block = w.uncomment_template_block(tpl, "gizmo")
-    assert "# Описание секции\n" in block          # описание остаётся комментарием
-    assert "\ngizmo:\n" in "\n" + block            # шапка раскомментирована
-    assert "  provider: openai" in block           # поле — с отступом канона
+    assert "# Описание секции\n" in block  # описание остаётся комментарием
+    assert "\ngizmo:\n" in "\n" + block  # шапка раскомментирована
+    assert "  provider: openai" in block  # поле — с отступом канона
 
 
 _TEMPLATE_WITH_COMMENTED_SECTION = (
-    'agent:\n  model: "m"\n\n'
-    "# Сборка мусора — намеренно выключена из коробки\n"
-    "#gc:\n"
-    "#  enabled: true\n"
+    'agent:\n  model: "m"\n\n# Сборка мусора — намеренно выключена из коробки\n#gc:\n#  enabled: true\n'
 )
 
 
@@ -126,20 +121,19 @@ def test_quote_scalar_escapes_quotes_and_backslashes():
 
 def test_upsert_mapping_entry_inserts_and_replaces():
     text = "models:\n  glm:\n    url: http://a\nslots:\n  default: glm\n"
-    out = w.upsert_mapping_entry(text, "models", "flash",
-                                 ["flash:", "  url: http://b", '  token: ""'])
+    out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", "  url: http://b", '  token: ""'])
     assert "flash:" in out and "http://b" in out
     out2 = w.upsert_mapping_entry(out, "models", "flash", ["flash:", "  url: http://c"])
     assert "http://c" in out2 and "http://b" not in out2
-    assert "glm:" in out2                     # соседи не тронуты
+    assert "glm:" in out2  # соседи не тронуты
 
 
 def test_upsert_mapping_entry_into_empty_bracket_anchor():
     text = "models: {}\nslots:\n  default: glm\n"
     out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", "  url: http://b"])
     assert "models: {}" not in out
-    assert "models:\n  flash:\n    url: http://b\n" in out    # нормализовано в блочную форму
-    assert "slots:\n  default: glm" in out                    # сосед не тронут
+    assert "models:\n  flash:\n    url: http://b\n" in out  # нормализовано в блочную форму
+    assert "slots:\n  default: glm" in out  # сосед не тронут
 
 
 def test_upsert_mapping_entry_into_bare_empty_anchor():
@@ -177,14 +171,12 @@ def test_upsert_mapping_entry_uses_the_column_of_existing_siblings():
     ломался (ParserError) либо запись вкладывалась внутрь соседней."""
     text = 'models:\n    glm:\n        url: "http://a"\n'
     out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", '  url: "http://b"'])
-    assert yaml.safe_load(out)["models"] == {
-        "glm": {"url": "http://a"}, "flash": {"url": "http://b"}}
+    assert yaml.safe_load(out)["models"] == {"glm": {"url": "http://a"}, "flash": {"url": "http://b"}}
 
 
 def test_upsert_mapping_entry_missing_parent_raises_keyerror():
     with pytest.raises(KeyError):
-        w.upsert_mapping_entry("backend:\n  url: x\n", "models", "flash",
-                               ["flash:", "  url: http://b"])
+        w.upsert_mapping_entry("backend:\n  url: x\n", "models", "flash", ["flash:", "  url: http://b"])
 
 
 def test_upsert_mapping_entry_replace_preserves_next_entrys_attached_comment():
@@ -201,21 +193,18 @@ def test_upsert_mapping_entry_insert_second_entry_preserves_next_section_attache
     комментарий СЛЕДУЮЩЕЙ топ-секции так же, как ветка REPLACE. Фикстура — ровно
     та форма (пустая строка + комментарий + топ-ключ), что синтезирует
     `ensure_section_anchor`."""
-    text = ("models:\n  glm:\n    url: http://a\n"
-            "\n# note about slots\nslots:\n  default: glm\n")
+    text = "models:\n  glm:\n    url: http://a\n\n# note about slots\nslots:\n  default: glm\n"
     out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", "  url: http://b"])
-    assert "# note about slots\nslots:" in out    # комментарий остался НАД slots:, не съехал
+    assert "# note about slots\nslots:" in out  # комментарий остался НАД slots:, не съехал
     assert "http://b" in out
-    assert "glm:" in out                          # сосед по models не тронут
+    assert "glm:" in out  # сосед по models не тронут
 
 
 def test_upsert_mapping_entry_replace_drops_own_comment_new_block_supplies_its_own():
     """replace = замена БЛОКА записи целиком: старый прикреплённый комментарий
     уходит вместе с ней; новый — первой строкой `block_lines`."""
-    text = ("models:\n  # old note about flash\n  flash:\n    url: http://b\n"
-            "slots:\n  default: flash\n")
-    out = w.upsert_mapping_entry(text, "models", "flash",
-                                 ["# new note", "flash:", "  url: http://c"])
+    text = "models:\n  # old note about flash\n  flash:\n    url: http://b\nslots:\n  default: flash\n"
+    out = w.upsert_mapping_entry(text, "models", "flash", ["# new note", "flash:", "  url: http://c"])
     assert "old note" not in out
     assert "# new note" in out
     assert "http://c" in out and "http://b" not in out
@@ -223,8 +212,7 @@ def test_upsert_mapping_entry_replace_drops_own_comment_new_block_supplies_its_o
 
 
 def test_remove_mapping_entry_keeps_siblings():
-    text = ("models:\n  glm:\n    url: http://a\n  flash:\n    url: http://b\n"
-            "slots:\n  default: glm\n")
+    text = "models:\n  glm:\n    url: http://a\n  flash:\n    url: http://b\nslots:\n  default: glm\n"
     out = w.remove_mapping_entry(text, "models", "flash")
     assert "flash" not in out
     assert "glm:" in out and "http://a" in out
@@ -242,8 +230,7 @@ def test_remove_mapping_entry_preserves_next_entrys_attached_comment():
 def test_remove_mapping_entry_deletes_own_attached_comment():
     """Собственный комментарий удаляемой записи уходит вместе с ней — иначе
     повисает над следующей, искажая смысл."""
-    text = ("models:\n  # note about glm\n  glm:\n    url: http://a\n"
-            "  qwen:\n    url: http://c\n")
+    text = "models:\n  # note about glm\n  glm:\n    url: http://a\n  qwen:\n    url: http://c\n"
     out = w.remove_mapping_entry(text, "models", "glm")
     assert "note about glm" not in out
     assert "qwen:" in out and "http://c" in out
@@ -253,7 +240,7 @@ def test_remove_mapping_entry_last_entry_leaves_valid_empty_mapping():
     text = "models:\n  flash:\n    url: http://b\nslots:\n  default: flash\n"
     out = w.remove_mapping_entry(text, "models", "flash")
     assert "models: {}" in out
-    assert yaml.safe_load(out)["models"] == {}   # не None — иначе схема упала бы на dict[str, ModelEntry]
+    assert yaml.safe_load(out)["models"] == {}  # не None — иначе схема упала бы на dict[str, ModelEntry]
 
 
 def test_remove_mapping_entry_collapse_branch_preserves_next_top_level_comment():
@@ -270,8 +257,7 @@ def test_remove_mapping_entry_collapse_keeps_dangling_section_comment():
     """Собственный комментарий записи уходит вместе с ней НАМЕРЕННО, а висячий
     комментарий секции — не её: он описывает секцию и переживает схлопывание,
     ровно как комментарий следующего топ-ключа."""
-    text = ("models:\n  # реестр заполняется формой\n\n  glm:\n    url: http://a\n"
-            "backend:\n  url: http://b\n")
+    text = "models:\n  # реестр заполняется формой\n\n  glm:\n    url: http://a\nbackend:\n  url: http://b\n"
     out = w.remove_mapping_entry(text, "models", "glm")
     assert "# реестр заполняется формой" in out
     assert yaml.safe_load(out)["models"] == {}
@@ -315,27 +301,29 @@ _DOTTED_TEXT = (
 
 def test_upsert_replaces_existing_entry_with_dot_in_key():
     out = w.upsert_mapping_entry(
-        _DOTTED_TEXT, "models", "opus-4.8",
-        ["opus-4.8:", '  model: "anthropic/claude-opus-4.8"', '  url: "https://other/v1"'])
-    assert out.count("  opus-4.8:") == 1        # в models — ровно одна, БЕЗ дубля
+        _DOTTED_TEXT,
+        "models",
+        "opus-4.8",
+        ["opus-4.8:", '  model: "anthropic/claude-opus-4.8"', '  url: "https://other/v1"'],
+    )
+    assert out.count("  opus-4.8:") == 1  # в models — ровно одна, БЕЗ дубля
     assert '"https://other/v1"' in out
-    assert "openrouter.ai" not in out           # старый блок заменён целиком
+    assert "openrouter.ai" not in out  # старый блок заменён целиком
 
 
 def test_remove_deletes_entry_with_dot_in_key():
     out = w.remove_mapping_entry(_DOTTED_TEXT, "models", "opus-4.8")
     assert "  opus-4.8:" not in out
-    assert "gemini-2.5-flash:" in out           # сосед цел
-    assert 'default: "opus-4.8"' in out         # слот (не models) не тронут
+    assert "gemini-2.5-flash:" in out  # сосед цел
+    assert 'default: "opus-4.8"' in out  # слот (не models) не тронут
 
 
 def test_upsert_key_named_like_nested_field_not_confused():
     """Алиас «model» не должен матчиться на ПОЛЕ `model:` внутри чужой записи."""
-    out = w.upsert_mapping_entry(
-        _DOTTED_TEXT, "models", "model", ["model:", '  url: "https://m/v1"'])
+    out = w.upsert_mapping_entry(_DOTTED_TEXT, "models", "model", ["model:", '  url: "https://m/v1"'])
     # добавилась НОВАЯ запись верхнего уровня, чужие поля model: целы
-    assert out.count('    model: "') == 2       # вложенные поля обеих записей не тронуты
-    assert '  model:\n' in out                  # новая запись-алиас
+    assert out.count('    model: "') == 2  # вложенные поля обеих записей не тронуты
+    assert "  model:\n" in out  # новая запись-алиас
 
 
 # --- ключи, которые YAML разбирает НЕ побайтно (llama3:8b, '123', '*') --------
@@ -344,34 +332,25 @@ def test_upsert_key_named_like_nested_field_not_confused():
 # upsert дописывал ещё один блок (PyYAML берёт последний, файл пух с каждым
 # сохранением), remove и переименование молча отказывали.
 
-_COLON_TEXT = (
-    "models:\n"
-    '  "llama3:8b":\n'
-    '    url: "http://a"\n'
-    "slots:\n"
-    '  default: "llama3:8b"\n'
-)
+_COLON_TEXT = 'models:\n  "llama3:8b":\n    url: "http://a"\nslots:\n  default: "llama3:8b"\n'
 
 
 def test_upsert_replaces_existing_entry_with_colon_in_key():
-    out = w.upsert_mapping_entry(
-        _COLON_TEXT, "models", '"llama3:8b"',
-        ['"llama3:8b":', '  url: "http://b"'])
-    assert out.count('  "llama3:8b":') == 1     # замена, а не второй блок
+    out = w.upsert_mapping_entry(_COLON_TEXT, "models", '"llama3:8b"', ['"llama3:8b":', '  url: "http://b"'])
+    assert out.count('  "llama3:8b":') == 1  # замена, а не второй блок
     assert "http://b" in out and "http://a" not in out
 
 
 def test_remove_deletes_entry_with_colon_in_key():
     out = w.remove_mapping_entry(_COLON_TEXT, "models", '"llama3:8b"')
     assert '  "llama3:8b":' not in out
-    assert 'default: "llama3:8b"' in out        # слот (не models) не тронут
+    assert 'default: "llama3:8b"' in out  # слот (не models) не тронут
 
 
 def test_child_lookup_matches_key_by_yaml_value_not_by_quoting_style():
     """Рукописные `'123'` и `'*'` — те же ключи, что писатель кладёт СВОИМИ
     двойными кавычками: сравнение идёт по разобранному скаляру, не по байтам."""
-    out = w.remove_mapping_entry("models:\n  '123':\n    url: \"http://a\"\n",
-                                 "models", '"123"')
+    out = w.remove_mapping_entry("models:\n  '123':\n    url: \"http://a\"\n", "models", '"123"')
     assert yaml.safe_load(out)["models"] == {}
     wildcard = "assign:\n  subagents:\n    '*': \"glm\"\n"
     assert w.remove_mapping_entry(wildcard, "assign.subagents", '"*"') != wildcard
@@ -379,12 +358,7 @@ def test_child_lookup_matches_key_by_yaml_value_not_by_quoting_style():
 
 # --- ensure_section_anchor / create_profile_file / write_text -----------------
 
-_LIVE_SECTION_TEMPLATE = (
-    "# реестр моделей\n"
-    "models:\n"
-    "  flash:\n"
-    "    url: http://tmpl\n"
-)
+_LIVE_SECTION_TEMPLATE = "# реестр моделей\nmodels:\n  flash:\n    url: http://tmpl\n"
 
 
 def test_ensure_section_anchor_reuses_live_template_block(tmp_path):
@@ -398,7 +372,7 @@ def test_ensure_section_anchor_reuses_live_template_block(tmp_path):
     assert "models: {}" not in out
 
     w.ensure_section_anchor(cfg, "models", _LIVE_SECTION_TEMPLATE)
-    assert cfg.read_text(encoding="utf-8") == out    # повторный вызов — no-op
+    assert cfg.read_text(encoding="utf-8") == out  # повторный вызов — no-op
 
 
 def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(tmp_path):
@@ -407,6 +381,7 @@ def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(tm
     from pathlib import Path
 
     from gc_core.config import _default_config_path
+
     template_text = Path(_default_config_path()).read_text(encoding="utf-8")
     cfg = tmp_path / "config.yml"
     cfg.write_text('backend:\n  completions_url: "http://x"\n', encoding="utf-8")
@@ -419,7 +394,7 @@ def test_ensure_section_anchor_synthesizes_bare_anchor_for_commented_template(tm
 
     for section in ("models", "slots", "assign"):
         w.ensure_section_anchor(cfg, section, template_text)
-    assert cfg.read_text(encoding="utf-8") == once   # повторный вызов — no-op
+    assert cfg.read_text(encoding="utf-8") == once  # повторный вызов — no-op
 
 
 def test_create_profile_file_refuses_existing(tmp_path):
@@ -440,7 +415,8 @@ def test_write_text_writes_atomically(tmp_path):
     path = tmp_path / "config.yml"
     path.write_text("models:\n  glm:\n    url: http://a\n", encoding="utf-8")
     new_text = w.upsert_mapping_entry(
-        path.read_text(encoding="utf-8"), "models", "flash", ["flash:", "  url: http://b"])
+        path.read_text(encoding="utf-8"), "models", "flash", ["flash:", "  url: http://b"]
+    )
     w.write_text(path, new_text)
     assert path.read_text(encoding="utf-8") == new_text
 
@@ -477,19 +453,18 @@ def test_insert_missing_top_key_lands_after_template_neighbour():
     out = w.insert_missing(user, "level", _ORDERED_TEMPLATE)
     assert out.index("level:") > out.index("profile:")
     assert out.index("level:") < out.index("backend:")
-    assert out.index("# бэкенд") < out.index("backend:")   # чужой комментарий не оторван
+    assert out.index("# бэкенд") < out.index("backend:")  # чужой комментарий не оторван
 
 
 def test_insert_missing_top_key_appended_when_neighbour_absent():
-    user = "# бэкенд\nbackend:\n  completions_url: \"http://real\"\n"
+    user = '# бэкенд\nbackend:\n  completions_url: "http://real"\n'
     out = w.insert_missing(user, "level", _ORDERED_TEMPLATE)
-    assert out.index("level:") > out.index("backend:")     # соседа (profile) нет — в конец
+    assert out.index("level:") > out.index("backend:")  # соседа (profile) нет — в конец
 
 
 def test_ensure_pointer_anchor_level_lands_after_profile(tmp_path):
     cfg = tmp_path / "config.yml"
-    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real"\n',
-                   encoding="utf-8")
+    cfg.write_text('profile: "work"\nbackend:\n  completions_url: "http://real"\n', encoding="utf-8")
     template = tmp_path / "config.default.yml"
     template.write_text(_ORDERED_TEMPLATE, encoding="utf-8")
 
@@ -514,8 +489,8 @@ def _default_template_text() -> str:
     from pathlib import Path
 
     from gc_core.config import _default_config_path
-    return Path(_default_config_path()).read_text(encoding="utf-8")
 
+    return Path(_default_config_path()).read_text(encoding="utf-8")
 
 
 def test_uncomment_template_block_reads_the_tight_comment_form_too():
@@ -528,10 +503,12 @@ def test_uncomment_template_block_reads_the_tight_comment_form_too():
 
 # ── §6.4 на НАСТОЯЩЕМ шаблоне: якорь там пишется «# key:», с пробелом ──
 
+
 def _real_template() -> str:
     from pathlib import Path
 
     from gc_core.config import _default_config_path
+
     return Path(_default_config_path()).read_text(encoding="utf-8")
 
 
@@ -546,7 +523,7 @@ def test_insert_missing_top_key_after_last_key_without_trailing_newline():
 
 def test_insert_missing_nested_key_into_section_without_trailing_newline():
     """То же на вложенной ветке: конец секции совпал с концом файла без `\\n`."""
-    user = 'profile: "corp"\nbackend:\n  use_ssl: false'                   # без \n
+    user = 'profile: "corp"\nbackend:\n  use_ssl: false'  # без \n
     out = w.insert_missing(user, "backend.completions_url", _ORDERED_TEMPLATE)
     raw = yaml.safe_load(out)
     assert raw["backend"]["completions_url"] == "http://sentinel"
@@ -558,6 +535,7 @@ def test_ensure_pointer_anchor_keeps_file_loadable_without_trailing_newline(tmp_
     пишет БЕЗ валидатора — склейку строк тут никто не поймает, и пользовательский
     конфиг остался бы нечитаемым, без шанса на откат."""
     from gc_core.config import _default_config_path
+
     cfg = tmp_path / "config.yml"
     cfg.write_text(_HAND_EDITED, encoding="utf-8")
 
@@ -569,10 +547,9 @@ def test_ensure_pointer_anchor_keeps_file_loadable_without_trailing_newline(tmp_
 
 def test_upsert_mapping_entry_into_section_without_trailing_newline():
     """Тот же шов у записей словаря: конец секции — конец файла без `\\n`."""
-    text = "models:\n  glm:\n    url: http://a"                            # без \n
+    text = "models:\n  glm:\n    url: http://a"  # без \n
     out = w.upsert_mapping_entry(text, "models", "flash", ["flash:", "  url: http://b"])
-    assert yaml.safe_load(out)["models"] == {
-        "glm": {"url": "http://a"}, "flash": {"url": "http://b"}}
+    assert yaml.safe_load(out)["models"] == {"glm": {"url": "http://a"}, "flash": {"url": "http://b"}}
 
 
 def test_write_values_inserts_into_file_without_trailing_newline(tmp_path):
@@ -583,12 +560,15 @@ def test_write_values_inserts_into_file_without_trailing_newline(tmp_path):
     tpl = tmp_path / "config.default.yml"
     tpl.write_text(_ORDERED_TEMPLATE, encoding="utf-8")
 
-    missing = w.write_values(cfg, {"backend.completions_url": "http://real/v1"},
-                             template_path=tpl, validate=yaml.safe_load)
+    missing = w.write_values(
+        cfg, {"backend.completions_url": "http://real/v1"}, template_path=tpl, validate=yaml.safe_load
+    )
 
     assert missing == []
     assert yaml.safe_load(cfg.read_text(encoding="utf-8"))["backend"] == {
-        "use_ssl": False, "completions_url": "http://real/v1"}
+        "use_ssl": False,
+        "completions_url": "http://real/v1",
+    }
 
 
 def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour(tmp_path):
@@ -597,23 +577,25 @@ def test_ensure_section_anchor_bare_anchor_lands_after_template_neighbour(tmp_pa
     from pathlib import Path
 
     from gc_core.config import _default_config_path
+
     template_text = Path(_default_config_path()).read_text(encoding="utf-8")
     cfg = tmp_path / "config.yml"
-    cfg.write_text('profile: ""\nlevel: default\nbackend:\n  completions_url: "http://real"\n',
-                   encoding="utf-8")
+    cfg.write_text('profile: ""\nlevel: default\nbackend:\n  completions_url: "http://real"\n', encoding="utf-8")
 
     w.ensure_section_anchor(cfg, "models", template_text)
     w.ensure_section_anchor(cfg, "slots", template_text)
 
     out = cfg.read_text(encoding="utf-8")
     assert out.index("level:") < out.index("models:") < out.index("slots:") < out.index("backend:")
+
+
 def test_uncomment_template_block_finds_the_real_anchor():
     """Живые шаблоны комментируют секции как «# gc:» — с пробелом после решётки.
     Regex требовал «#gc:», блок не находился, и write_values молча уносил ключ в
     missing. Тест выше собирает шаблон сам и проверяет формат, которого в шаблонах
     не бывает, — поэтому дыру не видел."""
     block = w.uncomment_template_block(_real_template(), "gc")
-    assert "\ngc:\n" in "\n" + block            # шапка раскомментирована и БЕЗ отступа
+    assert "\ngc:\n" in "\n" + block  # шапка раскомментирована и БЕЗ отступа
     assert "\n  force_collect:" in "\n" + block  # поле — вложенным, как положено YAML
 
 
@@ -630,18 +612,18 @@ def test_write_values_unfolds_a_commented_section_and_keeps_yaml_valid(tmp_path)
     сломала бы разбор)."""
     import yaml
     from gc_core.config import _default_config_path
+
     cfg = tmp_path / "config.yml"
-    cfg.write_text("backend:\n  completions_url: http://h/v1/chat/completions\n",
-                   encoding="utf-8")
-    missing = w.write_values(cfg, {"gc.force_collect": "true"},
-                             template_path=_default_config_path())
+    cfg.write_text("backend:\n  completions_url: http://h/v1/chat/completions\n", encoding="utf-8")
+    missing = w.write_values(cfg, {"gc.force_collect": "true"}, template_path=_default_config_path())
     assert missing == []
     data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
-    assert "gc" in data and "force_collect" in data["gc"]   # секция развернулась целиком
+    assert "gc" in data and "force_collect" in data["gc"]  # секция развернулась целиком
     assert data["backend"]["completions_url"] == "http://h/v1/chat/completions"
 
 
 # ── §6.4 на voice-секции: она в шаблоне тоже закомментирована ──
+
 
 def test_uncomment_voice_block_keeps_the_canonical_indent():
     """Отступ развёрнутого voice-блока — 2 пробела, как во всём файле.
@@ -652,8 +634,8 @@ def test_uncomment_voice_block_keeps_the_canonical_indent():
     валиден, поэтому ни один сторож этого не ловил, — а канон файла и последующая
     дописка ключа блоком из шаблона (у него отступ 2) разъезжались."""
     block = w.uncomment_template_block(_real_template(), "voice")
-    assert "\nvoice:\n" in "\n" + block            # шапка без отступа
-    assert "\n  provider: openai" in "\n" + block   # поле — ровно два пробела
+    assert "\nvoice:\n" in "\n" + block  # шапка без отступа
+    assert "\n  provider: openai" in "\n" + block  # поле — ровно два пробела
 
 
 def test_write_voice_values_uncomments_template_block(tmp_path):
@@ -666,21 +648,24 @@ def test_write_voice_values_uncomments_template_block(tmp_path):
 
     missing = w.write_values(
         cfg,
-        {"voice.url": "https://stt.example/v1/audio/transcriptions",
-         "voice.token": "sk-x", "voice.model": "whisper-1"},
-        template_path=template, validate=validate_config_text,
+        {"voice.url": "https://stt.example/v1/audio/transcriptions", "voice.token": "sk-x", "voice.model": "whisper-1"},
+        template_path=template,
+        validate=validate_config_text,
     )
     assert missing == []
     text = cfg.read_text(encoding="utf-8")
     assert 'url: "https://stt.example/v1/audio/transcriptions"' in text
-    assert "provider: openai" in text            # блок развёрнут целиком
+    assert "provider: openai" in text  # блок развёрнут целиком
     # повторная запись идемпотентна: якоря теперь есть
-    assert w.write_values(cfg, {"voice.model": "whisper-large"},
-                          template_path=template, validate=validate_config_text) == []
+    assert (
+        w.write_values(cfg, {"voice.model": "whisper-large"}, template_path=template, validate=validate_config_text)
+        == []
+    )
     assert 'model: "whisper-large"' in cfg.read_text(encoding="utf-8")
 
 
 # ── Частично живая секция: дописываем в неё, а не сдаёмся ──
+
 
 def test_write_values_extends_a_partially_live_section(tmp_path):
     """Юзер завёл voice: с одним полем — остальные ДОПИСЫВАЮТСЯ в ту же секцию.
@@ -704,15 +689,16 @@ def test_write_values_extends_a_partially_live_section(tmp_path):
         encoding="utf-8",
     )
 
-    missing = w.write_values(cfg, {"voice.model": "wh", "voice.language": "en"},
-                             template_path=template, validate=validate_config_text)
+    missing = w.write_values(
+        cfg, {"voice.model": "wh", "voice.language": "en"}, template_path=template, validate=validate_config_text
+    )
 
     assert missing == []
     text = cfg.read_text(encoding="utf-8")
-    assert len(re.findall(r"^voice:", text, re.MULTILINE)) == 1   # блок не задублирован
+    assert len(re.findall(r"^voice:", text, re.MULTILINE)) == 1  # блок не задублирован
     voice = yaml.safe_load(text)["voice"]
-    assert voice["url"] == user_url                                # юзерское значение цело
-    assert voice["model"] == "wh" and voice["language"] == "en"    # дописанные — на месте
+    assert voice["url"] == user_url  # юзерское значение цело
+    assert voice["model"] == "wh" and voice["language"] == "en"  # дописанные — на месте
 
 
 def test_write_values_leaves_the_file_untouched_when_a_key_cannot_be_written(tmp_path):
@@ -748,12 +734,9 @@ def test_remove_mapping_entry_keeps_a_dangling_comment_after_the_last_entry():
 
     Концом диапазона записи считается конец её последней СОДЕРЖАТЕЛЬНОЙ строки:
     удалять чужой текст безопаснее «недо-», чем «пере-»."""
-    text = ("models:\n"
-            '  a:\n    model: "m-a"\n'
-            '  b:\n    model: "m-b"\n'
-            "\n"
-            "  # ВАЖНЫЙ висячий комментарий\n"
-            'level: "default"\n')
+    text = (
+        'models:\n  a:\n    model: "m-a"\n  b:\n    model: "m-b"\n\n  # ВАЖНЫЙ висячий комментарий\nlevel: "default"\n'
+    )
 
     out = w.remove_mapping_entry(text, "models", "b")
 
@@ -767,16 +750,12 @@ def test_remove_mapping_entry_still_drops_the_entrys_own_attached_comment():
     """Сторож от чрезмерной осторожности: комментарий, вплотную примыкающий к
     следующей записи, по-прежнему остаётся ей, а собственный комментарий
     удаляемой записи уходит вместе с ней."""
-    text = ("models:\n"
-            "  # про a\n"
-            '  a:\n    model: "m-a"\n'
-            "  # про b\n"
-            '  b:\n    model: "m-b"\n')
+    text = 'models:\n  # про a\n  a:\n    model: "m-a"\n  # про b\n  b:\n    model: "m-b"\n'
 
     out = w.remove_mapping_entry(text, "models", "a")
 
-    assert "# про a" not in out          # свой комментарий ушёл с записью
-    assert "# про b" in out              # чужой остался при своей записи
+    assert "# про a" not in out  # свой комментарий ушёл с записью
+    assert "# про b" in out  # чужой остался при своей записи
 
 
 def test_upsert_mapping_entry_replace_keeps_a_dangling_comment_after_the_last_entry():
@@ -788,16 +767,12 @@ def test_upsert_mapping_entry_replace_keeps_a_dangling_comment_after_the_last_en
     заменяемый диапазон, а с ним и пустая строка-разделитель (повторные прогоны
     слипали файл). Валидация потерю не ловит — результат схемно валиден, — а
     бэкапа у записи реестра нет."""
-    text = ("slots:\n"
-            '  default: "a"\n'
-            "\n"
-            "  # light намеренно не задан: см. регламент\n"
-            'level: "default"\n')
+    text = 'slots:\n  default: "a"\n\n  # light намеренно не задан: см. регламент\nlevel: "default"\n'
 
     out = w.upsert_mapping_entry(text, "slots", "default", ['default: "b"'])
 
     assert "# light намеренно не задан" in out
-    assert '  default: "b"\n\n' in out    # пустая строка-разделитель цела
+    assert '  default: "b"\n\n' in out  # пустая строка-разделитель цела
     assert 'level: "default"' in out
 
 
@@ -805,14 +780,9 @@ def test_upsert_mapping_entry_insert_goes_before_a_dangling_comment_not_after():
     """Та же дыра у ветки ВСТАВКИ в непустого родителя: новая запись вставала
     ПОСЛЕ висячего комментария — чужой комментарий становился её шапкой и
     искажал смысл."""
-    text = ("models:\n"
-            '  a:\n    model: "m-a"\n'
-            "\n"
-            "  # хвостовой комментарий секции\n"
-            'level: "default"\n')
+    text = 'models:\n  a:\n    model: "m-a"\n\n  # хвостовой комментарий секции\nlevel: "default"\n'
 
     out = w.upsert_mapping_entry(text, "models", "b", ["b:", '  model: "m-b"'])
 
     assert out.index("  b:") < out.index("# хвостовой комментарий секции")
-    assert yaml.safe_load(out)["models"] == {
-        "a": {"model": "m-a"}, "b": {"model": "m-b"}}
+    assert yaml.safe_load(out)["models"] == {"a": {"model": "m-a"}, "b": {"model": "m-b"}}

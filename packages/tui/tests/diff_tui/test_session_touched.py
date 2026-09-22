@@ -1,4 +1,5 @@
 """Session-scoped DiffService listing / ops (S1–S12 acceptance)."""
+
 from __future__ import annotations
 
 import subprocess
@@ -83,12 +84,8 @@ def test_s3_sessions_different_files(git_proj):
     (root / "other.py").write_text("x\n", encoding="utf-8")
     TouchedJournal(str(threads), "tui", "A").add("tracked.txt")
     TouchedJournal(str(threads), "tui", "B").add("other.py")
-    assert {e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)} == {
-        "tracked.txt"
-    }
-    assert {e.key for e in _svc(root, threads, "B").list_entries(pending_only=True)} == {
-        "other.py"
-    }
+    assert {e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)} == {"tracked.txt"}
+    assert {e.key for e in _svc(root, threads, "B").list_entries(pending_only=True)} == {"other.py"}
 
 
 def test_s4_shared_file_both_see_same_visual(git_proj):

@@ -13,8 +13,6 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 TRIGGER_REASON = "session_compact"
 
 
-
-
 class SessionCompact(AbstractSimpleTool):
     tool_name = SESSION_COMPACT_TOOL_NAME
 
@@ -83,7 +81,6 @@ Input schema: {"type":"object","properties":{"reason":{"type":"string","descript
 Return format (JSON string):
 {"tool":"session_compact","ok":true,"error":null|{"type":"...","message":"..."},"message":"...","compacted":true}
 """
-
 
     async def acall(self, reason: str, **kwargs: Any) -> str:
         """Основная реализация: сжать трассу текущего хода по просьбе агента.

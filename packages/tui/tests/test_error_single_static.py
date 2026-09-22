@@ -1,4 +1,5 @@
 """Error-row рендерится одним Static, не Horizontal-row из нескольких."""
+
 import pytest
 
 

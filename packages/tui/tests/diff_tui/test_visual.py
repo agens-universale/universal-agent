@@ -1,4 +1,5 @@
 """visual.py: context lines + truncation (spec2 T14)."""
+
 from __future__ import annotations
 
 from gc_tui.diff_tui.visual import build_unified_diff, build_visual_diff, truncate_diff
@@ -37,9 +38,7 @@ def test_build_unified_diff_includes_context_and_hunk():
 def test_build_unified_diff_truncates(tmp_path):
     old = "\n".join(f"line-{i}" for i in range(200)) + "\n"
     new = "\n".join(f"line-{i}-changed" for i in range(200)) + "\n"
-    out = build_unified_diff(
-        old, new, context_lines=3, max_diff_chars=80
-    )
+    out = build_unified_diff(old, new, context_lines=3, max_diff_chars=80)
     assert "[diff truncated]" in out
     assert len(out) <= 80 + len("\n... [diff truncated]\n")
 
@@ -145,9 +144,7 @@ def test_build_visual_diff_adaptive_boundary_equal_full_file_max_lines():
 def test_build_visual_diff_adaptive_boundary_one_more_uses_preview():
     n_lines = 6  # full_file_max_lines=5 → preview
     old = "\n".join(f"o{i}" for i in range(n_lines)) + "\n"
-    new = (
-        "\n".join(["o0", "CHANGED"] + [f"o{i}" for i in range(2, n_lines)]) + "\n"
-    )
+    new = "\n".join(["o0", "CHANGED"] + [f"o{i}" for i in range(2, n_lines)]) + "\n"
     out = build_visual_diff(
         old,
         new,

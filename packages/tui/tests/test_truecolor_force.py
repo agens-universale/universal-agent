@@ -1,6 +1,7 @@
 """TUI подсказывает Textual truecolor на терминалах, где он точно есть
 (Windows Terminal / VS Code / COLORTERM) — иначе авто-детект может выбрать 256
 и градиент логотипа рендерится ступеньками (Windows)."""
+
 import os
 
 import gc_tui as tui

@@ -58,6 +58,7 @@ def test_set_terminal_title_uses_utf8_buffer_when_present():
     class _Stream:
         def __init__(self):
             self.buffer = io.BytesIO()
+
     s = _Stream()
     set_terminal_title("✦ GigaCode ✗ x", out=s)
     assert s.buffer.getvalue() == "\033]0;✦ GigaCode ✗ x\007".encode()

@@ -2,6 +2,7 @@
 Tests: on_delta is wired from ctx.on_stream_delta into
 request_chat_completions_with_policy, gated by cfg["stream"].
 """
+
 import logging
 from types import SimpleNamespace
 

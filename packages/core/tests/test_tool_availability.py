@@ -5,6 +5,7 @@
 ране нет: набор сужается ещё файлом кастомного сабагента, harbor-режимом и
 неподнявшимся MCP. Здесь пинится и сам резолвер, и три точки его применения.
 """
+
 from types import SimpleNamespace
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
@@ -53,9 +54,7 @@ class TestResolver:
 
     def test_reads_state_tools(self):
         # State.tools — тот же список схем; нужен раннеру, где ctx ребёнка ещё нет.
-        assert available_tool_names(_state([{"name": "session_memory"}])) == {
-            "session_memory"
-        }
+        assert available_tool_names(_state([{"name": "session_memory"}])) == {"session_memory"}
 
     def test_first_knowing_source_wins(self):
         ctx = SimpleNamespace(tools_data={"a": {}})
@@ -118,17 +117,11 @@ class TestProjectMemoryGate:
             "stop_tools": [],
         }
         absent = SimpleNamespace(config_dict=cfg, tools_data={"fs_read_file": {}})
-        present = SimpleNamespace(
-            config_dict=cfg, tools_data={"fs_read_file": {}, "project_memory": {}}
-        )
+        present = SimpleNamespace(config_dict=cfg, tools_data={"fs_read_file": {}, "project_memory": {}})
         base = [{"role": "user", "content": "hi", "id": "u1"}]
 
-        out_absent = apply_tool_usage_notice_before_llm(
-            base, _state(), absent, {}, step_messages=[]
-        )
-        out_present = apply_tool_usage_notice_before_llm(
-            base, _state(), present, {}, step_messages=[]
-        )
+        out_absent = apply_tool_usage_notice_before_llm(base, _state(), absent, {}, step_messages=[])
+        out_present = apply_tool_usage_notice_before_llm(base, _state(), present, {}, step_messages=[])
         assert len(out_absent) == 1
         assert len(out_present) == 2
         assert "project memory" in out_present[1]["content"].lower()

@@ -15,6 +15,7 @@ Usage:
         --agent-import-path adapters.gc_cli_external:GcCliExternal \\
         --model openai/MiniMaxAI/MiniMax-M2.7
 """
+
 import asyncio
 import json
 import os
@@ -68,10 +69,10 @@ DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
 # from __file__ so they work in both layouts, bypassing the source-checkout-only
 # default path helpers (which break in the non-editable image install).
-_ADAPTER_DIR = Path(__file__).resolve().parent          # .../adapters
-_PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"          # image: /opt/gc-harbor-adapters/prompts
+_ADAPTER_DIR = Path(__file__).resolve().parent  # .../adapters
+_PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"  # image: /opt/gc-harbor-adapters/prompts
 _SKILLS_DIR = _ADAPTER_DIR.parent / "skills"
-if not _PROMPTS_DIR.is_dir():                            # editable/local: fall back to repo
+if not _PROMPTS_DIR.is_dir():  # editable/local: fall back to repo
     # Корень репозитория ищем ПО МАРКЕРУ, а не фиксированной глубиной: адаптер
     # уже переезжал (harbor/ → integrations/harbor/), и счётчик .parent молча
     # уводил на уровень выше нужного — промпты переставали находиться.
@@ -83,7 +84,7 @@ if not _PROMPTS_DIR.is_dir():                            # editable/local: fall 
     from gc_core.bundled_assets import repo_root_from as _find_repo_root
 
     _repo_root = _find_repo_root(_ADAPTER_DIR)
-    if _repo_root is None:                               # не рабочая копия — оставляем как есть
+    if _repo_root is None:  # не рабочая копия — оставляем как есть
         _repo_root = _ADAPTER_DIR.parent.parent
     # Ассеты принадлежат дистрибутиву gc-core и лежат рядом с его исходниками;
     # в корне репозитория их больше нет.
@@ -209,18 +210,14 @@ class GcCliExternal(BaseAgent):
     def _model(self) -> str:
         # runner --model → env → profile. Strip only the provider prefix
         # ("openai/"); the backend expects the full vendor path as the model id.
-        m = (
-            self.model_name
-            or os.environ.get("GC_CLI_MODEL")
-            or self._overrides.get("model")
-        )
+        m = self.model_name or os.environ.get("GC_CLI_MODEL") or self._overrides.get("model")
         if not m:
             raise RuntimeError(
                 "No model configured: pass --model to the runner, set GC_CLI_MODEL, "
                 "or provide gc_cli_config.model in the agent profile."
             )
         if m.startswith("openai/"):
-            m = m[len("openai/"):]
+            m = m[len("openai/") :]
         return m
 
     @property
@@ -297,11 +294,7 @@ class GcCliExternal(BaseAgent):
             return []
         if (skills_root / "SKILL.md").is_file():
             return [skills_root]
-        return [
-            child
-            for child in sorted(skills_root.iterdir())
-            if child.is_dir() and (child / "SKILL.md").is_file()
-        ]
+        return [child for child in sorted(skills_root.iterdir()) if child.is_dir() and (child / "SKILL.md").is_file()]
 
     async def _merge_profile_skills(
         self, environment: BaseEnvironment, container_root: str | None
@@ -330,9 +323,7 @@ class GcCliExternal(BaseAgent):
         await environment.exec(f"mkdir -p {shlex.quote(root)}")
         candidates = self._resolve_profile_skill_dirs(local_root)
         if not candidates:
-            self.logger.warning(
-                "No SKILL.md found under %s — no profile skills uploaded", local_root
-            )
+            self.logger.warning("No SKILL.md found under %s — no profile skills uploaded", local_root)
             return root, {}
         sources: dict[str, str] = {}
         for skill_dir in candidates:
@@ -498,7 +489,8 @@ class GcCliExternal(BaseAgent):
                 if logger is not None:
                     logger.warning(
                         "MCP server %r: unsupported harbor transport %r, skipped",
-                        name, transport,
+                        name,
+                        transport,
                     )
                 continue
             key = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
@@ -506,21 +498,21 @@ class GcCliExternal(BaseAgent):
                 logger.warning(
                     "MCP server %r collides with an earlier server on key %r after "
                     "sanitising; the earlier one is dropped",
-                    name, key,
+                    name,
+                    key,
                 )
             # `sse` needs a live session, which a stateless exec cannot hold, so
             # tagging it os_backend would build a config the resolver is
             # guaranteed to reject. It stays on the agent locus: unreachable from
             # there is an honest connection error, not a self-inflicted config one.
-            locus = (
-                "os_backend" if gc_transport in OS_BACKEND_TRANSPORTS else "agent"
-            )
+            locus = "os_backend" if gc_transport in OS_BACKEND_TRANSPORTS else "agent"
             if locus == "agent" and logger is not None:
                 logger.warning(
                     "MCP server %r uses transport %r, which needs a live session "
                     "and cannot run inside the task environment; it will be tried "
                     "from the agent runtime instead",
-                    name, transport,
+                    name,
+                    transport,
                 )
             entry: dict = {
                 "transport": gc_transport,
@@ -536,9 +528,7 @@ class GcCliExternal(BaseAgent):
         return mapped
 
     @staticmethod
-    def _apply_mcp_servers(
-        config_dict: dict, servers: list, *, logger: Any = None
-    ) -> None:
+    def _apply_mcp_servers(config_dict: dict, servers: list, *, logger: Any = None) -> None:
         """Merge task MCP servers into the run config; existing entries win.
 
         An explicit entry in the agent's own config is a deliberate statement
@@ -559,35 +549,23 @@ class GcCliExternal(BaseAgent):
         meta = dict(config_dict.get("mcp-meta") or {})
         # Every MCP operation is now an exec round-trip into the container, and a
         # sim-user answer is a full LLM call on the other side.
-        meta["request_timeout_sec"] = max(
-            int(meta.get("request_timeout_sec") or 0), 600
-        )
-        meta["discovery_timeout_sec"] = max(
-            int(meta.get("discovery_timeout_sec") or 0), 120
-        )
+        meta["request_timeout_sec"] = max(int(meta.get("request_timeout_sec") or 0), 600)
+        meta["discovery_timeout_sec"] = max(int(meta.get("discovery_timeout_sec") or 0), 120)
         config_dict["mcp-meta"] = meta
 
-    async def run(
-        self, instruction: str, environment: BaseEnvironment, context: AgentContext
-    ) -> None:
+    async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         from gc_core.agent_executor import AgentExecutor
         from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
-        self._apply_mcp_servers(
-            config_dict, getattr(self, "mcp_servers", None) or [], logger=self.logger
-        )
+        self._apply_mcp_servers(config_dict, getattr(self, "mcp_servers", None) or [], logger=self.logger)
         skills_dir = getattr(self, "skills_dir", None)
-        container_skills = (
-            skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
-        )
+        container_skills = skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
         skill_sources: dict[str, str] = {}
         profile_skills = self._overrides.get("skills_data_path")
         if profile_skills:
-            container_skills, skill_sources = await self._merge_profile_skills(
-                environment, container_skills
-            )
+            container_skills, skill_sources = await self._merge_profile_skills(environment, container_skills)
         self._apply_injected_skills(config_dict, container_skills)
         instruction = self._nudge_instruction(instruction, container_skills)
 
@@ -704,7 +682,5 @@ class GcCliExternal(BaseAgent):
                         # A zero token count means "no calls"; a missing one means "not
                         # counted". Record both so the difference stays visible.
                         "llm_calls": totals["calls"] if totals else None,
-                        "llm_calls_without_usage": (
-                            totals["missing_usage_calls"] if totals else None
-                        ),
+                        "llm_calls_without_usage": (totals["missing_usage_calls"] if totals else None),
                     }

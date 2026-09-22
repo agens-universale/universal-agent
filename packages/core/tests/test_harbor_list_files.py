@@ -12,6 +12,7 @@ FakeBackend for the other.  Compare structured entries/count/truncated modulo
 absolute path roots (strip 'path' from each entry, compare only 'type' and
 'is_hidden'; also strip the top-level 'path' field).
 """
+
 import json
 
 from gc_core.backends.local import LocalFsBackend
@@ -75,6 +76,7 @@ _BRANCHING_FILES = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _base():
     t = ListFiles.__new__(ListFiles)
@@ -151,13 +153,11 @@ def _compare_results(base_raw: str, harbor_raw: str, case_id: str):
     h_entries = h.get("entries", [])
     assert len(b_entries) == len(h_entries), (
         f"{case_id}: entry count mismatch — base {len(b_entries)} vs harbor {len(h_entries)}\n"
-        f"base entries: {[e.get('path','?') for e in b_entries]}\n"
-        f"harbor entries: {[e.get('path','?') for e in h_entries]}"
+        f"base entries: {[e.get('path', '?') for e in b_entries]}\n"
+        f"harbor entries: {[e.get('path', '?') for e in h_entries]}"
     )
     for i, (be, he) in enumerate(zip(b_entries, h_entries)):
-        assert be["type"] == he["type"], (
-            f"{case_id}: entry[{i}] type mismatch: {be['type']!r} vs {he['type']!r}"
-        )
+        assert be["type"] == he["type"], f"{case_id}: entry[{i}] type mismatch: {be['type']!r} vs {he['type']!r}"
         assert be["is_hidden"] == he["is_hidden"], (
             f"{case_id}: entry[{i}] is_hidden mismatch: {be['is_hidden']} vs {he['is_hidden']}"
         )
@@ -190,8 +190,8 @@ def _compare_results_with_relpath(
     h_entries = h.get("entries", [])
     assert len(b_entries) == len(h_entries), (
         f"{case_id}: entry count mismatch — base {len(b_entries)} vs harbor {len(h_entries)}\n"
-        f"base  : {[e.get('path','?') for e in b_entries]}\n"
-        f"harbor: {[e.get('path','?') for e in h_entries]}"
+        f"base  : {[e.get('path', '?') for e in b_entries]}\n"
+        f"harbor: {[e.get('path', '?') for e in h_entries]}"
     )
     for i, (be, he) in enumerate(zip(b_entries, h_entries)):
         b_rel = be["path"].replace(base_root, "").lstrip("/")
@@ -199,8 +199,8 @@ def _compare_results_with_relpath(
         assert b_rel == h_rel, (
             f"{case_id}: entry[{i}] relative-path mismatch: base {b_rel!r} vs harbor {h_rel!r}\n"
             f"  (DFS expects {b_rel!r} at this position, BFS places {h_rel!r} here)\n"
-            f"base  order: {[e['path'].replace(base_root,'').lstrip('/') for e in b_entries]}\n"
-            f"harbor order: {[e['path'].replace(harbor_root,'').lstrip('/') for e in h_entries]}"
+            f"base  order: {[e['path'].replace(base_root, '').lstrip('/') for e in b_entries]}\n"
+            f"harbor order: {[e['path'].replace(harbor_root, '').lstrip('/') for e in h_entries]}"
         )
         assert be["type"] == he["type"], f"{case_id}: entry[{i}] type mismatch"
         assert be["is_hidden"] == he["is_hidden"], f"{case_id}: entry[{i}] is_hidden mismatch"
@@ -209,6 +209,7 @@ def _compare_results_with_relpath(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_flat_dir(tmp_path):
     """max_depth=0 (default): only immediate children, sorted alphabetically."""
@@ -323,6 +324,7 @@ def test_max_entries_truncation(tmp_path):
 # Branching-tree tests — these expose the BFS vs DFS order bug
 # ---------------------------------------------------------------------------
 
+
 def test_branching_full_depth(tmp_path):
     """Branching tree, full traversal: DFS order must match os.walk exactly.
 
@@ -345,8 +347,10 @@ def test_branching_full_depth(tmp_path):
     base_raw = _base()(path=str(tmp_path), max_depth=10)
     harbor_raw = _harbor_branching()(path=_BRANCHING_ROOT, max_depth=10)
     _compare_results_with_relpath(
-        base_raw, str(tmp_path),
-        harbor_raw, _BRANCHING_ROOT,
+        base_raw,
+        str(tmp_path),
+        harbor_raw,
+        _BRANCHING_ROOT,
         "branching_full_depth",
     )
 
@@ -365,8 +369,10 @@ def test_branching_max_entries_truncation(tmp_path):
     base_raw = _base()(path=str(tmp_path), max_depth=10, max_entries=5)
     harbor_raw = _harbor_branching()(path=_BRANCHING_ROOT, max_depth=10, max_entries=5)
     _compare_results_with_relpath(
-        base_raw, str(tmp_path),
-        harbor_raw, _BRANCHING_ROOT,
+        base_raw,
+        str(tmp_path),
+        harbor_raw,
+        _BRANCHING_ROOT,
         "branching_max_entries_truncation",
     )
 
@@ -397,6 +403,7 @@ def test_not_found(tmp_path):
 # Read-guard regression: denied dirs must be pruned from recursion, not just
 # from the emitted entry.
 # ---------------------------------------------------------------------------
+
 
 def test_walk_does_not_descend_into_denied_dir_via_nested_override():
     """A guard-DENIED directory must never be recursed into, even when a

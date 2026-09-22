@@ -59,9 +59,7 @@ def test_skill_md_present_with_valid_frontmatter(skill_id):
 
 def test_bootstrap_mentions_all_inner_skill_ids():
     body = (PACK_DIR / "using-default-coworker" / "SKILL.md").read_text(encoding="utf-8")
-    missing = [
-        sid for sid in INNER_SKILL_IDS if f"default-coworker:{sid}" not in body
-    ]
+    missing = [sid for sid in INNER_SKILL_IDS if f"default-coworker:{sid}" not in body]
     assert not missing, f"bootstrap missing inner routes: {missing}"
 
 
@@ -70,12 +68,8 @@ def test_inner_skills_do_not_reference_sibling_inners(skill_id):
     """Low coupling: only bootstrap routes between coworker inner skills."""
     body = (PACK_DIR / skill_id / "SKILL.md").read_text(encoding="utf-8")
     siblings = INNER_SKILL_IDS - {skill_id}
-    offenders = [
-        other for other in siblings if f"default-coworker:{other}" in body
-    ]
-    assert not offenders, (
-        f"{skill_id} references sibling inner skill(s): {offenders}"
-    )
+    offenders = [other for other in siblings if f"default-coworker:{other}" in body]
+    assert not offenders, f"{skill_id} references sibling inner skill(s): {offenders}"
 
 
 async def test_registry_default_list_returns_only_bootstrap(tmp_path):
@@ -87,9 +81,7 @@ async def test_registry_default_list_returns_only_bootstrap(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = {
-        i["id"]: i for i in await reg.list_skills() if i.get("pack_id") == "default-coworker"
-    }
+    items = {i["id"]: i for i in await reg.list_skills() if i.get("pack_id") == "default-coworker"}
     assert set(items.keys()) == {"default-coworker:using-default-coworker"}
     bootstrap = items["default-coworker:using-default-coworker"]
     assert bootstrap["is_pack_bootstrap"] is True

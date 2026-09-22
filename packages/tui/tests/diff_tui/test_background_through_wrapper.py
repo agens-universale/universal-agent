@@ -12,6 +12,7 @@
 пользователь. Структурный сторож паритета (`test_tracking.py`) ловит пропажу
 метода, но не отвечает на вопрос «а работает ли оно целиком».
 """
+
 import json
 import shlex
 import sys
@@ -34,10 +35,7 @@ _CHILD = (
 
 
 def _command(ticks) -> str:
-    return (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} "
-        f"{shlex.quote(str(ticks))}"
-    )
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} {shlex.quote(str(ticks))}"
 
 
 def test_background_works_through_the_tui_wrapper(tmp_path):
@@ -86,6 +84,7 @@ def test_backend_without_background_refuses_honestly(tmp_path):
     Модель должна получить внятную причину и уйти в передний план, а не
     сообщение про отсутствующий атрибут.
     """
+
     class _NoBackground:
         supports_background = False
         is_sandbox = True

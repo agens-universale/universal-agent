@@ -19,8 +19,6 @@ DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
 )
 
 
-
-
 @dataclass
 class MemoryPatchLlmResult:
     """LLM transport result for a memory patch step (no parsing here).
@@ -99,9 +97,7 @@ async def arequest_patch_replace(
         DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
     )
     # Soft-only: subagent addendum lives in system prompt only (no user duplicate).
-    system = load_memory_patch_replace_prompt(
-        prompt_path, subagent=_is_subagent_state(state)
-    )
+    system = load_memory_patch_replace_prompt(prompt_path, subagent=_is_subagent_state(state))
     user_prompt = (
         "<dialog_history>\n"
         f"{history_text}\n"
@@ -132,9 +128,7 @@ async def arequest_memory_deltas_format_repair(
 
     Основная реализация починки формата; синхронное имя оставлено шимом.
     """
-    request_messages = build_memory_deltas_format_repair_messages(
-        raw_output, full_replace=full_replace
-    )
+    request_messages = build_memory_deltas_format_repair_messages(raw_output, full_replace=full_replace)
     return await arequest_summary_text(
         ctx=ctx,
         state=state,

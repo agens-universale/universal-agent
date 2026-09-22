@@ -9,6 +9,7 @@
 переносятся verbatim-блоком при условии, что поддерево валидно по схеме
 (AppConfig.model_validate). Невалидное — в unknown.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -26,15 +27,15 @@ from gc_core.utils.user_text import read_user_text
 
 
 class ResetReport(NamedTuple):
-    backup_path: str        # старый файл, в бэкап
+    backup_path: str  # старый файл, в бэкап
 
 
 class SyncReport(NamedTuple):
-    transferred: int        # перенесено значений/блоков юзера
-    renamed: int            # из них — под новым именем (RENAMES)
-    removed: List[str]      # устаревшие ключи (REMOVED) — только в бэкапе
-    unknown: List[str]      # неизвестные ключи — только в бэкапе
-    reenter: List[str]      # значение не переносимо (конвертер) — задать заново
+    transferred: int  # перенесено значений/блоков юзера
+    renamed: int  # из них — под новым именем (RENAMES)
+    removed: List[str]  # устаревшие ключи (REMOVED) — только в бэкапе
+    unknown: List[str]  # неизвестные ключи — только в бэкапе
+    reenter: List[str]  # значение не переносимо (конвертер) — задать заново
     backup_path: str
 
 
@@ -97,14 +98,13 @@ def _remap_paths_after_rename(user_paths: set, old: str, new: str) -> set:
     out: set = set()
     for up in user_paths:
         if up == old or up.startswith(old + "."):
-            out.add(new + up[len(old):])
+            out.add(new + up[len(old) :])
         else:
             out.add(up)
     return out
 
 
-def _restore_template_keys(result: str, template_text: str, template_raw: Any,
-                           user_paths: set, ancestor: str) -> str:
+def _restore_template_keys(result: str, template_text: str, template_raw: Any, user_paths: set, ancestor: str) -> str:
     """Вернуть в перенесённую секцию ключи шаблона, которых у юзера нет.
 
     Collapse-перенос предка (см. sync_config) кладёт блок юзера ПОВЕРХ блока шаблона:
@@ -116,11 +116,11 @@ def _restore_template_keys(result: str, template_text: str, template_raw: Any,
         if path != ancestor and not path.startswith(ancestor + "."):
             continue
         if any(up == path or up.startswith(path + ".") for up in user_paths):
-            continue                     # юзер этот путь задал (сам или потомком) — уже перенесён
+            continue  # юзер этот путь задал (сам или потомком) — уже перенесён
         try:
             result = insert_missing(result, path, template_text)
         except KeyError:
-            continue                     # якорь в шаблоне не нашёлся — sync из-за этого не роняем
+            continue  # якорь в шаблоне не нашёлся — sync из-за этого не роняем
     return result
 
 
@@ -140,20 +140,13 @@ def needs_sync(user_text: str, template_text: str) -> bool:
     tmpl_paths = set(_user_paths(tmpl_raw))
     # Шаблонный путь «новый», только если юзер не покрывает его сам или
     # его потомком (chat_completion_kwargs: {} vs {temperature: 0.2}).
-    new_in_tmpl = {
-        tp for tp in tmpl_paths
-        if not any(up == tp or up.startswith(tp + ".") for up in user_paths)
-    }
+    new_in_tmpl = {tp for tp in tmpl_paths if not any(up == tp or up.startswith(tp + ".") for up in user_paths)}
     if new_in_tmpl:
         return True
     legacy = set(compat.RENAMES) | set(compat.REMOVED)
     # RENAMES/REMOVED часто указывают на секцию (не лист); _user_paths отдаёт
     # листья вроде chat_completions.llm.max_tokens — нужен prefix-match.
-    return any(
-        up == leg or up.startswith(leg + ".")
-        for leg in legacy
-        for up in user_paths
-    )
+    return any(up == leg or up.startswith(leg + ".") for leg in legacy for up in user_paths)
 
 
 def _validate_subtree(top_key: str, subtree: Any) -> bool:
@@ -163,6 +156,7 @@ def _validate_subtree(top_key: str, subtree: Any) -> bool:
     Возвращает True если схема принимает такую конфигурацию.
     """
     from gc_core.config_modules.root import AppConfig
+
     probe = {top_key: subtree}
     compat.apply_compat(probe)
     try:
@@ -250,7 +244,7 @@ class _SyncState:
         self.removed: List[str] = []
         self.unknown: List[str] = []
         self.reenter: List[str] = []
-        self.done: List[str] = []   # dotted-пути уже перенесённых блоков
+        self.done: List[str] = []  # dotted-пути уже перенесённых блоков
         # verbatim-блоки секций вне шаблона — добавляются в конец результата
         self.extra_blocks: List[str] = []
 
@@ -267,7 +261,7 @@ def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
         return
     target = compat.RENAMES.get(dotted, dotted)
     if dotted in compat.RENAME_CONVERTERS:
-        st.reenter.append(dotted)   # line-copy не умеет преобразовать значение
+        st.reenter.append(dotted)  # line-copy не умеет преобразовать значение
         return
     try:
         st.result = _transfer(st.result, ctx.user_text, dotted, target)
@@ -283,7 +277,10 @@ def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
     # ищем ближайшего предка с якорем в шаблоне.
     parts = dotted.split(".")
     st.result, ancestor_status = _transfer_via_ancestor(
-        st.result, parts, st.covered, st.done,
+        st.result,
+        parts,
+        st.covered,
+        st.done,
         ctx=(ctx.user_text, ctx.template_text, ctx.template_raw, ctx.all_user_paths),
     )
     if ancestor_status in ("transferred", "renamed"):
@@ -334,8 +331,7 @@ def _transfer_via_ancestor(result: str, parts: List[str], covered, done: List[st
         done.append(ancestor)
         # Блок юзера лёг ПОВЕРХ блока шаблона — вернём ключи шаблона,
         # которых у юзера нет (иначе они молча теряются, см. _restore_template_keys).
-        result = _restore_template_keys(result, template_text, template_raw,
-                                        all_user_paths, ancestor)
+        result = _restore_template_keys(result, template_text, template_raw, all_user_paths, ancestor)
         return result, "transferred"
     return result, None
 

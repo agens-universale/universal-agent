@@ -12,6 +12,7 @@
 ``roots`` → 61,2 с. Здесь ожидание укорочено до значения из переменной
 окружения, чтобы тест был быстрым, но механика та же.
 """
+
 import json
 import os
 import sys
@@ -41,28 +42,35 @@ def main():
                 # Незапрошенное уведомление ПЕРЕД ответом — так ведут себя
                 # серверы с включённым логированием. Клиент, читающий первую
                 # строку как ответ, примет за ответ вот это.
-                send({"jsonrpc": "2.0", "method": "notifications/message",
-                      "params": {"level": "info", "data": "поднимаюсь"}})
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/message",
+                        "params": {"level": "info", "data": "поднимаюсь"},
+                    }
+                )
             declared = ((msg.get("params") or {}).get("capabilities")) or {}
             if declared:
                 # Клиент пообещал — шлём встречный запрос и ждём ответа.
                 send({"jsonrpc": "2.0", "id": 9001, "method": "roots/list"})
                 deadline = time.monotonic() + STALL_SECONDS
                 while time.monotonic() < deadline:
-                    time.sleep(0.01)      # ответа не будет: обслуживать некому
-            send({
-                "jsonrpc": "2.0", "id": msg.get("id"),
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "stalling-fake", "version": "1"},
-                },
-            })
+                    time.sleep(0.01)  # ответа не будет: обслуживать некому
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": msg.get("id"),
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "stalling-fake", "version": "1"},
+                    },
+                }
+            )
         elif method == "notifications/initialized":
             continue
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": msg.get("id"),
-                  "result": {"tools": []}})
+            send({"jsonrpc": "2.0", "id": msg.get("id"), "result": {"tools": []}})
         elif msg.get("id") is not None:
             send({"jsonrpc": "2.0", "id": msg.get("id"), "result": {}})
 

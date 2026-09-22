@@ -39,9 +39,7 @@ def test_collect_hints_empty_before_k_tick():
         "stop_tools": [],
     }
     on_persist_steps(meta, steps=4)
-    hints = collect_project_memory_hints(
-        state, meta, SimpleNamespace(), cfg, get_hash_fn=lambda _ctx: "abc"
-    )
+    hints = collect_project_memory_hints(state, meta, SimpleNamespace(), cfg, get_hash_fn=lambda _ctx: "abc")
     assert hints == []
 
 
@@ -58,9 +56,7 @@ def test_collect_exists_hint_on_k_tick_first_hash():
     def _hash(_ctx):
         return "hash_v1"
 
-    hints = collect_project_memory_hints(
-        state, meta, SimpleNamespace(), cfg, get_hash_fn=_hash
-    )
+    hints = collect_project_memory_hints(state, meta, SimpleNamespace(), cfg, get_hash_fn=_hash)
     assert len(hints) == 1
     assert "project memory" in hints[0].lower()
     assert state.project_memory_content_hash == "hash_v1"

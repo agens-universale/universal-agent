@@ -4,6 +4,7 @@
 значениям. Отсутствующий источник → пустая строка + warning с именем/путём
 (никогда с содержимым).
 """
+
 from __future__ import annotations
 
 import logging
@@ -74,6 +75,7 @@ def _resolve(obj: Any, missing_env: set[str], file_cache: dict[str, str]) -> Any
     if isinstance(obj, list):
         return [_resolve(v, missing_env, file_cache) for v in obj]
     if isinstance(obj, str):
+
         def repl_env(m: re.Match[str]) -> str:
             var = m.group(1)
             if var in os.environ:

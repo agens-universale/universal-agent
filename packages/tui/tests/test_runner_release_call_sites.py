@@ -10,6 +10,7 @@ runner: логгер прогона живёт в реестре `logging` до 
 * замена устаревшего runner'а (`get_runner`);
 * остановка прогона по Esc / Ctrl+C (`TraceScreen._stop_and_replace_runner`).
 """
+
 from types import SimpleNamespace
 
 import pytest
@@ -38,9 +39,13 @@ def app(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    cfg = {"model": "M", "agent_md_path": str(tmp_path / "agent.md"),
-           "threads_data_path": str(tmp_path / "threads"),
-           "logs_dump_dir": str(tmp_path / "logs"), "mcp-servers": {}}
+    cfg = {
+        "model": "M",
+        "agent_md_path": str(tmp_path / "agent.md"),
+        "threads_data_path": str(tmp_path / "threads"),
+        "logs_dump_dir": str(tmp_path / "logs"),
+        "mcp-servers": {},
+    }
     return TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
 
 
@@ -62,7 +67,7 @@ def test_invalidate_runner_does_not_touch_a_live_run(app):
     app.invalidate_runner()
 
     assert runner.events == []
-    assert app.active_runner is runner        # снимут после завершения
+    assert app.active_runner is runner  # снимут после завершения
     assert app._runner_stale is True
 
 
@@ -90,9 +95,7 @@ def test_exit_stops_the_runner_before_releasing_it(app):
 
     app.on_unmount()
 
-    assert runner.events == ["stop", "release"], (
-        f"порядок на выходе: {runner.events} — ожидание человека не снято"
-    )
+    assert runner.events == ["stop", "release"], f"порядок на выходе: {runner.events} — ожидание человека не снято"
 
 
 def test_stop_and_replace_releases_after_stop():
@@ -104,8 +107,7 @@ def test_stop_and_replace_releases_after_stop():
     from gc_tui.screens.main import TraceScreen
 
     runner = _Runner(running=True)
-    screen = SimpleNamespace(app=SimpleNamespace(active_runner=runner,
-                                                 last_stop_requested=False))
+    screen = SimpleNamespace(app=SimpleNamespace(active_runner=runner, last_stop_requested=False))
 
     TraceScreen._stop_and_replace_runner(screen)
 

@@ -1,4 +1,5 @@
 """ThinkingIndicator — мгновенное гашение по submit_solution + sticky sentinel."""
+
 import json
 import threading
 import time
@@ -17,6 +18,7 @@ async def wait_for_finalized(pilot) -> None:
 
     Под нагрузкой полного suite interval 250мс Textual может не успевать;
     без ручного poll wait_until по _last_event_kind таймаутится."""
+
     def cond() -> bool:
         _screen(pilot)._poll_active()
         return _screen(pilot)._last_event_kind == "_finalized"
@@ -135,14 +137,17 @@ def _submit_solution_synthetic_output_record(
             "id": mid,
             "type": "function_call_output",
             "call_id": call_id,
-            "output": json.dumps({
-                "tool": "submit_solution",
-                "ok": True,
-                "status": "submitted",
-                "message": "Dialog turn finished. Waiting for new user questions.",
-                "error": None,
-                "synthetic": True,
-            }, ensure_ascii=False),
+            "output": json.dumps(
+                {
+                    "tool": "submit_solution",
+                    "ok": True,
+                    "status": "submitted",
+                    "message": "Dialog turn finished. Waiting for new user questions.",
+                    "error": None,
+                    "synthetic": True,
+                },
+                ensure_ascii=False,
+            ),
         },
     }
 
@@ -162,10 +167,15 @@ class _BlockingFake:
         meta = self._threads_dir / f"meta_cli_{thread_id}.json"
         # user-сообщение пишется первым (для consistency с реальным flow)
         lines = [
-            json.dumps({
-                "type": "message", "seq": 0, "ts_utc": "2026-05-27T23:59:59+00:00",
-                "payload": {"id": "u0", "role": "user", "content": messages[0]},
-            }) + "\n",
+            json.dumps(
+                {
+                    "type": "message",
+                    "seq": 0,
+                    "ts_utc": "2026-05-27T23:59:59+00:00",
+                    "payload": {"id": "u0", "role": "user", "content": messages[0]},
+                }
+            )
+            + "\n",
         ]
         for r in self._records:
             lines.append(json.dumps(r) + "\n")
@@ -440,18 +450,24 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(tmp_path)
         class _CompletedStore:
             def get_task_meta(self, tid):
                 return {"tui": {"status": "completed"}}
+
             def read_live_messages(self, tid):
                 return []
+
             def update_tui_meta(self, tid, patch):
                 pass
+
         screen._store = _CompletedStore()
-        screen._cursor = None   # skip tail_events — стор двойник не реализует его
+        screen._cursor = None  # skip tail_events — стор двойник не реализует его
 
         # Симулируем выход runner-треда (без _stop_requested → outcome=completed→done).
         class _StoppedRunner:
-            def is_running(self): return False
+            def is_running(self):
+                return False
+
             _stop_requested = False
             _thread_kind = "run"
+
         pilot.app.active_runner = _StoppedRunner()
         pilot.app.last_runner_error = None
         pilot.app.last_stop_requested = False

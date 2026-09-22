@@ -1,4 +1,5 @@
 """Экспорт треда — json (pretty-обёртка) / txt (аннотированный лог)."""
+
 from __future__ import annotations
 
 import json
@@ -11,20 +12,18 @@ from gc_core.message_policy.user_message_policy import (
 )
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
-_TECH_INNER_RE = re.compile(
-    r"<technical\s+type=\"[a-z_]+\">(.*?)</technical>", re.IGNORECASE | re.DOTALL
-)
+_TECH_INNER_RE = re.compile(r"<technical\s+type=\"[a-z_]+\">(.*?)</technical>", re.IGNORECASE | re.DOTALL)
 
 
 # --- helpers --------------------------------------------------------------
+
 
 def _env_ts(rec: dict) -> str:
     v = rec.get("ts")
     return v if isinstance(v, str) else ""
 
 
-def _build_header(segments: list[dict], *, meta: dict,
-                  thread_id: str, system: str) -> dict:
+def _build_header(segments: list[dict], *, meta: dict, thread_id: str, system: str) -> dict:
     all_recs = [r for seg in segments for r in seg["messages"]]
     n_sum = sum(1 for seg in segments if seg.get("compacted_by"))
     return {
@@ -40,20 +39,23 @@ def _build_header(segments: list[dict], *, meta: dict,
 
 # --- json -----------------------------------------------------------------
 
+
 def _render_json(segments: list[dict], header: dict) -> str:
     out_segments = []
     for seg in segments:
         msgs = [r["payload"] for r in seg["messages"] if isinstance(r.get("payload"), dict)]
-        out_segments.append({
-            "index": seg["index"],
-            "messages": msgs,
-            "compacted_by": seg.get("compacted_by"),
-        })
-    return json.dumps({"thread": header, "segments": out_segments},
-                      ensure_ascii=False, indent=2)
+        out_segments.append(
+            {
+                "index": seg["index"],
+                "messages": msgs,
+                "compacted_by": seg.get("compacted_by"),
+            }
+        )
+    return json.dumps({"thread": header, "segments": out_segments}, ensure_ascii=False, indent=2)
 
 
 # --- txt ------------------------------------------------------------------
+
 
 def _indent(text: str) -> list[str]:
     return ["    " + ln for ln in str(text).split("\n")]
@@ -81,7 +83,7 @@ def _split_think(text: str) -> tuple[str, str]:
     m = _THINK_RE.search(text)
     if not m:
         return "", text.strip()
-    return m.group(1).strip(), (text[:m.start()] + text[m.end():]).strip()
+    return m.group(1).strip(), (text[: m.start()] + text[m.end() :]).strip()
 
 
 def _strip_technical(content: str) -> str:
@@ -147,7 +149,7 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
         if "display_content" in payload:
             disp = (payload.get("display_content") or "").strip()
             if not disp:
-                return []                        # mid-run доставка — не выводим как USER
+                return []  # mid-run доставка — не выводим как USER
             return [f"[{n}] USER", *_indent(disp)]
         content = user_content_to_text(payload.get("content"))
         if is_technical_user_message_text(content):
@@ -165,8 +167,7 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
         body += answer.split("\n")
         return [f"[{n}] ASSISTANT", *["    " + ln for ln in body]]
 
-    return [f"[{n}] {role or typ or 'MESSAGE'}",
-            *_indent(json.dumps(payload, ensure_ascii=False, indent=2))]
+    return [f"[{n}] {role or typ or 'MESSAGE'}", *_indent(json.dumps(payload, ensure_ascii=False, indent=2))]
 
 
 def _render_txt(segments: list[dict], header: dict) -> str:
@@ -185,10 +186,7 @@ def _render_txt(segments: list[dict], header: dict) -> str:
         comp = seg.get("compacted_by")
         if comp:
             idx = seg["index"] + 1
-            out.append(
-                f"────────── КОНТЕКСТ СЖАТ #{idx} · "
-                f"{comp['messages_in_segment']} сообщений → сводка ──────────"
-            )
+            out.append(f"────────── КОНТЕКСТ СЖАТ #{idx} · {comp['messages_in_segment']} сообщений → сводка ──────────")
             out += comp["synthesis"].split("\n")
             out.append(f"────────── /конец сводки #{idx} ──────────")
             out.append("")
@@ -199,8 +197,8 @@ def _render_txt(segments: list[dict], header: dict) -> str:
 
 # --- public API -----------------------------------------------------------
 
-def export_thread(segments: list[dict], *, fmt: str, meta: dict,
-                  thread_id: str, system: str) -> str:
+
+def export_thread(segments: list[dict], *, fmt: str, meta: dict, thread_id: str, system: str) -> str:
     header = _build_header(segments, meta=meta, thread_id=thread_id, system=system)
     if fmt == "json":
         return _render_json(segments, header)

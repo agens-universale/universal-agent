@@ -39,8 +39,6 @@ _TOOL_DESCRIPTION = (
 )
 
 
-
-
 async def _aread_human_response(ctx: "Any", question: str) -> str:
     """Спросить человека через порт вызывающего, а по умолчанию — через stdin.
 
@@ -133,16 +131,16 @@ class AskHuman(AbstractSimpleTool):
                     }
                 },
                 "required": ["question"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
-        description = '''Tool name: turn_ask_human
+        description = """Tool name: turn_ask_human
 
 Overview:
 Finalizes turn: no. Ask the human user and wait for a free-form textual reply. Use for clarification,
@@ -213,9 +211,8 @@ User: "you decide"
   "question": "Given the tradeoffs above, I propose **B (direct wiring)** for this repo size: less indirection, easier debugging.\\n\\nConfirm B, or prefer A/C?"
 }
 Do not implement until they confirm.
-'''
+"""
         return description
-
 
     async def acall(self, question: str, **kwargs) -> str:
         """Асинхронный вход. Вопрос виден ДО того, как ждём ответ.
@@ -232,13 +229,13 @@ Do not implement until they confirm.
         """
         prepared = self._begin_ask(question)
         if isinstance(prepared, str):
-            return prepared                       # проверка не прошла — ждать нечего
+            return prepared  # проверка не прошла — ждать нечего
         question, via_name = prepared
         try:
             response = await _aread_human_response(self._ctx, question)
         except KeyboardInterrupt:
             return self._ask_interrupted(question, via_name)
-        except Exception as exc:                  # EOFError, отказ порта встраивающего
+        except Exception as exc:  # EOFError, отказ порта встраивающего
             return self._ask_failed(question, via_name, exc)
         except BaseException:
             # `CancelledError` — не `Exception`, и проходила мимо: событие
@@ -248,8 +245,11 @@ Do not implement until they confirm.
             from gc_core.tools.subagents.progress import emit_progress
 
             emit_progress(
-                self._ctx, self._state, "ask_human_done",
-                tool_name=via_name, ok=False,
+                self._ctx,
+                self._state,
+                "ask_human_done",
+                tool_name=via_name,
+                ok=False,
             )
             raise
         return self._ask_answered(question, via_name, response)
@@ -306,11 +306,11 @@ Do not implement until they confirm.
             prose=question,
             tool_name=via_name,
         )
-        print("\n" + "="*60, file=sys.stderr)
+        print("\n" + "=" * 60, file=sys.stderr)
         print("AI ASKS HUMAN:", file=sys.stderr)
-        print("-"*60, file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
         print(question, file=sys.stderr)
-        print("-"*60, file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
         print("Please enter your response (end with EOF or empty line):", file=sys.stderr)
         self._run_logger().info(
             "ask_human_question",
@@ -324,7 +324,7 @@ Do not implement until they confirm.
         if response == "":
             response = "(empty response)"
         print(f"Human responded: {response!r}", file=sys.stderr)
-        print("="*60 + "\n", file=sys.stderr)
+        print("=" * 60 + "\n", file=sys.stderr)
         self._run_logger().info(
             "ask_human_response",
             extra={"event": "ask_human_response", "response": response},
@@ -394,12 +394,12 @@ Do not implement until they confirm.
     def _normalize_text(self, text: str) -> str:
         """Normalize line endings and clean up extra whitespace."""
         # Convert all line breaks to \n
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         # Strip leading/trailing whitespace per line, but preserve internal structure
-        lines = [line.rstrip() for line in text.split('\n')]
+        lines = [line.rstrip() for line in text.split("\n")]
         # Remove trailing empty lines
-        while lines and lines[-1] == '':
+        while lines and lines[-1] == "":
             lines.pop()
-        while lines and lines[0] == '':
+        while lines and lines[0] == "":
             lines.pop(0)
-        return '\n'.join(lines)
+        return "\n".join(lines)

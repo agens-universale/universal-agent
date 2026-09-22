@@ -93,12 +93,10 @@ def _field_entries(params: Dict[str, Any]) -> "tuple[list[str], list[str]]":
 def _join_field_lines(all_field_lines: list[str]) -> str:
     # Add comma after each field entry (non-comment lines), except the last one
     body_lines = []
-    last_field_idx = max(
-        i for i, line in enumerate(all_field_lines) if not line.strip().startswith("//")
-    )
+    last_field_idx = max(i for i, line in enumerate(all_field_lines) if not line.strip().startswith("//"))
     for i, line in enumerate(all_field_lines):
         is_comment = line.strip().startswith("//")
-        is_last_field = (not is_comment and i == last_field_idx)
+        is_last_field = not is_comment and i == last_field_idx
         body_lines.append(line if is_comment or is_last_field else line + ",")
     return "\n".join(body_lines)
 
@@ -240,9 +238,7 @@ def _decode_double_encoded(value: str, subschema: Dict[str, Any]) -> Any:
     return decoded if Draft7Validator(subschema).is_valid(decoded) else None
 
 
-def unknown_property_names(
-    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
-) -> list[str]:
+def unknown_property_names(parsed_args: Dict[str, Any], params_schema: Dict[str, Any]) -> list[str]:
     """Ключи верхнего уровня, которых нет в ``properties``.
 
     ``additionalProperties`` — инструкция модели в схеме, не рантайм-политика:
@@ -358,9 +354,7 @@ def _parse_numeric_string(value: str, expected: str) -> Any:
     return num
 
 
-def _coerce_numeric_strings(
-    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
-) -> tuple[Dict[str, Any], bool]:
+def _coerce_numeric_strings(parsed_args: Dict[str, Any], params_schema: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
     """Recovery-проход: строка там, где схема ждёт число, и парс однозначен → число.
 
     Консервативно: только для полей с type integer/number; дробное значение в
@@ -403,7 +397,9 @@ def _parse_arguments_object(arguments: Any, reject, *, allow_empty: bool) -> Any
         reject(message=f"некорректный JSON: {e}")
 
 
-def _recover_arguments(tool_name: str, parsed_args: Dict[str, Any], params_schema: Dict[str, Any], validation_schema: Any) -> "Dict[str, Any] | None":
+def _recover_arguments(
+    tool_name: str, parsed_args: Dict[str, Any], params_schema: Dict[str, Any], validation_schema: Any
+) -> "Dict[str, Any] | None":
     """Коэрсеры по очереди; первый вариант, проходящий валидацию, либо None."""
     candidate = parsed_args
     # Пустую строку нельзя оставлять в enum-поле до числового коэрсера —

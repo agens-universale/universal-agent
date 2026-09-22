@@ -14,10 +14,11 @@ from gc_testkit import run_coro
 
 def _async_noop(fn):
     """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _state():
@@ -110,22 +111,22 @@ class TestSidecarIntermediateReply:
         answer = "Сейчас проверю структуру"
         pr = _patch_process(
             monkeypatch,
-            apply_return=json.dumps(
-                {"tool": "turn_intermediate_reply", "ok": True, "answer": answer}
-            ),
+            apply_return=json.dumps({"tool": "turn_intermediate_reply", "ok": True, "answer": answer}),
         )
-        run_coro(pr.aprocess_tool_calls(
-            messages=[
-                _fc(
-                    "turn_intermediate_reply",
-                    "ir1",
-                    json.dumps({"answer": answer}),
-                )
-            ],
-            state=_state(),
-            ctx=_child_ctx(tmp_path),
-            run_agent_func=None,
-        ))
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc(
+                        "turn_intermediate_reply",
+                        "ir1",
+                        json.dumps({"answer": answer}),
+                    )
+                ],
+                state=_state(),
+                ctx=_child_ctx(tmp_path),
+                run_agent_func=None,
+            )
+        )
         rows = read_subagent_trace(str(tmp_path), "cli", "task-1")
         assert [r["kind"] for r in rows] == ["intermediate_reply"]
         assert rows[0]["payload"]["prose"] == answer
@@ -249,18 +250,20 @@ class TestSidecarChildSummary:
 
             on_applied = kwargs.get("on_summary_applied")
             assert on_applied is not None
-            await await_callback(on_applied(
-                {
-                    "trigger_reason": "subagent_pre_backend",
-                    "summary_payload": {
-                        "summary_message_content": "wrapped",
-                    },
-                    "summary_trace": {
-                        "final_output": {"agent_summary_text": "сжатый контекст"},
-                    },
-                    "newly_summarized_message_id": "m1",
-                }
-            ))
+            await await_callback(
+                on_applied(
+                    {
+                        "trigger_reason": "subagent_pre_backend",
+                        "summary_payload": {
+                            "summary_message_content": "wrapped",
+                        },
+                        "summary_trace": {
+                            "final_output": {"agent_summary_text": "сжатый контекст"},
+                        },
+                        "newly_summarized_message_id": "m1",
+                    }
+                )
+            )
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [
@@ -287,9 +290,7 @@ class TestSidecarChildSummary:
 
         with (
             patch.object(rsc, "history_exceeds_summary_trigger", return_value=True),
-            patch.object(
-                rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction
-            ),
+            patch.object(rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction),
         ):
             await runner.arun(
                 "subagent_worker",
@@ -306,8 +307,6 @@ class TestSidecarChildSummary:
         assert summary["payload"]["synthesis"] == "сжатый контекст"
         # компакция не удаляет уже записанное
         call_idx = next(
-            i
-            for i, r in enumerate(rows)
-            if r["kind"] == "call" and r["payload"].get("call_id") == "before"
+            i for i, r in enumerate(rows) if r["kind"] == "call" and r["payload"].get("call_id") == "before"
         )
         assert call_idx < kinds.index("child_summary")

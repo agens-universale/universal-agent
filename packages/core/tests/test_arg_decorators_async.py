@@ -11,6 +11,7 @@
 (``security/dual_wrapper.py``): корутинную функцию оборачиваем корутиной,
 обычную — обычной.
 """
+
 from gc_core.utils.arg_decorators import parse_json_object_argument
 
 
@@ -21,14 +22,16 @@ class _Tool:
         return {"ok": False, "error": {"field": exc.field}}
 
     @parse_json_object_argument(
-        source_arg="args", target_arg="args_data",
+        source_arg="args",
+        target_arg="args_data",
         error_handler_method="_json_arg_error",
     )
     def call_sync(self, args=None, args_data=None, **kwargs):
         return {"ok": True, "parsed": args_data}
 
     @parse_json_object_argument(
-        source_arg="args", target_arg="args_data",
+        source_arg="args",
+        target_arg="args_data",
         error_handler_method="_json_arg_error",
     )
     async def call_async(self, args=None, args_data=None, **kwargs):

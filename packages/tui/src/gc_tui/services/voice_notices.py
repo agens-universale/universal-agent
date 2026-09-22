@@ -24,23 +24,28 @@ def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
     overridden = config_dict.get("voice_overridden_by_managed")
     extra: List[Notice] = []
     if overridden:
-        extra.append(Notice(
-            "info", "voice_overridden",
-            f"voice: настройки из config.yml ({overridden}) перекрыты локальным "
-            "сервисом (config.local.yml). Вернуть — gc-voice remove.",
-            highlights=("voice", "config.local.yml", "gc-voice remove"),
-        ))
+        extra.append(
+            Notice(
+                "info",
+                "voice_overridden",
+                f"voice: настройки из config.yml ({overridden}) перекрыты локальным "
+                "сервисом (config.local.yml). Вернуть — gc-voice remove.",
+                highlights=("voice", "config.local.yml", "gc-voice remove"),
+            )
+        )
     # Битая установка: state есть, а окружение снесено/повреждено.
     from gc_tui.voice_runtime.state import load_state  # ленивый: не тянуть при импорте
 
     st = load_state()
     if st is not None and not Path(st.root).is_dir():
-        extra.append(Notice(
-            "warning", "voice_install_broken",
-            "voice: локальная установка повреждена (нет каталога сервиса) — "
-            "выполните gc-voice install заново.",
-            highlights=("voice", "gc-voice install"),
-        ))
+        extra.append(
+            Notice(
+                "warning",
+                "voice_install_broken",
+                "voice: локальная установка повреждена (нет каталога сервиса) — выполните gc-voice install заново.",
+                highlights=("voice", "gc-voice install"),
+            )
+        )
     return extra
 
 
@@ -53,22 +58,27 @@ def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
         return []
     if not voice_enabled(voice):
         # Токен опционален (voice_enabled) — не обещаем юзеру лишнего
-        return [Notice(
-            "warning", "voice_incomplete",
-            "voice: секция заполнена не до конца — нужен url; "
-            "голосовой ввод неактивен.",
-            highlights=("voice",),
-        )]
+        return [
+            Notice(
+                "warning",
+                "voice_incomplete",
+                "voice: секция заполнена не до конца — нужен url; голосовой ввод неактивен.",
+                highlights=("voice",),
+            )
+        ]
     from gc_tui.voice.recorder import available  # ленивый: аудио-стек может отсутствовать
 
     notices: List[Notice] = []
     if not available():
-        notices.append(Notice(
-            "warning", "voice_no_sounddevice",
-            "voice: настроен, но аудио-стек sounddevice недоступен — голосовой "
-            "ввод неактивен (Linux: установите libportaudio2).",
-            highlights=("voice", "sounddevice", "libportaudio2"),
-        ))
+        notices.append(
+            Notice(
+                "warning",
+                "voice_no_sounddevice",
+                "voice: настроен, но аудио-стек sounddevice недоступен — голосовой "
+                "ввод неактивен (Linux: установите libportaudio2).",
+                highlights=("voice", "sounddevice", "libportaudio2"),
+            )
+        )
     # Доп. замечания (перекрытие, битая установка) собираем ВСЕГДА, а не только когда
     # аудио-стек на месте: раньше отсутствие sounddevice возвращало свой Notice и
     # перекрывало их: машина без libportaudio2 — ровно та, где полусломанная локальная

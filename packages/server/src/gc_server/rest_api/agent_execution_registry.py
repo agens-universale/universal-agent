@@ -116,7 +116,7 @@ class AgentRunRegistry:
         # Удаляем самые старые завершённые.
         items = sorted(
             self._completed.items(),
-            key=lambda kv: (kv[1].finished_at or 0.0),
+            key=lambda kv: kv[1].finished_at or 0.0,
         )
         overflow = len(items) - self._completed_max
         for i in range(max(0, overflow)):
@@ -134,9 +134,7 @@ class AgentRunRegistry:
         with self._lock:
             return self._get_status_locked(key)
 
-    def get_status_snapshot(
-        self, *, system: str, task_id: str
-    ) -> tuple[Optional[float], Optional[ActiveRun]]:
+    def get_status_snapshot(self, *, system: str, task_id: str) -> tuple[Optional[float], Optional[ActiveRun]]:
         """Статус задачи для клиента одним снимком: (с каких пор строится контекст, прогон).
 
         Первое — время брони, если контекст задачи сейчас строится, иначе None.
@@ -173,9 +171,7 @@ class AgentRunRegistry:
             run = self._runs.get(key)
             if (run is not None and not run.done) or key in self._reservations:
                 return False
-            self._reservations[key] = _Reservation(
-                done=asyncio.Event(), taken_at=time.time()
-            )
+            self._reservations[key] = _Reservation(done=asyncio.Event(), taken_at=time.time())
             return True
 
     def release_reservation(self, *, system: str, task_id: str) -> None:
@@ -336,7 +332,10 @@ class AgentRunRegistry:
                         # В счёт входит и батч хвоста, с которым умер ход.
                         logger.warning(
                             "run_tail_dropped system=%s task_id=%s ending=%s count=%d",
-                            system, task_id, ending, len(dropped),
+                            system,
+                            task_id,
+                            ending,
+                            len(dropped),
                             extra={
                                 "event": "run_tail_dropped",
                                 "system": system,
@@ -353,9 +352,7 @@ class AgentRunRegistry:
                     release_run_logger(getattr(ctx, "logger", None))
 
             # Таска, а не поток: эндпоинт уже на loop, а ядро больше не блокирует.
-            t = asyncio.get_running_loop().create_task(
-                _runner(), name=f"agent-run:{key}"
-            )
+            t = asyncio.get_running_loop().create_task(_runner(), name=f"agent-run:{key}")
             run_ref = ActiveRun(
                 key=key,
                 system=system,
@@ -369,7 +366,6 @@ class AgentRunRegistry:
             )
             self._runs[key] = run_ref
             return run_ref
-
 
     def add_user_message(
         self,

@@ -111,10 +111,7 @@ class AgentConfig(BaseModel):
         for ch in text:
             code = ord(ch)
             if ch.isspace() or code < 0x20 or code == 0x7F or ch == ":":
-                raise ValueError(
-                    "agent.trace_id_header_name: имя заголовка без пробелов, "
-                    "управляющих символов и ':'"
-                )
+                raise ValueError("agent.trace_id_header_name: имя заголовка без пробелов, управляющих символов и ':'")
         return text
 
     @field_validator("exec_timeout_sec", mode="before")
@@ -125,13 +122,9 @@ class AgentConfig(BaseModel):
         try:
             n = int(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "agent.exec_timeout_sec должен быть положительным целым числом"
-            ) from exc
+            raise ValueError("agent.exec_timeout_sec должен быть положительным целым числом") from exc
         if n <= 0:
-            raise ValueError(
-                "agent.exec_timeout_sec должен быть положительным целым числом"
-            )
+            raise ValueError("agent.exec_timeout_sec должен быть положительным целым числом")
         return n
 
     @field_validator("exec_output_capture_max_chars", mode="before")
@@ -142,13 +135,9 @@ class AgentConfig(BaseModel):
         try:
             n = int(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "agent.exec_output_capture_max_chars должен быть неотрицательным целым числом"
-            ) from exc
+            raise ValueError("agent.exec_output_capture_max_chars должен быть неотрицательным целым числом") from exc
         if n < 0:
-            raise ValueError(
-                "agent.exec_output_capture_max_chars должен быть неотрицательным целым числом"
-            )
+            raise ValueError("agent.exec_output_capture_max_chars должен быть неотрицательным целым числом")
         return n
 
     @field_validator("exec_output_preview_edge_chars", mode="before")
@@ -159,13 +148,9 @@ class AgentConfig(BaseModel):
         try:
             n = int(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "agent.exec_output_preview_edge_chars должен быть неотрицательным целым числом"
-            ) from exc
+            raise ValueError("agent.exec_output_preview_edge_chars должен быть неотрицательным целым числом") from exc
         if n < 0:
-            raise ValueError(
-                "agent.exec_output_preview_edge_chars должен быть неотрицательным целым числом"
-            )
+            raise ValueError("agent.exec_output_preview_edge_chars должен быть неотрицательным целым числом")
         return n
 
     @model_validator(mode="after")
@@ -210,9 +195,7 @@ def exec_output_preview_edge_chars_from_config_dict(
     overrides в уже провалидированный дамп), поэтому ``P <= T`` дожимается
     здесь, а не только в схеме: иначе preview продублировал бы весь capture.
     """
-    raw = (config_dict or {}).get(
-        "exec_output_preview_edge_chars", DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
-    )
+    raw = (config_dict or {}).get("exec_output_preview_edge_chars", DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS)
     try:
         n = int(raw)
     except (TypeError, ValueError):
@@ -237,9 +220,7 @@ def exec_output_capture_max_chars_from_config_dict(
     config_dict: dict[str, Any] | None,
 ) -> int:
     """Потолок captured stdout/stderr на поток из плоского config_dict."""
-    raw = (config_dict or {}).get(
-        "exec_output_capture_max_chars", DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    )
+    raw = (config_dict or {}).get("exec_output_capture_max_chars", DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS)
     try:
         n = int(raw)
     except (TypeError, ValueError):

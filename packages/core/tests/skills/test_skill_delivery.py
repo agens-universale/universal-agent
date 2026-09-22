@@ -13,11 +13,13 @@ class _FakeReg:
 
 
 async def test_injects_instructions_refs_and_lock():
-    reg = _FakeReg({
-        "instructions": "ВАЛИДИРУЙ ТРЕБОВАНИЯ ТАК.",
-        "references": ["quality_criteria", "report_templates"],
-        "assets": [],
-    })
+    reg = _FakeReg(
+        {
+            "instructions": "ВАЛИДИРУЙ ТРЕБОВАНИЯ ТАК.",
+            "references": ["quality_criteria", "report_templates"],
+            "assets": [],
+        }
+    )
     out = await build_skill_delivery("qa-req-validation", reg)
     assert out.startswith("Use skill `qa-req-validation`.")
     assert "ВАЛИДИРУЙ ТРЕБОВАНИЯ ТАК." in out
@@ -36,10 +38,10 @@ async def test_fallback_on_unknown_skill():
 async def test_no_reference_clause_when_no_refs_or_assets():
     reg = _FakeReg({"instructions": "X", "references": [], "assets": []})
     out = await build_skill_delivery("s", reg)
-    assert "skills_read_reference" not in out      # нет вспом. файлов → нет клаузы их загрузки
+    assert "skills_read_reference" not in out  # нет вспом. файлов → нет клаузы их загрузки
     assert "do not call skills_load again" in out  # базовый замок без запрета read_file
     assert "Do not read skill files via read_file." not in out
-    assert "ВАЛИД" not in out                       # sanity: чужой текст не просочился
+    assert "ВАЛИД" not in out  # sanity: чужой текст не просочился
 
 
 async def test_assets_listed_when_present():

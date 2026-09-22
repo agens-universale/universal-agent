@@ -1,5 +1,6 @@
 """Проверка обновлений: git ls-remote против установленного коммита (A2).
 Чистый факт; любая ошибка/таймаут → 'unknown' (никогда не блокирует старт)."""
+
 from __future__ import annotations
 
 import subprocess
@@ -11,18 +12,22 @@ _LS_TIMEOUT = 8
 
 
 class CheckResult(NamedTuple):
-    status: str                 # "update" | "current" | "unknown"
+    status: str  # "update" | "current" | "unknown"
     remote_commit: Optional[str]
     detail: str
 
 
 def _git_ls_remote(url: str, ref: str) -> Optional[str]:
     from gc_core.utils.win_console import preserve_console_mode
+
     try:
-        with preserve_console_mode():   # subprocess на Windows сбрасывает режим
-            out = subprocess.run(       # консоли — иначе Ctrl+C после проверки
+        with preserve_console_mode():  # subprocess на Windows сбрасывает режим
+            out = subprocess.run(  # консоли — иначе Ctrl+C после проверки
                 ["git", "ls-remote", "--exit-code", url, ref],  # обновлений рвёт приложение
-                capture_output=True, text=True, timeout=_LS_TIMEOUT, check=False,
+                capture_output=True,
+                text=True,
+                timeout=_LS_TIMEOUT,
+                check=False,
             )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -45,13 +50,13 @@ def check_for_update(
     return CheckResult("update", remote, "доступна новая версия")
 
 
-
 def record_check_result(now: float, remote_commit, installed_commit=None, path=None) -> None:
     """Стамп времени (троттл) + последний известный remote-коммит + установленный НА
     МОМЕНТ проверки (для валидности вердикта). remote/installed пишутся, только если
     remote известен — при unknown/ошибке (None) прошлый вердикт сохраняется (транзиентная
     сеть не гасит «доступна новая версия»)."""
     from gc_core import upgrade_gate
+
     updates = {"last_update_check_ts": now}
     if remote_commit:
         updates["last_update_remote_commit"] = remote_commit
@@ -69,8 +74,7 @@ def update_available_from_state(state: dict, installed_commit) -> bool:
     держится до обновления, а не только в день чека."""
     remote = state.get("last_update_remote_commit")
     checked = state.get("last_update_checked_installed")
-    return (bool(remote) and bool(installed_commit)
-            and checked == installed_commit and remote != installed_commit)
+    return bool(remote) and bool(installed_commit) and checked == installed_commit and remote != installed_commit
 
 
 def _update_cfg(config: dict) -> dict:

@@ -7,6 +7,7 @@
 
 Путь ``chat/completions`` тело читал. Асимметрия и была дефектом.
 """
+
 import logging
 
 import httpx
@@ -43,6 +44,4 @@ async def test_responses_error_carries_the_body(monkeypatch):
             logger=logger,
         )
 
-    assert any("невидимка" in line for line in logger.errors), (
-        f"тело ошибки потеряно, в логе только: {logger.errors}"
-    )
+    assert any("невидимка" in line for line in logger.errors), f"тело ошибки потеряно, в логе только: {logger.errors}"

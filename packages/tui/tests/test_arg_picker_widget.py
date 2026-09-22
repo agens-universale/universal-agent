@@ -1,4 +1,5 @@
 """ArgPicker — чистая логика фильтра/навигации (без mount/app)."""
+
 import pytest
 
 _OPTS = [("txt", "вся сессия в читаемом виде"), ("json", "структурированные данные сессии")]
@@ -110,7 +111,7 @@ def test_three_tuple_row_renders_status_column_colored():
     assert active_row.plain.rstrip().endswith("● активен")
     assert "активен" not in none_row.plain
 
-    spans = [s for s in active_row.spans if active_row.plain[s.start:s.end] == "● активен"]
+    spans = [s for s in active_row.spans if active_row.plain[s.start : s.end] == "● активен"]
     assert spans and str(spans[0].style) == pal.OK
 
 
@@ -173,7 +174,7 @@ def test_hint_provider_not_called_twice_for_the_same_selection():
         return f"hint for {value}"
 
     p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
-    calls.clear()   # __init__ уже посчитал хинт один раз ради стартового desired_height
+    calls.clear()  # __init__ уже посчитал хинт один раз ради стартового desired_height
     p._build_footer()
     _ = p.desired_height
     assert calls == [], f"выбор не менялся, а провайдер дёрнут снова: {calls}"
@@ -194,7 +195,7 @@ def test_hint_provider_not_called_again_on_repeated_desired_height():
         return "hint"
 
     p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
-    calls.clear()   # __init__ уже посчитал хинт один раз ради стартового desired_height
+    calls.clear()  # __init__ уже посчитал хинт один раз ради стартового desired_height
     for _ in range(5):
         _ = p.desired_height
     assert calls == [], f"повторные обращения к desired_height дёрнули провайдер заново: {calls}"

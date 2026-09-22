@@ -7,6 +7,7 @@ agent's own ``asyncio.run``) it schedules the call there and awaits the result v
 File ops mirror deepagents' HarborSandbox: write/edit use native upload/download,
 read/list use shell through exec.
 """
+
 import asyncio
 import base64
 import contextlib
@@ -62,9 +63,7 @@ set +e
 def _env_assignment_prefix(env: Optional[dict]) -> str:
     if not env:
         return ""
-    assignments = " ".join(
-        f"{k}={shlex.quote(str(v))}" for k, v in env.items()
-    )
+    assignments = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
     return f"env {assignments} "
 
 
@@ -160,15 +159,11 @@ class HarborBackend(FsBackend):
             running = None
         if running is self._loop:
             return await coro
-        return await asyncio.wrap_future(
-            asyncio.run_coroutine_threadsafe(coro, self._loop)
-        )
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, self._loop))
 
     def _capture_cap(self, max_chars: Optional[int]) -> int:
         """``None`` → tool-trace cap (40k/поток), else the per-call ceiling."""
-        return (
-            self.exec_output_capture_max_chars if max_chars is None else max_chars
-        )
+        return self.exec_output_capture_max_chars if max_chars is None else max_chars
 
     @staticmethod
     def _is_exec_timeout(exc: BaseException) -> bool:
@@ -178,9 +173,7 @@ class HarborBackend(FsBackend):
             return True
         return "Command timed out after" in str(exc)
 
-    def _output_capture(
-        self, cap: int
-    ) -> tuple[ContextManager[None], dict[str, "BoundedStreamAccumulator"]]:
+    def _output_capture(self, cap: int) -> tuple[ContextManager[None], dict[str, "BoundedStreamAccumulator"]]:
         """Scope Harbor's public ``scoped_output_callback`` around one exec and
         feed the streamed chunks into a bounded head+tail accumulator per stream.
 
@@ -253,9 +246,7 @@ class HarborBackend(FsBackend):
         Сборка строки — ``build_harbor_shell_command``. Внутренние помощники,
         обход, argv и python зовут транспорт без инициализации: сырой канал.
         """
-        full = build_harbor_shell_command(
-            command, cwd=cwd, env=env, exec_init=exec_init
-        )
+        full = build_harbor_shell_command(command, cwd=cwd, env=env, exec_init=exec_init)
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
         try:
@@ -285,9 +276,7 @@ class HarborBackend(FsBackend):
         ``walk_entries``, ``listdir`` и через ``sha256``/``stat`` ещё два)
         звали её напрямую.
         """
-        return await self._aexec_impl(
-            command, capture_max_chars=self.walk_output_max_chars
-        )
+        return await self._aexec_impl(command, capture_max_chars=self.walk_output_max_chars)
 
     async def aexec(
         self,
@@ -300,13 +289,15 @@ class HarborBackend(FsBackend):
     ) -> ExecResult:
         """Shell модели: с инициализацией окружения, если она задана."""
         return await self._aexec_impl(
-            command, cwd=cwd, timeout=timeout, env=env,
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
             capture_max_chars=capture_max_chars,
             exec_init=self.exec_init,
         )
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None) -> dict:
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None, env: Optional[dict] = None) -> dict:
         """Запустить команду в контейнере фоном и отдать её pid.
 
         Пока фона у Harbor не было, промпт велел модели поднимать сервисы через
@@ -331,7 +322,10 @@ class HarborBackend(FsBackend):
             "echo $!"
         )
         res = await self.aexec(
-            detached, cwd=cwd, env=env, timeout=_BACKGROUND_SPAWN_TIMEOUT_SEC,
+            detached,
+            cwd=cwd,
+            env=env,
+            timeout=_BACKGROUND_SPAWN_TIMEOUT_SEC,
         )
         if getattr(res, "timed_out", False):
             # Не «pid не сообщён»: оболочка не вернулась вовсе, а команда могла и
@@ -363,7 +357,10 @@ class HarborBackend(FsBackend):
     ) -> ExecResult:
         """POSIX без профиля: помощники ФС, grep, пробы, MCP."""
         return await self._aexec_impl(
-            command, cwd=cwd, timeout=timeout, env=env,
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
             capture_max_chars=capture_max_chars,
         )
 
@@ -381,7 +378,9 @@ class HarborBackend(FsBackend):
         # (общий `argv_to_posix_command`): у песочницы exec идёт через POSIX-шелл.
         return await self._aexec_impl(
             argv_to_posix_command(argv, stdin=stdin),
-            cwd=cwd, timeout=timeout, env=env,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
             capture_max_chars=capture_max_chars,
         )
 
@@ -395,7 +394,10 @@ class HarborBackend(FsBackend):
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
         return await self._aexec_impl(
-            self._python_command(code), cwd=cwd, timeout=timeout, env=env,
+            self._python_command(code),
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
             capture_max_chars=capture_max_chars,
         )
 
@@ -473,7 +475,7 @@ class HarborBackend(FsBackend):
         return res.stdout.strip() if res.return_code == 0 else path
 
     async def readable(self, path: str) -> bool:
-        return True   # container-root perspective (current harbor pack behavior)
+        return True  # container-root perspective (current harbor pack behavior)
 
     async def writable(self, path: str) -> bool:
         return True
@@ -499,17 +501,23 @@ class HarborBackend(FsBackend):
             raise FileNotFoundError(path)
         size, mtime, mode, kind = res.stdout.strip().split("|", 3)
         return {
-            "size": int(size), "mtime": int(mtime), "mode": mode,
-            "is_file": kind == "regular file", "is_dir": kind == "directory",
+            "size": int(size),
+            "mtime": int(mtime),
+            "mode": mode,
+            "is_file": kind == "regular file",
+            "is_dir": kind == "directory",
             "is_symlink": "symbolic link" in kind,
         }
 
     async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
         st = await self.stat(path)  # existing stat -c '%s|%Y|%a|%F' wrapper
         return {
-            "size": st["size"], "mtime": st["mtime"],
+            "size": st["size"],
+            "mtime": st["mtime"],
             "mode": int(str(st["mode"]), 8),
-            "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
+            "is_file": st["is_file"],
+            "is_dir": st["is_dir"],
+            "is_symlink": st["is_symlink"],
         }
 
     async def walk_entries(
@@ -524,17 +532,13 @@ class HarborBackend(FsBackend):
         channel is not spent on junk trees. Hit ceiling → fail-closed.
         """
         res = await self._aexec_impl(
-            _build_find_walk_command(
-                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
-            ),
+            _build_find_walk_command(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
             capture_max_chars=self.walk_output_max_chars,
         )
         if res.return_code != 0:
             raise FileNotFoundError(path)
         if res.stdout_hit_capture_cap:
-            raise WalkOutputTooLargeError(
-                path, ceiling_chars=self.walk_output_max_chars
-            )
+            raise WalkOutputTooLargeError(path, ceiling_chars=self.walk_output_max_chars)
         return parse_find_printf_entries(res.stdout or "")
 
     async def walk(self, path: str) -> list:
@@ -553,9 +557,7 @@ class HarborBackend(FsBackend):
         if res.return_code != 0:
             raise FileNotFoundError(path)
         if res.stdout_hit_capture_cap:
-            raise WalkOutputTooLargeError(
-                path, ceiling_chars=self.walk_output_max_chars
-            )
+            raise WalkOutputTooLargeError(path, ceiling_chars=self.walk_output_max_chars)
         out = []
         for line in (res.stdout or "").splitlines():
             if not line.strip():
@@ -662,8 +664,7 @@ class HarborBackend(FsBackend):
             await self._aawait(self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})"))
             await self._aawait(self._env.upload_file(local_tmp, remote_tmp))
             res = await self._afs_exec(
-                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; "
-                f"rm -f {shlex.quote(remote_tmp)}"
+                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; rm -f {shlex.quote(remote_tmp)}"
             )
             if res.return_code != 0:
                 raise OSError(res.stderr.strip() or f"append failed: {path}")

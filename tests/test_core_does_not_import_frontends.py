@@ -29,6 +29,7 @@ diff-журнала с тех пор ставит сам TUI (``attach_to_contex
 в headless-установке, либо (как здесь) тихую деградацию, когда ветка спрятана
 за ``except ImportError`` и просто не срабатывает.
 """
+
 import ast
 import pathlib
 

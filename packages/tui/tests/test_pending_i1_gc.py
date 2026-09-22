@@ -1,4 +1,5 @@
 """I1/A: GC pending на stream_reset, wire-match fallback на meta, set_tui_* не воскрешает."""
+
 from __future__ import annotations
 
 import json
@@ -55,13 +56,7 @@ async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
         history_messages=[],
         known_message_keys=set(),
         persisted_messages_count=0,
-        meta={
-            "tui": {
-                "pending_user_messages": [
-                    {"client_id": "stale", "content": "x", "status": "pending"}
-                ]
-            }
-        },
+        meta={"tui": {"pending_user_messages": [{"client_id": "stale", "content": "x", "status": "pending"}]}},
         previous_response_id=None,
         backend_api_mode="chat_completions",
     )
@@ -207,6 +202,4 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
                 break
             await pilot.pause(0.05)
         else:
-            raise AssertionError(
-                f"timeout: stream_reset GC, pending={_read_pending(tmp_path, tid)!r}"
-            )
+            raise AssertionError(f"timeout: stream_reset GC, pending={_read_pending(tmp_path, tid)!r}")

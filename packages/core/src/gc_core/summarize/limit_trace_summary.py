@@ -46,9 +46,7 @@ def _tokens_spent(state: Any) -> Any:
         usage = getattr(state, "usage", None)
         if usage is None:
             return "?"
-        baseline = UsageAccount.from_meta(
-            getattr(state, "run_start_usage_meta", None)
-        )
+        baseline = UsageAccount.from_meta(getattr(state, "run_start_usage_meta", None))
         return usage.delta_from(baseline).totals()["total"]
     except Exception:
         return "?"
@@ -57,16 +55,10 @@ def _tokens_spent(state: Any) -> Any:
 def _build_message(state: Any, reason: str, config_dict: dict[str, Any]) -> str:
     label = _REASON_LABELS.get(reason, reason)
     if reason == "step_limit":
-        return (
-            f"Agent stopped: {label} "
-            f"({state.steps}/{getattr(state, 'max_steps', '?')})."
-        )
+        return f"Agent stopped: {label} ({state.steps}/{getattr(state, 'max_steps', '?')})."
     if reason == "tool_call_limit":
         limit = config_dict.get("max_tool_calls")
-        return (
-            f"Agent stopped: {label} "
-            f"({state.tool_calls}/{limit})."
-        )
+        return f"Agent stopped: {label} ({state.tool_calls}/{limit})."
     if reason == "token_limit":
         limit = config_dict.get("session_token_limit")
         spent = _tokens_spent(state)
@@ -170,8 +162,7 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
                 raw_summary = ""
         except Exception:
             logger.warning(
-                "limit_trace_summary LLM call failed for reason=%s; "
-                "returning envelope with empty summary",
+                "limit_trace_summary LLM call failed for reason=%s; returning envelope with empty summary",
                 reason,
                 exc_info=True,
             )
@@ -184,5 +175,3 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
         "raw_trace_summary": raw_summary,
     }
     return json.dumps(envelope, ensure_ascii=False)
-
-

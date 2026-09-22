@@ -18,6 +18,7 @@ terminate → ожидание до 5 с → killpg → ещё до 2 с. Пря
 Форма повторяет уже принятую в ``stream_client._PersistentSessionManager``:
 синхронный ``close_all`` рядом с ``aclose_all``.
 """
+
 import subprocess
 import sys
 import time
@@ -28,10 +29,7 @@ from gc_core.tools.connect_mcp import persistent_stdio as ps
 #: Скрипт-двойник MCP-сервера, который ИГНОРИРУЕТ SIGTERM. Так проверяется
 #: дорогой путь: graceful-таймаут вышел, дожимаем SIGKILL.
 _STUBBORN = (
-    "import signal, sys, time\n"
-    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-    "sys.stderr.close()\n"
-    "time.sleep(60)\n"
+    "import signal, sys, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nsys.stderr.close()\ntime.sleep(60)\n"
 )
 
 #: Послушный: умирает по SIGTERM сразу.
@@ -104,8 +102,7 @@ async def test_loop_stays_free_while_waiting_for_a_stubborn_process(stubborn):
 
     assert len(pulse.gaps) > 20, f"пульс почти не тикал: {len(pulse.gaps)}"
     assert pulse.worst() < 0.15, (
-        f"loop залипал на {pulse.worst():.3f}с — ожидание процесса всё ещё "
-        f"блокирующее ({pulse.report()})"
+        f"loop залипал на {pulse.worst():.3f}с — ожидание процесса всё ещё блокирующее ({pulse.report()})"
     )
 
 

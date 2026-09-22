@@ -37,5 +37,6 @@ def test_normalize_clamps_negative():
 
 def test_app_config_accepts_todo_section():
     from gc_core.config_modules.root import AppConfig
+
     cfg = AppConfig(todo={"reminder_steps": 7})
     assert cfg.todo.reminder_steps == 7

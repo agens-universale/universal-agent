@@ -5,15 +5,17 @@ from gc_core.utils.convertations import get_output_list
 def test_stream_assembly_and_direct_json_give_same_output():
     # «non-stream» dict
     direct = {
-        "id": "r1", "model": "m",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "привет"},
-                     "finish_reason": "stop"}],
+        "id": "r1",
+        "model": "m",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "привет"}, "finish_reason": "stop"}],
     }
     # тот же ответ, собранный из SSE-дельт
-    assembled = assemble_streamed_completion([
-        '{"id":"r1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"при"},"finish_reason":null}]}',
-        '{"choices":[{"index":0,"delta":{"content":"вет"},"finish_reason":"stop"}]}',
-    ])
+    assembled = assemble_streamed_completion(
+        [
+            '{"id":"r1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"при"},"finish_reason":null}]}',
+            '{"choices":[{"index":0,"delta":{"content":"вет"},"finish_reason":"stop"}]}',
+        ]
+    )
     out_direct = get_output_list(direct)
     out_assembled = get_output_list(assembled)
     # оба дают одинаковый message-output (единый путь валидации)

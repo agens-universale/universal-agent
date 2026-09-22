@@ -23,6 +23,7 @@
 
 Всё, что тест запустил, добивает фикстура ``reaper`` в любом исходе.
 """
+
 import asyncio
 import json
 import os
@@ -36,9 +37,7 @@ from gc_core.mcp_session_owner import use_owner
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_testkit.paths import package_src_dirs
 
-pytestmark = pytest.mark.skipif(
-    os.name != "posix", reason="группы процессов и killpg есть только на POSIX"
-)
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="группы процессов и killpg есть только на POSIX")
 
 #: Двойник MCP-сервера. Отвечает на любой запрос пустым результатом, на
 #: ``tools/call`` с именем ``crash`` падает, не ответив. Когда stdin закрыт,
@@ -220,8 +219,7 @@ async def test_a_child_deaf_to_sigterm_does_not_outlive_its_leader(tmp_path, rea
 
     assert leader.poll() is not None, "лидер пережил снос"
     assert _group_gone_within(leader.pid, 2.0), (
-        f"потомок {child} пережил снос группы: ждали только лидера, и SIGKILL "
-        f"группе так и не ушёл"
+        f"потомок {child} пережил снос группы: ждали только лидера, и SIGKILL группе так и не ушёл"
     )
 
 
@@ -233,15 +231,13 @@ async def test_a_dead_leader_does_not_shield_its_group(tmp_path, reaper):
     """
     leader = _spawn(_cfg(tmp_path, child_on_term="ignore"), reaper)
     child = _wait_rows(tmp_path, 1)[0]["child"]
-    os.kill(leader.pid, signal.SIGKILL)          # только лидера, не группу
+    os.kill(leader.pid, signal.SIGKILL)  # только лидера, не группу
     leader.wait(timeout=5)
     assert _group_alive(leader.pid), "проверка пустая: потомок умер вместе с лидером"
 
     await ps._aterminate_process_tree(leader, graceful_timeout=0.3)
 
-    assert _group_gone_within(leader.pid, 2.0), (
-        f"потомок {child} мёртвого лидера пережил снос: группу не тронули"
-    )
+    assert _group_gone_within(leader.pid, 2.0), f"потомок {child} мёртвого лидера пережил снос: группу не тронули"
 
 
 async def test_an_obedient_group_is_not_kept_waiting(tmp_path, reaper):
@@ -259,9 +255,7 @@ async def test_an_obedient_group_is_not_kept_waiting(tmp_path, reaper):
     spent = time.monotonic() - started
 
     assert _group_gone_within(leader.pid, 1.0), "послушная группа пережила снос"
-    assert spent < 2.0, (
-        f"снос послушной группы занял {spent:.2f} с — ждали, когда ждать нечего"
-    )
+    assert spent < 2.0, f"снос послушной группы занял {spent:.2f} с — ждали, когда ждать нечего"
 
 
 def test_a_crashed_server_is_replaced_without_leaving_its_group(tmp_path, reaper):
@@ -271,9 +265,7 @@ def test_a_crashed_server_is_replaced_without_leaving_its_group(tmp_path, reaper
     процесс; потомков старого не трогал никто. Каждое падение сервера
     оставляло по браузеру.
     """
-    session = ps.PersistentStdioSession(
-        _cfg(tmp_path, leader_on_term="exit", child_on_term="exit")
-    )
+    session = ps.PersistentStdioSession(_cfg(tmp_path, leader_on_term="exit", child_on_term="exit"))
     try:
         session.call("tools/list", {}, 10.0)
         first = session._proc
@@ -281,16 +273,14 @@ def test_a_crashed_server_is_replaced_without_leaving_its_group(tmp_path, reaper
         child = _wait_rows(tmp_path, 1)[0]["child"]
 
         session.call("tools/call", {"name": "crash", "arguments": {}}, 5.0)
-        first.wait(timeout=5)                    # сервер упал между вызовами
+        first.wait(timeout=5)  # сервер упал между вызовами
         assert _group_alive(first.pid), "проверка пустая: потомок упал вместе с сервером"
 
-        session.call("tools/list", {}, 10.0)     # подмена мёртвого лидера
+        session.call("tools/list", {}, 10.0)  # подмена мёртвого лидера
         reaper.append(session._proc)
 
         assert session._proc is not first, "сервер не перезапущен — проверять нечего"
-        assert _group_gone_within(first.pid, 2.0), (
-            f"потомок {child} упавшего сервера пережил его перезапуск"
-        )
+        assert _group_gone_within(first.pid, 2.0), f"потомок {child} упавшего сервера пережил его перезапуск"
     finally:
         session.close()
 
@@ -343,9 +333,7 @@ async def test_a_cancelled_close_kills_the_group_at_once(tmp_path, reaper):
     assert _dead_within(proc, _AT_ONCE_SEC), (
         "лидер жив после прерванного закрытия: эскалация оборвалась, SIGKILL не ушёл"
     )
-    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), (
-        "потомок жив после прерванного закрытия"
-    )
+    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), "потомок жив после прерванного закрытия"
 
 
 async def test_a_timed_out_close_kills_the_group_at_once(tmp_path, reaper):
@@ -357,9 +345,7 @@ async def test_a_timed_out_close_kills_the_group_at_once(tmp_path, reaper):
         await asyncio.wait_for(session.aclose(), 0.5)
 
     assert _dead_within(proc, _AT_ONCE_SEC), "лидер жив после закрытия, снятого по таймауту"
-    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), (
-        "потомок жив после закрытия, снятого по таймауту"
-    )
+    assert _group_gone_within(proc.pid, _AT_ONCE_SEC), "потомок жив после закрытия, снятого по таймауту"
 
 
 async def test_the_drain_does_not_abandon_a_session_it_took(tmp_path, reaper):
@@ -381,8 +367,7 @@ async def test_the_drain_does_not_abandon_a_session_it_took(tmp_path, reaper):
 
     assert registry._sessions == {}, "проверка пустая: дочистка сессию не взяла"
     assert _dead_within(proc, _AT_ONCE_SEC), (
-        "сессия снята с реестра, бюджет вышел, а её процесс жив — его больше не "
-        "увидит никто, включая хук на выход"
+        "сессия снята с реестра, бюджет вышел, а её процесс жив — его больше не увидит никто, включая хук на выход"
     )
     assert _group_gone_within(proc.pid, _AT_ONCE_SEC), "потомок сессии пережил дочистку"
 
@@ -390,7 +375,7 @@ async def test_the_drain_does_not_abandon_a_session_it_took(tmp_path, reaper):
 #: «Агент» для сценария ревью целиком: две глухие к SIGTERM сессии, снос
 #: снимают снаружи посреди закрытия первой, а бюджет дочистки меньше, чем
 #: закрытие второй. После этого агент просто выходит.
-_AGENT = r'''
+_AGENT = r"""
 import asyncio, json, sys
 from pathlib import Path
 
@@ -418,7 +403,7 @@ async def main():
 
 
 asyncio.run(main())
-'''
+"""
 
 
 def test_no_server_survives_the_agent_after_an_interrupted_teardown(tmp_path, reaper):
@@ -434,14 +419,15 @@ def test_no_server_survives_the_agent_after_an_interrupted_teardown(tmp_path, re
     # Исходники рабочей копии: без них агент взял бы установленную копию
     # gc_core и проверял бы не тот код.
     src_dirs = [str(d) for d in package_src_dirs()]
-    env["PYTHONPATH"] = os.pathsep.join(
-        src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
-    )
+    env["PYTHONPATH"] = os.pathsep.join(src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     cfg = _cfg(tmp_path, child_on_term="ignore")
 
     done = subprocess.run(
         [sys.executable, "-c", _AGENT, json.dumps(cfg)],
-        env=env, capture_output=True, text=True, timeout=60,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     assert done.returncode == 0, done.stderr
@@ -468,7 +454,7 @@ async def test_a_sync_close_under_a_running_loop_still_kills_the_group(tmp_path,
     proc = session._proc
     registry._sessions[("embedder", "srv")] = session
 
-    registry.close_everything()                  # синхронно, прямо на loop теста
+    registry.close_everything()  # синхронно, прямо на loop теста
 
     assert registry._sessions == {}, "проверка пустая: закрытие сессию не взяло"
     assert _dead_within(proc, _AT_ONCE_SEC), "сессия снята с реестра, а её процесс жив"

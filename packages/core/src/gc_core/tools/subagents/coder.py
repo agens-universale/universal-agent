@@ -126,4 +126,3 @@ CODE GENERATOR HANDOFF ADDENDUM
     @classmethod
     def get_agent_specification(cls):
         return cls.tool_specification
-

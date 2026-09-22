@@ -63,9 +63,7 @@ class SwarmMonitor:
     def start_in_background(self) -> None:
         if self._thread is not None:
             return
-        self._thread = threading.Thread(
-            target=self._run_loop, name="swarm-monitor", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run_loop, name="swarm-monitor", daemon=True)
         self._thread.start()
 
     def _check_one_swarm(self, swarm_id: str) -> None:

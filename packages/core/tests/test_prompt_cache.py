@@ -1,5 +1,6 @@
 """Разметка prompt cache для claude-моделей: предикат по id и разметка payload
 (спека docs/specs/2026-09-07-prompt-cache-design.md §4)."""
+
 from copy import deepcopy
 
 import pytest
@@ -34,8 +35,11 @@ def _steady_payload() -> dict:
         "messages": [
             {"role": "system", "content": "You are an agent.", "name": "sys"},
             {"role": "user", "content": "do it"},
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function",
-                                                                 "function": {"name": "fs_read", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "fs_read", "arguments": "{}"}}],
+            },
             {"role": "tool", "tool_call_id": "c1", "content": "out-1"},
             {"role": "tool", "tool_call_id": "c1", "content": "out-2"},
         ],
@@ -73,9 +77,7 @@ def test_first_call_marks_system_and_user():
     payload = {"messages": [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]}
     result = apply_prompt_cache(payload)
     assert isinstance(result["messages"][0]["content"], list)
-    assert result["messages"][1]["content"] == [
-        {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
-    ]
+    assert result["messages"][1]["content"] == [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}]
 
 
 def test_tail_skips_assistant_and_blank_messages():
@@ -151,16 +153,19 @@ def test_cache_control_constant_is_ephemeral_without_ttl():
     assert CACHE_CONTROL == {"type": "ephemeral"}
 
 
-@pytest.mark.parametrize("setting,model_id,expected", [
-    (None, "anthropic/claude-opus-5", True),        # не задано — авто по id
-    (None, "google/gemini-2.5-flash", False),
-    (True, "google/gemini-2.5-flash", True),
-    (False, "anthropic/claude-opus-5", False),
-    (0, "anthropic/claude-opus-5", False),          # CLI --claude_prompt_cache 0 → int мимо схемы
-    (1, "google/gemini-2.5-flash", True),           # CLI --claude_prompt_cache 1 → int мимо схемы
-    ("disabled", "anthropic/claude-opus-5", True),  # незнакомая строка — как не задано (авто)
-    ("disabled", "google/gemini-2.5-flash", False), # …и никогда не включает принудительно
-    ("auto", "google/gemini-2.5-flash", False),
-])
+@pytest.mark.parametrize(
+    "setting,model_id,expected",
+    [
+        (None, "anthropic/claude-opus-5", True),  # не задано — авто по id
+        (None, "google/gemini-2.5-flash", False),
+        (True, "google/gemini-2.5-flash", True),
+        (False, "anthropic/claude-opus-5", False),
+        (0, "anthropic/claude-opus-5", False),  # CLI --claude_prompt_cache 0 → int мимо схемы
+        (1, "google/gemini-2.5-flash", True),  # CLI --claude_prompt_cache 1 → int мимо схемы
+        ("disabled", "anthropic/claude-opus-5", True),  # незнакомая строка — как не задано (авто)
+        ("disabled", "google/gemini-2.5-flash", False),  # …и никогда не включает принудительно
+        ("auto", "google/gemini-2.5-flash", False),
+    ],
+)
 def test_prompt_cache_enabled_setting_beats_autodetect(setting, model_id, expected):
     assert prompt_cache_enabled(setting, model_id) is expected

@@ -18,6 +18,7 @@
 Тесты ниже проверяют свойство на всех трёх реестрах сразу, без сети и
 подпроцессов: важно не «как закрывается», а «чьё закрывается».
 """
+
 import asyncio
 
 import pytest
@@ -57,6 +58,7 @@ def test_set_reset_pair():
 
 # --- persistent stdio ------------------------------------------------------
 
+
 class _FakeSession:
     def __init__(self) -> None:
         self.closed = False
@@ -70,9 +72,7 @@ def stdio_registry(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio
 
     reg = persistent_stdio.PersistentStdioRegistry()
-    monkeypatch.setattr(
-        persistent_stdio, "PersistentStdioSession", lambda cfg: _FakeSession()
-    )
+    monkeypatch.setattr(persistent_stdio, "PersistentStdioSession", lambda cfg: _FakeSession())
     return reg
 
 
@@ -118,6 +118,7 @@ def test_stdio_close_everything_closes_foreign_too(stdio_registry):
 
 
 # --- stream_* --------------------------------------------------------------
+
 
 class _FakeCm:
     def __init__(self, log: list, name: str) -> None:
@@ -194,6 +195,7 @@ async def test_stream_teardown_spares_a_foreign_owner():
 
 # --- свои http/sse: session-id --------------------------------------------
 
+
 def test_own_http_session_ids_are_per_owner():
     """Один session-id на всех означал бы общее состояние НА СЕРВЕРЕ.
 
@@ -214,6 +216,7 @@ def test_own_http_session_ids_are_per_owner():
 
 
 # --- перенос владельца через границы исполнения ---------------------------
+
 
 @pytest.mark.asyncio
 async def test_owner_survives_to_thread():
@@ -236,6 +239,7 @@ async def test_owner_survives_abandonable_thread():
 @pytest.mark.asyncio
 async def test_parallel_tasks_keep_separate_owners():
     """Каждая задача gather живёт со своим владельцем, они не путаются."""
+
     async def worker(name: str) -> str:
         with use_owner(name):
             await asyncio.sleep(0)

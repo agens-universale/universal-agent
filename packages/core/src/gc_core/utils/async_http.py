@@ -11,6 +11,7 @@ event loop. Клиент, созданный на одном loop и переи�
 401), env-прокси и REQUESTS_CA_BUNDLE не подхватываем — CA и прокси передаём
 явно.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -65,7 +65,7 @@ def get_md5_hash(obj):
     """Returns an md5 hash of a Python object for consistent IDs."""
     # For dicts/lists, use json serialization for stable hashing
     s = json.dumps(obj)
-    return hashlib.md5(s.encode('utf-8')).hexdigest()
+    return hashlib.md5(s.encode("utf-8")).hexdigest()
 
 
 # Только закрытая пара, нежадно. Незакрытый ``<think>`` в прозе не трогаем
@@ -108,12 +108,14 @@ def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
         "id": "msg_" + get_md5_hash(dct_choice),
         "type": "message",
         "status": "completed",
-        "content": [{
-            "type": "output_text",
-            "annotations": [],
-            "logprobs": [],
-            "text": text,
-        }],
+        "content": [
+            {
+                "type": "output_text",
+                "annotations": [],
+                "logprobs": [],
+                "text": text,
+            }
+        ],
         "role": role,
     }
     if reasoning is not None:
@@ -131,7 +133,7 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
     Совсем пустой choice — пустой output (цикл bounce), не ValueError.
     """
     output_list = []
-    for dct_choice in dct['choices']:
+    for dct_choice in dct["choices"]:
         choice_error = dct_choice.get("error")
         if isinstance(choice_error, dict):
             err_code = choice_error.get("code")
@@ -147,7 +149,9 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
         reasoning_text = nonempty_reasoning_text(msg_obj)
         has_tools = bool(msg_obj.get("tool_calls"))
         if not _accept_choice_finish_reason(
-            dct, dct_choice.get("finish_reason"), logger_override,
+            dct,
+            dct_choice.get("finish_reason"),
+            logger_override,
             has_content=bool(content),
             has_tool_calls=has_tools,
             has_reasoning=reasoning_text is not None,
@@ -155,7 +159,8 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
             continue
 
         text_out, item_reasoning = _message_text_and_reasoning(
-            content, reasoning_text,
+            content,
+            reasoning_text,
             has_tools=has_tools,
             persist_reasoning_content=persist_reasoning_content,
         )
@@ -199,16 +204,17 @@ def _accept_choice_finish_reason(
         if logger_override is not None:
             logger_override.error(
                 "Empty choice discarded (unknown/empty finish_reason=%r): payload=%s",
-                fr, _safe_json_for_log(dct),
+                fr,
+                _safe_json_for_log(dct),
             )
         return False
     if logger_override is None:
         return True
     if _decision.unknown:
         logger_override.warning(
-            "Unknown finish_reason=%r accepted permissively "
-            "(content/tool_calls/reasoning present): payload=%s",
-            fr, _safe_json_for_log(dct),
+            "Unknown finish_reason=%r accepted permissively (content/tool_calls/reasoning present): payload=%s",
+            fr,
+            _safe_json_for_log(dct),
         )
     if _decision.kind == FINISH_KIND_LENGTH:
         logger_override.warning(
@@ -219,8 +225,7 @@ def _accept_choice_finish_reason(
     return True
 
 
-def _message_text_and_reasoning(content, reasoning_text, *, has_tools: bool,
-                                persist_reasoning_content: bool):
+def _message_text_and_reasoning(content, reasoning_text, *, has_tools: bool, persist_reasoning_content: bool):
     """→ (text message-item канона либо None — message не эмитим, его reasoning_content)."""
     item_reasoning = reasoning_text if persist_reasoning_content else None
     if has_tools:
@@ -234,9 +239,7 @@ def _message_text_and_reasoning(content, reasoning_text, *, has_tools: bool,
         return text_out, item_reasoning
     if content:
         # Think + проза при strip — только проза; think-only content — as-is.
-        text_out = _canon_content_text(
-            content, persist_reasoning=persist_reasoning_content
-        )
+        text_out = _canon_content_text(content, persist_reasoning=persist_reasoning_content)
         return text_out, item_reasoning
     if reasoning_text is None:
         return None, item_reasoning
@@ -265,25 +268,23 @@ def _message_text_with_tools(content, *, item_reasoning, persist_reasoning_conte
 
 
 def _function_call_item(tool_call_dict) -> dict:
-    if tool_call_dict['type'] != 'function':
+    if tool_call_dict["type"] != "function":
         raise ValueError("Unknown logic")
     id_tool_call = get_md5_hash(tool_call_dict)
     return {
-        "arguments": tool_call_dict['function']['arguments'],
-        "call_id": tool_call_dict['id'],
-        "name": tool_call_dict['function']['name'],
+        "arguments": tool_call_dict["function"]["arguments"],
+        "call_id": tool_call_dict["id"],
+        "name": tool_call_dict["function"]["name"],
         "type": "function_call",
         "id": "fc_" + id_tool_call,
-        "status": "completed"
+        "status": "completed",
     }
 
 
-def output_chat_completion_to_response(
-    dct, logger_override=None, log_context=None, *, persist_reasoning_content=False
-):
+def output_chat_completion_to_response(dct, logger_override=None, log_context=None, *, persist_reasoning_content=False):
     """Converts a chat completion response dict to a model response format."""
     dct_output = deepcopy(dct)
-    dct_output['id'] = dct_output.get('id', get_md5_hash(dct_output))
+    dct_output["id"] = dct_output.get("id", get_md5_hash(dct_output))
     # Backends may return either `created` (chat/completions-like)
     # or already normalized `created_at`.
     created = dct_output.pop("created", None)
@@ -293,7 +294,7 @@ def output_chat_completion_to_response(
         dct_output["created_at"] = None
 
     try:
-        dct_output['output'] = get_output_list(
+        dct_output["output"] = get_output_list(
             dct_output,
             logger_override=logger_override,
             persist_reasoning_content=persist_reasoning_content,
@@ -307,10 +308,10 @@ def output_chat_completion_to_response(
                 exc_info=True,
             )
         raise
-    if 'system_fingerprint' in dct_output:
-        del dct_output['system_fingerprint']
+    if "system_fingerprint" in dct_output:
+        del dct_output["system_fingerprint"]
 
-    dct_output['parallel_tool_calls'] = True
-    dct_output['status'] = "completed"
-    dct_output['object'] = 'response'
+    dct_output["parallel_tool_calls"] = True
+    dct_output["status"] = "completed"
+    dct_output["object"] = "response"
     return dct_output

@@ -2,6 +2,7 @@
 
 Requires the `harbor` framework (dependency-group `test`).
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -12,8 +13,7 @@ import pytest
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
 # reorder sys.path so real site-packages wins, then evict cached shadows.
 _harbor_sp = next(
-    (p for p in sys.path
-     if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+    (p for p in sys.path if (Path(p) / "harbor" / "agents" / "base.py").exists()),
     None,
 )
 if _harbor_sp:
@@ -76,10 +76,7 @@ def test_orphan_tool_result_falls_back_to_user_step():
 def test_stringify_handles_none_str_and_parts():
     assert _stringify_content(None) == ""
     assert _stringify_content("x") == "x"
-    assert (
-        _stringify_content([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}])
-        == "a\nb"
-    )
+    assert _stringify_content([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]) == "a\nb"
 
 
 def test_gc_cli_config_overrides_merge_into_build_config():
@@ -135,8 +132,12 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.run_context.acreate_run_context", _actx)
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", FakeExecutor)
 
-    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s",
-                          gc_cli_config={"completions_url": "http://test/v1/chat/completions"})
+    agent = GcCliExternal(
+        logs_dir=tmp_path,
+        model_name="openai/m",
+        session_id="s",
+        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+    )
     context = SimpleNamespace(metadata=None)
 
     with pytest.raises(RuntimeError, match="HTTPError"):
@@ -275,6 +276,7 @@ def test_calls_without_usage_are_reported_not_hidden():
 
 def test_reporting_failure_never_breaks_the_run():
     """It runs inside a finally that may be unwinding a timeout."""
+
     class Exploding:
         @property
         def usage(self):

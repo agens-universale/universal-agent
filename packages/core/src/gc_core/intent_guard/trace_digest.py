@@ -35,10 +35,7 @@ def _without_last_turn_finish_call(messages: list[dict[str, Any]]) -> list[dict[
                 message
                 for pos, message in enumerate(messages)
                 if pos != idx
-                and not (
-                    message.get("type") == "function_call_output"
-                    and message.get("call_id") == call_id
-                )
+                and not (message.get("type") == "function_call_output" and message.get("call_id") == call_id)
             ]
     return list(messages)
 
@@ -57,9 +54,7 @@ def build_finish_gate_trace_digest(
 
     Axis A intent lives in ``state.current_user_intent``; not duplicated in the digest.
     """
-    history_messages = [
-        m for m in (getattr(state, "messages", None) or []) if isinstance(m, dict)
-    ]
+    history_messages = [m for m in (getattr(state, "messages", None) or []) if isinstance(m, dict)]
     if exclude_pending_turn_finish:
         history_messages = _without_last_turn_finish_call(history_messages)
 

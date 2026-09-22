@@ -60,10 +60,7 @@ class ListFiles(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": (
-                            "Absolute path of the directory to list. "
-                            "Must be an existing directory."
-                        ),
+                        "description": ("Absolute path of the directory to list. Must be an existing directory."),
                     },
                     "glob": {
                         "type": "string",
@@ -79,7 +76,7 @@ class ListFiles(AbstractSimpleTool):
                             "How deep to list. "
                             "0 = only immediate children of path (default). "
                             "Higher values include nested directories."
-                        )
+                        ),
                     },
                     "max_entries": {
                         "type": "integer",
@@ -87,18 +84,18 @@ class ListFiles(AbstractSimpleTool):
                         "description": (
                             "Maximum entries to return (files + directories). "
                             "Default 200. truncated=true if the directory has more."
-                        )
-                    }
+                        ),
+                    },
                 },
                 "required": ["path"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: fs_list_files
+        description = """Tool name: fs_list_files
 List files and directories under an absolute directory path.
 Default max_depth=0 = immediate children only; raise max_depth to list nested entries.
 Optional glob filters the listing (only paths within max_depth).
@@ -116,7 +113,7 @@ Examples:
 {"path": "/home/user/project"}
 {"path": "/home/user/project", "max_depth": 2}
 {"path": "/home/user/project", "glob": "*.py", "max_depth": 0}
-'''
+"""
         return description
 
     def _result(
@@ -142,8 +139,7 @@ Examples:
         }
         if truncated:
             payload["guidance"] = (
-                f"Results truncated (showing up to {max_entries} entries). "
-                "Increase max_entries if you need more."
+                f"Results truncated (showing up to {max_entries} entries). Increase max_entries if you need more."
             )
         if glob is not None:
             payload["glob"] = glob
@@ -191,7 +187,6 @@ Examples:
         extra_allowed = [skills_root] if skills_root else None
         return cfg, context.launch_root, extra_allowed
 
-
     @enforce_read_guard(path_arg="path")
     async def acall(
         self,
@@ -232,8 +227,11 @@ Examples:
         # never tool-exec 60k. Local: os.listdir / os.walk. Name/glob filter is
         # Python on that stream (no separate native find dump).
         result, hit_limit, enum_error = await self._aenumerate(
-            path, file_matcher=file_matcher, max_depth=effective_max_depth,
-            max_entries=max_entries, rg=(_rg_cfg, _rg_root, _rg_extra),
+            path,
+            file_matcher=file_matcher,
+            max_depth=effective_max_depth,
+            max_entries=max_entries,
+            rg=(_rg_cfg, _rg_root, _rg_extra),
         )
         if enum_error is not None:
             return _result(ok=False, error=enum_error)
@@ -333,8 +331,13 @@ Examples:
         try:
             if max_depth == 0:
                 hit_limit = await self._list_directory(
-                    path, result, file_matcher=file_matcher, max_entries=scan_max_entries,
-                    rg_cfg=rg_cfg, rg_root=rg_root, rg_extra=rg_extra,
+                    path,
+                    result,
+                    file_matcher=file_matcher,
+                    max_entries=scan_max_entries,
+                    rg_cfg=rg_cfg,
+                    rg_root=rg_root,
+                    rg_extra=rg_extra,
                 )
             else:
                 hit_limit = await self._walk_directory(
@@ -343,7 +346,9 @@ Examples:
                     file_matcher=file_matcher,
                     max_depth=max_depth,
                     max_entries=scan_max_entries,
-                    rg_cfg=rg_cfg, rg_root=rg_root, rg_extra=rg_extra,
+                    rg_cfg=rg_cfg,
+                    rg_root=rg_root,
+                    rg_extra=rg_extra,
                 )
         except WalkOutputTooLargeError as e:
             return result, False, {"type": "walk_too_large", "message": str(e)}
@@ -393,6 +398,7 @@ Examples:
         rg_extra=None,
     ):
         """Walk (max_depth>=1) via backend.iter_walk (os.walk on local)."""
+
         def _should_descend(abs_path: str) -> bool:
             return self._may_descend(abs_path, root_path, max_depth, rg_cfg, rg_root, rg_extra)
 

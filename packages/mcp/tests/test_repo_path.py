@@ -1,4 +1,5 @@
 """Тесты repo_path для editable install."""
+
 from __future__ import annotations
 
 import sys
@@ -38,9 +39,9 @@ def test_foreign_monorepo_is_not_our_root(tmp_path) -> None:
     """
     (tmp_path / "packages" / "core" / "src" / "foo").mkdir(parents=True)
     (tmp_path / "packages" / "core" / "pyproject.toml").write_text(
-        '[project]\nname = "someone-else"\n', encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname = "someone-else-meta"\n', encoding="utf-8")
+        '[project]\nname = "someone-else"\n', encoding="utf-8"
+    )
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "someone-else-meta"\n', encoding="utf-8")
     assert repo_root_from(tmp_path / "packages" / "core" / "src" / "foo" / "m.py") is None
 
 

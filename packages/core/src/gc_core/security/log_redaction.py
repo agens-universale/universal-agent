@@ -3,6 +3,7 @@
 Standalone-модуль (только stdlib): применяется в JsonlFormatter как единая точка
 редактинга для stdout и файла. Не переиспользует tui/services/redact (UI-only).
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,26 +16,32 @@ MASK = "***REDACTED***"
 
 SENSITIVE_KEY_SUBSTRINGS = (
     "authorization",
-    "api_key", "api-key", "apikey", "x-api-key",
-    "secret", "password", "passwd", "cookie", "set-cookie", "credential",
+    "api_key",
+    "api-key",
+    "apikey",
+    "x-api-key",
+    "secret",
+    "password",
+    "passwd",
+    "cookie",
+    "set-cookie",
+    "credential",
 )
 
 # "token" как отдельное слово-компонент, НО не "tokens"-множественное
 # (prompt_tokens / completion_tokens / max_tokens — счётчики/лимиты, не секреты).
 # Ловит: token, auth_token, access_token, refresh_token, token_id, x-token.
-SENSITIVE_KEY_PATTERNS = (
-    re.compile(r"(?:^|[_\-])token(?:$|[_\-])", re.IGNORECASE),
-)
+SENSITIVE_KEY_PATTERNS = (re.compile(r"(?:^|[_\-])token(?:$|[_\-])", re.IGNORECASE),)
 
 # Заякоренные паттерны популярных секретов (низкий false-positive; без энтропийных).
 SECRET_VALUE_PATTERNS = (
     # --- HTTP auth ---
-    r"(?i)\bbearer\s+[A-Za-z0-9._\-]+",                          # Bearer <token>
-    r"(?i)\bbasic\s+[A-Za-z0-9+/=]+",                           # Basic <base64>
+    r"(?i)\bbearer\s+[A-Za-z0-9._\-]+",  # Bearer <token>
+    r"(?i)\bbasic\s+[A-Za-z0-9+/=]+",  # Basic <base64>
     r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",  # JWT (eyJ…)
     # --- GitHub ---
-    r"\bgh[pousr]_[A-Za-z0-9]{30,}",                            # ghp_/gho_/ghu_/ghs_/ghr_
-    r"\bgithub_pat_[A-Za-z0-9_]{20,}",                          # fine-grained PAT
+    r"\bgh[pousr]_[A-Za-z0-9]{30,}",  # ghp_/gho_/ghu_/ghs_/ghr_
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}",  # fine-grained PAT
     # --- OpenAI/OpenRouter/Anthropic (sk-…, sk-ant-…, sk-or-…) ---
     r"\bsk-[A-Za-z0-9_\-]{16,}",
     # --- Stripe (sk_live_/sk_test_/rk_live_…) ---
@@ -42,12 +49,12 @@ SECRET_VALUE_PATTERNS = (
     # --- AWS access key id ---
     r"\bAKIA[0-9A-Z]{16}\b",
     # --- GCP / Google ---
-    r"\bAIza[0-9A-Za-z_\-]{35}\b",                              # Google API key
-    r"\bya29\.[0-9A-Za-z_\-]{20,}",                             # Google OAuth access token
+    r"\bAIza[0-9A-Za-z_\-]{35}\b",  # Google API key
+    r"\bya29\.[0-9A-Za-z_\-]{20,}",  # Google OAuth access token
     # --- GitLab / npm / Slack ---
-    r"\bglpat-[0-9A-Za-z_\-]{20}",                             # GitLab PAT
-    r"\bnpm_[A-Za-z0-9]{36}",                                  # npm token
-    r"\bxox[baprs]-[0-9A-Za-z-]{10,}",                         # Slack token
+    r"\bglpat-[0-9A-Za-z_\-]{20}",  # GitLab PAT
+    r"\bnpm_[A-Za-z0-9]{36}",  # npm token
+    r"\bxox[baprs]-[0-9A-Za-z-]{10,}",  # Slack token
     # --- PEM private key block (RSA/EC/DSA/OPENSSH/PGP) ---
     r"-----BEGIN[A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z0-9 ]*PRIVATE KEY-----",
 )
@@ -64,17 +71,13 @@ class Redactor:
         extra_keys: Iterable[str] = (),
         extra_patterns: Iterable[str] = (),
     ) -> None:
-        self._key_substrings = tuple(SENSITIVE_KEY_SUBSTRINGS) + tuple(
-            str(k).lower() for k in (extra_keys or ())
-        )
+        self._key_substrings = tuple(SENSITIVE_KEY_SUBSTRINGS) + tuple(str(k).lower() for k in (extra_keys or ()))
         compiled = [re.compile(p) for p in SECRET_VALUE_PATTERNS]
-        for p in (extra_patterns or ()):
+        for p in extra_patterns or ():
             try:
                 compiled.append(re.compile(str(p)))
             except re.error as exc:
-                _logger.warning(
-                    "log_redaction: invalid extra pattern %r skipped: %s", p, exc
-                )
+                _logger.warning("log_redaction: invalid extra pattern %r skipped: %s", p, exc)
         self._patterns = tuple(compiled)
 
     def _is_sensitive_key(self, key: Any) -> bool:

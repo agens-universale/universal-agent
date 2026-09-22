@@ -11,6 +11,7 @@
 `test_execution_workspace.py` имеет синхронный `exec`, поэтому там `pwd`
 отвечает. Здесь двойник намеренно async-only — как настоящая песочница.
 """
+
 import asyncio
 import logging
 import time
@@ -80,9 +81,7 @@ async def test_generic_pwd_answers_for_an_async_only_sandbox():
     await aprime_backend_cwd(backend, {})
 
     assert backend.asked == 1, "окружение не спросили вовсе"
-    assert discover_backend_cwd(backend) == "/work", (
-        "узнанный каталог не виден синхронным сборщикам рабочей области"
-    )
+    assert discover_backend_cwd(backend) == "/work", "узнанный каталог не виден синхронным сборщикам рабочей области"
     assert build_execution_workspace(backend).root == "/work"
 
 
@@ -97,9 +96,7 @@ async def test_a_silent_environment_is_a_loud_error():
     with pytest.raises(WorkspaceRootUnknownError) as excinfo:
         await aprime_backend_cwd(backend, {})
 
-    assert "launch_root" in str(excinfo.value), (
-        "в отказе нет подсказки, чем его лечить"
-    )
+    assert "launch_root" in str(excinfo.value), "в отказе нет подсказки, чем его лечить"
 
 
 async def test_a_config_root_makes_the_failure_harmless():
@@ -167,17 +164,13 @@ def _acreate_run_context_node():
 
     origin = importlib.util.find_spec("gc_core.run_context").origin
     tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
-    return next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context"
-    )
+    return next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
 
 
 def _calls_named(node, name: str) -> list:
     import ast
 
-    return [n.lineno for n in ast.walk(node)
-            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == name]
+    return [n.lineno for n in ast.walk(node) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == name]
 
 
 def test_the_root_is_asked_before_mcp_discovery():
@@ -209,23 +202,22 @@ def test_a_failed_prime_releases_the_run_logger():
 
     node = _acreate_run_context_node()
     guarded = [
-        t for t in ast.walk(node)
+        t
+        for t in ast.walk(node)
         if isinstance(t, ast.Try)
-        and any(getattr(getattr(c, "func", None), "id", None) == "aprime_backend_cwd"
-                for stmt in t.body for c in ast.walk(stmt))
+        and any(
+            getattr(getattr(c, "func", None), "id", None) == "aprime_backend_cwd"
+            for stmt in t.body
+            for c in ast.walk(stmt)
+        )
     ]
-    assert guarded, (
-        "прогрев не обёрнут в try — его отказ оставит логгер прогона с открытым файлом"
-    )
+    assert guarded, "прогрев не обёрнут в try — его отказ оставит логгер прогона с открытым файлом"
 
     handlers = [h for t in guarded for h in t.handlers]
     released = any(
-        getattr(getattr(c, "func", None), "id", None) == "release_run_logger"
-        for h in handlers for c in ast.walk(h)
+        getattr(getattr(c, "func", None), "id", None) == "release_run_logger" for h in handlers for c in ast.walk(h)
     )
-    reraised = any(
-        isinstance(n, ast.Raise) and n.exc is None for h in handlers for n in ast.walk(h)
-    )
+    reraised = any(isinstance(n, ast.Raise) and n.exc is None for h in handlers for n in ast.walk(h))
 
     assert released, "логгер прогона не освобождается при отказе прогрева"
     assert reraised, "отказ проглочен: сборка обязана упасть дальше"

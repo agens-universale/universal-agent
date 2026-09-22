@@ -23,8 +23,7 @@ def timings_mod(monkeypatch):
 
     core._arequest_backend_canonical = _arequest_backend_canonical
 
-    async def _aapply_tool(*, tool_name, arguments, ctx, state, run_agent_func=None,
-                           call_id=None):
+    async def _aapply_tool(*, tool_name, arguments, ctx, state, run_agent_func=None, call_id=None):
         # A subagent tool calls the backend from inside the tool span.
         if tool_name == "subagent":
             await core._arequest_backend_canonical([], state, ctx)
@@ -39,6 +38,7 @@ def timings_mod(monkeypatch):
     # раньше — атрибут уже проставлен, и одна лишь подмена sys.modules не видна.
     # В одиночку файл при этом проходит, поэтому класс ловится только полным прогоном.
     import gc_core
+
     monkeypatch.setitem(sys.modules, "gc_core.processing_responses", core)
     monkeypatch.setattr(gc_core, "processing_responses", core, raising=False)
     monkeypatch.syspath_prepend(str(HARBOR))
@@ -61,9 +61,7 @@ def test_llm_and_tool_spans_are_recorded_per_step(timings_mod, tmp_path):
     sink.attach()
     state = SimpleNamespace(steps=3, default_model="test-model")
     asyncio.run(core._arequest_backend_canonical([], state, None))
-    asyncio.run(
-        core.aapply_tool(tool_name="execute_command", arguments="", ctx=None, state=state)
-    )
+    asyncio.run(core.aapply_tool(tool_name="execute_command", arguments="", ctx=None, state=state))
     sink.close()
 
     records = _read(tmp_path / "timings.jsonl")
@@ -113,7 +111,5 @@ def test_detached_sink_leaves_the_core_untouched(timings_mod, tmp_path):
     sink.attach()
     sink.close()
     state = SimpleNamespace(steps=0, default_model="m")
-    assert asyncio.run(
-        core.aapply_tool(tool_name="x", arguments="", ctx=None, state=state)
-    ) == "tool-result"
+    assert asyncio.run(core.aapply_tool(tool_name="x", arguments="", ctx=None, state=state)) == "tool-result"
     assert not (tmp_path / "timings.jsonl").read_text(encoding="utf-8")

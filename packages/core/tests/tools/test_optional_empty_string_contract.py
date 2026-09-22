@@ -67,9 +67,7 @@ _ENUM_CASES = [
 
 @pytest.mark.parametrize("strict", [True, False], ids=["strict", "non-strict"])
 @pytest.mark.parametrize("fabric, tool_name, base, field", _ENUM_CASES)
-def test_empty_string_in_enum_field_is_treated_as_unset(
-    fabric, tool_name, base, field, strict
-):
+def test_empty_string_in_enum_field_is_treated_as_unset(fabric, tool_name, base, field, strict):
     out = _call(fabric, tool_name, {**base, field: ""}, strict=strict)
     assert field not in out, f"{field}='' должен сниматься, а не доезжать до инструмента"
     for key, value in base.items():
@@ -90,8 +88,10 @@ def test_free_form_string_keeps_the_promise(strict):
     props = _spec(WriteToFile, strict=strict)["parameters"]["properties"]
     assert _EMPTY_STRING_PROMISE in (props["encoding"].get("description") or "").lower()
     out = _call(
-        WriteToFile, "fs_write_file",
-        {"path": "/tmp/x.txt", "content": "hi", "encoding": ""}, strict=strict,
+        WriteToFile,
+        "fs_write_file",
+        {"path": "/tmp/x.txt", "content": "hi", "encoding": ""},
+        strict=strict,
     )
     assert "encoding" not in out
 
@@ -99,8 +99,10 @@ def test_free_form_string_keeps_the_promise(strict):
 @pytest.mark.parametrize("strict", [True, False], ids=["strict", "non-strict"])
 def test_real_enum_value_survives(strict):
     out = _call(
-        WriteToFile, "fs_write_file",
-        {"path": "/tmp/x.txt", "content": "hi", "newline": "lf"}, strict=strict,
+        WriteToFile,
+        "fs_write_file",
+        {"path": "/tmp/x.txt", "content": "hi", "newline": "lf"},
+        strict=strict,
     )
     assert out["newline"] == "lf"
 
@@ -110,8 +112,10 @@ def test_garbage_enum_value_still_rejected(strict):
     """Послабление касается только пустой строки: мусор обязан падать как раньше."""
     with pytest.raises(WrongFunctionArgumentsException):
         _call(
-            WriteToFile, "fs_write_file",
-            {"path": "/tmp/x.txt", "content": "hi", "newline": "zz"}, strict=strict,
+            WriteToFile,
+            "fs_write_file",
+            {"path": "/tmp/x.txt", "content": "hi", "newline": "zz"},
+            strict=strict,
         )
 
 
@@ -120,7 +124,9 @@ def test_preserve_empty_string_field_is_untouched():
     spec = _spec(AppendToFile, strict=True)
     assert "separator" not in resolve_optional_property_keys(spec["parameters"])
     out = _call(
-        AppendToFile, "fs_append_file",
-        {"path": "/tmp/x.txt", "content": "hi", "separator": ""}, strict=True,
+        AppendToFile,
+        "fs_append_file",
+        {"path": "/tmp/x.txt", "content": "hi", "separator": ""},
+        strict=True,
     )
     assert out["separator"] == ""

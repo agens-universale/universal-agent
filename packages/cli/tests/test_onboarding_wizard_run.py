@@ -6,8 +6,10 @@ from gc_core import onboarding, onboarding_config_writer
 class _FakeMcp:
     def __init__(self):
         self.installed = []
+
     def installable_names(self):
         return ["office", "science", "duckduckgo"]
+
     def install(self, name=None):
         self.installed.append(name)
         return 0
@@ -30,11 +32,15 @@ def test_run_writes_fields_installs_selected_and_returns_configured(tmp_path, mo
         encoding="utf-8",
     )
     # После записи load_config должен вернуть «настроено».
-    monkeypatch.setattr(wz, "_reload_config", lambda: {
-        "completions_url": "https://x/v1",
-        "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-        "model": "gigacode_agent_v1.6_rc",
-    })
+    monkeypatch.setattr(
+        wz,
+        "_reload_config",
+        lambda: {
+            "completions_url": "https://x/v1",
+            "chat_completion_headers": {"Authorization": "Bearer sk-1"},
+            "model": "gigacode_agent_v1.6_rc",
+        },
+    )
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
@@ -62,11 +68,15 @@ def test_run_returns_false_when_still_pending(tmp_path, monkeypatch):
         '  model: "gigacode_agent_v1.6_rc"\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(wz, "_reload_config", lambda: {
-        "completions_url": onboarding.URL_SENTINEL,   # так и не задан
-        "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-        "model": "gigacode_agent_v1.6_rc",
-    })
+    monkeypatch.setattr(
+        wz,
+        "_reload_config",
+        lambda: {
+            "completions_url": onboarding.URL_SENTINEL,  # так и не задан
+            "chat_completion_headers": {"Authorization": "Bearer sk-1"},
+            "model": "gigacode_agent_v1.6_rc",
+        },
+    )
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
@@ -84,15 +94,34 @@ def test_run_without_mcp_skips_mcp(tmp_path, monkeypatch):
         '  completions_url: "http://your-backend:PORT/v1/chat/completions"\n'
         "  chat_completion_headers:\n"
         '    Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"\n'
-        "agent:\n  model: \"m\"\n", encoding="utf-8")
-    monkeypatch.setattr(wz, "_reload_config", lambda: {
-        "completions_url": "https://x/v1", "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"})
-    it = iter(["", "1", "sk"])   # endpoint skip, auth "1" token, token
+        'agent:\n  model: "m"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        wz,
+        "_reload_config",
+        lambda: {
+            "completions_url": "https://x/v1",
+            "chat_completion_headers": {"Authorization": "Bearer sk"},
+            "model": "m",
+        },
+    )
+    it = iter(["", "1", "sk"])  # endpoint skip, auth "1" token, token
     io = wz.WizardIO(reader=lambda p, s: next(it), printer=lambda m: None)
     # mcp не передаём → шаг MCP не должен вызваться (нет исключения от отсутствующего mcp)
-    assert wz.run({"completions_url": "http://your-backend:PORT/v1/chat/completions",
-                   "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"}, "model": "m"},
-                  cfg_file, review_all=False, io=io) is True
+    assert (
+        wz.run(
+            {
+                "completions_url": "http://your-backend:PORT/v1/chat/completions",
+                "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+                "model": "m",
+            },
+            cfg_file,
+            review_all=False,
+            io=io,
+        )
+        is True
+    )
 
 
 def test_run_writes_registry_entry_and_flat_connection(tmp_path, monkeypatch):
@@ -103,15 +132,20 @@ def test_run_writes_registry_entry_and_flat_connection(tmp_path, monkeypatch):
     from gc_core.bundled_assets import bundled_root
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)   # без сети
+    monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)  # без сети
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(
-        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    cfg_file.write_text((bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file)))
 
     starting = cfg_mod.load_config(str(cfg_file))
@@ -136,33 +170,36 @@ def test_run_with_registry_but_skipped_endpoint_stays_unconfigured(tmp_path, mon
     from gc_core.bundled_assets import bundled_root
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(
-        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
+    cfg_file.write_text((bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file)))
 
     printed = []
-    it = iter(["", "3", "qwen3-coder"])   # адрес пропущен, auth-меню «3» (пропустить), модель
+    it = iter(["", "3", "qwen3-coder"])  # адрес пропущен, auth-меню «3» (пропустить), модель
     io = wz.WizardIO(reader=lambda p, s: next(it), printer=printed.append)
-    assert wz.run(cfg_mod.load_config(str(cfg_file)), cfg_file,
-                  review_all=False, io=io, mcp=None) is False
+    assert wz.run(cfg_mod.load_config(str(cfg_file)), cfg_file, review_all=False, io=io, mcp=None) is False
 
     raw = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
-    assert raw["models"] == {"qwen3-coder": {"model": "qwen3-coder"}}    # модель записана
+    assert raw["models"] == {"qwen3-coder": {"model": "qwen3-coder"}}  # модель записана
     assert raw["backend"]["completions_url"] == onboarding.URL_SENTINEL  # адрес так и не задан
     blob = "\n".join(printed)
     assert "настройка не завершена" in blob
     assert "backend.completions_url" in blob
 
 
-def test_run_reports_reload_failure_instead_of_crashing_after_all_answers(
-        tmp_path, monkeypatch):
+def test_run_reports_reload_failure_instead_of_crashing_after_all_answers(tmp_path, monkeypatch):
     """Ревью нашло: `_reload_config()` в конце run() не защищён вовсе. Файл на
     диске синтаксически сломан НАСТОЛЬКО, что патч поверх него отклоняет сама
     `validate_config_text` (первый except уже это ловит честно — «конфиг не
@@ -185,12 +222,16 @@ def test_run_reports_reload_failure_instead_of_crashing_after_all_answers(
     monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path))
     monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)
 
-    answers = iter([
-        "https://x/v1/chat/completions",  # адрес
-        "1", "sk-1",                      # авторизация: токен
-        "qwen/qwen3-coder",                # модель (список не пришёл — вручную)
-        "", "",                            # уровни — пропустить
-    ])
+    answers = iter(
+        [
+            "https://x/v1/chat/completions",  # адрес
+            "1",
+            "sk-1",  # авторизация: токен
+            "qwen/qwen3-coder",  # модель (список не пришёл — вручную)
+            "",
+            "",  # уровни — пропустить
+        ]
+    )
     printed = []
     io = wz.WizardIO(reader=lambda p, s: next(answers, ""), printer=printed.append)
 
@@ -200,9 +241,9 @@ def test_run_reports_reload_failure_instead_of_crashing_after_all_answers(
     # Файл действительно НЕ тронут — патч был отклонён валидацией до записи.
     assert cfg_file.read_text(encoding="utf-8") == "this is: : : not [valid yaml }\n"
     output = "\n".join(printed)
-    assert "конфиг не записан" in output          # первый, уже работавший except
-    assert "ответили на все вопросы" in output    # новое сообщение о втором крахе
-    assert output.count("невалидный YAML") >= 2   # причина названа дважды: коротко и в explain
+    assert "конфиг не записан" in output  # первый, уже работавший except
+    assert "ответили на все вопросы" in output  # новое сообщение о втором крахе
+    assert output.count("невалидный YAML") >= 2  # причина названа дважды: коротко и в explain
 
 
 def _phase_two_broken_stand(tmp_path, monkeypatch):
@@ -226,14 +267,15 @@ def _phase_two_broken_stand(tmp_path, monkeypatch):
         '    model: "qwen/qwen3-8b"\n'
         "slots:\n"
         '  default: "fast"\n'
-        '  max: "ghost"\n', encoding="utf-8")
+        '  max: "ghost"\n',
+        encoding="utf-8",
+    )
     monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path))
     monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)
     return cfg_file
 
 
-def test_a_reload_failure_after_a_landed_write_does_not_promise_an_untouched_file(
-        tmp_path, monkeypatch):
+def test_a_reload_failure_after_a_landed_write_does_not_promise_an_untouched_file(tmp_path, monkeypatch):
     """Ревью (M8б): человек ответил, запись ПРОШЛА (фаза 1 судит текст, а не
     собираемость стека), файл изменён — и мастер сообщал, что файл «остался в
     прежнем виде». Человек шёл искать свои ответы в нетронутом файле, где они уже
@@ -249,16 +291,15 @@ def test_a_reload_failure_after_a_landed_write_does_not_promise_an_untouched_fil
 
     assert configured is False
     text = cfg_file.read_text(encoding="utf-8")
-    assert "https://new.example/v1/chat/completions" in text     # ответ в файле
+    assert "https://new.example/v1/chat/completions" in text  # ответ в файле
     output = "\n".join(printed)
     assert "ответили на все вопросы" in output
     assert "прежнем виде" not in output and "не тронут" not in output
     assert "ваши ответы записаны" in output
-    assert "slots.max" in output                                 # причина названа
+    assert "slots.max" in output  # причина названа
 
 
-def test_a_reload_failure_without_a_write_still_says_the_file_is_untouched(
-        tmp_path, monkeypatch):
+def test_a_reload_failure_without_a_write_still_says_the_file_is_untouched(tmp_path, monkeypatch):
     """Второй исход того же места, и он обязан отличаться: человек прошёл мастер,
     ничего не заполнив, — писателя не звали, файл и правда прежний. Усреднить два
     исхода одним текстом значит соврать в одном из них (живой прогон стенда)."""
@@ -267,7 +308,7 @@ def test_a_reload_failure_without_a_write_still_says_the_file_is_untouched(
     loaded = onboarding.load_config_for_repair()
 
     printed: list = []
-    it = iter(["", "3", "", ""])                    # все ответы пропущены
+    it = iter(["", "3", "", ""])  # все ответы пропущены
     io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
     configured = wz.run(loaded.config, cfg_file, review_all=True, io=io)
 
@@ -285,18 +326,24 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
         '  completions_url: "http://your-backend:PORT/v1/chat/completions"\n'
         "  chat_completion_headers:\n"
         '    Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"\n'
-        "agent:\n  model: \"m\"\n", encoding="utf-8")
+        'agent:\n  model: "m"\n',
+        encoding="utf-8",
+    )
 
     # write_values бросает ValueError → run() обрабатывает без трейсбека
     def failing_write_values(*args, **kwargs):
         raise ValueError("схема не валидна")
 
     monkeypatch.setattr(onboarding_config_writer, "write_values", failing_write_values)
-    monkeypatch.setattr(wz, "_reload_config", lambda: {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": "Bearer real"},
-        "model": "m",
-    })
+    monkeypatch.setattr(
+        wz,
+        "_reload_config",
+        lambda: {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {"Authorization": "Bearer real"},
+            "model": "m",
+        },
+    )
 
     printed = []
     # Pending — ТОЛЬКО endpoint (auth и модель заданы): reader отвечает один раз,
@@ -326,17 +373,23 @@ def test_run_reports_an_oserror_without_traceback(tmp_path, monkeypatch):
         '  completions_url: "http://your-backend:PORT/v1/chat/completions"\n'
         "  chat_completion_headers:\n"
         '    Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"\n'
-        "agent:\n  model: \"m\"\n", encoding="utf-8")
+        'agent:\n  model: "m"\n',
+        encoding="utf-8",
+    )
 
     def failing_write_values(*args, **kwargs):
         raise OSError("[WinError 5] отказано в доступе")
 
     monkeypatch.setattr(onboarding_config_writer, "write_values", failing_write_values)
-    monkeypatch.setattr(wz, "_reload_config", lambda: {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": "Bearer real"},
-        "model": "m",
-    })
+    monkeypatch.setattr(
+        wz,
+        "_reload_config",
+        lambda: {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {"Authorization": "Bearer real"},
+            "model": "m",
+        },
+    )
 
     printed = []
     io = wz.WizardIO(reader=lambda p, s: "https://x/v1", printer=lambda m: printed.append(m))
@@ -352,8 +405,7 @@ def test_run_reports_an_oserror_without_traceback(tmp_path, monkeypatch):
     assert "[WinError 5] отказано в доступе" in output
 
 
-def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
-        tmp_path, monkeypatch):
+def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(tmp_path, monkeypatch):
     """Брат теста выше, второй полюс: там плоская запись — единственная, и «конфиг
     не записан» правда; здесь ей предшествует запись реестра, которая УЖЕ на диске.
 
@@ -364,16 +416,20 @@ def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
     from gc_core.bundled_assets import bundled_root
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(
-        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"),
-        encoding="utf-8")
+    cfg_file.write_text((bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file)))
 
     def failing_write_values(*args, **kwargs):
@@ -391,15 +447,16 @@ def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
     output = "\n".join(printed)
     assert "схема не валидна" in output
     assert "конфиг не записан" not in output
-    assert "модел" in output          # сказано, что записи моделей уже в файле
+    assert "модел" in output  # сказано, что записи моделей уже в файле
 
 
 def test_summary_reports_all_three_levels_from_the_fresh_config():
     """Итог читается из конфига, а не из введённого: человеку важно состояние
     файла, а не история его ответов."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
-                      "brain": {"model": "qwen/qwen3-235b"}},
-           "slots": {"default": "brain", "light": "fast"}}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}, "brain": {"model": "qwen/qwen3-235b"}},
+        "slots": {"default": "brain", "light": "fast"},
+    }
     lines = wz._summary_lines(cfg)
     assert lines == [
         "    модель       qwen/qwen3-235b  (имя записи «brain»)",
@@ -433,8 +490,7 @@ def test_summary_names_the_source_when_default_falls_back_to_a_level():
     """Без `slots.default` строка «модель» раньше показывала модель уровня
     `max` и отличалась от назначенной только отсутствием скобки — подсказка
     была слишком тихой, владелец её не заметил сразу и переспросил."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
-           "slots": {"max": "fast"}}
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {"max": "fast"}}
     lines = wz._summary_lines(cfg)
     assert lines[0] == "    модель       qwen/qwen3-8b  (default не задан — работает max)"
 
@@ -444,9 +500,11 @@ def test_summary_fallback_model_is_the_one_of_the_level_it_names():
     резолвом АКТИВНОГО уровня конфига, а подпись — обходом матрицы от default.
     При `level: light` с заданными обоими уровнями строка показывала модель light
     с подписью «работает max». Модель берётся из слота названного уровня."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
-                      "brain": {"model": "qwen/qwen3-235b"}},
-           "slots": {"light": "fast", "max": "brain"}, "level": "light"}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}, "brain": {"model": "qwen/qwen3-235b"}},
+        "slots": {"light": "fast", "max": "brain"},
+        "level": "light",
+    }
     lines = wz._summary_lines(cfg)
     assert lines[0] == "    модель       qwen/qwen3-235b  (default не задан — работает max)"
 
@@ -480,16 +538,19 @@ def _broken_profile_stand(tmp_path, monkeypatch, *, slot="strong"):
     monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=home))
     monkeypatch.chdir(project)
     (home / "config.yml").write_text(_STAND_BASE, encoding="utf-8")
-    (home / "profiles" / "work.yml").write_text(
-        f'slots:\n  default: "{slot}"\n', encoding="utf-8")
+    (home / "profiles" / "work.yml").write_text(f'slots:\n  default: "{slot}"\n', encoding="utf-8")
     monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)
     return home
 
 
-_ANSWERS = ["https://openrouter.ai/api/v1/chat/completions",   # адрес
-            "1", "sk-user-token",                              # авторизация: токен
-            "claude-fable-5",                                  # модель
-            "", ""]                                            # уровни — пропустить
+_ANSWERS = [
+    "https://openrouter.ai/api/v1/chat/completions",  # адрес
+    "1",
+    "sk-user-token",  # авторизация: токен
+    "claude-fable-5",  # модель
+    "",
+    "",
+]  # уровни — пропустить
 
 
 def test_run_on_the_without_profile_stage_warns_and_deactivates(tmp_path, monkeypatch):
@@ -498,6 +559,7 @@ def test_run_on_the_without_profile_stage_warns_and_deactivates(tmp_path, monkey
     Финал снимает указатель — починка ложится в файл, а файл профиля остаётся на
     диске. Предупреждение печатается до записи, тем же текстом, что и в TUI."""
     from gc_core import onboarding_fields as _of
+
     home = _broken_profile_stand(tmp_path, monkeypatch)
 
     loaded = onboarding.load_config_for_repair()
@@ -506,15 +568,14 @@ def test_run_on_the_without_profile_stage_warns_and_deactivates(tmp_path, monkey
     printed: list = []
     it = iter(_ANSWERS)
     io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
-    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io,
-                        deactivate_profile=True)
+    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io, deactivate_profile=True)
 
     assert any(_of.PROFILE_DEACTIVATION_WARNING in line for line in printed)
     raw = yaml.safe_load((home / "config.yml").read_text(encoding="utf-8"))
-    assert raw["profile"] == ""                                 # указатель снят
-    assert (home / "profiles" / "work.yml").is_file()           # …а файл профиля цел
-    assert raw["slots"]["default"] == "claude-fable-5"          # настройки записаны
-    assert configured is True                                   # конфиг перечитан и настроен
+    assert raw["profile"] == ""  # указатель снят
+    assert (home / "profiles" / "work.yml").is_file()  # …а файл профиля цел
+    assert raw["slots"]["default"] == "claude-fable-5"  # настройки записаны
+    assert configured is True  # конфиг перечитан и настроен
 
 
 def test_run_without_the_flag_leaves_the_pointer_and_says_nothing(tmp_path, monkeypatch):
@@ -527,8 +588,7 @@ def test_run_without_the_flag_leaves_the_pointer_and_says_nothing(tmp_path, monk
     printed: list = []
     it = iter(_ANSWERS)
     io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
-    wz.run(loaded.config, home / "config.yml", review_all=True, io=io,
-           deactivate_profile=False)
+    wz.run(loaded.config, home / "config.yml", review_all=True, io=io, deactivate_profile=False)
 
     assert not any("деактив" in line.lower() for line in printed)
     raw = yaml.safe_load((home / "config.yml").read_text(encoding="utf-8"))
@@ -570,11 +630,10 @@ def test_a_refused_write_is_not_reported_as_done(tmp_path, monkeypatch):
     output = "\n".join(printed)
     assert f"конфиг не записан: {_REFUSAL}" in output
     assert "✓ Готово" not in output
-    assert (home / "config.yml").read_text(encoding="utf-8") == _STAND_BASE   # файл не тронут
+    assert (home / "config.yml").read_text(encoding="utf-8") == _STAND_BASE  # файл не тронут
 
 
-def test_a_refused_flat_write_after_the_registry_landed_is_not_done_either(
-        tmp_path, monkeypatch):
+def test_a_refused_flat_write_after_the_registry_landed_is_not_done_either(tmp_path, monkeypatch):
     """Второй полюс: реестр уже лёг первой транзакцией, отказала плоская запись.
     Конфиг настроен (модели новые, подключение прежнее) — и мастер точно так же
     рапортовал «✓ Готово». Итог честный: что легло, что нет, — и исход «не записано».
@@ -590,7 +649,7 @@ def test_a_refused_flat_write_after_the_registry_landed_is_not_done_either(
 
     assert configured is False
     raw = yaml.safe_load((home / "config.yml").read_text(encoding="utf-8"))
-    assert raw["slots"]["default"] == "claude-fable-5"                         # реестр лёг
+    assert raw["slots"]["default"] == "claude-fable-5"  # реестр лёг
     assert raw["backend"]["completions_url"] == "https://openrouter.ai/api/v1/chat/completions"
     output = "\n".join(printed)
     assert _REFUSAL in output
@@ -604,8 +663,9 @@ def test_fields_left_unwritten_are_not_done(tmp_path, monkeypatch):
     """Третья ветка: плоская запись не нашла якорей и вернула их список («всё или
     ничего» — её правило). Ошибка называла поля — и следом шло «✓ Готово»."""
     home = _broken_profile_stand(tmp_path, monkeypatch, slot="fast")
-    monkeypatch.setattr(onboarding_config_writer, "write_values",
-                        lambda path, values, **kw: list(values))   # ни один якорь не нашёлся
+    monkeypatch.setattr(
+        onboarding_config_writer, "write_values", lambda path, values, **kw: list(values)
+    )  # ни один якорь не нашёлся
     loaded = onboarding.load_config_for_repair()
 
     printed: list = []
@@ -619,8 +679,7 @@ def test_fields_left_unwritten_are_not_done(tmp_path, monkeypatch):
     assert "✓ Готово" not in output
 
 
-def test_on_the_without_profile_stage_a_refused_write_names_the_deactivation(
-        tmp_path, monkeypatch):
+def test_on_the_without_profile_stage_a_refused_write_names_the_deactivation(tmp_path, monkeypatch):
     """Вторая половина находки: на ступени без профиля указатель снимается ДО
     транзакции реестра и в откате не участвует. Отказ дальше по цепочке оставлял
     человека с «конфиг не записан» — он уверен, что профиль активен, а следующий
@@ -630,7 +689,7 @@ def test_on_the_without_profile_stage_a_refused_write_names_the_deactivation(
     real_write_values = onboarding_config_writer.write_values
 
     def refusing_flat_write(path, values, **kwargs):
-        if "profile" in values:                      # снятие указателя — настоящее
+        if "profile" in values:  # снятие указателя — настоящее
             return real_write_values(path, values, **kwargs)
         raise ValueError(_REFUSAL)
 
@@ -641,13 +700,12 @@ def test_on_the_without_profile_stage_a_refused_write_names_the_deactivation(
     printed: list = []
     it = iter(_ANSWERS)
     io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
-    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io,
-                        deactivate_profile=True)
+    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io, deactivate_profile=True)
 
     assert configured is False
     raw = yaml.safe_load((home / "config.yml").read_text(encoding="utf-8"))
-    assert raw["profile"] == ""                                 # указатель снят — это уже случилось
-    assert raw["slots"]["default"] == "claude-fable-5"          # и реестр лёг
+    assert raw["profile"] == ""  # указатель снят — это уже случилось
+    assert raw["slots"]["default"] == "claude-fable-5"  # и реестр лёг
     output = "\n".join(printed)
     assert "профиль деактивирован" in output
     assert "записи моделей" in output
@@ -666,8 +724,7 @@ def test_the_outcome_names_exactly_what_the_writer_says_landed(tmp_path, monkeyp
     home = _broken_profile_stand(tmp_path, monkeypatch, slot="fast")
 
     def refusing_after_the_pointer(config_path, values, *, deactivate_profile=False):
-        raise onboarding.PartialWriteError("алиас «strong» не найден",
-                                           written=("profile_pointer",))
+        raise onboarding.PartialWriteError("алиас «strong» не найден", written=("profile_pointer",))
 
     monkeypatch.setattr(onboarding, "write_wizard_values", refusing_after_the_pointer)
     loaded = onboarding.load_config_for_repair()
@@ -675,18 +732,18 @@ def test_the_outcome_names_exactly_what_the_writer_says_landed(tmp_path, monkeyp
     printed: list = []
     it = iter(_ANSWERS)
     io = wz.WizardIO(reader=lambda p, secret: next(it, ""), printer=printed.append)
-    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io,
-                        deactivate_profile=True)
+    configured = wz.run(loaded.config, home / "config.yml", review_all=True, io=io, deactivate_profile=True)
 
     assert configured is False
     output = "\n".join(printed)
     assert "профиль деактивирован" in output
-    assert "записи моделей" not in output       # реестр не лёг — и не назван
+    assert "записи моделей" not in output  # реестр не лёг — и не назван
     assert "конфиг не записан" not in output
     assert "✓ Готово" not in output
 
 
 # --- прерывание: Ctrl-C — не «✓ Готово» ------------------------------------
+
 
 def test_an_interrupted_wizard_is_not_reported_as_done(tmp_path, monkeypatch):
     """Человек прервал настройку (Ctrl-C / EOF) — а мастер шёл дальше: перечитывал
@@ -703,12 +760,13 @@ def test_an_interrupted_wizard_is_not_reported_as_done(tmp_path, monkeypatch):
 
     printed: list = []
     io = wz.WizardIO(reader=interrupting_reader, printer=printed.append)
-    configured = wz.run(onboarding.load_config_for_repair().config, home / "config.yml",
-                        review_all=True, io=io, mcp=_FakeMcp())
+    configured = wz.run(
+        onboarding.load_config_for_repair().config, home / "config.yml", review_all=True, io=io, mcp=_FakeMcp()
+    )
 
     assert configured is False
     assert (home / "config.yml").read_text(encoding="utf-8") == before
     output = "\n".join(printed)
     assert "Прервано" in output
     assert "✓ Готово" not in output
-    assert "qwen/qwen3-8b" not in output          # и сводки о записанном тоже нет
+    assert "qwen/qwen3-8b" not in output  # и сводки о записанном тоже нет

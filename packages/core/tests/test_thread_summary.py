@@ -97,12 +97,8 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             suffix = result["archive_suffix"]
-            archived_data = os.path.join(
-                tmp_dir, f"data_cli_{thread_id}__pre_summary__{suffix}.jsonl"
-            )
-            archived_meta = os.path.join(
-                tmp_dir, f"meta_cli_{thread_id}__pre_summary__{suffix}.json"
-            )
+            archived_data = os.path.join(tmp_dir, f"data_cli_{thread_id}__pre_summary__{suffix}.jsonl")
+            archived_meta = os.path.join(tmp_dir, f"meta_cli_{thread_id}__pre_summary__{suffix}.json")
             self.assertTrue(os.path.exists(archived_data))
             self.assertTrue(os.path.exists(archived_meta))
 

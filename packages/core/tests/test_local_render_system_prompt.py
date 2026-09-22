@@ -8,7 +8,9 @@ def _base(slot: str = "<special_instructions></special_instructions>") -> str:
 
 
 def test_special_instructions_injected_into_slot():
-    out = render_system_prompt(_base(), tools_spec=[], project_info={}, specific_role=None, special_instructions="RULES-X")
+    out = render_system_prompt(
+        _base(), tools_spec=[], project_info={}, specific_role=None, special_instructions="RULES-X"
+    )
     assert "<special_instructions>RULES-X</special_instructions>" in out
 
 
@@ -25,10 +27,7 @@ def test_special_instructions_no_tag_is_noop():
 
 class LocalRenderSystemPromptTest(unittest.TestCase):
     def test_replaces_user_info_and_specific_role_tags(self):
-        tmpl = (
-            "Hello\n<user_info>\n</user_info>\n"
-            "<specific_role>\n</specific_role>\n"
-        )
+        tmpl = "Hello\n<user_info>\n</user_info>\n<specific_role>\n</specific_role>\n"
         out = render_system_prompt(
             system_prompt=tmpl,
             tools_spec=[],
@@ -43,4 +42,3 @@ class LocalRenderSystemPromptTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

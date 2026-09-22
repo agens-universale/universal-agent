@@ -1,4 +1,5 @@
 """@-аттач: ввод '@' открывает FilePicker; фильтрация; достройка; пара на сабмите."""
+
 import pytest
 
 
@@ -71,6 +72,7 @@ async def test_submit_with_attachment_sends_pair(tmp_path):
         async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
 
@@ -169,6 +171,7 @@ async def test_submit_without_attachment_single_message(tmp_path):
         async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
 
@@ -281,8 +284,8 @@ async def test_late_search_result_does_not_reopen_picker(tmp_path, monkeypatch):
         inp.insert("@age")
         await pilot.pause()
         worker = scr._file_search_worker
-        assert scr._file_picker is None          # результат ещё не пришёл
-        inp.insert(" ")                          # сегмент закончился
+        assert scr._file_picker is None  # результат ещё не пришёл
+        inp.insert(" ")  # сегмент закончился
         await pilot.pause()
         release.set()
         await worker.wait()
@@ -321,7 +324,7 @@ async def test_truncated_index_shows_note_in_picker(tmp_path, monkeypatch):
         assert len(picker.query(".palette-keys")) == 2
         assert picker.desired_height == len(picker._entries) + 2 + 4
         # Человек пошёл по папкам ('/' в запросе) — совет выполнен, строка уходит.
-        inp.insert("nts/ag")                     # @agents/ag
+        inp.insert("nts/ag")  # @agents/ag
         await pilot.pause()
         await scr._file_search_worker.wait()
         await pilot.pause()
@@ -382,8 +385,7 @@ async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch,
             await pilot.pause()
             assert scr._file_picker is None
             assert pilot.app.is_running
-    assert any("file search failed" in r.getMessage() and "'age'" in r.getMessage()
-               for r in caplog.records)
+    assert any("file search failed" in r.getMessage() and "'age'" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -412,19 +414,19 @@ async def test_tab_on_stale_list_does_not_complete_wrong_path(tmp_path, monkeypa
         scr._project_root = lambda: str(tmp_path)
         inp = pilot.app.query_one("#cmdinput")
         inp.focus()
-        inp.insert("@")                      # синхронный листинг корня (папки сверху)
+        inp.insert("@")  # синхронный листинг корня (папки сверху)
         await pilot.pause()
         stale = scr._file_picker.selected_entry()
         assert stale is not None and stale != "qqtarget.py"
-        inp.insert("qqtar")                  # поиск ушёл в фон и заблокирован
+        inp.insert("qqtar")  # поиск ушёл в фон и заблокирован
         await pilot.pause()
         await pilot.press("tab")
         await pilot.pause()
-        assert inp.text == "@qqtar"          # устаревший список не применён
+        assert inp.text == "@qqtar"  # устаревший список не применён
         release.set()
         await scr._file_search_worker.wait()
         await pilot.pause()
-        await pilot.press("tab")             # список свежий — достройка работает
+        await pilot.press("tab")  # список свежий — достройка работает
         await pilot.pause()
         assert inp.text == "@qqtarget.py "
 
@@ -459,7 +461,7 @@ async def test_late_result_does_not_overwrite_directory_listing(tmp_path, monkey
         inp.insert("@agents")
         await pilot.pause()
         worker = scr._file_search_worker
-        inp.insert("/")                      # синхронный листинг agents/
+        inp.insert("/")  # синхронный листинг agents/
         await pilot.pause()
         assert scr._file_picker._entries == ["agents/agent.py"]
         release.set()
@@ -503,7 +505,7 @@ async def test_truncated_index_with_no_matches_keeps_picker_with_note(tmp_path, 
         assert picker._truncated is True
         assert len(picker.query(".palette-keys")) == 2
         footer = picker.query_one(".palette-footer")
-        assert footer.region.height == 4          # margin+подсказка, margin+клавиши
+        assert footer.region.height == 4  # margin+подсказка, margin+клавиши
         assert footer.region.bottom <= picker.region.bottom
 
 
@@ -538,13 +540,13 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
         await pilot.pause()
         assert len(git_calls) == 1
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
-        await pilot.press("escape")              # конец сеанса
+        await pilot.press("escape")  # конец сеанса
         await pilot.pause()
-        inp.insert("n")                          # @agen — новый сеанс, новый индекс
+        inp.insert("n")  # @agen — новый сеанс, новый индекс
         await pilot.pause()
         await scr._file_search_worker.wait()
         await pilot.pause()
-        assert len(git_calls) == 1               # git второй раз не звали
+        assert len(git_calls) == 1  # git второй раз не звали
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
 
 
@@ -577,7 +579,7 @@ async def test_slow_search_shows_searching_row_then_results(tmp_path, monkeypatc
         inp.focus()
         inp.insert("@")
         await pilot.pause()
-        assert scr._file_picker._entries                 # листинг корня
+        assert scr._file_picker._entries  # листинг корня
         inp.insert("qqtar")
         await pilot.pause(0.2)
         assert scr._file_picker is not None
@@ -614,7 +616,7 @@ async def test_fast_search_never_shows_searching_row(tmp_path):
         inp.insert("@qqtar")
         await pilot.pause()
         await scr._file_search_worker.wait()
-        await pilot.pause(0.5)                          # порог 0.3 с давно прошёл
+        await pilot.pause(0.5)  # порог 0.3 с давно прошёл
         assert seen == [False]
         assert scr._file_picker._entries == ["qqtarget.py"]
 
@@ -644,7 +646,7 @@ async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, 
         scr._project_root = lambda: str(tmp_path)
         inp = pilot.app.query_one("#cmdinput")
         inp.focus()
-        inp.insert("@qqtar")                             # одним вводом: листинга не было
+        inp.insert("@qqtar")  # одним вводом: листинга не было
         await pilot.pause()
         worker = scr._file_search_worker
         assert scr._file_picker is None
@@ -653,7 +655,7 @@ async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, 
         assert scr._file_query is None
         release.set()
         await worker.wait()
-        await pilot.pause(0.5)                           # и порог индикатора прошёл
+        await pilot.pause(0.5)  # и порог индикатора прошёл
         assert scr._file_picker is None
         assert inp.text == "@qqtar"
 
@@ -684,14 +686,14 @@ async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path
         scr._project_root = lambda: str(tmp_path)
         inp = pilot.app.query_one("#cmdinput")
         inp.focus()
-        inp.insert("@qqtar")                      # поиск ушёл в фон и заблокирован
+        inp.insert("@qqtar")  # поиск ушёл в фон и заблокирован
         await pilot.pause()
-        inp.text = "/skill zz"                    # одним событием: открылся skill-пикер
+        inp.text = "/skill zz"  # одним событием: открылся skill-пикер
         await pilot.pause()
         assert scr._skill_picker is not None
         await pilot.press("escape")
         await pilot.pause()
-        assert scr._skill_picker is None          # Esc достался открытому оверлею
+        assert scr._skill_picker is None  # Esc достался открытому оверлею
         release.set()
         await scr._file_search_worker.wait()
         await pilot.pause()
@@ -769,10 +771,10 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
         inp.focus()
         inp.insert("@qqtar")
         await pilot.pause()
-        assert scr._file_picker is None          # пикера ещё нет: порог «ищу…» не прошёл
-        await pilot.press("enter")                      # пикера ещё нет
+        assert scr._file_picker is None  # пикера ещё нет: порог «ищу…» не прошёл
+        await pilot.press("enter")  # пикера ещё нет
         await pilot.pause(0.5)
-        assert scr._file_picker._searching is True      # показана «ищу по проекту…»
+        assert scr._file_picker._searching is True  # показана «ищу по проекту…»
         await pilot.press("enter")
         await pilot.pause()
         assert sent == []
@@ -780,7 +782,7 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
         release.set()
         await scr._file_search_worker.wait()
         await pilot.pause()
-        await pilot.press("enter")                      # результат пришёл — достройка
+        await pilot.press("enter")  # результат пришёл — достройка
         await pilot.pause()
         assert inp.text == "@qqtarget.py "
         assert sent == []
@@ -870,7 +872,7 @@ async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypa
         inp.insert("@qq")
         await pilot.pause()
         first = scr._file_search_worker
-        inp.insert("tar")                                # @qqtar
+        inp.insert("tar")  # @qqtar
         await pilot.pause()
         release.set()
         await first.wait()
@@ -953,7 +955,7 @@ async def test_escape_during_index_build_does_not_start_second_build(tmp_path, m
         first = scr._file_search_worker
         await pilot.press("escape")
         await pilot.pause()
-        inp.insert("n")                                  # @agen — новый сеанс
+        inp.insert("n")  # @agen — новый сеанс
         await pilot.pause()
         release.set()
         await first.wait()
@@ -995,12 +997,12 @@ async def test_index_finished_after_close_is_not_reused_by_next_session(tmp_path
         kept = scr._path_index
         await pilot.press("escape")
         await pilot.pause()
-        assert scr._path_index is kept                   # строится — оставлен
+        assert scr._path_index is kept  # строится — оставлен
         release.set()
         await worker.wait()
         await pilot.pause()
         assert kept.built is True
-        inp.insert("n")                                  # новый сеанс после достройки
+        inp.insert("n")  # новый сеанс после достройки
         await pilot.pause()
         await scr._file_search_worker.wait()
         await pilot.pause()
@@ -1144,8 +1146,8 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
         assert len(git_calls) == 1
         await pilot.press("escape")
         await pilot.pause()
-        monkeypatch.setattr(file_index, "_SLOW_GIT_RETRY_AFTER", 0.0)   # срок вышел
-        inp.insert("n")                                  # новый сеанс
+        monkeypatch.setattr(file_index, "_SLOW_GIT_RETRY_AFTER", 0.0)  # срок вышел
+        inp.insert("n")  # новый сеанс
         await pilot.pause()
         await scr._file_search_worker.wait()
         await pilot.pause()

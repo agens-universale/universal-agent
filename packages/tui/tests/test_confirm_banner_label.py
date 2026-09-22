@@ -1,13 +1,14 @@
 """Метка-заголовок confirm/guard баннера — глиф шлюза вместо '?'."""
+
 from gc_tui.palette import RUN_COLOR
 from gc_tui.widgets.confirm_banner import GUARD_GLYPH, build_guard_label
 
 
 def test_guard_label_uses_caution_glyph_not_question():
     label = build_guard_label("Защита записи")
-    assert label.plain.startswith(GUARD_GLYPH)   # глиф-шлюз впереди
+    assert label.plain.startswith(GUARD_GLYPH)  # глиф-шлюз впереди
     assert label.plain.endswith("Защита записи")  # титул на месте
-    assert "?" not in label.plain                 # '?' только в строке вопроса
+    assert "?" not in label.plain  # '?' только в строке вопроса
 
 
 def test_guard_glyph_is_amber():

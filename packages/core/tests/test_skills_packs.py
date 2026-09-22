@@ -1,4 +1,5 @@
 """Tests for skill packs in the new geometry (packs inside skills/, pack.yaml marker)."""
+
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ def _write_flat_skill(layer_root: Path, skill_id: str, description: str = "") ->
     skill_dir = layer_root / skill_id
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
-        f"---\nid: {skill_id}\nname: {skill_id}\ndescription: \"{description}\"\n---\n# body of {skill_id}\n",
+        f'---\nid: {skill_id}\nname: {skill_id}\ndescription: "{description}"\n---\n# body of {skill_id}\n',
         encoding="utf-8",
     )
     return skill_dir
@@ -45,7 +46,7 @@ def _write_pack(
         inner_dir = pack_dir / inner_id
         inner_dir.mkdir(parents=True, exist_ok=True)
         (inner_dir / "SKILL.md").write_text(
-            f"---\nid: {inner_id}\nname: {inner_id}\ndescription: \"\"\n---\n# body\n",
+            f'---\nid: {inner_id}\nname: {inner_id}\ndescription: ""\n---\n# body\n',
             encoding="utf-8",
         )
     return pack_dir
@@ -84,7 +85,8 @@ async def test_discriminator_pack_only(tmp_path):
     """Папка с pack.yaml — пакет, не flat-скилл."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
@@ -100,22 +102,24 @@ async def test_discriminator_pack_only(tmp_path):
 async def test_discriminator_pack_and_skill_md_on_root_warns_treats_as_pack(tmp_path, caplog):
     """Папка с pack.yaml И SKILL.md на корне — гибрид; warn + трактуется как пакет, корневой SKILL.md игнорируется."""
     import logging
+
     reg, paths = _registry(tmp_path, with_layers=("system",))
     pack_dir = _write_pack(
-        paths["system"], "hybrid",
+        paths["system"],
+        "hybrid",
         inner_skills=["using-it"],
         bootstrap_skill="using-it",
     )
     # Добавляем SKILL.md на корне пакета — это ошибочный гибрид
     (pack_dir / "SKILL.md").write_text(
-        "---\nid: hybrid\nname: hybrid\ndescription: \"should be ignored\"\n---\n# body\n",
+        '---\nid: hybrid\nname: hybrid\ndescription: "should be ignored"\n---\n# body\n',
         encoding="utf-8",
     )
     with caplog.at_level(logging.WARNING):
         items = {i["id"]: i for i in await reg.list_skills()}
     # Пакет, а не flat
     assert "hybrid:using-it" in items
-    assert "hybrid" not in items   # SKILL.md на корне НЕ регистрируется как flat
+    assert "hybrid" not in items  # SKILL.md на корне НЕ регистрируется как flat
     # Warn в логах (точный текст не зашиваем, проверяем что что-то логировалось)
     assert any("hybrid" in record.getMessage().lower() for record in caplog.records)
 
@@ -134,7 +138,8 @@ async def test_filter_default_hides_internal_skills(tmp_path):
     """По умолчанию internal-скиллы скрыты, виден только bootstrap."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming", "writing-plans"],
         bootstrap_skill="using-superpowers",
     )
@@ -147,7 +152,8 @@ async def test_filter_with_pack_param_returns_all_pack_internals(tmp_path):
     """list_skills(pack='X') возвращает все internal этого пакета (включая bootstrap)."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming", "writing-plans"],
         bootstrap_skill="using-superpowers",
     )
@@ -164,7 +170,8 @@ async def test_filter_with_pack_param_unknown_pack_returns_empty(tmp_path):
     """list_skills(pack='nonexistent') не падает, возвращает []."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers"],
         bootstrap_skill="using-superpowers",
     )
@@ -176,7 +183,8 @@ async def test_filter_include_all_returns_everything(tmp_path):
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_flat_skill(paths["system"], "swe-task-solver", "")
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
@@ -190,7 +198,8 @@ async def test_filter_pack_overrides_include_all(tmp_path):
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_flat_skill(paths["system"], "swe-task-solver", "")
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
@@ -204,7 +213,8 @@ async def test_bootstrap_has_is_pack_bootstrap_true_and_pack_size(tmp_path):
     """Bootstrap entry получает is_pack_bootstrap=true и pack_size=N."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming", "writing-plans"],
         bootstrap_skill="using-superpowers",
     )
@@ -219,7 +229,8 @@ async def test_internal_non_bootstrap_has_is_pack_bootstrap_false_no_pack_size(t
     """Internal non-bootstrap скиллы получают is_pack_bootstrap=false, без pack_size."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
@@ -243,7 +254,8 @@ async def test_internal_skill_standalone_loadable_despite_hidden(tmp_path):
     """skills_load("pack:inner") работает даже если inner скрыт из default list."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
@@ -259,7 +271,8 @@ async def test_short_alias_finds_hidden_internal(tmp_path):
     """skills_load("brainstorming") (без префикса) находит uniques superpowers:brainstorming."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
@@ -271,9 +284,10 @@ async def test_pack_with_missing_bootstrap_skill_invisible_but_internals_loadabl
     """Пакет без bootstrap_skill в манифесте: в default list не появляется, но internal грузятся."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "broken-pack",
+        paths["system"],
+        "broken-pack",
         inner_skills=["inner-a", "inner-b"],
-        bootstrap_skill=None,   # манифест без bootstrap_skill
+        bootstrap_skill=None,  # манифест без bootstrap_skill
     )
     # В default ни одной записи
     assert await reg.list_skills() == []
@@ -290,9 +304,10 @@ async def test_pack_bootstrap_pointing_to_nonexistent_skill_invisible(tmp_path):
     """Пакет с bootstrap_skill, указывающим в никуда: невидим, но internal доступны."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
-        paths["system"], "misconfigured",
+        paths["system"],
+        "misconfigured",
         inner_skills=["actual-inner"],
-        bootstrap_skill="nonexistent-entry",   # такого скилла нет
+        bootstrap_skill="nonexistent-entry",  # такого скилла нет
     )
     assert await reg.list_skills() == []
     # Internal доступен напрямую
@@ -305,20 +320,22 @@ async def test_override_inner_skill_project_layer(tmp_path):
     reg, paths = _registry(tmp_path, with_layers=("system", "project"))
     # System-слой: пакет с internal-скиллом
     _write_pack(
-        paths["system"], "superpowers",
+        paths["system"],
+        "superpowers",
         inner_skills=["brainstorming"],
         bootstrap_skill="brainstorming",
     )
     # Project-слой: переопределяет brainstorming. ВАЖНО: project тоже должен
     # содержать pack.yaml, иначе папка не считается пакетом.
     _write_pack(
-        paths["project"], "superpowers",
+        paths["project"],
+        "superpowers",
         inner_skills=["brainstorming"],
         bootstrap_skill="brainstorming",
     )
     # Перезаписываем body project-версии чтобы был отличим
     (paths["project"] / "superpowers" / "brainstorming" / "SKILL.md").write_text(
-        "---\nid: brainstorming\nname: brainstorming\ndescription: \"from project\"\n---\n# project version\n",
+        '---\nid: brainstorming\nname: brainstorming\ndescription: "from project"\n---\n# project version\n',
         encoding="utf-8",
     )
     detail = await reg.load_skill_detail("superpowers:brainstorming")
@@ -334,7 +351,8 @@ async def test_single_source_escape_disables_pack_walk(tmp_path):
     custom.mkdir()
     # Кладём папку с pack.yaml — в three-layer стала бы пакетом
     _write_pack(
-        custom, "would-be-pack",
+        custom,
+        "would-be-pack",
         inner_skills=["inner-a"],
         bootstrap_skill="inner-a",
     )
@@ -369,7 +387,7 @@ async def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(tmp
     inner_dir = pack_dir / "entry"
     inner_dir.mkdir()
     (inner_dir / "SKILL.md").write_text(
-        "---\nid: actual-entry\nname: actual-entry\ndescription: \"\"\n---\n# body\n",
+        '---\nid: actual-entry\nname: actual-entry\ndescription: ""\n---\n# body\n',
         encoding="utf-8",
     )
     # Manifest ссылается на имя папки, не на frontmatter id
@@ -408,13 +426,13 @@ async def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
     # Skill A: folder "foo/", frontmatter id "bar" (canonical: ambig:bar)
     (pack_dir / "foo").mkdir()
     (pack_dir / "foo" / "SKILL.md").write_text(
-        "---\nid: bar\nname: bar\ndescription: \"A\"\n---\n# A\n",
+        '---\nid: bar\nname: bar\ndescription: "A"\n---\n# A\n',
         encoding="utf-8",
     )
     # Skill B: folder "bar/", frontmatter id "baz" (canonical: ambig:baz)
     (pack_dir / "bar").mkdir()
     (pack_dir / "bar" / "SKILL.md").write_text(
-        "---\nid: baz\nname: baz\ndescription: \"B\"\n---\n# B\n",
+        '---\nid: baz\nname: baz\ndescription: "B"\n---\n# B\n',
         encoding="utf-8",
     )
     # bootstrap_skill: bar — должен матчиться через прямой canonical lookup

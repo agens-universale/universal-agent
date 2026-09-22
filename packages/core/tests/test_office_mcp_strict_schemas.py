@@ -1,4 +1,5 @@
 """All office-mcp tool schemas must survive OpenAI strict normalization."""
+
 from __future__ import annotations
 
 import pytest
@@ -60,9 +61,7 @@ def _strict_schema_errors(node: object, path: tuple[str, ...] = ()) -> list[str]
             if missing:
                 errors.append(f"{path}: required missing {sorted(missing)}")
         items = node.get("items")
-        if isinstance(items, dict) and not any(
-            k in items for k in ("type", "anyOf", "oneOf", "allOf", "$ref")
-        ):
+        if isinstance(items, dict) and not any(k in items for k in ("type", "anyOf", "oneOf", "allOf", "$ref")):
             errors.append(f"{path}.items: missing type")
         for key, value in node.items():
             if key != "$defs":
@@ -96,8 +95,6 @@ def test_all_office_mcp_tools_normalize_for_openai_strict() -> None:
         )
         params = normalized["parameters"]
         errors.extend(_strict_schema_errors(params, (name,)))
-        errors.extend(
-            _dangling_ref_errors(params, params.get("$defs"), (name, "parameters"))
-        )
+        errors.extend(_dangling_ref_errors(params, params.get("$defs"), (name, "parameters")))
         errors.extend(_ref_with_sibling_errors(params, (name, "parameters")))
     assert not errors, ";\n".join(errors)

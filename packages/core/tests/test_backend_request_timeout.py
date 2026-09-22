@@ -71,7 +71,8 @@ def _install_capturing_transport(monkeypatch, seen):
         return httpx.Response(200, json={"id": "x", "choices": [{"message": {"content": "ok"}}]})
 
     monkeypatch.setattr(
-        connect_backend, "get_async_client",
+        connect_backend,
+        "get_async_client",
         lambda **kw: _Capturing(transport=httpx.MockTransport(handler)),
     )
 
@@ -79,18 +80,29 @@ def _install_capturing_transport(monkeypatch, seen):
 def test_chat_completions_passes_timeout(monkeypatch):
     seen = {}
     _install_capturing_transport(monkeypatch, seen)
-    run_coro(connect_backend.arequest_backend_chat_completions(
-        {"messages": []}, {}, url="https://b/v1/chat", use_retry=False, timeout=120,
-    ))
+    run_coro(
+        connect_backend.arequest_backend_chat_completions(
+            {"messages": []},
+            {},
+            url="https://b/v1/chat",
+            use_retry=False,
+            timeout=120,
+        )
+    )
     assert seen["timeout"] == 120
 
 
 def test_chat_completions_default_timeout(monkeypatch):
     seen = {}
     _install_capturing_transport(monkeypatch, seen)
-    run_coro(connect_backend.arequest_backend_chat_completions(
-        {"messages": []}, {}, url="https://b/v1/chat", use_retry=False,
-    ))
+    run_coro(
+        connect_backend.arequest_backend_chat_completions(
+            {"messages": []},
+            {},
+            url="https://b/v1/chat",
+            use_retry=False,
+        )
+    )
     assert seen["timeout"] == DEFAULT_REQUEST_TIMEOUT_SEC
 
 
@@ -104,14 +116,16 @@ def test_policy_forwards_timeout(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(policy, "arequest_backend_chat_completions", fake_req)
-    run_coro(policy.arequest_chat_completions_with_policy(
-        payload_factory=lambda mt: {"max_tokens": mt},
-        initial_max_tokens=100,
-        min_response_tokens=10,
-        headers={},
-        url="http://x",
-        verify=True,
-        use_retry=False,
-        timeout=90,
-    ))
+    run_coro(
+        policy.arequest_chat_completions_with_policy(
+            payload_factory=lambda mt: {"max_tokens": mt},
+            initial_max_tokens=100,
+            min_response_tokens=10,
+            headers={},
+            url="http://x",
+            verify=True,
+            use_retry=False,
+            timeout=90,
+        )
+    )
     assert seen["timeout"] == 90

@@ -1,4 +1,5 @@
 """Subagent step-limit: ok=false, finish_reason=step_limit (не completed)."""
+
 from __future__ import annotations
 
 import json
@@ -44,13 +45,10 @@ def _wire_runner(monkeypatch, runner, child):
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
+
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
-    )
-    monkeypatch.setattr(
-        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
-    )
+    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
+    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: "")
     monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
 
     async def _create(*a, **k):
@@ -80,16 +78,16 @@ async def test_step_limit_returns_ok_false_not_completed(monkeypatch):
         child_state.terminal_outcome = "step_limit"
         child_state.steps = 5
         # Child run_agent returns a limit envelope (build_limit_envelope).
-        return json.dumps({
-            "ok": False,
-            "status": "step_limit",
-            "message": "Agent stopped: step limit (5/5).",
-            "raw_trace_summary": "## Intent\n\nDid work.",
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "status": "step_limit",
+                "message": "Agent stopped: step limit (5/5).",
+                "raw_trace_summary": "## Intent\n\nDid work.",
+            }
+        )
 
-    out = await runner._arun_internal(
-        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
-    )
+    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     # Runner pass-through: child envelope returned as-is (spec §6.2).
     payload = json.loads(out)
     assert payload["ok"] is False
@@ -107,9 +105,7 @@ async def test_normal_complete_still_ok_true(monkeypatch):
     async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
-    out = await runner._arun_internal(
-        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
-    )
+    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["meta"]["finish_reason"] == "completed"

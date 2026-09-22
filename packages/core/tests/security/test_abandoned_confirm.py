@@ -7,6 +7,7 @@
 другому вопросу, превращалось в запомненное на сессию разрешение на путь, в
 котором человек только что отказал.
 """
+
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -29,20 +30,27 @@ async def test_an_abandoned_confirm_records_nothing(monkeypatch):
     release = threading.Event()
 
     def _late_answer(_ctx, **_kw):
-        release.wait(5)                          # человек ещё думает…
+        release.wait(5)  # человек ещё думает…
         return confirm_port.CONFIRM_ALLOW_REMEMBER  # …и жмёт «y» — уже не сюда
 
     monkeypatch.setattr(confirm_port, "_ask_choice", _late_answer)
     store = PermissionStore()
     ctx = SimpleNamespace(permission_store=store)
 
-    waiting = asyncio.ensure_future(run_abandonable_in(
-        threading.BoundedSemaphore(1), confirm_port.request_confirm,
-        title="Запись", question="Разрешить?", fields=[], ctx=ctx,
-        decision_key="write:/etc/SECRET", _thread_name=_THREAD,
-    ))
+    waiting = asyncio.ensure_future(
+        run_abandonable_in(
+            threading.BoundedSemaphore(1),
+            confirm_port.request_confirm,
+            title="Запись",
+            question="Разрешить?",
+            fields=[],
+            ctx=ctx,
+            decision_key="write:/etc/SECRET",
+            _thread_name=_THREAD,
+        )
+    )
     await asyncio.sleep(0.1)
-    waiting.cancel()                             # Ctrl+C: вопрос брошен
+    waiting.cancel()  # Ctrl+C: вопрос брошен
     with pytest.raises(asyncio.CancelledError):
         await waiting
 
@@ -50,6 +58,4 @@ async def test_an_abandoned_confirm_records_nothing(monkeypatch):
     for thread in [t for t in threading.enumerate() if t.name == _THREAD]:
         thread.join(5)
 
-    assert store.decision_for("write:/etc/SECRET") is None, (
-        "брошенное подтверждение записало решение по чужому нажатию"
-    )
+    assert store.decision_for("write:/etc/SECRET") is None, "брошенное подтверждение записало решение по чужому нажатию"

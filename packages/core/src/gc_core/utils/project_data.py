@@ -34,26 +34,67 @@ def _slice_level(
     shown = sorted_entries[:limit]
     return shown, len(shown) < total, len(shown), total
 
+
 stop_folders = {
-        '.git', '.hg', '.svn', '.osc', '.gc',
-        '__pycache__', 'venv', '.venv', '.env',
-        'node_modules', 'bower_components',
-        'dist', 'build', 'out', 'target', 'bin', 'obj',
-        '.vscode', '.idea', '.fleet',
-        '.mypy_cache', '.pytest_cache', '.coverage',
-        '.gradle', '.classpath', '.project', '.settings',
-        'packages', '.nuget', 'TestResults',
-        'coverage', '.nyc_output',
-        'logs', 'tmp', 'temp', 'dump.rdb',
-        '.dockerignore', '.env.local', '.env.*',
-        '.github', '.gitlab', '.circleci', '.travis',
-        'Thumbs.db', 'Desktop.ini', '.DS_Store',
-        '$RECYCLE.BIN', 'System Volume Information',
-        '.Trash-*', '.local/share/Trash',
-        'patchwork', '.verdaccio', '.pnp', '.pnpify',
-        'Cargo.lock', 'target_debug', 'target_release',
-        'vendor'
-    }
+    ".git",
+    ".hg",
+    ".svn",
+    ".osc",
+    ".gc",
+    "__pycache__",
+    "venv",
+    ".venv",
+    ".env",
+    "node_modules",
+    "bower_components",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "bin",
+    "obj",
+    ".vscode",
+    ".idea",
+    ".fleet",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".coverage",
+    ".gradle",
+    ".classpath",
+    ".project",
+    ".settings",
+    "packages",
+    ".nuget",
+    "TestResults",
+    "coverage",
+    ".nyc_output",
+    "logs",
+    "tmp",
+    "temp",
+    "dump.rdb",
+    ".dockerignore",
+    ".env.local",
+    ".env.*",
+    ".github",
+    ".gitlab",
+    ".circleci",
+    ".travis",
+    "Thumbs.db",
+    "Desktop.ini",
+    ".DS_Store",
+    "$RECYCLE.BIN",
+    "System Volume Information",
+    ".Trash-*",
+    ".local/share/Trash",
+    "patchwork",
+    ".verdaccio",
+    ".pnp",
+    ".pnpify",
+    "Cargo.lock",
+    "target_debug",
+    "target_release",
+    "vendor",
+}
 
 
 async def get_listing(dir_path: str) -> str:
@@ -92,9 +133,7 @@ async def _build_listing(
     """
     raw_entries = await listdir_fn(dir_path)
 
-    filtered: list[tuple[str, bool]] = [
-        (n, d) for n, d in raw_entries if n not in stop_folders
-    ]
+    filtered: list[tuple[str, bool]] = [(n, d) for n, d in raw_entries if n not in stop_folders]
 
     shown, root_trunc, root_shown, root_total = _slice_level(filtered, cut_first)
     any_trunc = root_trunc
@@ -109,25 +148,23 @@ async def _build_listing(
         res.append((name + "/", sub_items))
 
     if root_trunc:
-        res.append((
-            "..." + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
-            [],
-        ))
+        res.append(
+            (
+                "..." + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
+                [],
+            )
+        )
 
     return _render_listing(res, any_trunc)
 
 
 async def _sub_level_items(listdir_fn, sub_path: str) -> tuple[List[str], bool]:
     """Имена второго уровня (с маркером усечения) и флаг усечения."""
-    filtered_sub: list[tuple[str, bool]] = [
-        (n, d) for n, d in await listdir_fn(sub_path) if n not in stop_folders
-    ]
+    filtered_sub: list[tuple[str, bool]] = [(n, d) for n, d in await listdir_fn(sub_path) if n not in stop_folders]
     shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(filtered_sub, cut_second)
     sub_items = [n + "/" if d else n for n, d in shown_sub]
     if sub_trunc:
-        sub_items.append(
-            "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
-        )
+        sub_items.append("..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total))
     return sub_items, sub_trunc
 
 
@@ -155,7 +192,6 @@ def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
             seen.add(candidate)
             out.append(candidate)
     return out
-
 
 
 def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
@@ -226,9 +262,7 @@ async def get_project_data(
     project_dir = ws.root
     be = ws.backend
     current_date = datetime.now().strftime("%Y-%m-%d")
-    is_git_project = (
-        "true" if await be.exists(be.join(project_dir, ".git")) else "false"
-    )
+    is_git_project = "true" if await be.exists(be.join(project_dir, ".git")) else "false"
     try:
         project_dir_listing = await get_listing_from_backend(be, project_dir)
     except OSError:
@@ -251,17 +285,13 @@ async def get_project_data(
     if not os.path.isdir(project_dir):
         project_dir = os.path.abspath(os.getcwd())
         root_writable = "true" if _dir_writable_probe(project_dir) else "false"
-        is_git_project = (
-            "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
-        )
+        is_git_project = "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
         try:
             project_dir_listing = await get_listing(project_dir)
         except OSError:
             project_dir_listing = ""
 
-    allowed_roots = _dedupe_ordered_abs_paths(
-        [project_dir, *_extra_write_roots(workspace_config)]
-    )
+    allowed_roots = _dedupe_ordered_abs_paths([project_dir, *_extra_write_roots(workspace_config)])
     writable_roots = [p for p in allowed_roots if _dir_writable_probe(p)]
     return {
         "OS": ws.os_name,

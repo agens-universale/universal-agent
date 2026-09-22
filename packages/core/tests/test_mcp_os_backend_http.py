@@ -13,8 +13,7 @@ from gc_core.tools.connect_mcp.os_backend_client import (
 
 
 class _ExecResult:
-    def __init__(self, stdout="", stderr="", return_code=0, timed_out=False,
-                 stdout_hit_capture_cap=False):
+    def __init__(self, stdout="", stderr="", return_code=0, timed_out=False, stdout_hit_capture_cap=False):
         self.stdout = stdout
         self.stderr = stderr
         self.return_code = return_code
@@ -40,8 +39,7 @@ class _RecordingSandbox:
         self.timeouts = []
         self.capture_caps = []
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None,
-                  capture_max_chars=None):
+    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.argvs.append(list(argv))
         self.codes.append(stdin)
         self.timeouts.append(timeout)
@@ -68,22 +66,24 @@ def _sent(code):
 
 
 async def test_list_tools_runs_full_handshake_in_one_operation():
-    backend = _RecordingSandbox([
-        _ok({"result": {"protocolVersion": "2024-11-05"}},
-            {"mcp-session-id": "sid-1"}),
-        _ok({}),
-        _ok({"result": {"tools": [{"name": "ask_user"}]}}),
-    ])
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {"protocolVersion": "2024-11-05"}}, {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": [{"name": "ask_user"}]}}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "user_server",
-        {"transport": "stream_http", "url": "http://user-server:8000/mcp",
-         "execute_on": "os_backend"},
+        {"transport": "stream_http", "url": "http://user-server:8000/mcp", "execute_on": "os_backend"},
         os_backend=backend,
     )
     assert await client.alist_tools(timeout=30.0) == [{"name": "ask_user"}]
     assert len(backend.codes) == 3
     assert [_sent(c)["payload"]["method"] for c in backend.codes] == [
-        "initialize", "notifications/initialized", "tools/list"
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
     ]
     # The handshake's session id is used within the operation, never before it.
     assert "mcp-session-id" not in _sent(backend.codes[0])["headers"]
@@ -91,14 +91,16 @@ async def test_list_tools_runs_full_handshake_in_one_operation():
 
 
 async def test_second_operation_does_not_reuse_the_first_session_id():
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "sid-A"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-        _ok({"result": {}}, {"mcp-session-id": "sid-B"}),
-        _ok({}),
-        _ok({"result": {"content": []}}),
-    ])
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "sid-A"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+            _ok({"result": {}}, {"mcp-session-id": "sid-B"}),
+            _ok({}),
+            _ok({"result": {"content": []}}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "srv",
         {"transport": "stream_http", "url": "http://x:8000/mcp"},
@@ -112,50 +114,49 @@ async def test_second_operation_does_not_reuse_the_first_session_id():
 
 
 async def test_call_tool_returns_the_raw_jsonrpc_body():
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "sid"}),
-        _ok({}),
-        _ok({"result": {"content": [{"type": "text", "text": "hi"}]}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "sid"}),
+            _ok({}),
+            _ok({"result": {"content": [{"type": "text", "text": "hi"}]}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     out = await client.acall_tool("ask_user", {"question": "q"}, timeout=10.0)
     assert out["result"]["content"][0]["text"] == "hi"
 
 
 async def test_http_error_status_raises():
-    backend = _RecordingSandbox([
-        {"status": 500, "headers": {}, "body": {}},
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            {"status": 500, "headers": {}, "body": {}},
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     with pytest.raises(Exception) as excinfo:
         await client.alist_tools(timeout=10.0)
     assert "500" in str(excinfo.value)
 
 
 async def test_truncated_stdout_is_an_error_not_broken_json():
-    backend = _RecordingSandbox([
-        _ExecResult(stdout=EXEC_RESULT_MARKER + '{"status": 200, "hea',
-                    stdout_hit_capture_cap=True),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ExecResult(stdout=EXEC_RESULT_MARKER + '{"status": 200, "hea', stdout_hit_capture_cap=True),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     with pytest.raises(McpExecCarrierError) as excinfo:
         await client.alist_tools(timeout=10.0)
     assert "truncated" in str(excinfo.value).lower()
 
 
 async def test_missing_marker_is_an_error_carrying_stderr():
-    backend = _RecordingSandbox([
-        _ExecResult(stdout="", stderr="python3: not found", return_code=127),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ExecResult(stdout="", stderr="python3: not found", return_code=127),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     with pytest.raises(McpExecCarrierError) as excinfo:
         await client.alist_tools(timeout=10.0)
     assert "python3: not found" in str(excinfo.value)
@@ -165,7 +166,8 @@ async def test_carrier_script_stops_at_the_first_sse_frame_without_waiting_for_e
     """D1: the carrier must not call resp.read() on a text/event-stream answer."""
     backend = _RecordingSandbox([_ok({"result": {}}, {"mcp-session-id": "s"})])
     client = OsBackendStatelessClient(
-        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"},
+        "srv",
+        {"transport": "stream_http", "url": "http://x:8000/mcp"},
         os_backend=backend,
     )
     try:
@@ -179,15 +181,16 @@ async def test_carrier_script_stops_at_the_first_sse_frame_without_waiting_for_e
 
 async def test_agent_locus_servers_never_appear_in_exec():
     """Isolation: only this server's own config may reach the container."""
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "sid"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "sid"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "srv",
-        {"transport": "http", "url": "http://sidecar:8000/mcp",
-         "token": "sidecar-token"},
+        {"transport": "http", "url": "http://sidecar:8000/mcp", "token": "sidecar-token"},
         os_backend=backend,
     )
     await client.alist_tools(timeout=10.0)
@@ -212,22 +215,21 @@ class _ProbingSandbox(_RecordingSandbox):
 
 
 async def test_python3_present_lets_the_operation_run():
-    backend = _ProbingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "s"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ], has_python3=True)
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _ProbingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "s"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ],
+        has_python3=True,
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     assert await client.alist_tools(timeout=10.0) == []
 
 
 async def test_missing_python3_is_an_explicit_error_and_installs_nothing():
     backend = _ProbingSandbox([], has_python3=False)
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     with pytest.raises(McpExecCarrierError) as excinfo:
         await client.alist_tools(timeout=10.0)
     assert "python3" in str(excinfo.value)
@@ -239,33 +241,34 @@ async def test_missing_python3_is_an_explicit_error_and_installs_nothing():
 
 async def test_carrier_probe_is_cached_on_the_backend_not_the_client():
     """Clients are rebuilt per operation; the probe must not be."""
-    backend = _ProbingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "s"}), _ok({}),
-        _ok({"result": {"tools": []}}),
-        _ok({"result": {}}, {"mcp-session-id": "s"}), _ok({}),
-        _ok({"result": {"tools": []}}),
-    ], has_python3=True)
+    backend = _ProbingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "s"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+            _ok({"result": {}}, {"mcp-session-id": "s"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ],
+        has_python3=True,
+    )
     cfg = {"transport": "http", "url": "http://x:8000/mcp"}
-    await OsBackendStatelessClient("srv", cfg, os_backend=backend).alist_tools(
-        timeout=10.0
-    )
-    await OsBackendStatelessClient("srv", cfg, os_backend=backend).alist_tools(
-        timeout=10.0
-    )
+    await OsBackendStatelessClient("srv", cfg, os_backend=backend).alist_tools(timeout=10.0)
+    await OsBackendStatelessClient("srv", cfg, os_backend=backend).alist_tools(timeout=10.0)
     assert len([p for p in backend.probes if "command -v" in p]) == 1
 
 
 async def test_the_operation_fits_inside_the_budget_it_was_given():
     """Three exec deadlines must not add up past the caller's timeout — that is
     the deadline registry uses to decide the server is dead."""
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "s"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "s"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=30.0)
     assert backend.timeouts == [10, 10, 10]
     assert sum(backend.timeouts) <= 30
@@ -274,14 +277,14 @@ async def test_the_operation_fits_inside_the_budget_it_was_given():
 async def test_socket_timeout_ends_before_the_exec_kill():
     """Ordering inside a share: the in-script socket gives up first, so a slow
     server is reported as an MCP timeout, not an opaque exec one."""
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "s"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "s"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=30.0)
     for code, deadline in zip(backend.codes, backend.timeouts):
         assert _sent(code)["timeout"] < deadline
@@ -298,28 +301,28 @@ def test_the_ordering_holds_on_every_budget(total):
 
 
 async def test_slack_keeps_its_full_size_when_the_budget_allows():
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "s"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "s"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=600.0)
     assert backend.timeouts == [200, 200, 200]
     assert _sent(backend.codes[0])["timeout"] == 185.0
 
 
 async def test_final_request_asks_the_server_to_drop_the_session():
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=10.0)
     assert [_sent(c)["close_session"] for c in backend.codes] == [False, False, True]
     assert "DELETE" in backend.codes[2]
@@ -328,15 +331,16 @@ async def test_final_request_asks_the_server_to_drop_the_session():
 async def test_delete_carries_the_same_auth_headers_as_the_posts():
     """A token-protected server answers a bare DELETE with 401 and the session
     outlives the operation. The carrier must reuse the request headers."""
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "srv",
-        {"transport": "http", "url": "http://x:8000/mcp", "token": "t0k",
-         "headers": {"X-Team": "bench"}},
+        {"transport": "http", "url": "http://x:8000/mcp", "token": "t0k", "headers": {"X-Team": "bench"}},
         os_backend=backend,
     )
     await client.alist_tools(timeout=10.0)
@@ -354,14 +358,14 @@ async def test_the_answer_is_printed_before_the_session_is_released():
     """Releasing the session is best effort, so it must not be able to lose the
     answer: a server that accepts the call and then wedges on DELETE would eat
     the exec deadline, and an unflushed envelope dies with the killed process."""
-    backend = _RecordingSandbox([
-        _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
-        _ok({}),
-        _ok({"result": {"tools": []}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": []}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=10.0)
     code = backend.codes[2]
     printed = code.index('json.dumps({"status"')
@@ -387,9 +391,7 @@ async def test_verify_ssl_false_reaches_the_carrier():
 
 async def test_verify_ssl_defaults_to_on():
     backend = _RecordingSandbox([_ok({"result": {}}, {"mcp-session-id": "s"})])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "https://x:8000/mcp"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "https://x:8000/mcp"}, os_backend=backend)
     try:
         await client.alist_tools(timeout=10.0)
     except Exception:
@@ -400,9 +402,7 @@ async def test_verify_ssl_defaults_to_on():
 async def test_only_307_308_are_followed_by_hand():
     """urllib follows 301/302 itself (rewriting POST to GET); only 307/308 reach us."""
     backend = _RecordingSandbox([_ok({"result": {}}, {"mcp-session-id": "s"})])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     try:
         await client.alist_tools(timeout=10.0)
     except Exception:
@@ -414,12 +414,12 @@ async def test_only_307_308_are_followed_by_hand():
 
 async def test_unresolved_redirect_is_an_error_not_a_hollow_success():
     """Four hops without settling must not look like `connected, 0 tools`."""
-    backend = _RecordingSandbox([
-        {"error": "RuntimeError: redirect loop not resolved after 4 hops: http://x/"},
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            {"error": "RuntimeError: redirect loop not resolved after 4 hops: http://x/"},
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     with pytest.raises(McpExecCarrierError) as excinfo:
         await client.alist_tools(timeout=10.0)
     assert "redirect loop" in str(excinfo.value)
@@ -428,9 +428,7 @@ async def test_unresolved_redirect_is_an_error_not_a_hollow_success():
 async def test_no_scratch_file_is_written_in_the_container():
     """The module docstring promises no file is written; hold it to that."""
     backend = _RecordingSandbox([_ok({"result": {}}, {"mcp-session-id": "s"})])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
-    )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     try:
         await client.alist_tools(timeout=10.0)
     except Exception:
@@ -439,14 +437,14 @@ async def test_no_scratch_file_is_written_in_the_container():
 
 
 async def test_carrier_runs_python3_from_stdin_via_exec_argv():
-    backend = _RecordingSandbox([
-        _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
-        {"status": 202, "headers": {}, "body": ""},
-        _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
-    ])
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
+            {"status": 202, "headers": {}, "body": ""},
+            _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+        ]
     )
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=10.0)
     assert backend.argvs and all(argv == ["python3", "-"] for argv in backend.argvs)
     assert all(EXEC_RESULT_MARKER in code for code in backend.codes)
@@ -455,15 +453,15 @@ async def test_carrier_runs_python3_from_stdin_via_exec_argv():
 async def test_carrier_uses_internal_channel_ceiling_not_tool_trace_cap():
     """The MCP answer is transport, not a model-facing trace: it must ride the
     backend's walk ceiling (50M) instead of inheriting the 60k shell cap."""
-    backend = _RecordingSandbox([
-        _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
-        {"status": 202, "headers": {}, "body": ""},
-        _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
-    ])
-    backend.walk_output_max_chars = 12_345_678
-    client = OsBackendStatelessClient(
-        "srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend
+    backend = _RecordingSandbox(
+        [
+            _ok({"jsonrpc": "2.0", "id": 1, "result": {}}),
+            {"status": 202, "headers": {}, "body": ""},
+            _ok({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+        ]
     )
+    backend.walk_output_max_chars = 12_345_678
+    client = OsBackendStatelessClient("srv", {"transport": "http", "url": "http://x:8000/mcp"}, os_backend=backend)
     await client.alist_tools(timeout=10.0)
     assert backend.capture_caps
     assert all(cap == 12_345_678 for cap in backend.capture_caps)
@@ -482,20 +480,17 @@ class _AsyncSandbox(_RecordingSandbox):
     async def arun_python(self, code, *, cwd=None, timeout=None, env=None):
         return self.run_python(code, cwd=cwd, timeout=timeout, env=env)
 
-    async def aexec(self, command, *, cwd=None, timeout=None, env=None,
-                    capture_max_chars=None):
+    async def aexec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         return self.exec(command, cwd=cwd, timeout=timeout, env=env)
 
-    async def aexec_argv(self, argv, *, stdin=None, cwd=None, timeout=None,
-                         env=None, capture_max_chars=None):
+    async def aexec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
         # HTTP-носитель ходит именно сюда: `python3 -` со скриптом на stdin —
         # тот же канал, что у stdio-транспорта. Раньше здесь стоял
         # `AssertionError`: носитель шёл через `run_python`, и это утверждение
         # было верным до правки develop «route http carrier via exec_argv»
         # (у модельного `run_python` свой потолок вывода, рассчитанный на
         # трассу тула, и крупный ответ MCP он обрезал).
-        return self.exec_argv(argv, stdin=stdin, cwd=cwd, timeout=timeout,
-                              env=env, capture_max_chars=capture_max_chars)
+        return self.exec_argv(argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env, capture_max_chars=capture_max_chars)
 
 
 async def test_async_operation_takes_no_thread():
@@ -506,12 +501,13 @@ async def test_async_operation_takes_no_thread():
     """
     import threading
 
-    backend = _AsyncSandbox([
-        _ok({"result": {"protocolVersion": "2024-11-05"}},
-            {"mcp-session-id": "sid-1"}),
-        _ok({}),
-        _ok({"result": {"tools": [{"name": "ask_user"}]}}),
-    ])
+    backend = _AsyncSandbox(
+        [
+            _ok({"result": {"protocolVersion": "2024-11-05"}}, {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": [{"name": "ask_user"}]}}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "user_server",
         {"transport": "stream_http", "url": "http://user-server:8000/mcp"},
@@ -535,10 +531,7 @@ async def test_async_operation_takes_no_thread():
         threading.Thread.start = real_start
 
     assert [t["name"] for t in tools] == ["ask_user"]
-    assert spawned == [], (
-        f"асинхронный обмен завёл потоки {spawned} — путь снова через "
-        "run_abandonable или пул"
-    )
+    assert spawned == [], f"асинхронный обмен завёл потоки {spawned} — путь снова через run_abandonable или пул"
 
 
 async def test_sync_backend_still_works_through_the_adapter():
@@ -547,12 +540,13 @@ async def test_sync_backend_still_works_through_the_adapter():
     Это обещание встраивающим: свой `FsBackend` переезда на asyncio не заметил.
     Поток здесь законен и является ценой совместимости, а не недоделкой.
     """
-    backend = _RecordingSandbox([
-        _ok({"result": {"protocolVersion": "2024-11-05"}},
-            {"mcp-session-id": "sid-1"}),
-        _ok({}),
-        _ok({"result": {"tools": [{"name": "ask_user"}]}}),
-    ])
+    backend = _RecordingSandbox(
+        [
+            _ok({"result": {"protocolVersion": "2024-11-05"}}, {"mcp-session-id": "sid-1"}),
+            _ok({}),
+            _ok({"result": {"tools": [{"name": "ask_user"}]}}),
+        ]
+    )
     client = OsBackendStatelessClient(
         "user_server",
         {"transport": "stream_http", "url": "http://user-server:8000/mcp"},

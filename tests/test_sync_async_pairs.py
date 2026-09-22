@@ -6,6 +6,7 @@
 loop'а уже нет. Две пары успели появиться незамеченными уже после того, как
 «восемь» было объявлено: счётчик тогда гоняли руками.
 """
+
 import ast
 import pathlib
 import re
@@ -50,6 +51,4 @@ def _pairs() -> set:
 def test_only_the_named_pairs_remain():
     found = _pairs()
     assert found - EXPECTED == set(), f"новая пара sync/async: {sorted(found - EXPECTED)}"
-    assert EXPECTED - found == set(), (
-        f"пара снята — уберите её из EXPECTED и из описания: {sorted(EXPECTED - found)}"
-    )
+    assert EXPECTED - found == set(), f"пара снята — уберите её из EXPECTED и из описания: {sorted(EXPECTED - found)}"

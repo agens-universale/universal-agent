@@ -10,6 +10,7 @@ For each scenario we run the same content through the SAME ``FileInfo`` class:
 We strip only genuinely environment-specific fields (``path``, ``modified_time``).
 Every other field — including ``permissions`` and ``sha256`` — must match exactly.
 """
+
 import json
 import os
 import tempfile
@@ -45,6 +46,7 @@ def _strip(env: dict) -> dict:
 # scenario helpers
 # ---------------------------------------------------------------------------
 
+
 def _compare(content: str, **call_kwargs):
     """Write a real temp file (base) and a fake backend on a virtual path
     (harbor) with the same content; compare."""
@@ -63,6 +65,7 @@ def _compare(content: str, **call_kwargs):
 # ---------------------------------------------------------------------------
 # tests
 # ---------------------------------------------------------------------------
+
 
 def test_text_file_no_hash():
     """Basic text file: all non-env fields must match (includes permissions)."""
@@ -107,9 +110,7 @@ def test_binary_file_with_hash():
         # The base uses self._backend.sha256_bytes (raw bytes, LocalFsBackend).
         # We only compare non-hash binary fields here since FakeBackend can't faithfully
         # reproduce raw-bytes hash for non-UTF-8 content (latin-1 round-trip differs).
-        harbor_env = json.loads(
-            _harbor_tool({"/work/blob.bin": content_str})(path="/work/blob.bin", include_hash=True)
-        )
+        harbor_env = json.loads(_harbor_tool({"/work/blob.bin": content_str})(path="/work/blob.bin", include_hash=True))
         base_strip = _strip(base_env)
         harbor_strip = _strip(harbor_env)
         # permissions and classification must match; sha256 may differ for binary due to

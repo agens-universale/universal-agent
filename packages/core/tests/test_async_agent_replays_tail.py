@@ -12,6 +12,7 @@
 только цикл агента (записывает батчи) и снос MCP (двойник выполняет шаг теста
 ровно в окне сноса).
 """
+
 import asyncio
 import importlib
 import logging
@@ -40,11 +41,7 @@ def _msg(text: str) -> dict:
 
 
 def _dropped(caplog) -> list:
-    return [
-        (r.ending, r.count)
-        for r in caplog.records
-        if getattr(r, "event", None) == "run_tail_dropped"
-    ]
+    return [(r.ending, r.count) for r in caplog.records if getattr(r, "event", None) == "run_tail_dropped"]
 
 
 @pytest.fixture()
@@ -94,14 +91,10 @@ def _break_thread_read(monkeypatch, env, turn: int, on_read) -> None:
             await on_read()
         return await real_session.afrom_config(**kw)
 
-    monkeypatch.setattr(
-        env.ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
-    )
+    monkeypatch.setattr(env.ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread))
 
 
-async def test_message_sent_during_teardown_reaches_the_agent_in_its_own_turn(
-    tmp_path, env
-):
+async def test_message_sent_during_teardown_reaches_the_agent_in_its_own_turn(tmp_path, env):
     async with await _agent(tmp_path, env) as agent:
         env.teardown_steps.append(lambda: agent.send(_msg("вдогонку")))
         answer = await agent.run("первый", thread_id="t", start_new_thread=True)
@@ -117,9 +110,7 @@ async def test_message_sent_during_teardown_reaches_the_agent_in_its_own_turn(
     assert answer == {"answer": "вдогонку"}, answer
 
 
-async def test_stopped_run_neither_replays_its_tail_nor_leaves_it(
-    tmp_path, env, caplog
-):
+async def test_stopped_run_neither_replays_its_tail_nor_leaves_it(tmp_path, env, caplog):
     """После стопа хвост не доигрывается — и не остаётся следующему `run`.
 
     Доиграть его значило бы проигнорировать остановку, а оставить в
@@ -139,9 +130,7 @@ async def test_stopped_run_neither_replays_its_tail_nor_leaves_it(
         env.teardown_steps.append(lambda: agent.send(_msg("к второму")))
         await agent.run("второй", thread_id="t")
 
-    assert env.batches[0] == ["первый"] and ["вдогонку"] not in env.batches, (
-        f"хвост доигран после стопа: {env.batches}"
-    )
+    assert env.batches[0] == ["первый"] and ["вдогонку"] not in env.batches, f"хвост доигран после стопа: {env.batches}"
     assert leftover == [], "хвост остановленного хода остался следующему run"
     assert _dropped(caplog) == [("stopped", 1)], _dropped(caplog)
     assert env.batches[1:] == [["второй"], ["к второму"]], (
@@ -149,9 +138,7 @@ async def test_stopped_run_neither_replays_its_tail_nor_leaves_it(
     )
 
 
-async def test_stop_in_the_setup_of_a_tail_turn_ends_the_replays(
-    tmp_path, env, monkeypatch, caplog
-):
+async def test_stop_in_the_setup_of_a_tail_turn_ends_the_replays(tmp_path, env, monkeypatch, caplog):
     """Стоп, пришедший в сетап хвостового хода, обрывает доигрывание.
 
     Исполнитель такой стоп не видит: state нового хода ещё не создан, и
@@ -175,9 +162,7 @@ async def test_stop_in_the_setup_of_a_tail_turn_ends_the_replays(
 
 
 @pytest.mark.parametrize("ending", ["failed", "cancelled"])
-async def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
-    tmp_path, env, monkeypatch, caplog, ending
-):
+async def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(tmp_path, env, monkeypatch, caplog, ending):
     """Батч хвоста, с которым умер ход, уходит в лог потерянным, а не в пустоту.
 
     Для исполнителя он — аргументы `arun`, а не очередь: снять хвост заново
@@ -198,9 +183,7 @@ async def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
         env.teardown_steps.append(lambda: agent.send(_msg("хвост-1")))
         env.teardown_steps.append(lambda: agent.send(_msg("хвост-2")))
         with caplog.at_level(logging.WARNING):
-            run = asyncio.create_task(
-                agent.run("первый", thread_id="t", start_new_thread=True)
-            )
+            run = asyncio.create_task(agent.run("первый", thread_id="t", start_new_thread=True))
             if ending == "cancelled":
                 await asyncio.wait_for(in_setup.wait(), _BOUND_SEC)
                 run.cancel()
@@ -210,6 +193,4 @@ async def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     assert env.batches == [["первый"], ["хвост-1"]], (
         f"ход со вторым хвостом дошёл до цикла — тест ничего не проверил: {env.batches}"
     )
-    assert _dropped(caplog) == [(ending, 1)], (
-        f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
-    )
+    assert _dropped(caplog) == [(ending, 1)], f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"

@@ -1,11 +1,12 @@
 """dialog_summary → kind=summary, видим, содержимое очищено от <think>/<technical>."""
+
 from gc_tui.services.trace_mapper import map_message
 
 
 def test_dialog_summary_maps_to_summary_kind():
     raw = (
         '<technical type="dialog_summary">Summarized context from previous dialogue.\n'
-        '<summary>User asked X. Agent did Y. Result: partial.</summary></technical>'
+        "<summary>User asked X. Agent did Y. Result: partial.</summary></technical>"
     )
     ev = map_message({"role": "user", "content": raw, "id": "s1"}, no=1, ts="t")
     assert ev is not None
@@ -17,10 +18,7 @@ def test_dialog_summary_maps_to_summary_kind():
 
 
 def test_dialog_summary_strips_think():
-    raw = (
-        '<technical type="dialog_summary"><summary><think>secret reasoning</think>'
-        'User did Z.</summary></technical>'
-    )
+    raw = '<technical type="dialog_summary"><summary><think>secret reasoning</think>User did Z.</summary></technical>'
     ev = map_message({"role": "user", "content": raw, "id": "s2"}, no=1, ts="t")
     assert "secret reasoning" not in ev.summary_content
     assert "User did Z" in ev.summary_content
@@ -48,9 +46,7 @@ def test_dialog_summary_nested_section_tags_do_not_leak():
         last_dialog_steps="[step 1] did X",
     )
     content = (
-        '<technical type="dialog_summary">Summarized context from previous dialogue.\n'
-        + body.strip()
-        + "</technical>"
+        '<technical type="dialog_summary">Summarized context from previous dialogue.\n' + body.strip() + "</technical>"
     )
     ev = map_message({"role": "user", "content": content, "id": "s3"}, no=1, ts="t")
     assert ev is not None

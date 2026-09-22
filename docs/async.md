@@ -37,16 +37,16 @@ async with await AsyncAgent.create(config) as agent:
         if kind == "answer":
             print(text, end="", flush=True)
         elif kind == "think":
-            ...          # рассуждение модели, если провайдер его отдаёт
+            ...  # рассуждение модели, если провайдер его отдаёт
         elif kind == "reset":
-            ...          # начать вывод заново: пошла повторная попытка запроса
+            ...  # начать вывод заново: пошла повторная попытка запроса
 ```
 
 Управление ходом снаружи:
 
 ```python
-agent.send({"role": "user", "content": "стоп, сначала линтер"})   # подкинуть в идущий ход
-agent.stop()                                                      # кооперативная остановка
+agent.send({"role": "user", "content": "стоп, сначала линтер"})  # подкинуть в идущий ход
+agent.stop()  # кооперативная остановка
 ```
 
 Сообщение, отданное `send`, пока ход уже закрывается (сохраняет тред, закрывает
@@ -136,8 +136,7 @@ loop'у, на котором заведены». Объяснение было �
 
 ```python
 class MyTool(AbstractSimpleTool):
-    async def acall(self, x: str) -> str:
-        ...
+    async def acall(self, x: str) -> str: ...
 ```
 
 Асинхронность формы НЕ означает, что тело обязано что-то ждать: файловые и
@@ -290,9 +289,9 @@ Python-класс-тул извне нельзя — `build_tools_data` соби
 Ядро — библиотека, и ресурсы приложения ей не принадлежат:
 
 ```python
-ctx.ask_human = my_ask          # спросить пользователя: функция или корутина
-ctx.on_stream_delta = my_sink   # живые дельты ответа
-ctx.on_progress = my_progress   # прогресс подключения MCP при сборке контекста
+ctx.ask_human = my_ask  # спросить пользователя: функция или корутина
+ctx.on_stream_delta = my_sink  # живые дельты ответа
+ctx.on_progress = my_progress  # прогресс подключения MCP при сборке контекста
 ```
 
 `ask_human` не задан → тул `turn_ask_human` читает stdin, как раньше в CLI.
@@ -334,10 +333,10 @@ logging:
 ```python
 from gc_core.backends.factory import resolve_os_backend
 
-backend = resolve_os_backend(config_dict)        # harbor: + environment=…, loop=…
+backend = resolve_os_backend(config_dict)  # harbor: + environment=…, loop=…
 cache = ToolsCache(config_dict, os_backend=backend)
 a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
-a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)   # уже бесплатно
+a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)  # уже бесплатно
 ```
 
 Бэкенд кэшу передаётся ОБЯЗАТЕЛЬНО, если в конфиге есть MCP-сервер с
@@ -358,8 +357,8 @@ a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)   # у�
 
 ```python
 async for kind, text in agent.stream("вопрос"):
-    ...                       # kind: "answer" | "think" | "reset"
-print(agent.last_answer)      # финальный ответ хода
+    ...  # kind: "answer" | "think" | "reset"
+print(agent.last_answer)  # финальный ответ хода
 ```
 
 Очередь заводится **на вызов**: два параллельных `stream()` не растаскивают
@@ -408,7 +407,9 @@ agent = await AsyncAgent.create(cfg, thread_store=MyDbStore())
 class RedisThreadStore:
     async def aload_messages(self, system_id, thread_id): ...
     async def aload_thread_state(self, system_id, thread_id): ...
+
     # ...остальные девять
+
 
 agent = await AsyncAgent.create(cfg, thread_store=RedisThreadStore(url))
 ```

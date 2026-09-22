@@ -11,6 +11,7 @@ Singleton `env = EnvVars()` читает os.environ при импорте мод
 - `XDG_*_HOME` читаются на каждый вызов `gc_paths()` через `_xdg_or` →
   тесты могут использовать `monkeypatch.setenv` напрямую.
 """
+
 from __future__ import annotations
 
 import os
@@ -37,7 +38,11 @@ class EnvVars(BaseSettings):
     gc_data_dir: Path | None = None
 
     @field_validator(
-        "gc_home", "gc_state_dir", "gc_config_dir", "gc_cache_dir", "gc_data_dir",
+        "gc_home",
+        "gc_state_dir",
+        "gc_config_dir",
+        "gc_cache_dir",
+        "gc_data_dir",
         "server_config_path",
         "swarm_agentmd_path",
         "swarm_threads_dir",
@@ -51,7 +56,11 @@ class EnvVars(BaseSettings):
         return v
 
     @field_validator(
-        "gc_home", "gc_state_dir", "gc_config_dir", "gc_cache_dir", "gc_data_dir",
+        "gc_home",
+        "gc_state_dir",
+        "gc_config_dir",
+        "gc_cache_dir",
+        "gc_data_dir",
         mode="after",
     )
     @classmethod
@@ -126,7 +135,7 @@ def _config_dir_usable(p: Path) -> bool:
     """
     probe = p
     while not probe.exists():
-        if probe.parent == probe:   # дошли до корня — дальше некуда
+        if probe.parent == probe:  # дошли до корня — дальше некуда
             return False
         probe = probe.parent
     return os.access(probe, os.W_OK)
@@ -235,4 +244,3 @@ def project_local_config_path() -> Optional[str]:
     и потребители снаружи спрашивают отсюда."""
     candidate = str((project_gc_dir() / "config.yml").resolve())
     return candidate if os.path.isfile(candidate) else None
-

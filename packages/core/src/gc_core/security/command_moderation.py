@@ -136,9 +136,7 @@ def build_judge_payload(
 ) -> dict[str, Any]:
     try:
         ps = _get_protected_paths(context.cwd)
-        never_touch = sorted(
-            str(p) for p in ps.instructions | ps.operational
-        )
+        never_touch = sorted(str(p) for p in ps.instructions | ps.operational)
     except Exception:
         never_touch = []
     return {
@@ -171,9 +169,7 @@ def run_command_judge(judge_client: Any, judge_payload: dict[str, Any]) -> Judge
     return validate_judge_result(raw_result)
 
 
-def run_command_judge_with_retry(
-    judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1
-) -> JudgeResult:
+def run_command_judge_with_retry(judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1) -> JudgeResult:
     """Судья с ретраями: слабая модель часто отдаёт мусорный вердикт разово —
     один повтор перед тем как признать судью недоступным. Если все попытки
     исчерпаны — пробрасываем последнее исключение (декоратор переведёт это в
@@ -199,9 +195,7 @@ def judge_with_retry_flow(judge_client: Any, judge_payload: dict[str, Any], *, r
     """
     if judge_client is None:
         raise JudgeUnavailable("judge client is not configured")
-    request = (
-        AwaitOnCaller if inspect.iscoroutinefunction(judge_client) else OffLoop
-    )
+    request = AwaitOnCaller if inspect.iscoroutinefunction(judge_client) else OffLoop
     last_exc: Exception | None = None
     for _ in range(retries + 1):
         try:
@@ -547,21 +541,20 @@ def _obtain_user_confirmation(
     # Экстрактор — только для режима ask. В deny подтверждение даёт
     # человек через порт: иначе подтверждение из аргументов вызова
     # (то есть от модели) разрешало бы команду при недоступном судье.
-    if (
-        user_confirmation_extractor is not None
-        and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
-    ):
+    if user_confirmation_extractor is not None and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED:
         return user_confirmation_extractor(*args, **kwargs)
     # Единственное, что остаётся блокирующим по существу:
     # человек думает, и асинхронной формы у этого нет.
-    return (yield OffLoop(
-        _ask_user_confirmation,
-        payload,
-        moderation_context,
-        decision,
-        tool_ctx,
-        on_interrupt=False,
-    ))
+    return (
+        yield OffLoop(
+            _ask_user_confirmation,
+            payload,
+            moderation_context,
+            decision,
+            tool_ctx,
+            on_interrupt=False,
+        )
+    )
 
 
 def _build_context(
@@ -664,9 +657,7 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
-def _default_judge_client(
-    args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> Callable[[dict[str, Any]], Any]:
+def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Callable[[dict[str, Any]], Any]:
     """Судья модерации: корутина, которую ждёт loop ВЫЗЫВАЮЩЕГО.
 
     Прежняя редакция была синхронной и поднимала `asyncio.run` на каждый
@@ -760,7 +751,7 @@ def _extract_json_candidate(text: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return text[start:end + 1]
+        return text[start : end + 1]
     return text
 
 

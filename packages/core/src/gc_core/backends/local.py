@@ -1,5 +1,6 @@
 """Host implementation of FsBackend (os / open() / subprocess); the host-I/O
 details that used to live inline in the tools are concentrated here."""
+
 import asyncio
 import codecs
 import hashlib
@@ -209,10 +210,7 @@ class LocalFsBackend(FsBackend):
                 yield prefix + f
 
             if should_descend is not None:
-                dirnames[:] = [
-                    d for d in dirnames
-                    if should_descend(os.path.join(dirpath, d))
-                ]
+                dirnames[:] = [d for d in dirnames if should_descend(os.path.join(dirpath, d))]
 
     async def walk(self, path: str) -> list:
         return [_item async for _item in self.iter_walk(path)]
@@ -269,7 +267,10 @@ class LocalFsBackend(FsBackend):
         prune_names: Sequence[str] = (),
         prune_dot_dirs: bool = False,
     ) -> list:
-        return [_item async for _item in self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)]
+        return [
+            _item
+            async for _item in self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+        ]
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:
@@ -285,41 +286,67 @@ class LocalFsBackend(FsBackend):
 
     # --- exec ---
     # --- exec (async) ---
-    async def aexec(self, command: str, *, cwd: Optional[str] = None,
-                    timeout: Optional[int] = None,
-                    env: Optional[dict] = None,
-                    capture_max_chars: Optional[int] = None) -> ExecResult:
+    async def aexec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
         return await _arun_bounded_process(
-            command, shell=True, cwd=cwd, timeout=timeout, env=merged_env,
+            command,
+            shell=True,
+            cwd=cwd,
+            timeout=timeout,
+            env=merged_env,
             stdin_text=None,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                         cwd: Optional[str] = None,
-                         timeout: Optional[int] = None,
-                         env: Optional[dict] = None,
-                         capture_max_chars: Optional[int] = None) -> ExecResult:
+    async def aexec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
         return await _arun_bounded_process(
-            [str(a) for a in argv], shell=False, cwd=cwd, timeout=timeout,
-            env=merged_env, stdin_text=stdin,
+            [str(a) for a in argv],
+            shell=False,
+            cwd=cwd,
+            timeout=timeout,
+            env=merged_env,
+            stdin_text=stdin,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def arun_python(self, code: str, *, cwd: Optional[str] = None,
-                          timeout: Optional[int] = None,
-                          env: Optional[dict] = None,
-                          capture_max_chars: Optional[int] = None) -> ExecResult:
+    async def arun_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         return await _arun_bounded_process(
-            [sys.executable, "-u", "-"], shell=False, cwd=cwd, timeout=timeout,
-            env=_sanitize_env(env), stdin_text=code,
+            [sys.executable, "-u", "-"],
+            shell=False,
+            cwd=cwd,
+            timeout=timeout,
+            env=_sanitize_env(env),
+            stdin_text=code,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None) -> dict:
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None, env: Optional[dict] = None) -> dict:
         """Запустить команду и НЕ ждать её: отдать pid сразу.
 
         Здесь нет ни труб, ни чтения, ни таймаута, и в этом весь смысл. Труба
@@ -363,7 +390,8 @@ class LocalFsBackend(FsBackend):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd=cwd, env=merged_env,
+                cwd=cwd,
+                env=merged_env,
                 **_background_detach_kwargs(),
             )
         # Команда, упавшая сразу (опечатка в имени, нет файла), — не «запущена».
@@ -438,7 +466,7 @@ def _kill_background_now(proc: Any) -> None:
     """
     try:
         if os.name == "posix":
-            os.killpg(proc.pid, signal.SIGKILL)        # своя сессия: pgid == pid
+            os.killpg(proc.pid, signal.SIGKILL)  # своя сессия: pgid == pid
         else:
             proc.kill()
     except OSError:
@@ -606,7 +634,7 @@ async def _astop_process(proc) -> None:
     if _terminate_quietly(proc):
         try:
             await _await_process_exit(proc, _KILL_GRACE_SEC)
-            return                       # вышла сама, убивать некого
+            return  # вышла сама, убивать некого
         except (TimeoutError, asyncio.CancelledError):
             pass
     _kill_quietly(proc)
@@ -654,9 +682,7 @@ async def _arun_bounded_process(
     """Запустить процесс с ограниченным буфером, не занимая ни одного потока."""
     from gc_core.utils.win_console import preserve_console_mode
 
-    stdin_arg = (
-        asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL
-    )
+    stdin_arg = asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL
     # Своя группа процессов. Без неё `proc.kill()` на таймауте убивал ТОЛЬКО
     # шелл: потомки `sh -c "a; b"` продолжали работать, унаследовав pipe'ы, и
     # переживали и таймаут, и отмену. С группой убиваем всю команду разом
@@ -669,7 +695,10 @@ async def _arun_bounded_process(
                 args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+                stdin=stdin_arg,
+                cwd=cwd,
+                env=env,
+                limit=_READ_CHUNK * 8,
                 **spawn_kwargs,
             )
         else:
@@ -677,7 +706,10 @@ async def _arun_bounded_process(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+                stdin=stdin_arg,
+                cwd=cwd,
+                env=env,
+                limit=_READ_CHUNK * 8,
                 **spawn_kwargs,
             )
 
@@ -768,6 +800,7 @@ def _keep_draining(tasks: list, proc) -> None:
     умрёт или завершится сам. До тех пор читаем — иначе закрытая труба выдаёт
     ему EPIPE на первой записи.
     """
+
     async def _finish() -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -823,8 +856,9 @@ def _dup_pipe_ends(proc) -> list:
             ends.append(_dup_pipe_end(pipe))
         except Exception as exc:
             logger.warning(
-                "exec: трубу %s команды не отдать потоку дренажа — фоновый "
-                "процесс команды получит ошибку записи: %r", stream_fd, exc,
+                "exec: трубу %s команды не отдать потоку дренажа — фоновый процесс команды получит ошибку записи: %r",
+                stream_fd,
+                exc,
             )
     return ends
 
@@ -840,9 +874,7 @@ def _dup_pipe_end(pipe):
         import _winapi
 
         current = _winapi.GetCurrentProcess()
-        return _winapi.DuplicateHandle(
-            current, pipe.handle, current, 0, False, _winapi.DUPLICATE_SAME_ACCESS
-        )
+        return _winapi.DuplicateHandle(current, pipe.handle, current, 0, False, _winapi.DUPLICATE_SAME_ACCESS)
     copy = os.dup(pipe.fileno())
     # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
     # без этого первое же чтение из потока даёт `BlockingIOError`, мы
@@ -978,7 +1010,7 @@ def _kill_quietly(proc) -> None:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return
         except (ProcessLookupError, PermissionError, OSError):
-            pass                      # группы уже нет либо она не наша
+            pass  # группы уже нет либо она не наша
     try:
         proc.kill()
     except Exception:
@@ -1040,11 +1072,7 @@ _CHILD_ENV_ALLOWLIST = frozenset(
 
 
 def _child_env_from_parent() -> Dict[str, str]:
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if k in _CHILD_ENV_ALLOWLIST and isinstance(v, str)
-    }
+    return {k: v for k, v in os.environ.items() if k in _CHILD_ENV_ALLOWLIST and isinstance(v, str)}
 
 
 def _sanitize_env(env: Optional[Dict[str, Any]]) -> Dict[str, str]:

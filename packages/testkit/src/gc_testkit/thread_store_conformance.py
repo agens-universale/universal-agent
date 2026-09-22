@@ -31,6 +31,7 @@
 Каждое из четырёх теперь здесь. Правило простое: расходятся реализации ровно
 там, где их проверяют по-разному, поэтому проверка одна на всех.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -44,9 +45,7 @@ SYS = "cli"
 CONTRACT_METHODS = CONTRACT_METHODS
 
 #: Шесть полей записи трассы. Форма замкнутая: её пишет и читает только ядро.
-TRACE_FIELDS = frozenset(
-    {"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"}
-)
+TRACE_FIELDS = frozenset({"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"})
 
 
 class ThreadStoreContractError(AssertionError):
@@ -62,6 +61,7 @@ def _fail(what: str, detail: str) -> None:
 
 
 # --- структура -------------------------------------------------------------
+
 
 def check_methods_present(store: Any) -> None:
     """Все одиннадцать методов есть и вызываемы.
@@ -131,12 +131,12 @@ def check_signatures(store: Any) -> None:
         if [(p.name, p.kind) for p in want_p] != [(p.name, p.kind) for p in got_p]:
             _fail(
                 f"{type(store).__name__}.{name}: сигнатура разошлась с контрактом",
-                f"контракт: ({', '.join(str(p) for p in want_p)})"
-                f"\n  у вас:    ({', '.join(str(p) for p in got_p)})",
+                f"контракт: ({', '.join(str(p) for p in want_p)})\n  у вас:    ({', '.join(str(p) for p in got_p)})",
             )
 
 
 # --- поведение -------------------------------------------------------------
+
 
 def check_missing_thread_is_empty(store: Any) -> None:
     """Нет треда — пустота, а не исключение."""
@@ -352,10 +352,8 @@ def check_every_write_path_stamps_meta(store: Any) -> None:
     # ``save_meta``. Иначе штампы достались бы в наследство от него, и
     # проверка стала бы пустой — ровно так расхождение и пряталось.
     for label, write in (
-        ("patch_runtime_flag",
-         lambda tid: store.patch_runtime_flag(SYS, tid, "summarizing", active=True)),
-        ("update_runtime_meta",
-         lambda tid: store.update_runtime_meta(SYS, tid, {"trace_ids": ["z"]})),
+        ("patch_runtime_flag", lambda tid: store.patch_runtime_flag(SYS, tid, "summarizing", active=True)),
+        ("update_runtime_meta", lambda tid: store.update_runtime_meta(SYS, tid, {"trace_ids": ["z"]})),
     ):
         tid = f"t-stamp-{label}"
         write(tid)
@@ -384,10 +382,14 @@ def check_discard_updates_the_count(store: Any) -> None:
     столько же, а в треде меньше».
     """
     tid = "t-discard-count"
-    store.append_messages(SYS, tid, [
-        {"role": "user", "content": "a", "id": "m1"},
-        {"role": "user", "content": "b", "id": "m2"},
-    ])
+    store.append_messages(
+        SYS,
+        tid,
+        [
+            {"role": "user", "content": "a", "id": "m1"},
+            {"role": "user", "content": "b", "id": "m2"},
+        ],
+    )
     before = len(store.load_messages(SYS, tid))
 
     removed = store.discard_message(SYS, tid, "m2")
@@ -421,8 +423,12 @@ def check_replace_messages_keeps_the_trace(store: Any) -> None:
     store.append_messages(SYS, tid, [{"role": "user", "content": "старое", "id": "m1"}])
     for n in range(2):
         store.append_subagent_trace(
-            SYS, tid, parent_call_id=f"p{n}", child_run_id=f"c{n}",
-            kind="call", payload={"x": n},
+            SYS,
+            tid,
+            parent_call_id=f"p{n}",
+            child_run_id=f"c{n}",
+            kind="call",
+            payload={"x": n},
         )
     before = store.read_subagent_trace(SYS, tid)
 
@@ -492,9 +498,12 @@ def check_subagent_trace(store: Any) -> None:
     четыре, а проверка смотрела только на ``kind`` и оставалась зелёной.
     """
     rec = store.append_subagent_trace(
-        SYS, "t-trace",
-        parent_call_id="call-1", child_run_id="run-1",
-        kind="call", payload={"name": "fs_read_file"},
+        SYS,
+        "t-trace",
+        parent_call_id="call-1",
+        child_run_id="run-1",
+        kind="call",
+        payload={"name": "fs_read_file"},
     )
     if not isinstance(rec, dict):
         _fail(
@@ -513,9 +522,12 @@ def check_subagent_trace(store: Any) -> None:
         _fail("seq трассы не целое", f"seq={rec.get('seq')!r}")
 
     store.append_subagent_trace(
-        SYS, "t-trace",
-        parent_call_id="call-2", child_run_id="run-2",
-        kind="finished", payload={},
+        SYS,
+        "t-trace",
+        parent_call_id="call-2",
+        child_run_id="run-2",
+        kind="finished",
+        payload={},
     )
     trace = store.read_subagent_trace(SYS, "t-trace")
     if [r.get("kind") for r in trace] != ["call", "finished"]:
@@ -584,6 +596,7 @@ def assert_conforms(store_factory: Callable[[], Any]) -> List[str]:
 
 # --- асинхронные реализации ------------------------------------------------
 
+
 class _AwaitingFacade:
     """Синхронный вид асинхронного хранилища — чтобы проверки были ТЕ ЖЕ.
 
@@ -616,10 +629,7 @@ def check_async_methods_present(store: Any) -> None:
     """Все одиннадцать ``a``-методов есть и корутинны."""
     from gc_core.thread_store_async import ASYNC_CONTRACT_METHODS
 
-    missing = [
-        m for m in ASYNC_CONTRACT_METHODS
-        if not inspect.iscoroutinefunction(getattr(store, m, None))
-    ]
+    missing = [m for m in ASYNC_CONTRACT_METHODS if not inspect.iscoroutinefunction(getattr(store, m, None))]
     if not missing:
         return
     present_sync = [m for m in missing if callable(getattr(store, m, None))]
@@ -627,12 +637,12 @@ def check_async_methods_present(store: Any) -> None:
         f"\n  Есть, но не корутинны: {', '.join(present_sync)}."
         "\n  Половинчатая реализация опаснее полного отсутствия: часть записей"
         "\n  уйдёт в базу, часть потеряется молча."
-        if present_sync else ""
+        if present_sync
+        else ""
     )
     _fail(
         f"{type(store).__name__}: нет корутинных методов: {', '.join(missing)}",
-        f"AsyncThreadStore ждёт все {len(ASYNC_CONTRACT_METHODS)}: "
-        f"{', '.join(ASYNC_CONTRACT_METHODS)}{hint}",
+        f"AsyncThreadStore ждёт все {len(ASYNC_CONTRACT_METHODS)}: {', '.join(ASYNC_CONTRACT_METHODS)}{hint}",
     )
 
 

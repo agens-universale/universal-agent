@@ -3,6 +3,7 @@
 В отличие от startup_notices, живут только в памяти текущего процесса;
 не пишутся в meta/jsonl. TUI показывает их в карточке и на экране /notices.
 """
+
 from __future__ import annotations
 
 import json
@@ -207,9 +208,7 @@ def maybe_push_llm_failure_notice(
 ) -> None:
     if not enabled:
         return
-    push_runtime_notice(
-        notice_from_llm_failure(exc, request_label=request_label, url=url)
-    )
+    push_runtime_notice(notice_from_llm_failure(exc, request_label=request_label, url=url))
 
 
 def notice_from_fallback_to_active(
@@ -225,9 +224,7 @@ def notice_from_fallback_to_active(
     субагентов; пусто для служебных потребителей."""
     suffix = f" ({mode})" if mode else ""
     message = f"{who}{suffix}: {failed_alias} недоступна — выполнено активной {active_model}"
-    return Notice(
-        "warning", "fallback_to_active", message, (failed_alias, active_model)
-    )
+    return Notice("warning", "fallback_to_active", message, (failed_alias, active_model))
 
 
 def maybe_push_fallback_to_active_notice(
@@ -241,7 +238,5 @@ def maybe_push_fallback_to_active_notice(
     if not enabled:
         return
     push_runtime_notice(
-        notice_from_fallback_to_active(
-            who=who, failed_alias=failed_alias, active_model=active_model, mode=mode
-        )
+        notice_from_fallback_to_active(who=who, failed_alias=failed_alias, active_model=active_model, mode=mode)
     )

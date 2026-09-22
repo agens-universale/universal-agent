@@ -4,6 +4,7 @@
   (он уже смонтирован delivery-флоу через _mount_user_reply → _flush_skill_marker);
 - mid-run доставка (display_content="", live=False) — только маркер, без реплики юзера.
 """
+
 import pytest
 
 
@@ -57,9 +58,7 @@ async def test_resume_path_mounts_exactly_one_marker(tmp_path):
         scr = pilot.app.screen
         scr._render_records([_user_rec_with_skill("qa-x")], live=False)
         await pilot.pause()
-        assert _count_skill_markers(scr) == 1, (
-            "На resume-пути должен быть ровно один [skill]-маркер"
-        )
+        assert _count_skill_markers(scr) == 1, "На resume-пути должен быть ровно один [skill]-маркер"
 
 
 @pytest.mark.asyncio
@@ -74,9 +73,7 @@ async def test_live_path_mounts_no_marker(tmp_path):
         scr = pilot.app.screen
         scr._render_records([_user_rec_with_skill("qa-x")], live=True)
         await pilot.pause()
-        assert _count_skill_markers(scr) == 0, (
-            "На live-пути _render_record не должен монтировать [skill]-маркер"
-        )
+        assert _count_skill_markers(scr) == 0, "На live-пути _render_record не должен монтировать [skill]-маркер"
 
 
 @pytest.mark.asyncio
@@ -91,12 +88,8 @@ async def test_midrun_delivery_resume_marker_only(tmp_path):
         scr = pilot.app.screen
         scr._render_records([_midrun_delivery_rec("qa-x")], live=False)
         await pilot.pause()
-        assert _count_skill_markers(scr) == 1, (
-            "Mid-run доставка на resume: должен быть ровно один [skill]-маркер"
-        )
-        assert _count_user_replies(scr) == 0, (
-            "Mid-run доставка на resume: UserReplyContainer не должен монтироваться"
-        )
+        assert _count_skill_markers(scr) == 1, "Mid-run доставка на resume: должен быть ровно один [skill]-маркер"
+        assert _count_user_replies(scr) == 0, "Mid-run доставка на resume: UserReplyContainer не должен монтироваться"
 
 
 @pytest.mark.asyncio
@@ -111,6 +104,4 @@ async def test_midrun_delivery_live_no_marker(tmp_path):
         scr = pilot.app.screen
         scr._render_records([_midrun_delivery_rec("qa-x")], live=True)
         await pilot.pause()
-        assert _count_skill_markers(scr) == 0, (
-            "Mid-run доставка на live-пути: [skill]-маркер не должен монтироваться"
-        )
+        assert _count_skill_markers(scr) == 0, "Mid-run доставка на live-пути: [skill]-маркер не должен монтироваться"

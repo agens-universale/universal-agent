@@ -1,4 +1,5 @@
 """Хром: бейдж статуса и индикатор контекста — после Task 6 в мета-полосе, не хедере."""
+
 import json
 
 import pytest
@@ -16,6 +17,7 @@ def _write_task(tmp_path, tid, status_tui=None, extra_data=""):
 async def test_badge_completed_from_meta_tui(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "hdr00000000000000000000000000001a"
     _write_task(tmp_path, tid, status_tui="completed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -31,6 +33,7 @@ async def test_header_left_is_str_with_session_id(tmp_path):
     """После Task 6: хедер-лево — str «Сессия: <id>», без модели и бейджа."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "hdr00000000000000000000000000002a"
     _write_task(tmp_path, tid, status_tui="completed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -51,16 +54,16 @@ async def test_meter_hidden_in_header_responses_mode(tmp_path):
     """Контекст-индикатор в хедере не показывается — он в мете."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "hdr00000000000000000000000000003a"
     _write_task(tmp_path, tid, status_tui="completed")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "responses"})
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "responses"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         left, _ = scr._compose_header_segments()
         s = left if isinstance(left, str) else left.plain
-        assert "контекст" not in s   # индикатор не в хедере вообще
+        assert "контекст" not in s  # индикатор не в хедере вообще
 
 
 @pytest.mark.asyncio
@@ -71,6 +74,7 @@ async def test_badge_failed_read_via_task_status_badge(tmp_path):
     переездом «модель·контекст» в футер — здесь проверяем только чтение статуса."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "hdr00000000000000000000000000004a"
     _write_task(tmp_path, tid, status_tui="failed")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -85,14 +89,26 @@ async def test_meter_in_header_not_shown_chat_mode(tmp_path):
     """Контекст-индикатор не в хедере (переехал в мету или вовсе убран из хрома)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "hdr00000000000000000000000000005a"
-    rec = {"type": "message", "thread_id": tid, "system": "cli", "seq": 1,
-           "ts": "t", "payload": {"role": "user", "content": "привет " * 50}}
-    _write_task(tmp_path, tid, status_tui="completed",
-                extra_data=json.dumps(rec) + "\n")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions",
-                         "summary_params": {"chat_completions_summary_trigger_chars": 1000}})
+    rec = {
+        "type": "message",
+        "thread_id": tid,
+        "system": "cli",
+        "seq": 1,
+        "ts": "t",
+        "payload": {"role": "user", "content": "привет " * 50},
+    }
+    _write_task(tmp_path, tid, status_tui="completed", extra_data=json.dumps(rec) + "\n")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "backend_api_mode": "chat_completions",
+            "summary_params": {"chat_completions_summary_trigger_chars": 1000},
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

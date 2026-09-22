@@ -1,4 +1,5 @@
 """TDD-тест: флаг --init-config существует в arg_parser (ренейм с --init)."""
+
 import sys
 
 import pytest
@@ -14,6 +15,7 @@ def _parse(argv, monkeypatch):
     import importlib
 
     from gc_cli import arg_parser as ap_mod
+
     importlib.reload(ap_mod)
     return ap_mod.run_args
 
@@ -39,6 +41,7 @@ def test_init_flag_registered(monkeypatch):
 def test_init_config_and_query_mutually_exclusive(monkeypatch):
     """--init-config и -q вместе должны вызвать SystemExit."""
     import importlib
+
     monkeypatch.setattr(sys, "argv", ["gc-cli", "--init-config", "-q", "hi"])
     with pytest.raises(SystemExit):
         importlib.reload(importlib.import_module("gc_cli.arg_parser"))
@@ -61,6 +64,7 @@ def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
     import importlib
 
     from gc_cli import arg_parser as ap_mod
+
     importlib.reload(ap_mod)
-    assert ap_mod.run_args.trace_id == "00123"     # строка, не 83
+    assert ap_mod.run_args.trace_id == "00123"  # строка, не 83
     assert "trace_id" not in ap_mod.extra_config_overrides

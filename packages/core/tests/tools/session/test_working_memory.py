@@ -16,9 +16,7 @@ from gc_testkit.helpers.tool_ctx import CallableTool
 
 def _make_state(working_memory=None):
     state = SimpleNamespace()
-    state.shared = SharedStateData(
-        working_memory=working_memory if working_memory is not None else {}
-    )
+    state.shared = SharedStateData(working_memory=working_memory if working_memory is not None else {})
     return state
 
 
@@ -187,10 +185,12 @@ def test_register_limit_exceeded():
 def test_total_budget_limit_exceeded():
     state = _make_state({REGISTER_GOAL: "a" * 49})
     assert DEFAULT_TOTAL_BUDGET_CHARS == 20_000
-    tool = CallableTool(WorkingMemory(
-        ctx=SimpleNamespace(config_dict={"working_memory_params": {"total_budget_chars": 50}}),
-        state=state,
-    ))
+    tool = CallableTool(
+        WorkingMemory(
+            ctx=SimpleNamespace(config_dict={"working_memory_params": {"total_budget_chars": 50}}),
+            state=state,
+        )
+    )
     res = json.loads(
         tool(
             action="append",

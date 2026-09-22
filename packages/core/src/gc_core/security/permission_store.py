@@ -51,15 +51,15 @@ class PermissionStore:
         for key, val in self._session_rules.items():
             if not key.startswith(self._INSESSION_PREFIX):
                 continue
-            payload = key[len(self._INSESSION_PREFIX):]
+            payload = key[len(self._INSESSION_PREFIX) :]
             payload = self._truncate_example(payload)
             if val:
                 allowed.append(payload)
             else:
                 denied.append(payload)
         return {
-            "allowed": allowed[-self._MAX_ALLOWED:],
-            "denied": denied[-self._MAX_DENIED:],
+            "allowed": allowed[-self._MAX_ALLOWED :],
+            "denied": denied[-self._MAX_DENIED :],
         }
 
     def _truncate_example(self, payload: str) -> str:

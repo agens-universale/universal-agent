@@ -1,4 +1,5 @@
 """gc-cli --sync-config: цель записи и отчёт."""
+
 import sys
 
 # arg_parser.py парсит sys.argv на import — подменяем argv до импорта cli.
@@ -15,6 +16,7 @@ def _fake_run_args(config=None):
 def test_run_sync_config_refuses_bundled_template(monkeypatch, capsys):
     """M9a: bundled-шаблон → отдельное сообщение (не «не найден»)."""
     from gc_core.config import _default_config_path
+
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args())
     monkeypatch.setattr(cli, "user_config_path", lambda: __import__("pathlib").Path(_default_config_path()))
     assert cli._run_sync_config() == 1
@@ -38,10 +40,11 @@ def test_run_sync_config_refuses_project_local(monkeypatch, tmp_path, capsys):
     gc_dir = tmp_path / ".gc"
     gc_dir.mkdir()
     local_cfg = gc_dir / "config.yml"
-    local_cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
+    local_cfg.write_text('backend:\n  completions_url: "http://x"\n', encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(local_cfg)))
     # project_local_config_path должна вернуть путь к этому файлу
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(local_cfg))
     assert cli._run_sync_config() == 1
     err = capsys.readouterr().err
@@ -65,7 +68,7 @@ def test_run_sync_config_names_the_file_it_could_not_read(monkeypatch, tmp_path,
     `UnicodeDecodeError` доезжал лишь потому, что он подкласс `ValueError`, —
     и без пути человек не понимал, о каком файле речь."""
     cfg = tmp_path / "config.yml"
-    cfg.write_bytes('backend:\n  completions_url: \"http://x\"\n'.encode("utf-16"))
+    cfg.write_bytes('backend:\n  completions_url: "http://x"\n'.encode("utf-16"))
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(cfg)))
     assert cli._run_sync_config() == 1
     err = capsys.readouterr().err
@@ -74,7 +77,7 @@ def test_run_sync_config_names_the_file_it_could_not_read(monkeypatch, tmp_path,
 
 def test_run_sync_config_happy_path(monkeypatch, tmp_path, capsys):
     cfg = tmp_path / "config.yml"
-    cfg.write_text("backend:\n  completions_url: \"http://x\"\n", encoding="utf-8")
+    cfg.write_text('backend:\n  completions_url: "http://x"\n', encoding="utf-8")
     monkeypatch.setattr(cli.arg_parser, "run_args", _fake_run_args(config=str(cfg)))
     called = {}
 

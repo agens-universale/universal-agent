@@ -130,18 +130,18 @@ def test_apply_tool_output_mentions_dropped_fields():
             "injected_fields": [],
         }
     }
-    raw = run_coro(aapply_tool(
-        "exec_command",
-        {"command": "ls", "description": "List dir", "timeout": "3"},
-        tools_data_=tools,
-    ))
+    raw = run_coro(
+        aapply_tool(
+            "exec_command",
+            {"command": "ls", "description": "List dir", "timeout": "3"},
+            tools_data_=tools,
+        )
+    )
     payload = json.loads(raw)
     assert payload["ok"] is True
     assert payload["command"] == "ls"
     assert payload["timeout"] == 3
-    assert payload["dropped_arguments"] == (
-        "Field description was dropped because it is not in the tool schema."
-    )
+    assert payload["dropped_arguments"] == ("Field description was dropped because it is not in the tool schema.")
 
 
 def test_open_schema_still_drops_extra_keys():

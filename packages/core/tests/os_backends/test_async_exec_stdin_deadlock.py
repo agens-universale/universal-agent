@@ -15,6 +15,7 @@ stdin, `arun_python` — код. Таймаут тула здесь единст
 Числа в тесте подобраны с запасом за оба порога. При 200 КБ вывода дефект
 скрыт предбуфером asyncio — тест на таких числах был бы зелёным всегда.
 """
+
 import asyncio
 import sys
 import time
@@ -76,15 +77,11 @@ async def test_child_actually_receives_the_whole_stdin(backend, tmp_path):
     """Читатели вперёд — но stdin обязан доехать целиком, а не потеряться."""
     script = tmp_path / "echo_len.py"
     script.write_text(
-        "import sys\n"
-        "data = sys.stdin.read()\n"
-        "sys.stdout.write(str(len(data)))\n",
+        "import sys\ndata = sys.stdin.read()\nsys.stdout.write(str(len(data)))\n",
         encoding="utf-8",
     )
 
-    result = await backend.aexec_argv(
-        [sys.executable, str(script)], timeout=30, stdin="b" * _STDIN_BYTES
-    )
+    result = await backend.aexec_argv([sys.executable, str(script)], timeout=30, stdin="b" * _STDIN_BYTES)
 
     assert str(_STDIN_BYTES) in str(result.stdout), result
 

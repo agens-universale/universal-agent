@@ -5,6 +5,7 @@
 ещё и удерживая дескрипторы. Агент возвращал «команда снята», а работа
 продолжалась.
 """
+
 import asyncio
 import os
 from pathlib import Path
@@ -18,9 +19,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="групп процес
 def _marker_script(marker: Path) -> str:
     """Потомок, который переживёт шелл и оставит след, если его не убили."""
     return (
-        f"python3 -c \"import time,pathlib; time.sleep(2); "
-        f"pathlib.Path({str(marker)!r}).write_text('жив')\" & "
-        "sleep 30"
+        f"python3 -c \"import time,pathlib; time.sleep(2); pathlib.Path({str(marker)!r}).write_text('жив')\" & sleep 30"
     )
 
 
@@ -31,17 +30,13 @@ async def test_timeout_kills_the_child_too(tmp_path):
 
     # Потомок спит 2 с: если группу сняли, до записи он не доживёт.
     await asyncio.sleep(3.0)
-    assert not marker.exists(), (
-        "потомок пережил таймаут — убили только шелл"
-    )
+    assert not marker.exists(), "потомок пережил таймаут — убили только шелл"
 
 
 async def test_cancellation_kills_the_child_too(tmp_path):
     marker = tmp_path / "survived.txt"
 
-    task = asyncio.create_task(
-        LocalFsBackend().aexec(_marker_script(marker), timeout=30)
-    )
+    task = asyncio.create_task(LocalFsBackend().aexec(_marker_script(marker), timeout=30))
     await asyncio.sleep(0.5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

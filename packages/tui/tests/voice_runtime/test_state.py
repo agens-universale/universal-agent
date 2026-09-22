@@ -25,18 +25,16 @@ def test_available_update_names_the_pin_only_when_behind():
     same = VoiceState(version=SPEACHES_PIN, root="/x", port=8735, model="m")
     assert available_update(old) == SPEACHES_PIN
     assert available_update(same) is None
-    assert available_update(None) is None      # не установлен — обновлять нечего
+    assert available_update(None) is None  # не установлен — обновлять нечего
     assert DEFAULT_PORT == 8735
     assert DEFAULT_MODEL == "Systran/faster-whisper-small"
 
 
 def test_state_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
-                        lambda: tmp_path / "state.json")
+    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
     assert load_state() is None
-    st = VoiceState(version="v0.8.3", root=str(tmp_path / "speaches"),
-                    port=8735, model=DEFAULT_MODEL)
+    st = VoiceState(version="v0.8.3", root=str(tmp_path / "speaches"), port=8735, model=DEFAULT_MODEL)
     save_state(st)
     assert load_state() == st
     clear_state()
@@ -57,8 +55,7 @@ def test_current_model_short_default_when_not_installed(tmp_path, monkeypatch):
 
 def test_current_model_short_uses_installed_state_model(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
-    save_state(VoiceState(version="v0.8.3", root=str(tmp_path / "speaches"),
-                          port=8735, model="Org/custom-model"))
+    save_state(VoiceState(version="v0.8.3", root=str(tmp_path / "speaches"), port=8735, model="Org/custom-model"))
     assert current_model_short() == "custom-model"
 
 

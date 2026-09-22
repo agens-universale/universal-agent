@@ -17,10 +17,29 @@ class FlushFileHandler(logging.FileHandler):
 
 
 _RESERVED_LOGRECORD_KEYS = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-    "created", "msecs", "relativeCreated", "thread", "threadName",
-    "processName", "process", "taskName", "message", "asctime",
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "taskName",
+    "message",
+    "asctime",
 }
 
 
@@ -132,7 +151,7 @@ def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
     if not value:
         return "main"
     if value.startswith("subagent_"):
-        value = value[len("subagent_"):]
+        value = value[len("subagent_") :]
     normalized = "".join(ch if ch.isalnum() else "_" for ch in value).strip("_")
     return normalized or "main"
 
@@ -149,10 +168,7 @@ def build_run_log_paths(
     """
     base_dir = config_dict.get("logs_dump_dir")
     if not isinstance(base_dir, str) or not base_dir.strip():
-        raise ValueError(
-            "logs_dump_dir пуст; "
-            "config_modules.root.resolve_paths() должен был его заполнить"
-        )
+        raise ValueError("logs_dump_dir пуст; config_modules.root.resolve_paths() должен был его заполнить")
     suffix = run_id or generate_run_id()
     kind = _normalize_agent_kind(agent_kind)
     trace = trace_id_from_config(config_dict)
@@ -168,16 +184,12 @@ def build_run_log_paths(
     return logging_path, summary_trace_path
 
 
-_DISABLED_LOG_PATH = (
-    "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
-)
+_DISABLED_LOG_PATH = "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
 _TEXT_FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Отдельная строка формата, а не условная подстановка: '%(trace_id)s' падает на
 # любой записи без атрибута, и строка теряется через handleError. Поэтому формат
 # с trace выбирается только вместе с фильтром, который атрибут гарантирует.
-_TEXT_FMT_TRACE = (
-    "%(asctime)s - %(name)s - %(levelname)s - [trace=%(trace_id)s] %(message)s"
-)
+_TEXT_FMT_TRACE = "%(asctime)s - %(name)s - %(levelname)s - [trace=%(trace_id)s] %(message)s"
 
 
 def _build_text_logger(logger, config_dict, run_id, kind, redactor):
@@ -271,6 +283,7 @@ def create_run_logger(
 
     # Ленивый импорт: security тяжёлый, а logging грузится очень рано (run_context).
     from gc_core.security.log_redaction import build_redactor
+
     redactor = build_redactor(config_dict.get("redact_secrets"))
 
     fmt = str(config_dict.get("logging_format", "text")).strip().lower()
@@ -311,7 +324,7 @@ def release_run_logger(logger: Any) -> None:
         return
     name = getattr(logger, "name", None)
     if not name or not str(name).startswith("agent_run_"):
-        return                       # не наш логгер — не наше дело
+        return  # не наш логгер — не наше дело
     foreign = _FOREIGN_HANDLERS.pop(name, set())
     for handler in list(getattr(logger, "handlers", ())):
         logger.removeHandler(handler)

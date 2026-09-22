@@ -4,6 +4,7 @@
 Пока он говорил `ok: true` и давал pid даже мёртвого процесса, опечатка в
 команде выглядела запущенным сервисом, и модель шла проверять его порт.
 """
+
 import json
 
 from gc_core.backends import local as local_backend
@@ -46,7 +47,7 @@ def test_the_schema_printed_in_the_prompt_matches_the_real_one():
     """
     text = ExecuteCommand.prompt_description()
     line = next(ln for ln in text.splitlines() if ln.startswith("Input schema: "))
-    printed = json.loads(line[len("Input schema: "):])
+    printed = json.loads(line[len("Input schema: ") :])
     real = ExecuteCommand.tool_description()["parameters"]
 
     assert sorted(printed["properties"]) == sorted(real["properties"])

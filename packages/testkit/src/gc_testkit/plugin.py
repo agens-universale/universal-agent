@@ -343,7 +343,6 @@ def _clear_runtime_notices_between_tests():
     clear_runtime_notices(listeners=True)
 
 
-
 @pytest.fixture(autouse=True)
 def _isolated_config_layers(tmp_path, monkeypatch):
     """Managed- и проектный слои конфига видны тесту, только если он сам их и положил.

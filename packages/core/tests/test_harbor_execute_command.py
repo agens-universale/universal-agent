@@ -114,6 +114,7 @@ def test_default_cwd_none_is_passed_through_untouched():
 
 # --- Gap 1: env_vars validation and forwarding as a raw dict via backend.exec(env=...) ---
 
+
 def test_env_vars_forwarded_as_env_kwarg():
     """env_vars must be forwarded to backend.exec() as the env= dict — the base tool
     does not embed them into the command string."""
@@ -162,6 +163,7 @@ def test_env_vars_item_not_dict_returns_invalid_argument():
 
 # --- Gap 2: timeout and max_output_chars validation ---
 
+
 def test_timeout_zero_returns_invalid_argument():
     """timeout=0 must return invalid_argument with field='timeout'."""
     b = _RecordingFakeBackend()
@@ -191,6 +193,7 @@ def test_max_output_chars_argument_no_longer_exists():
 
 
 # --- Gap 3: cwd validation via backend.is_dir ---
+
 
 def test_cwd_nonexistent_in_container_returns_invalid_argument():
     """cwd that doesn't exist in the container must return invalid_argument with field='cwd'."""

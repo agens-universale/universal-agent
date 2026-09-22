@@ -101,8 +101,7 @@ def test_local_sources_preferred_over_git(tmp_path, monkeypatch):
     monkeypatch.setattr(inst, "active_pip_python", lambda: "PY")
     monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
 
-    inst._install_source("office", "office-mcp", recipes,
-                         editable=False, repo_url="https://x/repo")
+    inst._install_source("office", "office-mcp", recipes, editable=False, repo_url="https://x/repo")
 
     assert calls, "установка не запускалась"
     assert str(src) in calls[0]
@@ -114,8 +113,9 @@ def test_git_fallback_when_no_local_sources(tmp_path, monkeypatch):
     monkeypatch.setattr(inst, "pip_argv", lambda *a: ["PY", "-m", "pip", *a])
     monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
 
-    inst._install_source("office", "office-mcp", tmp_path / "nope",
-                         editable=False, repo_url="https://x/repo", repo_ref="main")
+    inst._install_source(
+        "office", "office-mcp", tmp_path / "nope", editable=False, repo_url="https://x/repo", repo_ref="main"
+    )
 
     joined = " ".join(calls[0])
     assert "git+https://x/repo@main#subdirectory=packages/mcp/external/vendor/office-mcp" in joined
@@ -123,8 +123,7 @@ def test_git_fallback_when_no_local_sources(tmp_path, monkeypatch):
 
 def test_no_local_no_repo_url_errors(tmp_path):
     with pytest.raises(inst.InstallError) as e:
-        inst._install_source("office", "office-mcp", tmp_path / "nope",
-                             editable=False, repo_url=None)
+        inst._install_source("office", "office-mcp", tmp_path / "nope", editable=False, repo_url=None)
     assert "просмотрено" in str(e.value), "в ошибке должны быть перечислены пути поиска"
 
 
@@ -149,7 +148,8 @@ def test_legacy_source_installs_instead_of_being_skipped(tmp_path, monkeypatch, 
     monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
 
     entry = MCPEntry(
-        name="office", path=Path("."),
+        name="office",
+        path=Path("."),
         install=InstallSpec(type="source", source=Path("../external/office-mcp")),
     )
     results = inst.run_install_entries([entry], recipes, None, editable=True)

@@ -1,4 +1,5 @@
 """TDD Step 4: proxy field in ConnectionEditor."""
+
 from __future__ import annotations
 
 import pytest
@@ -14,6 +15,7 @@ def _harness(editor):
     class _App(App):
         def compose(self) -> ComposeResult:
             yield editor
+
     return _App()
 
 

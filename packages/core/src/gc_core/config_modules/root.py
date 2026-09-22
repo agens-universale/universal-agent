@@ -86,9 +86,7 @@ class AppConfig(BaseModel):
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
-    strip_tags_projection: StripTagsProjectionConfig = Field(
-        default_factory=StripTagsProjectionConfig
-    )
+    strip_tags_projection: StripTagsProjectionConfig = Field(default_factory=StripTagsProjectionConfig)
     agent_auth: AgentAuthConfig | None = None
 
     # Профили v2 (волна A, фаза 1): реестр моделей + уровни + привязки + указатели.
@@ -106,9 +104,7 @@ class AppConfig(BaseModel):
 
     @field_validator("models")
     @classmethod
-    def _validate_model_aliases(
-        cls, value: dict[str, ModelEntry]
-    ) -> dict[str, ModelEntry]:
+    def _validate_model_aliases(cls, value: dict[str, ModelEntry]) -> dict[str, ModelEntry]:
         for alias in value:
             validate_model_alias(alias)
         return value
@@ -155,18 +151,14 @@ def _normalize_summary_limits(cfg: AppConfig) -> None:
     turn_end_raw = cfg.summary.chat_completions_summary_turn_end_trigger_chars
     if turn_end_raw is None:
         cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
-            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO))
-            if trigger > 0
-            else 0
+            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO)) if trigger > 0 else 0
         )
     elif turn_end_raw <= 0:
         cfg.summary.chat_completions_summary_turn_end_trigger_chars = 0
     if cfg.summary.last_dialog_steps_count <= 0:
         cfg.summary.last_dialog_steps_count = DEFAULT_LAST_DIALOG_STEPS_COUNT
     if cfg.summary.last_dialog_step_message_max_chars <= 0:
-        cfg.summary.last_dialog_step_message_max_chars = (
-            DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
-        )
+        cfg.summary.last_dialog_step_message_max_chars = DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
     if cfg.summary.max_message_chars <= 0:
         cfg.summary.max_message_chars = DEFAULT_MAX_MESSAGE_CHARS
     if cfg.summary.max_dialogue_chars <= 0:
@@ -174,9 +166,7 @@ def _normalize_summary_limits(cfg: AppConfig) -> None:
     if cfg.summary.max_accumulated_summary_chars <= 0:
         cfg.summary.max_accumulated_summary_chars = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
     if cfg.summary.incremental_batch_chars is None or cfg.summary.incremental_batch_chars <= 0:
-        cfg.summary.incremental_batch_chars = (
-            int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
-        )
+        cfg.summary.incremental_batch_chars = int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
 
 
 def _normalize_finish_gate_limits(cfg: AppConfig) -> None:
@@ -193,9 +183,7 @@ def _normalize_finish_gate_limits(cfg: AppConfig) -> None:
             cfg.agent.subagent_finish_gate_max_iterations,
             DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
         )
-        cfg.agent.subagent_finish_gate_max_iterations = (
-            DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
-        )
+        cfg.agent.subagent_finish_gate_max_iterations = DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
 
 
 def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
@@ -216,13 +204,9 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     cfg.paths.chat_completions_custom_subagent_system_prompt_path = to_abs(
         cfg.paths.chat_completions_custom_subagent_system_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_custom_subagent_system_prompt.md")
-    cfg.paths.threads_data_path = (
-        to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
-    )
+    cfg.paths.threads_data_path = to_abs(cfg.paths.threads_data_path) or str(project_state / "threads")
     cfg.paths.skills_data_path = to_abs(cfg.paths.skills_data_path)
-    cfg.paths.logs_dump_dir = (
-        to_abs(cfg.paths.logs_dump_dir) or str(project_state / "logs")
-    )
+    cfg.paths.logs_dump_dir = to_abs(cfg.paths.logs_dump_dir) or str(project_state / "logs")
     cfg.summary.chat_completions_summary_prompt_path = to_abs(
         cfg.summary.chat_completions_summary_prompt_path
     ) or _prompt_default(config_dir, "chat_completions_summary_prompt.md")
@@ -250,9 +234,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     )
     cfg.backend.completions_url = str(cfg.backend.completions_url).strip()
     write_guard = cfg.security.write_guard
-    write_guard.extra_paths = [
-        to_abs(path) or path for path in write_guard.extra_paths
-    ]
+    write_guard.extra_paths = [to_abs(path) or path for path in write_guard.extra_paths]
 
 
 # Вводная текста ошибки схемы — ОДНА строка на всех пишущих и на разбор
@@ -286,6 +268,6 @@ def schema_error_details(exc) -> str:
     # координату дважды (ревью MR #80, #4). Тексты правил не меняем — они матчатся
     # тестами; снимается только этот повтор, здесь же.
     return "; ".join(
-        f"{'.'.join(map(str, err['loc']))}: "
-        f"{err['msg'].removeprefix('Value error, ').removeprefix('models.<alias>: ')}"
-        for err in exc.errors())
+        f"{'.'.join(map(str, err['loc']))}: {err['msg'].removeprefix('Value error, ').removeprefix('models.<alias>: ')}"
+        for err in exc.errors()
+    )

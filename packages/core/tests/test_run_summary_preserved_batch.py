@@ -13,9 +13,7 @@ from gc_core.thread_store import make_message_key
 
 
 def test_user_ask_keeps_prior_non_technical_users_skips_technical():
-    tech = wrap_technical_user_content(
-        "ctx...", technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
-    )
+    tech = wrap_technical_user_content("ctx...", technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT)
     current_messages = [
         {"role": "user", "content": "старый смысловой запрос"},
         {"role": "user", "content": tech},
@@ -32,9 +30,7 @@ def test_user_ask_keeps_prior_non_technical_users_skips_technical():
         current_messages=current_messages,
         mode="user_ask",
         state_messages=[],
-        message_keys_already_persisted=frozenset(
-            {make_message_key(current_messages[0])}
-        ),
+        message_keys_already_persisted=frozenset({make_message_key(current_messages[0])}),
     )
     assert batch_incoming_only == [current_messages[-1]]
 

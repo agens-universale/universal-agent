@@ -30,9 +30,7 @@ def teardown_module(_module) -> None:
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+        proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
 
 
 agent_executor_module = None
@@ -176,25 +174,23 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                     return
                 msgs = list(st.messages)
                 sys_m = next(
-                    (
-                        m
-                        for m in msgs
-                        if str(m.get("role", "")).strip().lower() == "system"
-                    ),
+                    (m for m in msgs if str(m.get("role", "")).strip().lower() == "system"),
                     None,
                 )
                 st.messages = [sys_m] if sys_m else []
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
-                side_effect=_hist_exceeds,
-            ), patch.object(
-                run_summary_coordinator_module,
-                "arun_summary_compaction",
-                side_effect=_record_summary_call,
+            with (
+                patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "history_exceeds_summary_trigger",
+                    side_effect=_hist_exceeds,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "arun_summary_compaction",
+                    side_effect=_record_summary_call,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
@@ -228,25 +224,23 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                     return
                 msgs = list(st.messages)
                 sys_m = next(
-                    (
-                        m
-                        for m in msgs
-                        if str(m.get("role", "")).strip().lower() == "system"
-                    ),
+                    (m for m in msgs if str(m.get("role", "")).strip().lower() == "system"),
                     None,
                 )
                 st.messages = [sys_m] if sys_m else []
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
-                side_effect=_hist_exceeds,
-            ), patch.object(
-                run_summary_coordinator_module,
-                "arun_summary_compaction",
-                side_effect=_record,
+            with (
+                patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "history_exceeds_summary_trigger",
+                    side_effect=_hist_exceeds,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "arun_summary_compaction",
+                    side_effect=_record,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = await executor.arun(["hello"], system="cli", verbose=False)
@@ -258,11 +252,10 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = await self._make_ctx(tmp_dir, backend_api_mode="responses")
 
-            with patch.object(
-                agent_executor_module, "arun_agent", return_value="ok"
-            ), patch.object(
-                run_summary_coordinator_module, "arun_summary_compaction"
-            ) as compaction_mock:
+            with (
+                patch.object(agent_executor_module, "arun_agent", return_value="ok"),
+                patch.object(run_summary_coordinator_module, "arun_summary_compaction") as compaction_mock,
+            ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
@@ -279,12 +272,13 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 captured.update(kwargs)
                 return "ok"
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
-                return_value=False,
+            with (
+                patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "history_exceeds_summary_trigger",
+                    return_value=False,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = await executor.arun(["hello"], system="cli", verbose=False)
@@ -354,12 +348,13 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                     await await_callback(persist_cb(messages))
                 return "ok"
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
-                return_value=False,
+            with (
+                patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "history_exceeds_summary_trigger",
+                    return_value=False,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = await executor.arun(
@@ -376,9 +371,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
             with open(meta_path, encoding="utf-8") as fd:
                 saved_meta = json.load(fd)
             self.assertEqual(
-                intent_user_ask_texts(
-                    deserialize_list(saved_meta.get("current_user_intent"))
-                ),
+                intent_user_ask_texts(deserialize_list(saved_meta.get("current_user_intent"))),
                 ["новый вопрос"],
             )
 

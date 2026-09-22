@@ -1,10 +1,17 @@
 """PreviewScreen — реальные виджеты трейса + «сессия <id>» слева, путь справа в шапке."""
+
 import pytest
 
 
 def _rec(payload):
-    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1,
-            "ts": "2026-05-30T10:00:00Z", "payload": payload}
+    return {
+        "type": "message",
+        "thread_id": "t",
+        "system": "cli",
+        "seq": 1,
+        "ts": "2026-05-30T10:00:00Z",
+        "payload": payload,
+    }
 
 
 def _segs(records):
@@ -18,20 +25,21 @@ async def test_preview_renders_trace_widgets_and_header():
     from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
     from textual.widgets import Static
+
     result = {}
     records = [_rec({"role": "user", "content": "вопрос-превью", "id": "m1"})]
 
     class _A(App):
         def on_mount(self):
             self.push_screen(
-                PreviewScreen(segments=_segs(records), thread_id="abc12345xyz",
-                              project_path="D:\\dev\\proj\\foo"),
-                lambda v: result.update(v=v))
+                PreviewScreen(segments=_segs(records), thread_id="abc12345xyz", project_path="D:\\dev\\proj\\foo"),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
-        assert len(scr.query(UserReplyContainer)) == 1   # реальный виджет трейса
-        assert len(scr.query("#cmdinput")) == 0           # без поля ввода
+        assert len(scr.query(UserReplyContainer)) == 1  # реальный виджет трейса
+        assert len(scr.query("#cmdinput")) == 0  # без поля ввода
         # шапка слева — «превью · сессия <id8>» (промпт сессии не дублируется)
         assert "сессия abc12345" in str(scr.query_one("#header-left", Static).render())
         # путь проекта справа в шапке
@@ -54,12 +62,15 @@ async def test_preview_summary_marker_collapsed_then_toggles():
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.trace_row import SummaryMarker
     from textual.app import App
+
     # seg0 [вопрос] сжат → СИНТЕЗ; seg1 (live) [ответ]
     segments = [
-        {"index": 0, "messages": [_rec({"role": "user", "content": "вопрос", "id": "m0"})],
-         "compacted_by": {"ts": "t", "messages_in_segment": 1, "synthesis": "СИНТЕЗ-ПРЕВЬЮ"}},
-        {"index": 1, "messages": [_rec({"role": "user", "content": "ответ", "id": "m1"})],
-         "compacted_by": None},
+        {
+            "index": 0,
+            "messages": [_rec({"role": "user", "content": "вопрос", "id": "m0"})],
+            "compacted_by": {"ts": "t", "messages_in_segment": 1, "synthesis": "СИНТЕЗ-ПРЕВЬЮ"},
+        },
+        {"index": 1, "messages": [_rec({"role": "user", "content": "ответ", "id": "m1"})], "compacted_by": None},
     ]
 
     class _A(App):
@@ -74,10 +85,14 @@ async def test_preview_summary_marker_collapsed_then_toggles():
         # свёрнут по умолчанию — стрелка вправо
         assert body.has_class("hidden")
         assert "▸" in prefix() and "▾" not in prefix()
+
         # клик по маркеру → раскрыт, стрелка вниз
         class _Click:
             chain = 1
-            def stop(self): pass
+
+            def stop(self):
+                pass
+
         marker.on_click(_Click())
         await pilot.pause()
         assert not body.has_class("hidden")
@@ -96,18 +111,22 @@ async def test_preview_enter_resumes_even_with_summary():
     pytest.importorskip("textual")
     from gc_tui.screens.preview import PreviewScreen
     from textual.app import App
+
     result = {}
     segments = [
-        {"index": 0, "messages": [_rec({"role": "user", "content": "q", "id": "m0"})],
-         "compacted_by": {"ts": "t", "messages_in_segment": 1, "synthesis": "СВОДКА"}},
-        {"index": 1, "messages": [_rec({"role": "user", "content": "a", "id": "m1"})],
-         "compacted_by": None},
+        {
+            "index": 0,
+            "messages": [_rec({"role": "user", "content": "q", "id": "m0"})],
+            "compacted_by": {"ts": "t", "messages_in_segment": 1, "synthesis": "СВОДКА"},
+        },
+        {"index": 1, "messages": [_rec({"role": "user", "content": "a", "id": "m1"})], "compacted_by": None},
     ]
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(PreviewScreen(segments=segments, thread_id="t", project_path="p"),
-                             lambda v: result.update(v=v))
+            self.push_screen(
+                PreviewScreen(segments=segments, thread_id="t", project_path="p"), lambda v: result.update(v=v)
+            )
 
     async with _A().run_test() as pilot:
         await pilot.press("enter")
@@ -123,16 +142,31 @@ async def test_preview_enter_resumes_when_row_focused():
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
+
     result = {}
-    segments = [{"index": 0, "compacted_by": None, "messages": [
-        _rec({"type": "function_call", "id": "fc1", "call_id": "c1",
-              "name": "read_file", "arguments": '{"path": "x.py"}'}),
-    ]}]
+    segments = [
+        {
+            "index": 0,
+            "compacted_by": None,
+            "messages": [
+                _rec(
+                    {
+                        "type": "function_call",
+                        "id": "fc1",
+                        "call_id": "c1",
+                        "name": "read_file",
+                        "arguments": '{"path": "x.py"}',
+                    }
+                ),
+            ],
+        }
+    ]
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(PreviewScreen(segments=segments, thread_id="t", project_path="p"),
-                             lambda v: result.update(v=v))
+            self.push_screen(
+                PreviewScreen(segments=segments, thread_id="t", project_path="p"), lambda v: result.update(v=v)
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -153,32 +187,55 @@ async def test_preview_mounts_nested_subagent_rows():
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
-    segments = [{"index": 0, "compacted_by": None, "messages": [
-        _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
-              "name": "subagent_worker", "arguments": '{"task": "x"}'}),
-    ]}]
+
+    segments = [
+        {
+            "index": 0,
+            "compacted_by": None,
+            "messages": [
+                _rec(
+                    {
+                        "type": "function_call",
+                        "id": "fc1",
+                        "call_id": "parent1",
+                        "name": "subagent_worker",
+                        "arguments": '{"task": "x"}',
+                    }
+                ),
+            ],
+        }
+    ]
     records = [
-        {"parent_call_id": "parent1", "seq": 1, "kind": "call",
-         "payload": {"call_id": "n1", "name": "fs_read_file",
-                     "arguments": {"path": "a.py"}}},
-        {"parent_call_id": "parent1", "seq": 2, "kind": "call",
-         "payload": {"call_id": "n2", "name": "session_todo",
-                     "arguments": {"todos": [
-                         {"content": "step", "status": "pending"}]}}},
+        {
+            "parent_call_id": "parent1",
+            "seq": 1,
+            "kind": "call",
+            "payload": {"call_id": "n1", "name": "fs_read_file", "arguments": {"path": "a.py"}},
+        },
+        {
+            "parent_call_id": "parent1",
+            "seq": 2,
+            "kind": "call",
+            "payload": {
+                "call_id": "n2",
+                "name": "session_todo",
+                "arguments": {"todos": [{"content": "step", "status": "pending"}]},
+            },
+        },
     ]
 
     class _A(App):
         def on_mount(self):
             self.push_screen(
-                PreviewScreen(segments=segments, thread_id="t", project_path="p",
-                              subagent_records=records))
+                PreviewScreen(segments=segments, thread_id="t", project_path="p", subagent_records=records)
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         nested_tools = scr.query(ToolCallRow).filter(".nested-tool")
-        assert len(nested_tools) == 1                     # fs_read_file
+        assert len(nested_tools) == 1  # fs_read_file
         todo_rows = scr.query(".line-todo-nested")
-        assert len(todo_rows) == 1                        # развёрнутый чек-лист
+        assert len(todo_rows) == 1  # развёрнутый чек-лист
 
 
 @pytest.mark.asyncio
@@ -188,15 +245,28 @@ async def test_preview_without_records_unchanged():
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
-    segments = [{"index": 0, "compacted_by": None, "messages": [
-        _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
-              "name": "subagent_worker", "arguments": '{"task": "x"}'}),
-    ]}]
+
+    segments = [
+        {
+            "index": 0,
+            "compacted_by": None,
+            "messages": [
+                _rec(
+                    {
+                        "type": "function_call",
+                        "id": "fc1",
+                        "call_id": "parent1",
+                        "name": "subagent_worker",
+                        "arguments": '{"task": "x"}',
+                    }
+                ),
+            ],
+        }
+    ]
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(
-                PreviewScreen(segments=segments, thread_id="t", project_path="p"))
+            self.push_screen(PreviewScreen(segments=segments, thread_id="t", project_path="p"))
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -209,13 +279,12 @@ async def test_preview_escape_false():
     pytest.importorskip("textual")
     from gc_tui.screens.preview import PreviewScreen
     from textual.app import App
+
     result = {}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(
-                PreviewScreen(segments=[], thread_id="t", project_path="p"),
-                lambda v: result.update(v=v))
+            self.push_screen(PreviewScreen(segments=[], thread_id="t", project_path="p"), lambda v: result.update(v=v))
 
     async with _A().run_test() as pilot:
         await pilot.press("escape")

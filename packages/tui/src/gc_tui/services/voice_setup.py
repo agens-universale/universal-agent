@@ -36,7 +36,7 @@ class VoiceStatus:
     service_alive: bool | None
     port: int | None
     model: str | None
-    mode: str            # "local" | "cloud" | "off"
+    mode: str  # "local" | "cloud" | "off"
     # Версия движка, до которой можно обновиться, или None (не установлен / уже на ней).
     # Живёт в снимке, а не считается по месту: строка режима, гейт клавиши и футер
     # обязаны судить по ОДНОМУ факту, и статус в секции уже кэшируется на рендер.
@@ -55,6 +55,7 @@ def _post(url, **kwargs):
     агента (без ~/.netrc, иначе Basic оттуда перетирает наш Bearer) и прокси по тем же
     правилам, что у backend. Отдельная функция — шов для тестов."""
     from gc_tui.voice_runtime.net import post as voice_post
+
     return voice_post(url, **kwargs)
 
 
@@ -73,9 +74,10 @@ def engine_update() -> tuple[str, str] | None:
     доходить сюда."""
     try:
         from gc_tui.voice_runtime.state import available_update, load_state
+
         state = load_state()
         want = available_update(state)
-    except Exception:                       # voice-рантайма нет — сверять нечего
+    except Exception:  # voice-рантайма нет — сверять нечего
         return None
     return (state.version, want) if want else None
 
@@ -91,13 +93,17 @@ def status_cheap(config_dict: dict) -> VoiceStatus:
     url = str((config_dict.get("voice") or {}).get("url") or "")
     if st is not None:
         from gc_tui.voice_runtime.autostart import url_is_ours
+
         mode = "local" if url_is_ours(config_dict, st.port) else ("cloud" if url else "off")
-        return VoiceStatus(installed=True,
-                           service_alive=None,
-                           port=st.port, model=st.model, mode=mode,
-                           available_version=_available_update(st))
-    return VoiceStatus(installed=False, service_alive=False, port=None, model=None,
-                       mode="cloud" if url else "off")
+        return VoiceStatus(
+            installed=True,
+            service_alive=None,
+            port=st.port,
+            model=st.model,
+            mode=mode,
+            available_version=_available_update(st),
+        )
+    return VoiceStatus(installed=False, service_alive=False, port=None, model=None, mode="cloud" if url else "off")
 
 
 def probe_alive() -> bool | None:
@@ -117,11 +123,13 @@ def status_snapshot(config_dict: dict) -> VoiceStatus:
     if not s.installed:
         return s
     from dataclasses import replace
+
     return replace(s, service_alive=bool(probe_alive()))
 
 
 def install_local(echo=print) -> bool:
     from gc_tui.voice_runtime.install import VoiceInstallError, install
+
     try:
         # base_raw обязателен: без него install видит пустой конфиг, не находит
         # конфликта и МОЛЧА перекрывает уже настроенный человеком voice.url. Раньше
@@ -154,8 +162,7 @@ def update_local(config: dict, echo=print) -> bool:
         echo("[voice] сервис остановлен на время обновления")
     updated = True
     try:
-        install(port=state.port, model=state.model,
-                base_raw=base_config_raw(), echo=echo)
+        install(port=state.port, model=state.model, base_raw=base_config_raw(), echo=echo)
     except VoiceInstallError as exc:
         echo(f"[voice] ошибка обновления: {exc}")
         updated = False
@@ -175,6 +182,7 @@ def update_local(config: dict, echo=print) -> bool:
 def remove_local() -> bool:
     # _cmd_remove приватная — публичный remove() в voice_runtime кандидат рефакторинга (не делаем сейчас).
     from gc_tui.voice_runtime.cli import _cmd_remove
+
     return _cmd_remove() == 0
 
 
@@ -221,17 +229,19 @@ def wire_cloud(config_path, url: str, token: str, model: str, language: str = "r
     """Свой endpoint: поля — в юзерский config.yml, managed-слой отключить
     только после успешной записи (провал записи не должен ломать рабочий local)."""
     from gc_core.config import _default_config_path, validate_config_text
-    missing = _write_values(config_path,
-                            {"voice.url": url, "voice.token": token, "voice.model": model,
-                             "voice.language": language},
-                            template_path=_default_config_path(), validate=validate_config_text)
+
+    missing = _write_values(
+        config_path,
+        {"voice.url": url, "voice.token": token, "voice.model": model, "voice.language": language},
+        template_path=_default_config_path(),
+        validate=validate_config_text,
+    )
     if missing:
         raise ValueError(f"поля не записаны: {', '.join(missing)}")
     _unwire_managed()
 
 
-def list_models(url: str, token: str, verify=True,
-                config_proxy: str | None = None) -> list[str] | None:
+def list_models(url: str, token: str, verify=True, config_proxy: str | None = None) -> list[str] | None:
     """id моделей сервера по адресу STT-endpoint или None — список не получен.
 
     Корень API у аудио-методов тот же, что у chat (`api_base` стрижёт
@@ -241,31 +251,35 @@ def list_models(url: str, token: str, verify=True,
     Пустой список ≠ None: сервер ответил, но моделей не отдал — это разные
     сообщения для человека."""
     from gc_core.model_picker import fetch_models
-    models = fetch_models(url, f"Bearer {token}" if token else None, verify=verify,
-                          config_proxy=config_proxy)
+
+    models = fetch_models(url, f"Bearer {token}" if token else None, verify=verify, config_proxy=config_proxy)
     return None if models is None else [m.id for m in models]
 
 
-def probe_endpoint(url: str, token: str, model: str, timeout: int = 10,
-                   config_proxy: str | None = None, verify=True) -> ProbeResult:
+def probe_endpoint(
+    url: str, token: str, model: str, timeout: int = 10, config_proxy: str | None = None, verify=True
+) -> ProbeResult:
     """POST 0.2 c тишины на endpoint — «жив ли STT» (тот же приём, что прогрев).
 
     verify — из voice.verify_ssl, как у транскрибации и у списка моделей: проверка,
     строже реальной работы, врёт про рабочую связку (корп-CA → «ошибка TLS»)."""
+
     def _do() -> ProbeResult:
         t0 = time.monotonic()
-        resp = _post(url,
-                     headers={"Authorization": f"Bearer {token}"},
-                     files={"file": ("probe.wav", make_silence_wav(), "audio/wav")},
-                     data={"model": model},
-                     timeout=timeout,
-                     config_proxy=config_proxy,
-                     verify=verify)
+        resp = _post(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("probe.wav", make_silence_wav(), "audio/wav")},
+            data={"model": model},
+            timeout=timeout,
+            config_proxy=config_proxy,
+            verify=verify,
+        )
         ms = int((time.monotonic() - t0) * 1000)
         if getattr(resp, "status_code", 0) == 200:
             return ProbeResult(ok=True, latency_ms=ms, error=None)
-        return ProbeResult(ok=False, latency_ms=ms,
-                           error=f"HTTP {getattr(resp, 'status_code', '?')}")
+        return ProbeResult(ok=False, latency_ms=ms, error=f"HTTP {getattr(resp, 'status_code', '?')}")
+
     try:
         return with_system_trust_retry(_do)
     except Exception as exc:

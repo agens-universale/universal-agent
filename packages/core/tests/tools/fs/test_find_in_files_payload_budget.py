@@ -49,9 +49,7 @@ def test_whole_response_stays_small_on_a_minified_line(tmp_path):
 
 def test_normal_context_window_unchanged(tmp_path, monkeypatch):
     """Обычный исходник: контекст по-прежнему отдаёт окно вокруг совпадения."""
-    (tmp_path / "app.py").write_text(
-        "\n".join(f"line_{i}" for i in range(1, 21)) + "\n", encoding="utf-8"
-    )
+    (tmp_path / "app.py").write_text("\n".join(f"line_{i}" for i in range(1, 21)) + "\n", encoding="utf-8")
 
     data = _python_call(tmp_path, monkeypatch, pattern="line_10", query_mode="text")
 

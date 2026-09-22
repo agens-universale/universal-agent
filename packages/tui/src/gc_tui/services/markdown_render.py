@@ -11,6 +11,7 @@ API:
 - списки `- item`   → ink, маркер `• `
 - fenced ``` блок ``` → code-block (мягкий серый)
 """
+
 from __future__ import annotations
 
 import re
@@ -30,6 +31,7 @@ class Block:
 
     `lang` — только для kind="code-block". `headers`/`rows`/`aligns` — только для kind="table".
     """
+
     kind: str  # 'prose' | 'code-block' | 'table'
     content: str = ""
     lang: str | None = None
@@ -183,9 +185,7 @@ def render_prose(text: str) -> Text:
     return out
 
 
-
-def build_markdown_table(headers: list[str], rows: list[list[str]],
-                         aligns: list[str]) -> Table:
+def build_markdown_table(headers: list[str], rows: list[list[str]], aligns: list[str]) -> Table:
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
     заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
     здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,
@@ -194,8 +194,7 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     from rich.table import Table
     from rich.text import Text as _Text
 
-    table = Table(box=_box.SQUARE, border_style=_DEEP_DIM,
-                  show_header=True, expand=False, pad_edge=True)
+    table = Table(box=_box.SQUARE, border_style=_DEEP_DIM, show_header=True, expand=False, pad_edge=True)
     for h, a in zip(headers, aligns):
         table.add_column(h, justify=a, header_style=f"{_ACC} bold")
     for row in rows:
@@ -208,26 +207,22 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     return table
 
 
-def table_block_to_markdown(headers: list[str], rows: list[list[str]],
-                            aligns: list[str]) -> str:
+def table_block_to_markdown(headers: list[str], rows: list[list[str]], aligns: list[str]) -> str:
     """Реконструировать валидный markdown таблицы из Block (для clipboard).
 
     left → ``---`` (GFM-дефолт). ``|`` в ячейке → ``\\|`` для вставки в редактор.
     Round-trip через текущий segment_answer для ячеек с ``|`` НЕ обещаем:
     парсер режет по сырому ``|`` без escape.
     """
+
     def esc(cell: str) -> str:
         return cell.replace("|", r"\|")
 
     lines = ["| " + " | ".join(esc(h) for h in headers) + " |"]
     sep: list[str] = []
     for a in aligns:
-        sep.append(":---:" if a == "center"
-                   else "---:" if a == "right"
-                   else "---")
+        sep.append(":---:" if a == "center" else "---:" if a == "right" else "---")
     lines.append("| " + " | ".join(sep) + " |")
     for row in rows:
         lines.append("| " + " | ".join(esc(c) for c in row) + " |")
     return "\n".join(lines)
-
-

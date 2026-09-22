@@ -188,8 +188,7 @@ def observe(
     count_in_window = state.loop_detector_window.count(fp)
     if count_consecutive >= consecutive_limit or count_in_window >= in_window_limit:
         already = any(
-            fingerprint(str(hit.get("tool") or ""), hit.get("args") or {}) == fp
-            for hit in state.loop_detector_pending
+            fingerprint(str(hit.get("tool") or ""), hit.get("args") or {}) == fp for hit in state.loop_detector_pending
         )
         if not already:
             state.loop_detector_pending.append({"tool": tool_name, "args": args})

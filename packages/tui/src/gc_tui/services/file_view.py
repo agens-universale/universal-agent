@@ -3,6 +3,7 @@
 Кроссплатформенное чтение текстового файла для `/view` — без shell.
 Не пишет в thread jsonl; позиция страницы живёт только в процессе TUI.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict

@@ -11,7 +11,7 @@ class FakeSandboxBackend:
 
     def __init__(self, cwd: str, tree: dict[str, list[tuple[str, bool]]], git: bool):
         self._cwd = cwd
-        self._tree = tree          # path -> [(name, is_dir), ...]
+        self._tree = tree  # path -> [(name, is_dir), ...]
         self._git = git
 
     def default_cwd(self) -> Optional[str]:
@@ -62,7 +62,7 @@ async def test_sandbox_workspace_supplies_listing():
     listing = data["projectDirListing"]
     assert "django/" in listing
     assert "setup.py" in listing
-    assert "    __init__.py" in listing          # nested entry, one level deep
+    assert "    __init__.py" in listing  # nested entry, one level deep
 
 
 async def test_sandbox_workspace_reports_container_writable_and_shell():

@@ -1,4 +1,5 @@
 """_installed_status: трёхзначный статус INSTALLED для gc-mcp list."""
+
 from pathlib import Path
 
 from recommended_mcp.manifest import InstallSpec, MCPEntry
@@ -6,8 +7,11 @@ from recommended_mcp.runtime import cli
 
 
 def _src(dist=None):
-    return MCPEntry(name="office", path=Path("."),
-                    install=InstallSpec(type="source", source=Path("../external/office-mcp"), dist=dist))
+    return MCPEntry(
+        name="office",
+        path=Path("."),
+        install=InstallSpec(type="source", source=Path("../external/office-mcp"), dist=dist),
+    )
 
 
 def test_status_source_installed(monkeypatch):
@@ -29,22 +33,19 @@ def test_status_source_unknown_name(monkeypatch):
 
 def test_status_npx_present(monkeypatch):
     monkeypatch.setattr("recommended_mcp.install.npm_global_has", lambda pkg, dep: True)
-    e = MCPEntry(name="pw", path=Path("."),
-                 install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
+    e = MCPEntry(name="pw", path=Path("."), install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     assert cli._installed_status(e, Path("."), Path(".")) == "yes"
 
 
 def test_status_npx_undetermined(monkeypatch):
     monkeypatch.setattr("recommended_mcp.install.npm_global_has", lambda pkg, dep: None)
-    e = MCPEntry(name="pw", path=Path("."),
-                 install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
+    e = MCPEntry(name="pw", path=Path("."), install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     assert cli._installed_status(e, Path("."), Path(".")) == "?"
 
 
 def test_status_npx_not_installed(monkeypatch):
     monkeypatch.setattr("recommended_mcp.install.npm_global_has", lambda pkg, dep: False)
-    e = MCPEntry(name="pw", path=Path("."),
-                 install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
+    e = MCPEntry(name="pw", path=Path("."), install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     assert cli._installed_status(e, Path("."), Path(".")) == "—"
 
 
@@ -62,8 +63,8 @@ def test_install_all_skips_optional(monkeypatch):
     monkeypatch.setattr(cli_mod, "_agent_dep_dir", lambda: Path("."))
     monkeypatch.setattr(cli_mod, "_load_repo_url", lambda config=None: (None, None))
     installed = []
-    monkeypatch.setattr(cli_mod, "_install_one", lambda e, *a, **k: (installed.append(e.name) or True))
+    monkeypatch.setattr(cli_mod, "_install_one", lambda e, *a, **k: installed.append(e.name) or True)
     monkeypatch.setattr(cli_mod, "_wire_one", lambda *a, **k: None)
 
-    cli_mod._cmd_install(None)   # install-all
-    assert installed == ["keep"]   # optional 'skip' пропущен
+    cli_mod._cmd_install(None)  # install-all
+    assert installed == ["keep"]  # optional 'skip' пропущен

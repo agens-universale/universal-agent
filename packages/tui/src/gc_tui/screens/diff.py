@@ -1,4 +1,5 @@
 """DiffScreen — список pending-диффов, approve/undo, Enter → viewer."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,16 +26,14 @@ from gc_tui.palette import ACCENT, ERR, INK, MUTED, OK
 from gc_tui.services.diff_render import render_unified_diff_widget
 
 _FOOTER = (
-    "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  "
-    "[Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
+    "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
 )
 _VIEWER_FOOTER_ADAPTIVE = (
     "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
     "[f] файл целиком  [↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
 _VIEWER_FOOTER_FULL = (
-    "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
-    "[↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
+    "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  [↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
 
 UndoFeedbackFn = Callable[[Sequence[str], Sequence[str]], None]  # restored, deleted
@@ -171,9 +170,7 @@ class DiffViewerScreen(Screen):
                 )
                 body.add_class("viewer-body")
                 yield body
-            footer = (
-                _VIEWER_FOOTER_FULL if self._mode == "full" else _VIEWER_FOOTER_ADAPTIVE
-            )
+            footer = _VIEWER_FOOTER_FULL if self._mode == "full" else _VIEWER_FOOTER_ADAPTIVE
             yield Static(footer, id="footer", markup=False)
 
     def on_key(self, event: events.Key) -> None:
@@ -304,9 +301,7 @@ class DiffScreen(Screen):
         trace = self.query_one("#trace", VerticalScroll)
         trace.remove_children()
         if not self._entries:
-            trace.mount(
-                Static("Нет изменений", classes="line-meta", markup=False)
-            )
+            trace.mount(Static("Нет изменений", classes="line-meta", markup=False))
             return
         selected_row: Optional[Static] = None
         for idx, entry in enumerate(self._entries):
@@ -406,9 +401,7 @@ class DiffScreen(Screen):
     def _approve_all(self) -> None:
         pending = list(self._entries)
         result = self._svc.approve_all()
-        if self._svc.mode == "git-mode" and (
-            result.git_count or result.cache_count
-        ):
+        if self._svc.mode == "git-mode" and (result.git_count or result.cache_count):
             ack = format_bulk_approve_ack(result.git_count, result.cache_count)
         else:
             ack = format_approve_ack(len(pending))
@@ -418,11 +411,7 @@ class DiffScreen(Screen):
 
     def _undo_all(self) -> None:
         result = self._svc.undo_all()
-        if (
-            self._svc.mode == "git-mode"
-            and (result.git_count or result.cache_count)
-            and result.undone_keys
-        ):
+        if self._svc.mode == "git-mode" and (result.git_count or result.cache_count) and result.undone_keys:
             ack = format_bulk_undo_ack(result.git_count, result.cache_count)
             if ack:
                 self._emit_ui_ack(ack)
@@ -452,11 +441,7 @@ class DiffScreen(Screen):
         index пуст для untracked, а cache-meta ещё не видит created). Логика
         общая для adaptive и full — не дублируется (remark 4).
         """
-        disk = (
-            Path(key)
-            if key.startswith("/")
-            else Path(self._svc.launch_root) / key
-        )
+        disk = Path(key) if key.startswith("/") else Path(self._svc.launch_root) / key
         if not disk.is_file():
             return ""
         try:
@@ -489,12 +474,8 @@ class DiffScreen(Screen):
                 path=key,
                 mode=mode,
                 on_open_full=on_open_full,
-                on_approve=lambda: self._run_from_viewer(
-                    lambda: self._approve_key(key)
-                ),
-                on_undo=lambda: self._run_from_viewer(
-                    lambda: self._apply_undo_result(self._svc.undo(key))
-                ),
+                on_approve=lambda: self._run_from_viewer(lambda: self._approve_key(key)),
+                on_undo=lambda: self._run_from_viewer(lambda: self._apply_undo_result(self._svc.undo(key))),
                 on_approve_all=lambda: self._run_from_viewer(self._approve_all),
                 on_undo_all=lambda: self._run_from_viewer(self._undo_all),
             )

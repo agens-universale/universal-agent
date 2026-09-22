@@ -98,9 +98,7 @@ def message_text_for_summary(
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        content = project_assistant_text(
-            raw_content, tags=tags, strip_think=strip_think
-        )
+        content = project_assistant_text(raw_content, tags=tags, strip_think=strip_think)
     else:
         content = _message_content_to_text(raw_content)
     return f"[{role}] {content}".strip()
@@ -129,9 +127,7 @@ def message_raw_payload_chars_for_trigger(
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        projected = project_assistant_text(
-            raw_content, tags=tags, strip_think=strip_think
-        )
+        projected = project_assistant_text(raw_content, tags=tags, strip_think=strip_think)
         if projected:
             return len(projected)
         return len(_message_content_to_text(raw_content))
@@ -145,10 +141,7 @@ def calc_history_chars_for_trigger(
     strip_think: bool = True,
 ) -> int:
     """Суммарный объём истории в «сырых» символах для ``chat_completions_summary_trigger_chars``."""
-    return sum(
-        message_raw_payload_chars_for_trigger(m, tags=tags, strip_think=strip_think)
-        for m in messages
-    )
+    return sum(message_raw_payload_chars_for_trigger(m, tags=tags, strip_think=strip_think) for m in messages)
 
 
 def calc_messages_chars_total(

@@ -224,9 +224,7 @@ class RunSupervisor:
                         code = proc.returncode
                         remove_pid(name, self.pids_dir)
                         self._managed = [(n, p) for n, p in self._managed if n != name]
-                        raise SupervisorError(
-                            f"mcp {name!r} exited unexpectedly (code {code})"
-                        )
+                        raise SupervisorError(f"mcp {name!r} exited unexpectedly (code {code})")
                 stop.wait(timeout=0.5)
         finally:
             signal.signal(signal.SIGINT, previous_int)

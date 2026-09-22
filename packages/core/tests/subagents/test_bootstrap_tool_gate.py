@@ -5,6 +5,7 @@
 доступность берётся из ``child_state.tools`` — он собран раньше и уже с учётом
 сужения набора (файл сабагента, глобальный stop_tools, harbor).
 """
+
 from types import SimpleNamespace
 
 import pytest
@@ -61,12 +62,8 @@ async def _run_with_tools(monkeypatch, tools):
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
-    )
-    monkeypatch.setattr(
-        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: BOOT_MARKER
-    )
+    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
+    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: BOOT_MARKER)
     monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
 
     async def _create(*a, **k):

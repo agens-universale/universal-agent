@@ -205,10 +205,7 @@ def test_apply_not_found_multiline_suggestions(tmp_path):
 def test_apply_not_found_picks_nearest_among_distractors(tmp_path):
     p = tmp_path / "code.py"
     p.write_text(
-        "import os\n"
-        "def compute_total(items):\n"
-        "    return sum(items)\n"
-        "print('done')\n",
+        "import os\ndef compute_total(items):\n    return sum(items)\nprint('done')\n",
         encoding="utf-8",
     )
     res = json.loads(

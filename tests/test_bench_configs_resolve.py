@@ -13,6 +13,7 @@
 Сетка смотрит на РЕЗОЛВ, а не на текст: пути относительны каталогу конфига, и
 проверять их подстрокой значит проверять не то.
 """
+
 from __future__ import annotations
 
 import os
@@ -79,6 +80,4 @@ def test_bench_config_prompts_exist(config):
     assert found, f"{config.name}: в конфиге нет ни одного пути к промпту"
 
     missing = [f"{key} → {path}" for key, path in found if not os.path.isfile(path)]
-    assert not missing, (
-        f"{config.name}: промпты не найдены —\n  " + "\n  ".join(missing)
-    )
+    assert not missing, f"{config.name}: промпты не найдены —\n  " + "\n  ".join(missing)

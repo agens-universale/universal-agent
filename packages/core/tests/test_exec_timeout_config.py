@@ -1,4 +1,5 @@
 """agent.exec_timeout_sec / exec_output_capture_max_chars → config_dict → tools/backends."""
+
 import json
 from pathlib import Path
 
@@ -55,18 +56,25 @@ def test_agent_config_preview_edge_rejects_negative():
 
 def test_agent_config_preview_edge_is_clamped_to_capture_tail():
     """P <= L - floor(L / 2); превышение зажимается, как и на плоском пути."""
-    assert AgentConfig(
-        exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=500
-    ).exec_output_preview_edge_chars == 500
-    assert AgentConfig(
-        exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=501
-    ).exec_output_preview_edge_chars == 500
+    assert (
+        AgentConfig(
+            exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=500
+        ).exec_output_preview_edge_chars
+        == 500
+    )
+    assert (
+        AgentConfig(
+            exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=501
+        ).exec_output_preview_edge_chars
+        == 500
+    )
 
 
 def test_agent_config_zero_capture_clamps_preview_to_zero():
-    assert AgentConfig(
-        exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1
-    ).exec_output_preview_edge_chars == 0
+    assert (
+        AgentConfig(exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1).exec_output_preview_edge_chars
+        == 0
+    )
 
 
 def test_agent_config_capture_max_rejects_negative():
@@ -133,8 +141,7 @@ def test_execute_command_uses_config_default(monkeypatch):
     # Подменяем АСИНХРОННУЮ форму: запуск процесса нативно асинхронный, и
     # `acall` зовёт именно её. Подмена синхронной оставляла бы тест зелёным на
     # настоящей команде, ничего не проверяя.
-    async def _fake_exec(self, command, *, cwd=None, timeout=None, env=None,
-                         capture_max_chars=None):
+    async def _fake_exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         seen["timeout"] = timeout
         return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
 
@@ -196,9 +203,7 @@ def test_preview_edge_from_flat_config_is_clamped_to_capture_tail():
     cfg = {"exec_output_capture_max_chars": 1000, "exec_output_preview_edge_chars": 3000}
     assert exec_output_preview_edge_chars_from_config_dict(cfg) == 500
     assert exec_output_preview_edge_chars_from_config_dict({}) == 3000
-    assert exec_output_preview_edge_chars_from_config_dict(
-        {"exec_output_capture_max_chars": 0}
-    ) == 0
+    assert exec_output_preview_edge_chars_from_config_dict({"exec_output_capture_max_chars": 0}) == 0
 
 
 def test_exec_result_requires_return_code():

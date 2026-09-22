@@ -128,9 +128,7 @@ class TestStopRequestedPropagation:
             return None
 
         runner = SubagentRunner(ctx, orch, cfg)
-        with patch.object(
-            runner, "_build_child_ctx", return_value=SimpleNamespace(run_id="child-run-42")
-        ):
+        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace(run_id="child-run-42")):
             result = await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         payload = json.loads(result)

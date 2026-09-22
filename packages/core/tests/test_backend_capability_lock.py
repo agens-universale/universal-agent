@@ -58,12 +58,8 @@ async def test_sub_capabilities_are_skipped_when_grep_is_missing(monkeypatch):
     """
     calls: list[str] = []
     monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
-    monkeypatch.setattr(
-        capabilities, "aprobe_grep_include", _stub(True, calls, "include")
-    )
-    monkeypatch.setattr(
-        capabilities, "aprobe_grep_exclude_dir", _stub(True, calls, "exclude")
-    )
+    monkeypatch.setattr(capabilities, "aprobe_grep_include", _stub(True, calls, "include"))
+    monkeypatch.setattr(capabilities, "aprobe_grep_exclude_dir", _stub(True, calls, "exclude"))
     backend = LocalFsBackend()
 
     await backend.awarm_capabilities()
@@ -93,7 +89,9 @@ def test_a_cold_read_refuses_instead_of_probing(monkeypatch):
     вызывающего.
     """
     monkeypatch.setattr(
-        capabilities, "aprobe_has_grep", _stub(True),
+        capabilities,
+        "aprobe_has_grep",
+        _stub(True),
     )
     backend = LocalFsBackend()
 

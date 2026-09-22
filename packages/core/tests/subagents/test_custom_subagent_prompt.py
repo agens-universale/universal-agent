@@ -3,6 +3,7 @@
 Роль в файле пишет оператор, а не продукт: промпт предупреждает модель, что роль
 прав не выдаёт и может расходиться с фактическим набором инструментов.
 """
+
 from types import SimpleNamespace
 
 from gc_core.run_context import acreate_run_context

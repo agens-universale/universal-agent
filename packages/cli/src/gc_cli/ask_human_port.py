@@ -22,6 +22,7 @@ Ctrl+C на этом пути НЕ перехватывается: поток-ч
 перехвата он забрал бы строку у следующего вопроса. Без перехвата Ctrl+C
 снимает прогон — честнее, чем украденный ответ.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,8 +59,10 @@ async def _ask_via_thread() -> str:
     """Запасной путь: поток-читатель, без перехвата Ctrl+C (см. докстроку модуля)."""
     box: queue.Queue[str] = queue.Queue()
     threading.Thread(
-        target=_read_stdin_lines_into, args=(box,),
-        name="gc-cli-ask-human", daemon=True,
+        target=_read_stdin_lines_into,
+        args=(box,),
+        name="gc-cli-ask-human",
+        daemon=True,
     ).start()
     while True:
         try:

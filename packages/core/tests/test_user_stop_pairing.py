@@ -1,4 +1,5 @@
 """User-stop mid-batch — A for started, B for not-started; pairing persist."""
+
 from __future__ import annotations
 
 import json
@@ -9,10 +10,11 @@ from gc_testkit import run_coro
 
 def _async_noop(fn):
     """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _unique_id_factory():
@@ -91,9 +93,7 @@ def test_stop_before_any_tool_emits_b_for_all(monkeypatch):
         {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
 
     assert applied == []
     assert _statuses(outs) == [
@@ -122,9 +122,7 @@ def test_stop_after_first_tool_a_then_b_for_rest(monkeypatch):
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
         {"type": "function_call", "name": "fs_list_files", "call_id": "c3", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
 
     assert applied == ["subagent_worker"]
     assert [o["call_id"] for o in outs] == ["c1", "c2", "c3"]
@@ -153,9 +151,7 @@ def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
         {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
 
     assert applied == ["fs_read_file"]
     first = json.loads(outs[0]["output"])
@@ -178,15 +174,11 @@ def test_single_tool_batch_stop_only_a_no_b(monkeypatch):
     messages = [
         {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
 
     assert len(outs) == 1
     assert json.loads(outs[0]["output"])["status"] == "cancelled_by_user"
-    assert outs[0]["call_id"] in {
-        m["call_id"] for m in state.messages if m.get("type") == "function_call_output"
-    }
+    assert outs[0]["call_id"] in {m["call_id"] for m in state.messages if m.get("type") == "function_call_output"}
 
 
 def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
@@ -208,9 +200,7 @@ def test_stop_does_not_apply_remaining_even_if_names_differ(monkeypatch):
         {"type": "function_call", "name": "c", "call_id": "c3", "arguments": "{}"},
         {"type": "function_call", "name": "d", "call_id": "c4", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
     assert applied == ["a"]
     assert _statuses(outs) == [
         "cancelled_by_user",
@@ -230,9 +220,7 @@ def test_no_stop_runs_full_batch(monkeypatch):
         {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
     assert applied == ["fs_read_file", "fs_read_file"]
     assert len(outs) == 2
     assert all(json.loads(o["output"])["ok"] is True for o in outs)
@@ -259,13 +247,15 @@ def test_pairing_persist_despite_discard_writes(monkeypatch):
         {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages,
-        state,
-        type("C", (), {"config_dict": {}, "logger": None})(),
-        None,
-        persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages,
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+            persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+        )
+    )
 
     assert len(outs) == 2
     assert {m["call_id"] for m in state.messages if m.get("type") == "function_call_output"} == {
@@ -286,9 +276,7 @@ def test_pairing_writes_state_even_without_persist_callback(monkeypatch):
         {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
     ]
-    run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
     assert {m["call_id"] for m in state.messages} == {"c1", "c2"}
 
 
@@ -303,15 +291,17 @@ def test_pairing_persist_clears_allow_flag_after(monkeypatch):
         seen_flags.append(bool(getattr(state, "allow_pairing_persist", False)))
 
     _patch_process_tool_calls(monkeypatch, pr)
-    run_coro(pr.aprocess_tool_calls(
-        [
-            {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
-        ],
-        state,
-        type("C", (), {"config_dict": {}, "logger": None})(),
-        None,
-        persist_messages_callback=cb,
-    ))
+    run_coro(
+        pr.aprocess_tool_calls(
+            [
+                {"type": "function_call", "name": "fs_read_file", "call_id": "c1", "arguments": "{}"},
+            ],
+            state,
+            type("C", (), {"config_dict": {}, "logger": None})(),
+            None,
+            persist_messages_callback=cb,
+        )
+    )
     assert seen_flags == [True]
     assert state.allow_pairing_persist is False
 
@@ -369,9 +359,7 @@ def test_pairing_commit_does_not_duplicate_already_in_state(monkeypatch):
         {"type": "function_call", "name": "subagent_worker", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "fs_read_file", "call_id": "c2", "arguments": "{}"},
     ]
-    run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
     # existing + новый A(c1) + B(c2) — два c1 допустимы только если разные id
     # (реальный make_message_key по id). Проверяем: c2 появился ровно раз.
     c2 = [m for m in state.messages if m.get("call_id") == "c2"]
@@ -406,9 +394,7 @@ def test_stop_abort_still_appends_finalizer_skip_outputs(monkeypatch):
         {"type": "function_call", "name": "turn_ask_human", "call_id": "c1", "arguments": "{}"},
         {"type": "function_call", "name": "turn_finish", "call_id": "c2", "arguments": "{}"},
     ]
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None
-    ))
+    outs = run_coro(pr.aprocess_tool_calls(messages, state, type("C", (), {"config_dict": {}, "logger": None})(), None))
     # executed=[ask_human], skipped=[session_memory]
     # stop before ask → B for ask + skip for session_memory
     assert len(outs) == 2

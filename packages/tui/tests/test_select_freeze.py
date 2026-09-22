@@ -3,6 +3,7 @@
 Пока Screen._selecting=True: _poll_active пропускает stick/scroll/stream/anim;
 timeout ~5с → clear_selection(); runner не стопается.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -141,8 +142,7 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
         updated = {"n": 0}
         if row._prefix_static is not None:
             monkeypatch.setattr(
-                row._prefix_static, "update",
-                lambda *a, **k: updated.__setitem__("n", updated["n"] + 1)
+                row._prefix_static, "update", lambda *a, **k: updated.__setitem__("n", updated["n"] + 1)
             )
         # freeze ON → _pulse_tick не апдейтит prefix
         pilot.app.screen._selecting = True
@@ -166,22 +166,38 @@ async def test_refresh_stream_content_gated_by_selecting(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         # Подложим фейковый sink — иначе метод и так вернётся по `sink is None`.
-        monkeypatch.setattr(app, "_stream_sink", type("S", (), {
-            "snapshot": lambda self: ("think", "answer"),
-            "has_content": lambda self: True,
-        })(), raising=False)
+        monkeypatch.setattr(
+            app,
+            "_stream_sink",
+            type(
+                "S",
+                (),
+                {
+                    "snapshot": lambda self: ("think", "answer"),
+                    "has_content": lambda self: True,
+                },
+            )(),
+            raising=False,
+        )
         # Заглушим UI-мутации, которые метод мог бы позвать.
         mutated = {"set_content": 0, "stick": 0, "scroll": 0}
         # _stream_answer_row должен быть не None, чтобы дошло до set_content.
-        monkeypatch.setattr(scr, "_stream_answer_row",
-                            type("R", (), {"set_content": staticmethod(
-                                lambda *a, **k: mutated.__setitem__(
-                                    "set_content", mutated["set_content"] + 1))})(),
-                            raising=False)
-        monkeypatch.setattr(scr, "_update_stick_state",
-                            lambda: mutated.__setitem__("stick", mutated["stick"] + 1))
-        monkeypatch.setattr(scr, "_scroll_trace_end",
-                            lambda: mutated.__setitem__("scroll", mutated["scroll"] + 1))
+        monkeypatch.setattr(
+            scr,
+            "_stream_answer_row",
+            type(
+                "R",
+                (),
+                {
+                    "set_content": staticmethod(
+                        lambda *a, **k: mutated.__setitem__("set_content", mutated["set_content"] + 1)
+                    )
+                },
+            )(),
+            raising=False,
+        )
+        monkeypatch.setattr(scr, "_update_stick_state", lambda: mutated.__setitem__("stick", mutated["stick"] + 1))
+        monkeypatch.setattr(scr, "_scroll_trace_end", lambda: mutated.__setitem__("scroll", mutated["scroll"] + 1))
         # Freeze ON → никаких мутаций
         scr._selecting = True
         scr._refresh_stream_content()
@@ -206,14 +222,10 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         calls = {"footer": 0, "title": 0, "orphan": 0, "mcp": 0}
-        monkeypatch.setattr(scr, "_refresh_footer",
-                            lambda: calls.__setitem__("footer", calls["footer"] + 1))
-        monkeypatch.setattr(scr, "_update_terminal_title",
-                            lambda: calls.__setitem__("title", calls["title"] + 1))
-        monkeypatch.setattr(scr, "_run_orphan_cleanups",
-                            lambda: calls.__setitem__("orphan", calls["orphan"] + 1))
-        monkeypatch.setattr(scr, "_update_mcp_indicator",
-                            lambda: calls.__setitem__("mcp", calls["mcp"] + 1))
+        monkeypatch.setattr(scr, "_refresh_footer", lambda: calls.__setitem__("footer", calls["footer"] + 1))
+        monkeypatch.setattr(scr, "_update_terminal_title", lambda: calls.__setitem__("title", calls["title"] + 1))
+        monkeypatch.setattr(scr, "_run_orphan_cleanups", lambda: calls.__setitem__("orphan", calls["orphan"] + 1))
+        monkeypatch.setattr(scr, "_update_mcp_indicator", lambda: calls.__setitem__("mcp", calls["mcp"] + 1))
         # Без активной сессии poll доходит до ветки `_active_task_id is None`,
         # которая зовёт footer+title и return — это и доказывает, что хвост
         # poll не отрезан ранним return при freeze.

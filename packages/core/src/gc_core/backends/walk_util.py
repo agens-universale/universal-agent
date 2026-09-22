@@ -12,6 +12,7 @@ Prune semantics — one rule for every backend, twin of
 LISTED, only its subtree is cut. Name search must keep finding ``node_modules``
 or ``.github`` themselves; content search never needed what is below them.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -26,9 +27,7 @@ class WalkEntry:
     size: Optional[int] = None  # bytes for files when known cheaply; None otherwise (symlinks too)
 
 
-def pruned_dir_predicate(
-    prune_names: Sequence[str], prune_dot_dirs: bool
-) -> Callable[[str], bool]:
+def pruned_dir_predicate(prune_names: Sequence[str], prune_dot_dirs: bool) -> Callable[[str], bool]:
     """The single "is this directory name pruned?" rule shared by every walk."""
     names = frozenset(n for n in prune_names if n)
 
@@ -57,9 +56,7 @@ def iter_walk_entries_from_flat(
         subdirs: list[str] = []
         for _name, entry in dir_children.get(parent_rel, []):
             yield entry
-            if entry.is_dir and (
-                should_descend is None or should_descend(_abs(join, root, entry.rel))
-            ):
+            if entry.is_dir and (should_descend is None or should_descend(_abs(join, root, entry.rel))):
                 subdirs.append(entry.rel)
         for subdir_rel in subdirs:
             yield from _dfs(subdir_rel)
@@ -76,9 +73,7 @@ def iter_walk_from_flat(
 ) -> Iterable[tuple[str, bool]]:
     """``iter_walk_entries_from_flat`` over plain ``(relpath, is_dir)`` rows."""
     sized = [WalkEntry(rel, is_d) for rel, is_d in entries]
-    for entry in iter_walk_entries_from_flat(
-        sized, should_descend=should_descend, join=join, root=root
-    ):
+    for entry in iter_walk_entries_from_flat(sized, should_descend=should_descend, join=join, root=root):
         yield entry.rel, entry.is_dir
 
 

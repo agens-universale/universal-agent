@@ -33,13 +33,8 @@ def test_turn_end_default_sixty_percent_via_load_config():
         cfg_path = os.path.join(tmp_dir, "config.yml")
         with open(cfg_path, "w", encoding="utf-8") as fd:
             fd.write(
-                "backend:\n  api_mode: chat_completions\n"
-                "summary:\n"
-                "  chat_completions_summary_trigger_chars: 200000\n"
+                "backend:\n  api_mode: chat_completions\nsummary:\n  chat_completions_summary_trigger_chars: 200000\n"
             )
         cfg = load_config(cfg_path)
-        assert (
-            cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"]
-            == 120000
-        )
+        assert cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"] == 120000
         assert parse_summary_turn_end_trigger_chars(cfg) == 120000

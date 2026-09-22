@@ -32,6 +32,7 @@ def test_default_presets_are_not_materialized_into_the_template():
     добавленный провайдер до людей уже не доехал бы (живой случай 2026-08-17:
     в песочнице осталось три пресета из четырёх)."""
     from gc_testkit.paths import ASSETS, REPO
+
     # Шаблон ядра уехал в packages/core/assets/, demo_config.yml остался
     # в корне репозитория — считать оба от __file__ больше нельзя.
     # Правило одно на ВСЕ каталоги пресетов, а не на первый заведённый:
@@ -74,9 +75,5 @@ def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
     )
     config_dict = cfgmod.load_config(str(conf))
 
-    assert config_dict["endpoint_presets"] == [
-        {"name": "My", "url": "http://x/v1/chat/completions"}
-    ]
-    assert endpoint_presets_from_config(config_dict) == [
-        EndpointPreset(name="My", url="http://x/v1/chat/completions")
-    ]
+    assert config_dict["endpoint_presets"] == [{"name": "My", "url": "http://x/v1/chat/completions"}]
+    assert endpoint_presets_from_config(config_dict) == [EndpointPreset(name="My", url="http://x/v1/chat/completions")]

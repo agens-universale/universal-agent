@@ -7,6 +7,7 @@ and asserts it forwards the RAW code/cwd/timeout/validated-env dict to
 `run_python()`, plus the sandbox cwd branch and shared envelope parity
 (validation errors, non_zero_exit, timeout, execution_failed, truncation).
 """
+
 import json
 
 from gc_core.backends.protocol import ExecResult, bound_exec_result

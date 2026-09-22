@@ -1,4 +1,5 @@
 """os_ops.write_clipboard — нативная запись в системный буфер (дополняет OSC 52)."""
+
 import sys
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ def _ok_run(captured):
         captured["cmd"] = cmd
         captured["input"] = kw.get("input")
         return SimpleNamespace(returncode=0)
+
     return fake_run
 
 
@@ -27,9 +29,7 @@ def test_write_clipboard_windows_uses_winapi(monkeypatch):
     # Win32 — через ctypes (_win_write_clipboard), без subprocess.
     monkeypatch.setattr(os_ops.sys, "platform", "win32")
     seen: dict = {}
-    monkeypatch.setattr(
-        os_ops, "_win_write_clipboard", lambda t: seen.update(text=t) or True
-    )
+    monkeypatch.setattr(os_ops, "_win_write_clipboard", lambda t: seen.update(text=t) or True)
     assert os_ops.write_clipboard("тест") is True
     assert seen["text"] == "тест"
 
@@ -59,6 +59,7 @@ def test_write_clipboard_graceful_on_missing_tool(monkeypatch):
 
 
 # --- реальный round-trip через Win32 API (прогоняется только на Windows) ---
+
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Win32 clipboard API")
 def test_win_clipboard_roundtrip_cyrillic_and_glyphs():

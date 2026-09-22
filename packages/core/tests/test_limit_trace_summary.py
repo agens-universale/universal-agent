@@ -3,6 +3,7 @@
 Mock LLM: no live calls. Validates envelope shape, LLM failure, raw text passthrough,
 config kill-switch, and no working_memory injection into the prompt.
 """
+
 import json
 from types import SimpleNamespace
 
@@ -14,8 +15,13 @@ from gc_testkit import run_coro
 
 def _make_state(max_steps=2):
     return State(
-        verbose=False, model="Test", tools_spec=[], tools_descr=[],
-        skills_list=[], max_steps=max_steps, system_prompt_id="v1",
+        verbose=False,
+        model="Test",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=max_steps,
+        system_prompt_id="v1",
         use_server_subagents=False,
     )
 
@@ -40,6 +46,7 @@ def _make_ctx(**overrides):
 # ---------------------------------------------------------------------------
 # Envelope shape
 # ---------------------------------------------------------------------------
+
 
 def test_step_limit_envelope_shape(monkeypatch):
     async def _fake_llm(**kw):
@@ -98,9 +105,11 @@ def test_token_limit_envelope_shape(monkeypatch):
 # LLM failure -> empty summary, envelope still returned
 # ---------------------------------------------------------------------------
 
+
 def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
     async def _boom(**kw):
         raise RuntimeError("LLM down")
+
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _boom)
     state = _make_state(max_steps=1)
     state.steps = 2
@@ -116,6 +125,7 @@ def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
 # ---------------------------------------------------------------------------
 # Raw non-JSON model text still in raw_trace_summary
 # ---------------------------------------------------------------------------
+
 
 def test_raw_non_markdown_text_still_in_summary(monkeypatch):
     async def _fake_llm(**kw):
@@ -133,6 +143,7 @@ def test_raw_non_markdown_text_still_in_summary(monkeypatch):
 # ---------------------------------------------------------------------------
 # Config kill-switch: limit_trace_summary=false -> empty summary, no LLM call
 # ---------------------------------------------------------------------------
+
 
 def test_kill_switch_disables_llm_call(monkeypatch):
     called = {"n": 0}
@@ -154,6 +165,7 @@ def test_kill_switch_disables_llm_call(monkeypatch):
 # ---------------------------------------------------------------------------
 # No working_memory / shared memory in the prompt
 # ---------------------------------------------------------------------------
+
 
 def test_no_working_memory_in_prompt(monkeypatch):
     captured = {}
@@ -183,6 +195,7 @@ def test_no_working_memory_in_prompt(monkeypatch):
 # System message is stripped from trace serialization
 # ---------------------------------------------------------------------------
 
+
 def test_system_message_not_in_trace(monkeypatch):
     captured = {}
 
@@ -206,6 +219,7 @@ def test_system_message_not_in_trace(monkeypatch):
 # ---------------------------------------------------------------------------
 # Tool calls and outputs are serialized in the trace (not lost)
 # ---------------------------------------------------------------------------
+
 
 def test_function_call_serialized_in_trace(monkeypatch):
     captured = {}
@@ -253,6 +267,7 @@ def test_function_call_serialized_in_trace(monkeypatch):
 # Config wiring: flatten_app_config must propagate limit_trace_summary
 # from AgentConfig into config_dict (regression guard for missing wiring).
 # ---------------------------------------------------------------------------
+
 
 def test_kill_switch_wired_from_config():
     """flatten_app_config must include limit_trace_summary from AgentConfig.

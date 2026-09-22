@@ -34,9 +34,7 @@ def test_blocks_system_package_install_command(tmp_path, monkeypatch):
         ),
     )
 
-    result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command="sudo apt install nginx")
-    )
+    result = json.loads(with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command="sudo apt install nginx"))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -48,7 +46,9 @@ def test_blocks_system_package_install_command(tmp_path, monkeypatch):
 
 def test_blocks_shell_profile_modification_command(tmp_path, monkeypatch):
     profile_path = tmp_path / ".bashrc"
-    command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(profile_path)!r}).write_text(\'export BAD=1\')"'
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; Path({str(profile_path)!r}).write_text(\'export BAD=1\')"'
+    )
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",

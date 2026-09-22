@@ -172,8 +172,12 @@ async def acreate_run_context(
         athread_store(thread_store)
 
     prep = _prepare_run_context(
-        config_dict, run_id=run_id, environment=environment, loop=loop,
-        os_backend=os_backend, log_handlers=log_handlers,
+        config_dict,
+        run_id=run_id,
+        environment=environment,
+        loop=loop,
+        os_backend=os_backend,
+        log_handlers=log_handlers,
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -219,12 +223,19 @@ async def acreate_run_context(
                 registered_names=registered,
             )
         return _finish_run_context(
-            config_dict, prep, tools,
+            config_dict,
+            prep,
+            tools,
             registered_names=registered,
-            auth_connector=auth_connector, environment=environment,
-            on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-            is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
-            level_provider=level_provider, circuit_breaker=circuit_breaker,
+            auth_connector=auth_connector,
+            environment=environment,
+            on_stream_delta=on_stream_delta,
+            on_messages_evicted=on_messages_evicted,
+            is_tui=is_tui,
+            tools_cache=tools_cache,
+            thread_store=thread_store,
+            level_provider=level_provider,
+            circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
         )
     except BaseException as exc:
@@ -307,7 +318,10 @@ def _prepare_run_context(
     """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
-        config_dict, environment=environment, loop=loop, override=os_backend,
+        config_dict,
+        environment=environment,
+        loop=loop,
+        override=os_backend,
     )
     skills_registry = get_skills_registry(config_dict, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
@@ -315,7 +329,9 @@ def _prepare_run_context(
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
     # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict, run_id=effective_run_id, agent_kind="main",
+        config_dict,
+        run_id=effective_run_id,
+        agent_kind="main",
         log_handlers=log_handlers,
     )
     # Токен владельца MCP-сессий рождается здесь и живёт столько же, сколько
@@ -411,9 +427,7 @@ def _finish_run_context(
     auxiliary_llm = auxiliary_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
-    effective_level_provider = level_provider or (
-        lambda: config_dict.get("level") or "default"
-    )
+    effective_level_provider = level_provider or (lambda: config_dict.get("level") or "default")
     model_router = ModelRouter(
         config_dict,
         level_provider=effective_level_provider,

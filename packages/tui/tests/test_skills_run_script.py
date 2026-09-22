@@ -14,7 +14,7 @@ def _write_skill_with_script(root, skill_id: str, script_body: str) -> None:
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
-        f"---\nid: {skill_id}\nname: {skill_id}\ndescription: \"\"\n---\n# body\n",
+        f'---\nid: {skill_id}\nname: {skill_id}\ndescription: ""\n---\n# body\n',
         encoding="utf-8",
     )
     (scripts_dir / "main.py").write_text(script_body, encoding="utf-8")
@@ -64,11 +64,7 @@ def test_skills_run_script_passes_args_as_stdin_json(reg_with_scripts, tmp_path)
     _write_skill_with_script(
         tmp_path / "system",
         "stdin-echo",
-        (
-            "import json, sys\n"
-            "payload = json.load(sys.stdin)\n"
-            "print(payload.get('skill_path', ''))\n"
-        ),
+        ("import json, sys\npayload = json.load(sys.stdin)\nprint(payload.get('skill_path', ''))\n"),
     )
     tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
     payload = json.loads(
@@ -90,9 +86,7 @@ def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
         "import sys\nprint('|'.join(sys.argv[1:]))\n",
     )
     tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
-    payload = json.loads(
-        tool(skill_id="argv-echo", script_name="main.py", argv='--format json "two words"')
-    )
+    payload = json.loads(tool(skill_id="argv-echo", script_name="main.py", argv='--format json "two words"'))
     assert payload["ok"] is True
     assert payload["script_ok"] is True
     assert payload["result"]["stdout"]["content"].strip() == "--format|json|two words"
@@ -138,9 +132,7 @@ async def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_pa
         encoding="utf-8",
     )
     hostile = [r"C:\temp\it's report.pdf", '{"a": "b c"}', "--flag='x'"]
-    res = await LocalFsBackend().aexec_argv(
-        [sys.executable, str(script), *hostile], stdin="42"
-    )
+    res = await LocalFsBackend().aexec_argv([sys.executable, str(script), *hostile], stdin="42")
     assert res.return_code == 0
     lines = res.stdout.splitlines()
     assert lines[0] == "|".join(hostile)
@@ -170,9 +162,7 @@ async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_pat
     inner = LocalFsBackend()
     ctx = local_ctx()
     wrapped = TrackingFsBackend(inner, ctx)
-    res = await wrapped.aexec_argv(
-        [sys.executable, str(script), *hostile], stdin="42"
-    )
+    res = await wrapped.aexec_argv([sys.executable, str(script), *hostile], stdin="42")
     assert res.return_code == 0
     lines = res.stdout.splitlines()
     assert lines[0] == "|".join(hostile)
@@ -181,6 +171,7 @@ async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_pat
 
 def test_default_exec_argv_builds_posix_pipe_for_sandbox_backends():
     """Sandbox backends (harbor) keep the POSIX shell-string contract."""
+
     class _Recorder:
         is_sandbox = True
 
@@ -190,6 +181,4 @@ def test_default_exec_argv_builds_posix_pipe_for_sandbox_backends():
 
     rec = _Recorder()
     FsBackend.exec_argv(rec, ["python3", "/harbor/skills/s/scripts/x.py", "a b"], stdin='{"k": 1}')
-    assert rec.command == (
-        "printf '%s' '{\"k\": 1}' | python3 /harbor/skills/s/scripts/x.py 'a b'"
-    )
+    assert rec.command == ("printf '%s' '{\"k\": 1}' | python3 /harbor/skills/s/scripts/x.py 'a b'")

@@ -67,12 +67,18 @@ def test_settings_probe_forwards_config_proxy(monkeypatch):
     def fake_fetch(endpoint, auth, *, verify=True, config_proxy=None, **kw):
         seen["config_proxy"] = config_proxy
         return mp.FetchOutcome(
-            models=[mp.ModelInfo(id="m1")], status=200, network_error="", latency_ms=1,
+            models=[mp.ModelInfo(id="m1")],
+            status=200,
+            network_error="",
+            latency_ms=1,
         )
 
     monkeypatch.setattr(mp, "probe_fetch", fake_fetch)
     r = sp.probe(
-        "https://x/v1/chat/completions", None, True, "m1",
+        "https://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
         config_proxy="socks5h://127.0.0.1:1080",
     )
     assert r.verdict == "ok"

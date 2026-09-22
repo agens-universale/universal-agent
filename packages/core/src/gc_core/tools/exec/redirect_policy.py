@@ -11,6 +11,7 @@
 он звал ``follow_redirects=True`` и доверял всей цепочке. Две реализации
 одного правила расходятся молча, а третья дырявая — поэтому петля здесь одна.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -87,9 +88,7 @@ async def fetch_validating_redirects(
     """
     current = start_url
     for _ in range(max_redirects + 1):
-        response = await session.get(
-            current, headers=headers, timeout=timeout, follow_redirects=False
-        )
+        response = await session.get(current, headers=headers, timeout=timeout, follow_redirects=False)
         next_abs = _next_hop(response, current)
         if next_abs is None:
             return response
@@ -118,9 +117,7 @@ async def stream_validating_redirects(
     """
     current = start_url
     for _ in range(max_redirects + 1):
-        request = session.build_request(
-            "GET", current, headers=headers, timeout=timeout
-        )
+        request = session.build_request("GET", current, headers=headers, timeout=timeout)
         response = await session.send(request, stream=True, follow_redirects=False)
         next_abs = _next_hop(response, current)
         if next_abs is None:

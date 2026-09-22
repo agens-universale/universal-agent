@@ -175,9 +175,7 @@ def _todo_item_from(item: Any) -> Optional[Dict[str, str]]:
     return {"content": content.strip(), "status": status}
 
 
-def brief_args_summary(
-    arguments: Any, *, tool_name: Optional[str] = None, limit: int = _ARGS_SUMMARY_MAX
-) -> str:
+def brief_args_summary(arguments: Any, *, tool_name: Optional[str] = None, limit: int = _ARGS_SUMMARY_MAX) -> str:
     """Compact one-line args preview for progress events (no TUI dependency)."""
     data: Any = arguments
     if isinstance(arguments, str):

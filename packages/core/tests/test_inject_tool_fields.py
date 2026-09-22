@@ -15,9 +15,7 @@ from gc_core.tools.inject_tool_fields import (
 )
 
 _REASON = "reason"
-_REASON_DESC = (
-    "Brief rationale (1–2 sentences): goal, why now, expected outcome."
-)
+_REASON_DESC = "Brief rationale (1–2 sentences): goal, why now, expected outcome."
 
 
 def _reason_fields(**extra: str) -> dict[str, str]:
@@ -123,9 +121,7 @@ class TestInjectPropertyIntoSpec:
 class TestStripInjectedToolArgs:
     def test_strips_only_listed_fields(self):
         args = {_REASON: "because", "path": "/tmp/x"}
-        assert strip_injected_tool_args(args, injected_fields=[_REASON]) == {
-            "path": "/tmp/x"
-        }
+        assert strip_injected_tool_args(args, injected_fields=[_REASON]) == {"path": "/tmp/x"}
 
 
 class TestBuildToolsData:
@@ -243,9 +239,7 @@ class TestApplyTool:
 
     async def test_missing_reason_is_accepted(self):
         """Omitted injected reason no longer rejects the call (it is semantically optional)."""
-        tools_data, _, _, _ = await abuild_tools_data(
-            _base_config(inject_tool_fields=_reason_fields())
-        )
+        tools_data, _, _, _ = await abuild_tools_data(_base_config(inject_tool_fields=_reason_fields()))
 
         received = {}
 
@@ -288,9 +282,8 @@ class TestApplyTool:
         }
         # Обёртка зовёт `acall_mcp_tool`: у тула форма одна. Подмена
         # синхронного имени оставляла бы тест зелёным, ничего не проверяя.
-        with patch(
-            "gc_core.tools.connect_mcp.agent_tools.acall_mcp_tool"
-        ) as mock_call:
+        with patch("gc_core.tools.connect_mcp.agent_tools.acall_mcp_tool") as mock_call:
+
             async def _ok(**_kw):
                 return "mcp ok"
 
@@ -340,15 +333,14 @@ class TestApplyTool:
         with patch.object(tools_pkg, "is_subagent_tool", return_value=True):
             with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
                 instance = MockRunner.return_value
+
                 async def _arun(*_a, **_kw):
                     return "done"
 
                 instance.arun.side_effect = _arun
                 await aapply_tool(
                     tool_name="subagent_stub",
-                    arguments=json.dumps(
-                        {_REASON: "delegate work", "task": "do something"}
-                    ),
+                    arguments=json.dumps({_REASON: "delegate work", "task": "do something"}),
                     ctx=ctx,
                     state=MagicMock(),
                     run_agent_func=run_agent_func,

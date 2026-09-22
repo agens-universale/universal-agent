@@ -9,6 +9,7 @@ TUI держит один исполнитель на сессию. Сообще
 агента (записывает батчи) и снос MCP (двойник выполняет шаг теста ровно в
 окне сноса).
 """
+
 import asyncio
 import importlib
 import logging
@@ -41,9 +42,7 @@ def env(monkeypatch, tmp_path):
     h = types.SimpleNamespace(batches=[], runs=[], teardown_steps=[])
 
     async def _loop(messages, state, ctx, **kw):
-        h.batches.append(
-            [m.get("content") if isinstance(m, dict) else m for m in messages]
-        )
+        h.batches.append([m.get("content") if isinstance(m, dict) else m for m in messages])
         return {"finished": True}
 
     original_teardown = ae._aclose_mcp_and_release
@@ -128,23 +127,15 @@ def test_stopped_run_neither_replays_its_tail_nor_passes_it_on(env):
     assert runner.start(query="второй", thread_id="t")
     _finish(runner)
 
-    assert env.batches == [["первый"], ["второй"]], (
-        f"хвост остановленного хода доигран или уехал дальше: {env.batches}"
-    )
+    assert env.batches == [["первый"], ["второй"]], f"хвост остановленного хода доигран или уехал дальше: {env.batches}"
 
 
 def _dropped(caplog) -> list:
-    return [
-        (r.ending, r.count)
-        for r in caplog.records
-        if getattr(r, "event", None) == "run_tail_dropped"
-    ]
+    return [(r.ending, r.count) for r in caplog.records if getattr(r, "event", None) == "run_tail_dropped"]
 
 
 @pytest.mark.parametrize("ending", ["failed", "cancelled"])
-def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
-    env, monkeypatch, caplog, ending
-):
+def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(env, monkeypatch, caplog, ending):
     """Хвост, отданный повторному ходу, не исчезает без следа, если ход умер в сетапе.
 
     Для исполнителя батч хвоста — аргументы хода, а не очередь: снять хвост
@@ -167,16 +158,12 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
             raise asyncio.CancelledError()
         return await real_session.afrom_config(**kw)
 
-    monkeypatch.setattr(
-        ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
-    )
+    monkeypatch.setattr(ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread))
     # Отмена выходит из `asyncio.run` рабочего потока и завершает поток, как и
     # до правки: раннер её не глушит. Перехватываем, чтобы отличить от
     # постороннего исключения.
     thread_errors: list = []
-    monkeypatch.setattr(
-        threading, "excepthook", lambda args: thread_errors.append(args.exc_type)
-    )
+    monkeypatch.setattr(threading, "excepthook", lambda args: thread_errors.append(args.exc_type))
     runner = AgentRunner(executor=env.executor)
     env.teardown_steps += [
         lambda: runner.add_message(_user("хвост-1")),
@@ -190,9 +177,7 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     assert env.batches == [["первый"], ["хвост-1"]], (
         f"ход с вторым хвостом дошёл до цикла — тест ничего не проверил: {env.batches}"
     )
-    assert _dropped(caplog) == [(ending, 1)], (
-        f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
-    )
+    assert _dropped(caplog) == [(ending, 1)], f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
     assert thread_errors == ([asyncio.CancelledError] if ending == "cancelled" else [])
 
 
@@ -233,9 +218,7 @@ def test_message_during_compaction_does_not_start_a_parallel_run():
     assert executor.compacting.wait(_WAIT_SEC)
     try:
         runner.add_message(_user("во время сжатия"))
-        assert executor.runs == [["первый"]], (
-            f"сообщение завело прогон параллельно сжатию: {executor.runs}"
-        )
+        assert executor.runs == [["первый"]], f"сообщение завело прогон параллельно сжатию: {executor.runs}"
         assert executor.queued == [_user("во время сжатия")]
     finally:
         executor.release.set()

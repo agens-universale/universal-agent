@@ -5,6 +5,7 @@
 же id). Рендер сегментов рисует соседние сегменты сырьём → реплика дублировалась
 вокруг маркера «контекст сжат». Дедуп по id убирает повтор (номер события у копий
 разный — это render-счётчик, не identity)."""
+
 import pytest
 
 _DUP = "m_dup"
@@ -23,10 +24,15 @@ def _seg_live():
         "index": 1,
         "messages": [
             {"payload": {"role": "user", "content": "A", "id": _DUP}},  # preserved-дубль
-            {"payload": {"id": "a1", "type": "message", "role": "assistant",
-                         "status": "completed",
-                         "content": [{"type": "output_text", "text": "ответ",
-                                      "annotations": []}]}},
+            {
+                "payload": {
+                    "id": "a1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "ответ", "annotations": []}],
+                }
+            },
         ],
         "compacted_by": None,
     }
@@ -54,8 +60,9 @@ def _seg_user(idx, content, mid, n_compacted):
     return {
         "index": idx,
         "messages": [{"payload": {"role": "user", "content": content, "id": mid}}],
-        "compacted_by": ({"ts": "", "messages_in_segment": n_compacted, "synthesis": f"S{idx}"}
-                         if n_compacted else None),
+        "compacted_by": (
+            {"ts": "", "messages_in_segment": n_compacted, "synthesis": f"S{idx}"} if n_compacted else None
+        ),
     }
 
 
@@ -71,11 +78,13 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         # 3 сегмента (= 2 компакции): OLD до #1, MID между #1 и #2, LIVE после #2.
-        scr._render_segments([
-            _seg_user(0, "OLD", "m0", 47),
-            _seg_user(1, "MID", "m1", 22),
-            _seg_user(2, "LIVE", "m2", None),
-        ])
+        scr._render_segments(
+            [
+                _seg_user(0, "OLD", "m0", 47),
+                _seg_user(1, "MID", "m1", 22),
+                _seg_user(2, "LIVE", "m2", None),
+            ]
+        )
         await pilot.pause()
         # ВСЕ три реплики отрисованы (старый сегмент не потерян)
         assert len(scr.query(UserReplyContainer)) == 3
@@ -96,8 +105,7 @@ async def test_readonly_render_segments_dedupes_preserved_reply():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(
-                self.query_one("#t", VerticalScroll), [_seg_archived(), _seg_live()])
+            render_segments_readonly(self.query_one("#t", VerticalScroll), [_seg_archived(), _seg_live()])
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen

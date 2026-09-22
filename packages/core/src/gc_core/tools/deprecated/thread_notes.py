@@ -14,13 +14,10 @@ class ThreadNotes(AbstractSimpleTool):
     tool_name = "thread_notes"
     MAX_CHARS = 50_000
     EMPTY_PROMPT = (
-        "Notes are empty. Use this tool to persist meaningful decisions, specs, "
-        "paths, or conclusions for this thread."
+        "Notes are empty. Use this tool to persist meaningful decisions, specs, paths, or conclusions for this thread."
     )
 
-    def __init__(
-        self, ctx: Any = None, state: Any = None, **kwargs: Any
-    ) -> None:
+    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
@@ -71,7 +68,7 @@ class ThreadNotes(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        return '''Tool name: thread_notes
+        return """Tool name: thread_notes
 Tool description: Persistent per-thread markdown notes stored in thread meta. Can be read, appended, or rewritten.
 
 Mandatory workflow (use it to avoid contradictions across turns):
@@ -108,7 +105,7 @@ Return format (JSON string):
   "error": null|{"type":"...","message":"..."},
   "notes_md": "..." (only for read; last field)
 }
-'''
+"""
 
     @staticmethod
     def _result(
@@ -144,9 +141,7 @@ Return format (JSON string):
 
         shared = getattr(state, "shared", None)
         existing_md = getattr(shared, "notes_md", None) if shared is not None else None
-        existing_md_stripped = (
-            existing_md.strip() if isinstance(existing_md, str) else ""
-        )
+        existing_md_stripped = existing_md.strip() if isinstance(existing_md, str) else ""
 
         if action not in ("read", "append", "write"):
             return self._result(
@@ -158,9 +153,7 @@ Return format (JSON string):
             )
 
         if action == "read":
-            notes_md = (
-                existing_md_stripped if existing_md_stripped else self.EMPTY_PROMPT
-            )
+            notes_md = existing_md_stripped if existing_md_stripped else self.EMPTY_PROMPT
             return self._result(
                 ok=True,
                 action=action,
@@ -183,9 +176,7 @@ Return format (JSON string):
 
         if action == "append":
             new_md = (
-                (existing_md_stripped + "\n\n" + content.strip())
-                if existing_md_stripped
-                else content.strip()
+                (existing_md_stripped + "\n\n" + content.strip()) if existing_md_stripped else content.strip()
             ).strip()
         else:  # write
             new_md = content.strip()
@@ -196,8 +187,13 @@ Return format (JSON string):
                 action=action,
                 length=len(new_md),
                 notes_md=None,
-                error={"type": "limit_exceeded", "message": (f"Notes exceed {self.MAX_CHARS} chars. Not written. "
-                                                             "Please read first and rewrite new version of notes with new content")},
+                error={
+                    "type": "limit_exceeded",
+                    "message": (
+                        f"Notes exceed {self.MAX_CHARS} chars. Not written. "
+                        "Please read first and rewrite new version of notes with new content"
+                    ),
+                },
             )
 
         state.shared.notes_md = new_md

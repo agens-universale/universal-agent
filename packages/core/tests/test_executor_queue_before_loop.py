@@ -17,6 +17,7 @@
 участвуют по-настоящему. И ассертим мы СЪЕДЕННОЕ циклом, а не «долежало до
 атрибута исполнителя»: прошлый сторож зеленел именно на этой подмене.
 """
+
 import importlib
 import types
 
@@ -55,9 +56,7 @@ def _texts(messages) -> list:
     return out
 
 
-async def test_message_queued_before_the_run_reaches_the_first_batch(
-    monkeypatch, tmp_path
-):
+async def test_message_queued_before_the_run_reaches_the_first_batch(monkeypatch, tmp_path):
     """Положенное до `arun` уходит агенту в первом же запросе."""
     seen: list = []
 
@@ -70,9 +69,7 @@ async def test_message_queued_before_the_run_reaches_the_first_batch(
     # `arun` принимает СТРОКИ (в очередь же кладут словари — так делает сервер).
     await ex.arun(["стартовое"], thread_id="t", start_new_thread=True, system="cli")
 
-    assert seen and "из брони" in seen[0], (
-        f"сообщение из очереди не доехало до модели: {seen}"
-    )
+    assert seen and "из брони" in seen[0], f"сообщение из очереди не доехало до модели: {seen}"
     assert "стартовое" in seen[0], f"стартовое сообщение потеряно: {seen}"
 
 

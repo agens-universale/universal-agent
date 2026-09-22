@@ -12,6 +12,7 @@
 Здесь проверяется свойство, а не наличие кода: сервер отвечает редиректом на
 запрещённый адрес, и тул обязан отказать, не сходив туда.
 """
+
 import json
 
 import httpx
@@ -49,9 +50,7 @@ def _redirecting(monkeypatch, module, visited: list):
             return httpx.Response(200, content=b"SECRET")
         return httpx.Response(302, headers={"Location": FORBIDDEN})
 
-    factory = lambda **kw: httpx.AsyncClient(
-        transport=httpx.MockTransport(_dispatch)
-    )
+    factory = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(_dispatch))
     monkeypatch.setattr(async_http, "get_async_client", factory)
     monkeypatch.setattr(module, "get_async_client", factory, raising=False)
     return factory
@@ -79,9 +78,7 @@ def test_fetch_url_refuses_a_redirect_into_a_blocked_address(monkeypatch):
 
     assert out["ok"] is False, out
     assert out["error"].get("blocked_on_redirect") is True, out
-    assert not any("169.254" in u for u in visited), (
-        f"тул всё-таки сходил на запрещённый адрес: {visited}"
-    )
+    assert not any("169.254" in u for u in visited), f"тул всё-таки сходил на запрещённый адрес: {visited}"
 
 
 def test_simple_fetch_url_refuses_the_same_redirect(monkeypatch):
@@ -105,12 +102,9 @@ def test_download_file_refuses_the_same_redirect(monkeypatch, tmp_path):
     launch_root.mkdir()
     visited: list = []
     factory = _redirecting(monkeypatch, mod, visited)
-    _patch_tool_globals(monkeypatch, factory, DownloadFile.acall,
-                        DownloadFile._http_get_bytes)
+    _patch_tool_globals(monkeypatch, factory, DownloadFile.acall, DownloadFile._http_get_bytes)
 
-    tool = CallableTool(
-        with_local_ctx(DownloadFile, config_dict=_policy_config(launch_root))._tool
-    )
+    tool = CallableTool(with_local_ctx(DownloadFile, config_dict=_policy_config(launch_root))._tool)
     out = json.loads(tool(url="https://example.com/start", filename="x.pdf"))
 
     assert out["ok"] is False, out
@@ -125,12 +119,8 @@ def test_all_three_share_one_redirect_loop():
 
     for module in (fetch_url, simple_fetch_url, download_file):
         src = inspect.getsource(module)
-        assert "redirect_policy" in src, (
-            f"{module.__name__} не пользуется общей петлёй редиректов"
-        )
-        assert "urljoin(current" not in src, (
-            f"{module.__name__} завёл собственную петлю редиректов заново"
-        )
+        assert "redirect_policy" in src, f"{module.__name__} не пользуется общей петлёй редиректов"
+        assert "urljoin(current" not in src, f"{module.__name__} завёл собственную петлю редиректов заново"
     assert hasattr(redirect_policy, "fetch_validating_redirects")
     assert hasattr(redirect_policy, "stream_validating_redirects")
 
@@ -152,16 +142,12 @@ def test_all_three_share_one_redirect_ceiling():
     from gc_core.tools.exec import download_file, fetch_url, simple_fetch_url
     from gc_core.tools.exec.redirect_policy import DEFAULT_MAX_REDIRECTS
 
-    assert DEFAULT_MAX_REDIRECTS == 20, (
-        "общий потолок разошёлся с тем, что брал httpx до переезда"
-    )
+    assert DEFAULT_MAX_REDIRECTS == 20, "общий потолок разошёлся с тем, что брал httpx до переезда"
     # Своих чисел у тулов быть не должно: разъезжаются они молча.
     for module in (fetch_url, simple_fetch_url, download_file):
         src = inspect.getsource(module)
         for literal in ("max_redirects=5", "max_redirects=10", "_MAX_REDIRECTS = "):
-            assert literal not in src, (
-                f"{module.__name__} завёл собственный потолок: {literal}"
-            )
+            assert literal not in src, f"{module.__name__} завёл собственный потолок: {literal}"
 
 
 def _looping(monkeypatch, module, hops: int):
@@ -172,13 +158,9 @@ def _looping(monkeypatch, module, hops: int):
 
     def _dispatch(request: httpx.Request) -> httpx.Response:
         seen["n"] += 1
-        return httpx.Response(
-            302, headers={"Location": f"https://example.com/hop{seen['n']}"}
-        )
+        return httpx.Response(302, headers={"Location": f"https://example.com/hop{seen['n']}"})
 
-    factory = lambda **kw: httpx.AsyncClient(
-        transport=httpx.MockTransport(_dispatch)
-    )
+    factory = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(_dispatch))
     monkeypatch.setattr(async_http, "get_async_client", factory)
     monkeypatch.setattr(module, "get_async_client", factory, raising=False)
     return factory, seen
@@ -200,9 +182,5 @@ def test_a_redirect_loop_is_not_reported_as_a_policy_block(monkeypatch):
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out
-    assert out["error"]["type"] == "too_many_redirects", (
-        f"петля редиректов названа не своим именем: {out['error']}"
-    )
-    assert out["error"].get("blocked_on_redirect") is not True, (
-        "петля всё ещё отдаётся как запрет политики"
-    )
+    assert out["error"]["type"] == "too_many_redirects", f"петля редиректов названа не своим именем: {out['error']}"
+    assert out["error"].get("blocked_on_redirect") is not True, "петля всё ещё отдаётся как запрет политики"

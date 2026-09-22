@@ -1,4 +1,5 @@
 """Diff-TUI v2 hybrid: ignored→cache в git-mode (H1–H12) + session journal."""
+
 from __future__ import annotations
 
 import json
@@ -75,7 +76,7 @@ def _cfg(launch_root: Path) -> dict:
     }
 
 
-def _write_tool(launch_root: Path, threads: Path, *, thread_id: str = "t1") :
+def _write_tool(launch_root: Path, threads: Path, *, thread_id: str = "t1"):
     cfg = _cfg(launch_root)
     ctx = local_ctx(cfg)
     ctx.is_tui = True
@@ -243,9 +244,7 @@ def test_h6_untracked_non_ignored_uses_git(git_proj):
 def test_h7_merge_list_marker_and_count(git_proj):
     root, threads = git_proj
     tool = _write_tool(root, threads)
-    assert json.loads(
-        tool(path=str(root / "tracked.txt"), content="dirty\n")
-    )["ok"] is True
+    assert json.loads(tool(path=str(root / "tracked.txt"), content="dirty\n"))["ok"] is True
     target = root / "local.md"
     target.write_text("v1\n", encoding="utf-8")
     assert json.loads(tool(path=str(target), content="v2\n"))["ok"] is True
@@ -284,9 +283,7 @@ def test_h8_no_longer_ignored_stale_cleanup_to_git(git_proj):
 def test_h9_approve_all_both_layers_dual_notice(git_proj):
     root, threads = git_proj
     tool = _write_tool(root, threads)
-    assert json.loads(
-        tool(path=str(root / "tracked.txt"), content="dirty\n")
-    )["ok"] is True
+    assert json.loads(tool(path=str(root / "tracked.txt"), content="dirty\n"))["ok"] is True
     target = root / "local.md"
     target.write_text("v1\n", encoding="utf-8")
     assert json.loads(tool(path=str(target), content="v2\n"))["ok"] is True
@@ -306,9 +303,7 @@ def test_h9_approve_all_both_layers_dual_notice(git_proj):
 def test_h9_undo_all_both_layers(git_proj):
     root, threads = git_proj
     tool = _write_tool(root, threads)
-    assert json.loads(
-        tool(path=str(root / "tracked.txt"), content="dirty\n")
-    )["ok"] is True
+    assert json.loads(tool(path=str(root / "tracked.txt"), content="dirty\n"))["ok"] is True
     target = root / "local.md"
     target.write_text("v1\n", encoding="utf-8")
     assert json.loads(tool(path=str(target), content="v2\n"))["ok"] is True
@@ -390,9 +385,7 @@ def test_h11_cache_mode_without_git_alive(tmp_path, monkeypatch):
 def test_h12_clear_all_git_mode_only_cache(git_proj):
     root, threads = git_proj
     tool = _write_tool(root, threads)
-    assert json.loads(
-        tool(path=str(root / "tracked.txt"), content="dirty\n")
-    )["ok"] is True
+    assert json.loads(tool(path=str(root / "tracked.txt"), content="dirty\n"))["ok"] is True
     target = root / "local.md"
     target.write_text("v1\n", encoding="utf-8")
     assert json.loads(tool(path=str(target), content="v2\n"))["ok"] is True

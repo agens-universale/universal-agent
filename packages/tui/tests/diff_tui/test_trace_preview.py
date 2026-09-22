@@ -1,4 +1,5 @@
 """Diff-preview для trace: visual_diff → первые 3 строки (не tool-output)."""
+
 from __future__ import annotations
 
 from gc_core.config_modules import env_vars

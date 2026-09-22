@@ -5,6 +5,7 @@
 только ``run_id``. Без этого события тред виден в логе лишь косвенно — через
 сообщения суммаризации, и только если она вообще срабатывала.
 """
+
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -47,9 +48,7 @@ async def _run(tmp_path, log_format, **run_kwargs):
         state.messages += list(messages)
         return "ok"
 
-    with patch.object(
-        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-    ):
+    with patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent):
         executor = agent_executor_module.AgentExecutor(ctx)
         result = await executor.arun(["привет"], verbose=False, **run_kwargs)
 
@@ -124,8 +123,6 @@ async def test_no_crash_when_logger_is_absent(tmp_path):
         state.messages += list(messages)
         return "ok"
 
-    with patch.object(
-        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-    ):
+    with patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent):
         executor = agent_executor_module.AgentExecutor(ctx)
         assert await executor.arun(["привет"], thread_id="thr-1", system="cli") == "ok"

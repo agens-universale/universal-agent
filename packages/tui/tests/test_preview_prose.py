@@ -1,4 +1,5 @@
 """Read-only превью рендерит прозу так же, как трейс (через build_block_widgets)."""
+
 import pytest
 
 
@@ -10,8 +11,7 @@ async def test_preview_multiparagraph_prose_single_row(tmp_path):
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    rec = {"payload": {"id": "a1", "role": "assistant",
-                       "content": "абзац1\n\nабзац2"}, "ts": ""}
+    rec = {"payload": {"id": "a1", "role": "assistant", "content": "абзац1\n\nабзац2"}, "ts": ""}
 
     class _App(App):
         def compose(self):
@@ -24,5 +24,5 @@ async def test_preview_multiparagraph_prose_single_row(tmp_path):
         await pilot.pause()
         rows = list(target.query(TraceRow))
         prose_rows = [r for r in rows if "абзац" in str(r._content.plain)]
-        assert len(prose_rows) == 1            # один прогон, пустая строка внутри
+        assert len(prose_rows) == 1  # один прогон, пустая строка внутри
         assert "\n\n" in str(prose_rows[0]._content.plain)

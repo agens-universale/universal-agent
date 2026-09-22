@@ -1,4 +1,5 @@
 """Спека 04: unknown tool → JSON + suggestions; streak stop; tool_error_cnt."""
+
 from __future__ import annotations
 
 import json
@@ -11,10 +12,11 @@ from gc_testkit import run_coro
 
 def _async_noop(fn):
     """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _make_state(**overrides):

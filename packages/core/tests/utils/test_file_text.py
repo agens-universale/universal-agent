@@ -204,20 +204,14 @@ def test_check_encoding_on_file_head_truncation():
 
     # Incomplete trailing UTF-8 sequence at cut — should still pass when truncated.
     sample = b"hello " + b"\xd0"  # start of a 2-byte Cyrillic char
-    assert (
-        check_encoding_on_file_head(
-            sample, "utf-8", sample_is_complete_file=False
-        )
-        is None
-    )
+    assert check_encoding_on_file_head(sample, "utf-8", sample_is_complete_file=False) is None
     # Same bytes as a complete file would be invalid UTF-8.
-    err = check_encoding_on_file_head(
-        sample, "utf-8", sample_is_complete_file=True
-    )
+    err = check_encoding_on_file_head(sample, "utf-8", sample_is_complete_file=True)
     assert err is not None and err["type"] == "undecodable_text"
 
 
 # --- append encode (no mid-file BOM) -------------------------------------------
+
 
 @pytest.mark.parametrize(
     "encoding,expected_payload",

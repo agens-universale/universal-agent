@@ -3,6 +3,7 @@
 Ключи ``live_history_chars`` / ``live_msg_count`` пишет thread_store при
 append / compact / discard; TUI только читает (см. docs_md/tui/meta-ownership).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
@@ -24,16 +25,12 @@ def live_volume_from_messages(
 ) -> Dict[str, int]:
     """Полный пересчёт агрегатов объёма live-окна."""
     return {
-        "live_history_chars": calc_history_chars_for_trigger(
-            messages, tags=tags, strip_think=strip_think
-        ),
+        "live_history_chars": calc_history_chars_for_trigger(messages, tags=tags, strip_think=strip_think),
         "live_msg_count": len(messages),
     }
 
 
-def bump_live_volume_in_meta(
-    meta: Dict[str, Any], *, delta_chars: int, delta_count: int
-) -> None:
+def bump_live_volume_in_meta(meta: Dict[str, Any], *, delta_chars: int, delta_count: int) -> None:
     """Инкремент live_* в meta.runtime (создаёт ключи с 0, если их ещё не было)."""
     runtime = dict(meta.get("runtime") or {})
     try:
@@ -59,8 +56,6 @@ def bump_live_volume_for_messages(
     """Инкремент live_* на объём только что дописанных payload."""
     bump_live_volume_in_meta(
         meta,
-        delta_chars=calc_history_chars_for_trigger(
-            messages, tags=tags, strip_think=strip_think
-        ),
+        delta_chars=calc_history_chars_for_trigger(messages, tags=tags, strip_think=strip_think),
         delta_count=len(messages),
     )

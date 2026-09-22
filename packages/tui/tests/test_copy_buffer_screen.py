@@ -4,6 +4,7 @@ SPEC 2026-07-25 §3.1 B6/B7/B8: экран буфера сессии; Esc сох
 (пусто = очистили), без изменений — на диск не пишем; paste OS-first; копирование
 не дописывает буфер сам в себя (маркер _is_copy_buffer_screen).
 """
+
 from __future__ import annotations
 
 import pytest

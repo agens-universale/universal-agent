@@ -1,4 +1,5 @@
 """Ctrl+V (action_paste) и правый клик вставляют из системного буфера."""
+
 import pytest
 
 
@@ -34,10 +35,20 @@ async def test_right_click_pastes_from_os_clipboard(tmp_path, monkeypatch):
         inp = pilot.app.query_one("#cmdinput")
         inp.focus()
         await pilot.pause(0.1)
-        await inp._on_mouse_down(events.MouseDown(
-            widget=inp, x=0, y=0, delta_x=0, delta_y=0,
-            button=3, shift=False, meta=False, ctrl=False,
-            screen_x=0, screen_y=0,
-        ))
+        await inp._on_mouse_down(
+            events.MouseDown(
+                widget=inp,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=3,
+                shift=False,
+                meta=False,
+                ctrl=False,
+                screen_x=0,
+                screen_y=0,
+            )
+        )
         await pilot.pause(0.1)
         assert inp.text == "правый клик"

@@ -22,8 +22,8 @@ SOLUTION_TYPES = (
 
 TASK_REPORT_MAX_CHARS = 10000
 
-class SubmitSolution(AbstractSimpleTool):
 
+class SubmitSolution(AbstractSimpleTool):
     @staticmethod
     def _result(
         *,
@@ -108,17 +108,13 @@ class SubmitSolution(AbstractSimpleTool):
 
         if decision.outcome == "reject" and decision.validation is not None:
             validation = decision.validation
-            feedback = (decision.feedback_text or "").strip() or build_finish_gate_feedback(
-                validation
-            )
+            feedback = (decision.feedback_text or "").strip() or build_finish_gate_feedback(validation)
             payload["ok"] = False
             payload["status"] = "rejected_by_finish_gate"
             payload["message"] = feedback
             payload["finish_gate"] = cls._finish_gate_block_from_validation(validation)
         elif decision.validation is not None:
-            payload["finish_gate"] = cls._finish_gate_block_from_validation(
-                decision.validation
-            )
+            payload["finish_gate"] = cls._finish_gate_block_from_validation(decision.validation)
             if decision.outcome == "accept":
                 payload.setdefault("ok", True)
                 payload.setdefault("status", "submitted")
@@ -173,17 +169,15 @@ class SubmitSolution(AbstractSimpleTool):
                     },
                     "comment": {
                         "type": "string",
-                        "description": (
-                            "Caveats, risks, unresolved items, or suggested next steps for the user."
-                        ),
+                        "description": ("Caveats, risks, unresolved items, or suggested next steps for the user."),
                     },
                     "handoff": {
                         "type": "string",
                         "description": (
                             "Must decode to a JSON object (dictionary), not an array, scalar, or null. "
                             "Pass the object as one JSON string (this field is string-typed, not a nested object). "
-                            "Machine-readable payload for downstream workflows; use \"{}\" when nothing extra is needed. "
-                            "Example: '{\"artifacts\":[\"report.md\"]}'."
+                            'Machine-readable payload for downstream workflows; use "{}" when nothing extra is needed. '
+                            'Example: \'{"artifacts":["report.md"]}\'.'
                         ),
                     },
                 },
@@ -195,7 +189,8 @@ class SubmitSolution(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        return '''Tool name: turn_finish
+        return (
+            """Tool name: turn_finish
 Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
 IMPORTANT: This marks end of the current turn, NOT end of the whole thread/session.
 Use solution_type to classify the turn outcome; task for what the user asked this turn; task_report for what was done in this turn; comment for caveats or next steps.
@@ -204,7 +199,9 @@ Input schema:
 {
   "solution_type": "full_solution" | "partial_solution" | "direct_answer" | "couldnt_solve" | "need_additional_info" | "abandoned",
   "task": "string (required)",
-  "task_report": "string (required, max ''' + str(TASK_REPORT_MAX_CHARS) + ''' chars)",
+  "task_report": "string (required, max """
+            + str(TASK_REPORT_MAX_CHARS)
+            + """ chars)",
   "comment": "string (optional)",
   "handoff": "{}" (required; JSON object encoded as a string)
 }
@@ -241,14 +238,16 @@ Choosing solution_type (for current turn):
 - abandoned: stopped by explicit choice/instruction.
 
 - task: What the user asked this turn, in 1–2 phrases, in the user's terms. Not what was done — that is task_report.
-- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief. Max ''' + str(TASK_REPORT_MAX_CHARS) + ''' characters.
+- task_report: What was done in this turn (steps, result, assumptions/evidence). Plain text, brief. Max """
+            + str(TASK_REPORT_MAX_CHARS)
+            + """ characters.
 - comment: Optional caveats, risks, unresolved items, or next steps.
 - handoff: Required JSON object string (see Handoff format). Minimal valid value: "{}".
 
 Success return format (compact JSON ack): {"tool":"turn_finish","ok":true,"status":"submitted"}
 Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rejected","message":"...","error":{...},"task_report":""}
-'''
-
+"""
+        )
 
     async def acall(
         self,
@@ -345,9 +344,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                 error={
                     "type": "limit_exceeded",
                     "field": "task_report",
-                    "message": (
-                        f"task_report exceeds {TASK_REPORT_MAX_CHARS} chars, got {report_len}"
-                    ),
+                    "message": (f"task_report exceeds {TASK_REPORT_MAX_CHARS} chars, got {report_len}"),
                 },
             )
 
@@ -363,8 +360,7 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                     "type": "invalid_argument",
                     "field": "handoff",
                     "message": (
-                        "handoff is required. Must decode to a JSON object; "
-                        "pass it as a JSON string (e.g. \"{}\")."
+                        'handoff is required. Must decode to a JSON object; pass it as a JSON string (e.g. "{}").'
                     ),
                 },
             )

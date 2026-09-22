@@ -11,9 +11,7 @@ from gc_core.utils.llm_chat_client import arequest_chat_completion_text, log_llm
 def _require_auxiliary_llm(ctx: Any) -> Any:
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     if auxiliary_llm is None:
-        raise RuntimeError(
-            "RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context."
-        )
+        raise RuntimeError("RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context.")
     return auxiliary_llm
 
 
@@ -26,9 +24,7 @@ def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
     auxiliary_llm = _require_auxiliary_llm(ctx)
     completion_kwargs = getattr(auxiliary_llm, "completion_kwargs", None)
     if not isinstance(completion_kwargs, dict):
-        raise RuntimeError(
-            "RunContext.auxiliary_llm.completion_kwargs must be a dict"
-        )
+        raise RuntimeError("RunContext.auxiliary_llm.completion_kwargs must be a dict")
     return dict(completion_kwargs)
 
 
@@ -110,9 +106,7 @@ async def arequest_summary_text(
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     default_max_tokens = getattr(auxiliary_llm, "max_tokens", None)
     if not isinstance(default_max_tokens, int) or default_max_tokens < 1:
-        raise RuntimeError(
-            "RunContext.auxiliary_llm.max_tokens must be a positive int"
-        )
+        raise RuntimeError("RunContext.auxiliary_llm.max_tokens must be a positive int")
     return await arequest_auxiliary_completion_text(
         ctx=ctx,
         state=state,
@@ -124,12 +118,9 @@ async def arequest_summary_text(
         logger=logger,
     )
 
+
 #
 # Нужны вызывающим вне цикла агента (ручной /compact в TUI, тесты). Внутри
 # асинхронного цикла звать их НЕЛЬЗЯ — и не потому, что «что-то откажет»:
 # синхронный вызов заморозил бы loop на всё время aux-LLM, а fail-open вокруг
 # судей проглотил бы такую ошибку и молча выключил проверку.
-
-
-
-

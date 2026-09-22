@@ -27,11 +27,7 @@ async def test_skill_catalog_shape_on_real_pack():
 
     # invariants the resolver relies on (content-independent)
     assert set(cat.pack_bootstrap.values()) <= cat.canonical_ids
-    assert all(
-        cid in cat.canonical_ids
-        for ids in cat.bare_to_canonical.values()
-        for cid in ids
-    )
+    assert all(cid in cat.canonical_ids for ids in cat.bare_to_canonical.values() for cid in ids)
 
 
 async def test_resolver_outputs_are_loadable_against_real_registry():
@@ -40,8 +36,7 @@ async def test_resolver_outputs_are_loadable_against_real_registry():
     reg = SkillsRegistry()
     cat = await reg.skill_catalog()
     # "project-overview" is now a pack-inner skill: bare tail -> codebase:project-overview
-    for raw in ["supercoder", "brainstorming", "supercoder:brainstorming",
-                "suprcoder", "project-overview"]:
+    for raw in ["supercoder", "brainstorming", "supercoder:brainstorming", "suprcoder", "project-overview"]:
         r = resolve_skill_arg(raw, cat)
         assert isinstance(r, Resolved), f"{raw!r} -> {r}"
         # guard: every resolved id is actually loadable by the registry

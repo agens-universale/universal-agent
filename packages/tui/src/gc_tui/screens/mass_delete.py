@@ -4,6 +4,7 @@
 Enter (при count > 0) → dismiss({"keep_last": N}) | dismiss({"older_than_days": N}).
 Esc → dismiss(None). Живой счётчик — через select_for_deletion.
 Образец — RenameScreen/ConfirmScreen (инлайновый DEFAULT_CSS)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -54,8 +55,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
             yield Static(self._modes_text(), id="mass-modes", markup=False)
             yield Input(value="20", id="mass-n")
             yield Static("", id="mass-count", markup=False)
-            yield Static("[↑↓] режим · [Enter] далее · [Esc] отмена",
-                         id="mass-hint", markup=False)
+            yield Static("[↑↓] режим · [Enter] далее · [Esc] отмена", id="mass-hint", markup=False)
 
     def on_mount(self) -> None:
         self.query_one("#mass-dialog").border_title = "Массовое удаление"
@@ -67,10 +67,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
         return _MODES[self._mode_idx]
 
     def _modes_text(self) -> str:
-        return "   ".join(
-            f"({'•' if i == self._mode_idx else ' '}) {_MODE_LABEL[m]}"
-            for i, m in enumerate(_MODES)
-        )
+        return "   ".join(f"({'•' if i == self._mode_idx else ' '}) {_MODE_LABEL[m]}" for i, m in enumerate(_MODES))
 
     def _n(self) -> Optional[int]:
         raw = self.query_one("#mass-n", Input).value.strip()
@@ -84,8 +81,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
 
     def _refresh(self) -> None:
         self.query_one("#mass-modes", Static).update(self._modes_text())
-        self.query_one("#mass-count", Static).update(
-            f"→ под удаление: {len(self._ids())} из {len(self._tasks)}")
+        self.query_one("#mass-count", Static).update(f"→ под удаление: {len(self._ids())} из {len(self._tasks)}")
 
     # ---- events ----
     def on_input_changed(self, event: Input.Changed) -> None:

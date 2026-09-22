@@ -15,9 +15,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
 
     def _default_limit(self) -> int:
         cfg = intent_scope_from_config_dict(self._config_dict or {})
-        return int(
-            cfg.read_page_record_limit or DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-        )
+        return int(cfg.read_page_record_limit or DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT)
 
     def _closed_log(self) -> list:
         if self._state is None:
@@ -50,16 +48,12 @@ class ReadUserIntentLog(AbstractSimpleTool):
                     },
                     "offset": {
                         "type": "integer",
-                        "description": (
-                            "For action=read only. 0-based **record** index (not char/line). Default: 0."
-                        ),
+                        "description": ("For action=read only. 0-based **record** index (not char/line). Default: 0."),
                         "default": 0,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": (
-                            f"For action=read only. Max records per page (default {default_records})."
-                        ),
+                        "description": (f"For action=read only. Max records per page (default {default_records})."),
                         "default": default_records,
                     },
                 },
@@ -100,7 +94,6 @@ Behavior:
             action=action,
             body={"error": {"type": error_type, "message": message}},
         )
-
 
     async def acall(
         self,

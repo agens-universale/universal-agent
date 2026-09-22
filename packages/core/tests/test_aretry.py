@@ -3,6 +3,7 @@
 Главное утверждение — паритет с синхронным двойником: политика ретраев не
 должна зависеть от того, каким транспортом ушёл запрос.
 """
+
 import asyncio
 import logging
 
@@ -87,6 +88,7 @@ async def test_unknown_kwargs_are_filtered_like_in_sync_twin(monkeypatch):
     Тот же приём, что в синхронном retry: вызывающие транспорта передают общий
     мешок параметров, часть которых конкретной функции не нужна.
     """
+
     async def fake_sleep(_d):
         return None
 

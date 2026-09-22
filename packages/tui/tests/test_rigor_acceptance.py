@@ -1,5 +1,6 @@
 """Гвозди приёмки /rigor (спека §8): резолвер-матрица, custom-правило, эфемерная
 позиция, smart-гейт, сессионность пары. Живые UI-гейты — в смоуке (см. план §смоук)."""
+
 import pytest
 from gc_testkit import run_coro
 from gc_testkit.paths import REPO
@@ -7,6 +8,7 @@ from gc_testkit.paths import REPO
 
 def _app(tmp_path, yaml_text):
     from gc_tui.app import TuiApp
+
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
     app = TuiApp(config={})
@@ -17,18 +19,20 @@ def _app(tmp_path, yaml_text):
     return app
 
 
-@pytest.mark.parametrize("gate,answers,expected", [
-    ("off", "allow", "low"),
-    ("smart", "judge", "medium"),
-    ("on", "deny", "high"),
-    ("on", "allow", "custom"),
-    ("off", "deny", "custom"),
-])
+@pytest.mark.parametrize(
+    "gate,answers,expected",
+    [
+        ("off", "allow", "low"),
+        ("smart", "judge", "medium"),
+        ("on", "deny", "high"),
+        ("on", "allow", "custom"),
+        ("off", "deny", "custom"),
+    ],
+)
 def test_resolver_matrix(gate, answers, expected):
     from gc_tui.toggles import resolve_preset
-    assert resolve_preset(
-        {"tui.finish_gate_mode": gate, "tui.text_answer_mode": answers}
-    ) == expected
+
+    assert resolve_preset({"tui.finish_gate_mode": gate, "tui.text_answer_mode": answers}) == expected
 
 
 def test_custom_unreachable_by_stepping(tmp_path):
@@ -40,10 +44,11 @@ def test_custom_unreachable_by_stepping(tmp_path):
     сессию (см. test_apply_toggle_rejects_custom в test_palette_rigor.py)."""
     pytest.importorskip("textual")
     from gc_tui.toggles import PRESET_CUSTOM, apply_toggle, next_toggle_value
-    b = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')   # custom с самого начала
+
+    b = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')  # custom с самого начала
 
     for direction in (1, -1):
-        for _ in range(7):    # больше одного полного оборота по трём значениям
+        for _ in range(7):  # больше одного полного оборота по трём значениям
             nxt = next_toggle_value(b, "rigor", direction)
             assert nxt != PRESET_CUSTOM
             apply_toggle(b, "rigor", nxt)
@@ -57,13 +62,15 @@ def test_session_pair_not_preset_survives(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.session_settings import read_from_meta
+
     a = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
     from gc_tui.toggles import apply_toggle
+
     apply_toggle(a, "rigor", "low")
     store = FileTaskStore(threads_dir=a._threads_dir, system=a._system)
     saved = read_from_meta(store.get_task_meta("t1"))
     assert saved == {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}
-    assert "rigor" not in str(saved)               # пресет как значение не хранится
+    assert "rigor" not in str(saved)  # пресет как значение не хранится
 
 
 def test_apply_rigor_preset_never_clears_session_overrides(tmp_path, monkeypatch):
@@ -78,8 +85,9 @@ def test_apply_rigor_preset_never_clears_session_overrides(tmp_path, monkeypatch
     замещены целевой парой (не остались частичными, не были обнулены)."""
     pytest.importorskip("textual")
     from gc_tui.toggles import apply_toggle
+
     app = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
-    app.apply_session_overrides({"tui.finish_gate_mode": "on"})   # частичный оверрайд
+    app.apply_session_overrides({"tui.finish_gate_mode": "on"})  # частичный оверрайд
 
     clear_calls = []
     monkeypatch.setattr(app, "clear_session_overrides", lambda keys: clear_calls.append(tuple(keys)))
@@ -88,7 +96,8 @@ def test_apply_rigor_preset_never_clears_session_overrides(tmp_path, monkeypatch
 
     assert clear_calls == []
     assert app._session_overrides == {
-        "tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow",
+        "tui.finish_gate_mode": "off",
+        "tui.text_answer_mode": "allow",
     }
 
 
@@ -99,12 +108,14 @@ def test_smart_gate_counts_failed_and_subagent_calls():
     from types import SimpleNamespace
 
     from gc_core.intent_guard.guard import FinishGateGuard
-    cfg = {"backend_api_mode": "chat_completions",
-           "strict_turn_finish_validation": True, "finish_gate_smart": True}
-    g0 = FinishGateGuard(ctx=SimpleNamespace(config_dict=cfg),
-                         state=SimpleNamespace(parent_state_id=None, turn_tool_calls=0))
-    g1 = FinishGateGuard(ctx=SimpleNamespace(config_dict=cfg),
-                         state=SimpleNamespace(parent_state_id=None, turn_tool_calls=1))
+
+    cfg = {"backend_api_mode": "chat_completions", "strict_turn_finish_validation": True, "finish_gate_smart": True}
+    g0 = FinishGateGuard(
+        ctx=SimpleNamespace(config_dict=cfg), state=SimpleNamespace(parent_state_id=None, turn_tool_calls=0)
+    )
+    g1 = FinishGateGuard(
+        ctx=SimpleNamespace(config_dict=cfg), state=SimpleNamespace(parent_state_id=None, turn_tool_calls=1)
+    )
     assert g0.enabled is False and g1.enabled is True
 
 
@@ -122,12 +133,16 @@ def test_turn_tool_calls_counter_survives_summary_compaction():
     state = SimpleNamespace(
         messages=[{"role": "user", "content": "hi"}],
         shared=None,
-        user_intent_log=[], current_user_intent=[],
-        dialog_steps_offset=0, previous_response_id="resp1",
+        user_intent_log=[],
+        current_user_intent=[],
+        dialog_steps_offset=0,
+        previous_response_id="resp1",
         turn_tool_calls=3,
     )
     apply_summary_state_patch(
-        state=state, raw_summary="summary text", last_dialog_steps="",
+        state=state,
+        raw_summary="summary text",
+        last_dialog_steps="",
         summarized_messages_count=1,
     )
     assert state.turn_tool_calls == 3
@@ -152,16 +167,12 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
 
     app = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config=app._config, config_path=app._config_path,
-                              on_apply=app.reload_config)
+        scr = SettingsScreen(config=app._config, config_path=app._config_path, on_apply=app.reload_config)
         app.push_screen(scr)
         await pilot.pause()
 
         rigor_text = scr._mode_row_text("rigor", selected=False)
-        assert any(
-            "bold" in str(s.style).lower() and p.INK.lower() in str(s.style).lower()
-            for s in rigor_text.spans
-        )
+        assert any("bold" in str(s.style).lower() and p.INK.lower() in str(s.style).lower() for s in rigor_text.spans)
         assert not any(p.DIM.lower() in str(s.style).lower() for s in rigor_text.spans)
 
         gate_text = scr._mode_row_text("gate", selected=False)
@@ -169,16 +180,13 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
         # Имя+описание ребёнка (head, включая имя команды) — DIM.
         gate_plain = gate_text.plain
         dim_spans = [s for s in gate_text.spans if p.DIM.lower() in str(s.style).lower()]
-        assert dim_spans and dim_spans[0].start == 2   # сразу после курсора — БЕЗ отступа/маркера
+        assert dim_spans and dim_spans[0].start == 2  # сразу после курсора — БЕЗ отступа/маркера
         assert dim_spans[0].end >= 2 + len("gate · самопроверка выполнения задачи")
 
         # Подпись значения ребёнка ("on") — тоже DIM (трек между head и
         # подписью — семантические цвета, не задет).
         value_start = gate_plain.rindex("on")
-        assert any(
-            p.DIM.lower() in str(s.style).lower() and s.start <= value_start < s.end
-            for s in gate_text.spans
-        )
+        assert any(p.DIM.lower() in str(s.style).lower() and s.start <= value_start < s.end for s in gate_text.spans)
 
 
 def test_exactly_one_preset_group_today():
@@ -191,6 +199,7 @@ def test_exactly_one_preset_group_today():
     `test_palette_toggles.py::test_group_separator_between_two_preset_groups`
     и `test_settings_screen.py::test_modes_section_group_separator_between_two_preset_groups`)."""
     from gc_tui.toggles import TOGGLES
+
     n_groups = sum(1 for spec in TOGGLES.values() if spec.preset_keys)
     assert n_groups == 1
 

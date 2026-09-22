@@ -5,6 +5,7 @@
   ordering_key    → max seq из data_*
   storage_epoch   → meta.last_summary_archive_suffix (fallback last_summarized_at)
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,7 @@ class FileTaskStore:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            tid = meta.get("thread_id") or meta_path.stem[len(prefix):]
+            tid = meta.get("thread_id") or meta_path.stem[len(prefix) :]
             # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
             # failed); верхний meta.status — для CLI/server-потоков. Нет ни того, ни
             # другого → None (исход не записан; список не выдумывает «stopped»).
@@ -56,19 +57,21 @@ class FileTaskStore:
             token_usage = meta.get("token_usage")
             if not isinstance(token_usage, dict):
                 token_usage = None
-            items.append(TaskSummary(
-                thread_id=tid,
-                status=status,
-                updated_at=updated,
-                messages_count=msgs,
-                skill_id=skill_id,
-                unread_count=unread,
-                last_error=last_err,
-                tui_meta=tui_meta,
-                token_usage=token_usage,
-            ))
+            items.append(
+                TaskSummary(
+                    thread_id=tid,
+                    status=status,
+                    updated_at=updated,
+                    messages_count=msgs,
+                    skill_id=skill_id,
+                    unread_count=unread,
+                    last_error=last_err,
+                    tui_meta=tui_meta,
+                    token_usage=token_usage,
+                )
+            )
         items.sort(key=lambda s: s.updated_at, reverse=True)
-        return items[offset:offset + limit]
+        return items[offset : offset + limit]
 
     # ---- per-task -----------------------------------------------------
 
@@ -83,9 +86,7 @@ class FileTaskStore:
             return {}
         return raw if isinstance(raw, dict) else {}
 
-    def update_tui_meta(
-        self, task_id: str, patch: dict, system: Optional[str] = None
-    ) -> None:
+    def update_tui_meta(self, task_id: str, patch: dict, system: Optional[str] = None) -> None:
         """Объединяет patch с meta.tui sub-dict и сохраняет (TUI-owned)."""
         sys_ = system or self._system
         meta_path = self._meta_path(task_id, sys_)
@@ -126,9 +127,7 @@ class FileTaskStore:
             strip_think=strip_think,
         )
 
-    def read_subagent_trace(
-        self, task_id: str, system: Optional[str] = None
-    ) -> list[dict]:
+    def read_subagent_trace(self, task_id: str, system: Optional[str] = None) -> list[dict]:
         """Sidecar nested-трейс: data_subagents_{system}_{task_id}.jsonl."""
         sys_ = system or self._system
         return read_subagent_trace(str(self._dir), sys_, task_id)
@@ -159,9 +158,7 @@ class FileTaskStore:
             return None
         return rec
 
-    def read_all_events(
-        self, task_id: str, system: Optional[str] = None
-    ) -> tuple[list[dict], TaskCursor]:
+    def read_all_events(self, task_id: str, system: Optional[str] = None) -> tuple[list[dict], TaskCursor]:
         sys_ = system or self._system
         data_path = self._data_path(task_id, sys_)
         records: list[dict] = []
@@ -195,13 +192,9 @@ class FileTaskStore:
         payload = rec.get("payload")
         if not isinstance(payload, dict) or payload.get("role") != "user":
             return False
-        return is_dialog_summary_user_message_text(
-            user_content_to_text(payload.get("content"))
-        )
+        return is_dialog_summary_user_message_text(user_content_to_text(payload.get("content")))
 
-    def read_raw_thread_jsonl(
-        self, task_id: str, system: Optional[str] = None
-    ) -> str:
+    def read_raw_thread_jsonl(self, task_id: str, system: Optional[str] = None) -> str:
         """Дословная конкатенация всех файлов треда (архивы __pre_summary__ +
         live) в порядке имён — сырьё для /export log-json. В отличие от
         read_segments НЕ отбрасывает лидирующие dialog_summary-строки архивов:
@@ -256,10 +249,7 @@ class FileTaskStore:
                 if next_leading is not None:
                     payload = next_leading.get("payload") or {}
                     synthesis = _clean_summary(user_content_to_text(payload.get("content")))
-                    chars_before = sum(
-                        len(user_content_to_text((r.get("payload") or {}).get("content")))
-                        for r in seg
-                    )
+                    chars_before = sum(len(user_content_to_text((r.get("payload") or {}).get("content"))) for r in seg)
                     compacted_by = {
                         "ts": next_leading.get("ts", ""),
                         "messages_in_segment": len(seg),
@@ -286,9 +276,7 @@ class FileTaskStore:
                     out.append(payload)
         return out
 
-    def tail_events(
-        self, task_id: str, cursor: TaskCursor, system: Optional[str] = None
-    ) -> TailResult:
+    def tail_events(self, task_id: str, cursor: TaskCursor, system: Optional[str] = None) -> TailResult:
         sys_ = system or self._system
         data_path = self._data_path(task_id, sys_)
 
@@ -317,9 +305,7 @@ class FileTaskStore:
 
         # 3. incremental read
         new_records: list[dict] = []
-        max_seq: int = (
-            int(cursor.ordering_key) if isinstance(cursor.ordering_key, int) else 0
-        )
+        max_seq: int = int(cursor.ordering_key) if isinstance(cursor.ordering_key, int) else 0
         with open(data_path, encoding="utf-8") as f:
             f.seek(int(cursor.position_token or 0))
             for line in f:

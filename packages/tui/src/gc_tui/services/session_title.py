@@ -11,6 +11,7 @@ title > task > last_actual > «Без названия».
 Пикер (SessionsScreen) и OSC (TraceScreen) читают только её — никакого
 сканирования jsonl/архивов для отображения имени.
 """
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional

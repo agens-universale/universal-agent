@@ -19,6 +19,7 @@
 коротком сценарии. Что она действительно сработала — проверяется каждым тестом
 отдельно, а не подразумевается: «порог выставлен» не значит «компакция была».
 """
+
 import asyncio
 import json
 import threading
@@ -67,9 +68,15 @@ def _stub_turn_finish(monkeypatch):
 
 TURNS = [
     assistant_tool_call("exec_calculator", {"expression": "2+2"}, call_id="c1"),
-    assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer", "task_report": "готово", "handoff": "{}",
-    }, call_id="c2"),
+    assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": "готово",
+            "handoff": "{}",
+        },
+        call_id="c2",
+    ),
     judge_accept(),
 ]
 
@@ -114,20 +121,17 @@ def thread_dump(cfg, system_id, thread_id):
     path = Path(data_path)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def was_compacted(cfg, system_id, thread_id) -> bool:
     """Компакция была ⟺ история схлопнулась в одну сводку."""
     dump = thread_dump(cfg, system_id, thread_id)
-    return (
-        len(dump) == 1
-        and "dialog_summary" in json.dumps(dump, ensure_ascii=False)
-    )
+    return len(dump) == 1 and "dialog_summary" in json.dumps(dump, ensure_ascii=False)
 
 
 # --- S-1: компакция не заводит потоков -------------------------------------
+
 
 async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
     """Компакция не создаёт ни одного потока.
@@ -136,6 +140,7 @@ async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
     Проверяем именно ИТОГ: сколько потоков было до прогона, столько и после.
     Оседающий поток на каждую компакцию — утечка, заметная только под нагрузкой.
     """
+
     async def run_and_snapshot(cfg, tid):
         install(monkeypatch, script())
         async with await AsyncAgent.create(cfg) as agent:
@@ -215,7 +220,7 @@ async def test_the_pulse_actually_sees_a_frozen_loop(where):
     async with LoopPulse() as pulse:
         if where != "head":
             await asyncio.sleep(pulse.step * 3)
-        time.sleep(_CONTROL_FREEZE)          # заморозка loop, не await
+        time.sleep(_CONTROL_FREEZE)  # заморозка loop, не await
         if where != "tail":
             await asyncio.sleep(pulse.step * 3)
 
@@ -315,6 +320,7 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
 
 # --- S-3: два агента компактятся одновременно ------------------------------
 
+
 async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
     """Две одновременные компакции не путают треды.
 
@@ -348,12 +354,11 @@ async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
         root = Path(cfg["threads_data_path"])
         archives = [p.name for p in root.glob("*__pre_summary__*")]
         assert archives, f"{tid}: архив компакции не создан"
-        assert not any(other in name for name in archives), (
-            f"в каталоге {tid} лежит архив чужого треда: {archives}"
-        )
+        assert not any(other in name for name in archives), f"в каталоге {tid} лежит архив чужого треда: {archives}"
 
 
 # --- S-4: компакция под нагрузкой соседа -----------------------------------
+
 
 async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
     """Компакция одного агента не выстраивает второго в очередь.
@@ -404,6 +409,7 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
 
 # --- S-7: сообщение, пришедшее во время компакции --------------------------
 
+
 async def test_message_arriving_during_compaction_is_not_lost(tmp_path, monkeypatch):
     """Сообщение, пришедшее во время компакции, не теряется.
 
@@ -428,12 +434,11 @@ async def test_message_arriving_during_compaction_is_not_lost(tmp_path, monkeypa
         await agent.run("вопрос после компакции", thread_id="t-s7")
 
     dump = json.dumps(thread_dump(cfg, "sdk", "t-s7"), ensure_ascii=False)
-    assert "вопрос после компакции" in dump, (
-        "сообщение, отправленное после компакции, не попало в тред"
-    )
+    assert "вопрос после компакции" in dump, "сообщение, отправленное после компакции, не попало в тред"
 
 
 # --- S-8: отмена посреди компакции -----------------------------------------
+
 
 async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeypatch):
     """Отмена посреди компакции не рвёт тред.
@@ -457,7 +462,7 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
 
     async def slow_compaction(*args, **kwargs):
         entered.set()
-        await asyncio.sleep(5)          # отменят раньше, чем досчитает
+        await asyncio.sleep(5)  # отменят раньше, чем досчитает
         return await real(*args, **kwargs)
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", slow_compaction)
@@ -477,7 +482,9 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
     from gc_core.thread_store import ThreadSession
 
     session = await ThreadSession.afrom_config(
-        config_dict=cfg, system_id="sdk", thread_id="t-s8",
+        config_dict=cfg,
+        system_id="sdk",
+        thread_id="t-s8",
     )
     assert isinstance(session.history_messages, list)
 
@@ -487,6 +494,5 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
     await areset_stale_summarizing_flag(session)
     runtime = session.meta.get("runtime") or {}
     assert not runtime.get("summarizing"), (
-        "флаг summarizing остался взведённым после отменённой компакции — "
-        "TUI будет вечно показывать «сжимаю контекст»"
+        "флаг summarizing остался взведённым после отменённой компакции — TUI будет вечно показывать «сжимаю контекст»"
     )

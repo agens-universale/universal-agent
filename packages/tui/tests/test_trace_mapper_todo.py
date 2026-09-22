@@ -1,21 +1,27 @@
 """trace_mapper: session_todo → kind=todo (чек-лист), output глушится."""
+
 import json
 
 from gc_tui.services.trace_mapper import map_message
 
-ARGS = {"todos": [
-    {"content": "Изучить код", "status": "completed"},
-    {"content": "Написать тест", "status": "in_progress"},
-    {"content": "Прогнать pytest", "status": "pending"},
-]}
+ARGS = {
+    "todos": [
+        {"content": "Изучить код", "status": "completed"},
+        {"content": "Написать тест", "status": "in_progress"},
+        {"content": "Прогнать pytest", "status": "pending"},
+    ]
+}
 
 
 def _call(arguments) -> dict:
     # Реальная форма function_call из data_*.jsonl (chat_completions):
     # arguments — JSON-строка.
     return {
-        "id": "m1", "type": "function_call", "name": "session_todo",
-        "call_id": "call_1", "arguments": json.dumps(arguments, ensure_ascii=False),
+        "id": "m1",
+        "type": "function_call",
+        "name": "session_todo",
+        "call_id": "call_1",
+        "arguments": json.dumps(arguments, ensure_ascii=False),
     }
 
 
@@ -46,16 +52,17 @@ def test_partially_broken_list_is_not_a_checklist():
     «чек-лист 0/1» (или «очищен») значило бы врать о состоянии."""
     ev = map_message(
         _call({"todos": [{"content": "ok", "status": "pending"}, {"status": "bad"}]}),
-        no=1, ts="t",
+        no=1,
+        ts="t",
     )
     assert ev.kind == "call"
 
 
 def test_output_suppressed_by_name():
     ev = map_message(
-        {"id": "m2", "type": "function_call_output", "name": "session_todo",
-         "call_id": "call_1", "output": "{}"},
-        no=2, ts="t",
+        {"id": "m2", "type": "function_call_output", "name": "session_todo", "call_id": "call_1", "output": "{}"},
+        no=2,
+        ts="t",
     )
     assert ev is None
 
@@ -65,7 +72,8 @@ def test_output_suppressed_by_tool_key_chat_completions():
     out = json.dumps({"tool": "session_todo", "ok": True, "count": 3})
     ev = map_message(
         {"id": "m3", "type": "function_call_output", "call_id": "call_1", "output": out},
-        no=3, ts="t",
+        no=3,
+        ts="t",
     )
     assert ev is None
 
@@ -81,10 +89,11 @@ def test_garbage_arguments_do_not_map_to_todo_kind():
     """Битые аргументы -> обычное call-событие (механика покажет статус),
     а не чек-лист с враньём «очищен»."""
     from gc_tui.services.trace_mapper import map_message
+
     ev = map_message(
-        {"type": "function_call", "name": "session_todo", "call_id": "c1",
-         "arguments": "оборванный json{{{"},
-        no=1, ts="t",
+        {"type": "function_call", "name": "session_todo", "call_id": "c1", "arguments": "оборванный json{{{"},
+        no=1,
+        ts="t",
     )
     assert ev is not None and ev.kind == "call"
 
@@ -94,12 +103,19 @@ def test_failed_output_is_not_suppressed():
     import json as _json
 
     from gc_tui.services.trace_mapper import map_message
-    out = _json.dumps({"tool": "session_todo", "ok": False,
-                       "error": {"type": "invalid_todos", "message": "bad"},
-                       "message": "Checklist NOT changed."})
+
+    out = _json.dumps(
+        {
+            "tool": "session_todo",
+            "ok": False,
+            "error": {"type": "invalid_todos", "message": "bad"},
+            "message": "Checklist NOT changed.",
+        }
+    )
     ev = map_message(
         {"type": "function_call_output", "call_id": "c1", "output": out},
-        no=2, ts="t",
+        no=2,
+        ts="t",
     )
     assert ev is not None
 
@@ -108,10 +124,11 @@ def test_ok_output_still_suppressed():
     import json as _json
 
     from gc_tui.services.trace_mapper import map_message
-    out = _json.dumps({"tool": "session_todo", "ok": True, "count": 2,
-                       "message": "Checklist replaced: 2 items."})
+
+    out = _json.dumps({"tool": "session_todo", "ok": True, "count": 2, "message": "Checklist replaced: 2 items."})
     ev = map_message(
         {"type": "function_call_output", "call_id": "c1", "output": out},
-        no=2, ts="t",
+        no=2,
+        ts="t",
     )
     assert ev is None

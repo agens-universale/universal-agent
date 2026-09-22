@@ -115,11 +115,7 @@ def test_append_cp1251_round_trip(tmp_path):
 def test_append_unsupported_encoding(tmp_path):
     p = tmp_path / "a.txt"
     p.write_text("x", encoding="utf-8")
-    res = json.loads(
-        with_local_ctx(AppendToFile)(
-            path=str(p), content="y", separator="", encoding="shift_jis"
-        )
-    )
+    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="y", separator="", encoding="shift_jis"))
     assert res["ok"] is False
     assert res["error"]["type"] == "unsupported_encoding"
     assert p.read_text(encoding="utf-8") == "x"
@@ -129,11 +125,7 @@ def test_append_encode_failed_keeps_file(tmp_path):
     p = tmp_path / "a.txt"
     original = "Hi".encode("latin-1")
     p.write_bytes(original)
-    res = json.loads(
-        with_local_ctx(AppendToFile)(
-            path=str(p), content="Привет", separator="", encoding="latin-1"
-        )
-    )
+    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="Привет", separator="", encoding="latin-1"))
     assert res["ok"] is False
     assert res["error"]["type"] == "encode_failed"
     assert p.read_bytes() == original
@@ -143,11 +135,7 @@ def test_append_wrong_encoding_keeps_file(tmp_path):
     p = tmp_path / "ru.txt"
     original = "Привет".encode("cp1251")
     p.write_bytes(original)
-    res = json.loads(
-        with_local_ctx(AppendToFile)(
-            path=str(p), content=" x", separator="", encoding="utf-8"
-        )
-    )
+    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content=" x", separator="", encoding="utf-8"))
     assert res["ok"] is False
     assert res["error"]["type"] == "undecodable_text"
     assert p.read_bytes() == original
@@ -157,11 +145,7 @@ def test_append_rejects_nul_binary(tmp_path):
     p = tmp_path / "blob.bin"
     original = b"aaa\x00bbb"
     p.write_bytes(original)
-    res = json.loads(
-        with_local_ctx(AppendToFile)(
-            path=str(p), content="x", separator="", encoding="utf-8"
-        )
-    )
+    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="x", separator="", encoding="utf-8"))
     assert res["ok"] is False
     assert res["error"]["type"] == "is_binary"
     assert p.read_bytes() == original
@@ -176,11 +160,7 @@ def test_append_large_file_without_full_read(tmp_path):
     body = ("line\n" * 30_000).encode("utf-8")
     assert len(body) > APPEND_HEAD_SAMPLE_BYTES
     p.write_bytes(body)
-    res = json.loads(
-        with_local_ctx(AppendToFile)(
-            path=str(p), content="TAIL", separator="\n", encoding="utf-8"
-        )
-    )
+    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="TAIL", separator="\n", encoding="utf-8"))
     assert res["ok"] is True
     assert p.read_bytes().endswith(b"\nTAIL")
     assert p.read_bytes().startswith(body[:64])
@@ -197,11 +177,7 @@ def test_append_head_truncated_utf8_still_ok(tmp_path):
     rest = "я".encode() + b" more text\n"
     p = tmp_path / "cut.txt"
     p.write_bytes(prefix + rest)
-    res = json.loads(
-        with_local_ctx(AppendToFile)(
-            path=str(p), content="ok", separator="", encoding="utf-8"
-        )
-    )
+    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="ok", separator="", encoding="utf-8"))
     assert res["ok"] is True
     assert p.read_bytes().endswith(b"ok")
 
@@ -247,9 +223,7 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
     # leading BOM, so any remaining U+FEFF is a spurious mid-file BOM (the bug).
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok, f"{encoding}: decode failed: {decoded.error}"
-    assert "\ufeff" not in decoded.text, (
-        f"{encoding}: spurious mid-file BOM (U+FEFF): {decoded.text!r}"
-    )
+    assert "\ufeff" not in decoded.text, f"{encoding}: spurious mid-file BOM (U+FEFF): {decoded.text!r}"
     assert decoded.text == "Строка первая\nСтрока втораяСтрока третья"
 
     # bytes_appended must count the payload without the BOM (26 bytes = 13 chars * 2).
@@ -293,15 +267,20 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
     p = tmp_path / "sig.txt"
     wres = json.loads(
         with_local_ctx(WriteToFile)(
-            path=str(p), content="first line\nsecond line",
-            mode="overwrite", encoding="utf-8-sig",
+            path=str(p),
+            content="first line\nsecond line",
+            mode="overwrite",
+            encoding="utf-8-sig",
         )
     )
     assert wres["ok"], wres
 
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="third line", separator="", encoding="utf-8-sig",
+            path=str(p),
+            content="third line",
+            separator="",
+            encoding="utf-8-sig",
         )
     )
     assert res["ok"], res
@@ -325,8 +304,12 @@ def test_append_utf8_sig_create_missing_has_bom(tmp_path):
     p = tmp_path / "created_sig.txt"
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="Hello", separator="",
-            encoding="utf-8-sig", create_if_missing=True, make_dirs=True,
+            path=str(p),
+            content="Hello",
+            separator="",
+            encoding="utf-8-sig",
+            create_if_missing=True,
+            make_dirs=True,
         )
     )
     assert res["ok"] and res["created"], res
@@ -352,7 +335,10 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
 
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="Hello", separator="", encoding=encoding,
+            path=str(p),
+            content="Hello",
+            separator="",
+            encoding=encoding,
         )
     )
     assert res["ok"], res
@@ -371,6 +357,7 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
 
 # --- CRLF preservation (fix #2) ---
 
+
 def test_append_to_crlf_file_preserves_crlf(tmp_path):
     """Appending \\n-delimited text to a CRLF file must not mix line endings.
 
@@ -383,7 +370,9 @@ def test_append_to_crlf_file_preserves_crlf(tmp_path):
     p.write_bytes(b"line1\r\nline2\r\n")
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="added line3\nmore text", separator="\n\n",
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
         )
     )
     assert res["ok"], res
@@ -401,7 +390,9 @@ def test_append_to_lf_file_keeps_lf(tmp_path):
     p.write_bytes(b"line1\nline2\n")
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="added line3\nmore text", separator="\n\n",
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
         )
     )
     assert res["ok"], res
@@ -419,7 +410,9 @@ def test_append_crlf_empty_separator(tmp_path):
     p.write_bytes(b"a\r\nb\r\n")
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="c\nd", separator="",
+            path=str(p),
+            content="c\nd",
+            separator="",
         )
     )
     assert res["ok"], res

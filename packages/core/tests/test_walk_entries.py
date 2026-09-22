@@ -105,10 +105,7 @@ async def test_local_backend_iter_walk_is_the_entries_walk_without_sizes(tmp_pat
     (tmp_path / "a.py").write_bytes(b"1")
     backend = LocalFsBackend()
     walked = [pair async for pair in backend.iter_walk(str(tmp_path))]
-    assert walked == [
-        (e.rel, e.is_dir)
-        async for e in backend.iter_walk_entries(str(tmp_path))
-    ]
+    assert walked == [(e.rel, e.is_dir) async for e in backend.iter_walk_entries(str(tmp_path))]
     assert walked == [("b", True), ("a.py", False), ("b/c.py", False)]
 
 
@@ -119,8 +116,6 @@ async def test_local_backend_symlink_size_is_unknown_not_the_link_length(tmp_pat
         os.symlink(str(target), str(tmp_path / "l.txt"))
     except (OSError, NotImplementedError):
         pytest.skip("symlinks unavailable")
-    entries = {
-        e.rel: e async for e in LocalFsBackend().iter_walk_entries(str(tmp_path))
-    }
+    entries = {e.rel: e async for e in LocalFsBackend().iter_walk_entries(str(tmp_path))}
     assert entries["t.txt"].size == 5
     assert entries["l.txt"].size is None  # размер узнает потребитель через getsize (по цели)

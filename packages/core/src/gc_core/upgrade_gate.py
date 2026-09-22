@@ -4,6 +4,7 @@
 Презентации здесь нет. Стамп — <gc config dir>/agent_state.json; поле
 last_update_check_ts принадлежит update-flow (спека D) и пишется write_state().
 """
+
 from __future__ import annotations
 
 import json

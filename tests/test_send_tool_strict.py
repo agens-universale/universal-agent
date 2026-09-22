@@ -4,6 +4,7 @@ Some OpenAI-compatible builds (vllm/sglang) answer 500 on `function.strict`
 instead of ignoring the unknown key, so the field has to be switchable — for
 both API dialects, since `responses` sends tool specs verbatim.
 """
+
 import asyncio
 import os
 import tempfile

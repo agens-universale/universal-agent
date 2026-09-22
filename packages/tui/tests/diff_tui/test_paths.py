@@ -1,4 +1,5 @@
 """canonical_path_key / orig_key / perimeter / protected skip."""
+
 from __future__ import annotations
 
 import os

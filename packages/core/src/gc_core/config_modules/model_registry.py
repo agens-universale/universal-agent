@@ -8,6 +8,7 @@
 Как это настраивается пользователем — docs/configuration.md, раздел
 «Профили и уровни моделей».
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -33,17 +34,13 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
 def validate_model_alias(alias: str) -> None:
     """Алиас models.<alias> не может совпадать с зарезервированным словом уровня."""
     if alias in RESERVED_WORDS:
-        raise ValueError(
-            f"models: имя '{alias}' зарезервировано ({', '.join(RESERVED_WORDS)})"
-        )
+        raise ValueError(f"models: имя '{alias}' зарезервировано ({', '.join(RESERVED_WORDS)})")
 
 
 def validate_level_value(value: str) -> str:
     """level ∉ LEVELS — ошибка; auto получает отдельную подсказку (появится в волне C)."""
     if value == "auto":
-        raise ValueError(
-            "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
-        )
+        raise ValueError("level: значение 'auto' появится с функцией авто-выбора — пока недоступно")
     if value not in LEVELS:
         raise ValueError(f"level должен быть одним из {LEVELS}, получено '{value}'")
     return value
@@ -95,7 +92,7 @@ def _pair_violation(label: str, has_address: bool, has_token: bool) -> str | Non
     иначе формулировки разъезжаются так же, как разъехались бы определения."""
     if has_address and not has_token:
         return (
-            f'{label}: задан свой адрес, но не задан токен — укажите token '
+            f"{label}: задан свой адрес, но не задан токен — укажите token "
             '(или token: "" — «сервер не требует авторизации»), либо уберите адрес, '
             "чтобы запись работала через общее подключение"
         )
@@ -113,14 +110,19 @@ def _unresolved_pair_refs(entry) -> list[str]:
     Смотрит ДОРЕЗОЛВНОЕ значение: после подстановки от `${ENV:X}` не остаётся ничего,
     кроме пустой строки, и назвать причину уже нечем."""
     from gc_core.config_raw import missing_env_refs
+
     if not isinstance(entry, dict):
         return []
     backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-    headers = (backend.get("chat_completion_headers")
-               if isinstance(backend.get("chat_completion_headers"), dict) else {})
+    headers = backend.get("chat_completion_headers") if isinstance(backend.get("chat_completion_headers"), dict) else {}
     names: list[str] = []
-    for value in (entry.get("url"), entry.get("token"), backend.get("completions_url"),
-                  backend.get("proxy"), headers.get("Authorization")):
+    for value in (
+        entry.get("url"),
+        entry.get("token"),
+        backend.get("completions_url"),
+        backend.get("proxy"),
+        headers.get("Authorization"),
+    ):
         for name in missing_env_refs(value):
             if name not in names:
                 names.append(name)
@@ -155,8 +157,9 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
         if not isinstance(entry, dict):
             continue
         backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-        headers = (backend.get("chat_completion_headers")
-                   if isinstance(backend.get("chat_completion_headers"), dict) else {})
+        headers = (
+            backend.get("chat_completion_headers") if isinstance(backend.get("chat_completion_headers"), dict) else {}
+        )
         problem = _pair_violation(
             f"{prefix}models.{alias}",
             *connection_parts(
@@ -168,8 +171,7 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
             ),
         )
         if problem:
-            names = _unresolved_pair_refs(
-                ((raw_source or {}).get("models") or {}).get(alias))
+            names = _unresolved_pair_refs(((raw_source or {}).get("models") or {}).get(alias))
             if names:
                 raise ValueError(
                     f"{prefix}models.{alias}: не задана переменная окружения "
@@ -205,8 +207,7 @@ class ModelEntry(BaseModel):
             )
         if self.url is not None and self.backend is not None and self.backend.completions_url:
             raise ValueError(
-                "models.<alias>: url и backend.completions_url — два написания одного "
-                "и того же — оставьте что-то одно"
+                "models.<alias>: url и backend.completions_url — два написания одного и того же — оставьте что-то одно"
             )
         return self
 
@@ -222,10 +223,7 @@ class ModelEntry(BaseModel):
             token=self.token,
             completions_url=backend.completions_url if backend is not None else None,
             proxy=backend.proxy if backend is not None else None,
-            authorization=(
-                backend.chat_completion_headers.get("Authorization")
-                if backend is not None else None
-            ),
+            authorization=(backend.chat_completion_headers.get("Authorization") if backend is not None else None),
         )
 
     @model_validator(mode="after")
@@ -297,7 +295,5 @@ class AssignConfig(BaseModel):
     @classmethod
     def _forbid_main(cls, data: Any) -> Any:
         if isinstance(data, dict) and "main" in data:
-            raise ValueError(
-                "assign.main запрещён — основной трейс управляется уровнем, не привязкой"
-            )
+            raise ValueError("assign.main запрещён — основной трейс управляется уровнем, не привязкой")
         return data

@@ -1,4 +1,5 @@
 """Cache-mode store: ``.gc/diffs/`` — ``.orig`` + ``index.json``."""
+
 from __future__ import annotations
 
 import json
@@ -243,9 +244,7 @@ class DiffStore:
             if isinstance(meta, dict)
         ]
 
-    def _cleanup_stale(
-        self, index: dict[str, dict[str, Any]]
-    ) -> dict[str, dict[str, Any]]:
+    def _cleanup_stale(self, index: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         """Убрать записи, где ожидается ``.orig``, но файла нет.
 
         ``created`` без ``baseline_exists`` — валидно без ``.orig``.
@@ -285,9 +284,7 @@ class DiffStore:
             if len(orig_files) <= self.cache_max_orig:
                 return
             # 1) clean first (disk == .orig), oldest-first
-            victim = self._find_clean_victim(
-                orig_files, index, protect_key=protect_key
-            )
+            victim = self._find_clean_victim(orig_files, index, protect_key=protect_key)
             if victim is None:
                 # oldest dirty, но не protect_key
                 victim = self._oldest_evictable(orig_files, index, protect_key)
@@ -332,9 +329,7 @@ class DiffStore:
                 continue
         return None
 
-    def _evict_orig(
-        self, orig: Path, index: dict[str, dict[str, Any]]
-    ) -> None:
+    def _evict_orig(self, orig: Path, index: dict[str, dict[str, Any]]) -> None:
         key_by_orig = {self._orig_path(k): k for k in index}
         key = key_by_orig.get(orig)
         try:

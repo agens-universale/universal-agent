@@ -1,4 +1,5 @@
 """FileTaskStore.update_tui_meta — обновление meta.tui sub-dict."""
+
 import json
 from pathlib import Path
 
@@ -8,8 +9,7 @@ from gc_tui.services.stores.file_store import FileTaskStore
 def test_update_tui_meta_creates_skills_list(tmp_path):
     tid = "t1"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "2026-05-21T12:00:00+00:00",
-                    "messages_count": 1}),
+        json.dumps({"thread_id": tid, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
         encoding="utf-8",
     )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")

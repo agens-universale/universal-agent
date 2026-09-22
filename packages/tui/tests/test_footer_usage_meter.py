@@ -4,11 +4,11 @@
 последнего хода, пока во время активного хода last_run_meta=None; смена сессии
 сбрасывает кэш; без runner'а сегмента нет.
 """
+
 import pytest
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
-_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-            "per_tokens": 1_000_000}
+_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
 
 
 class _FakeRunner:
@@ -99,7 +99,7 @@ async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
         app._config = {"model": "m", "pricing": _PRICING}
         scr._active_task_id = "t1"
         app.active_runner = _Bare()
-        right = scr._compose_footer_right().plain      # не должно кинуть
+        right = scr._compose_footer_right().plain  # не должно кинуть
         assert right == "● m"
 
 
@@ -133,7 +133,7 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
         app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
         plain = scr._compose_footer_right().plain
         lines = plain.split("\n")
-        assert len(lines) == 2                       # застекано
+        assert len(lines) == 2  # застекано
         assert "запрос" not in lines[0] and "сессия" not in lines[0]
         assert "запрос" in lines[1] and "сессия" in lines[1]
 
@@ -153,7 +153,7 @@ async def test_footer_never_flush_against_left(tmp_path):
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
         plain = scr._compose_footer_right().plain
-        assert "\n" in plain                        # впритык → стек, не склейка
+        assert "\n" in plain  # впритык → стек, не склейка
 
 
 @pytest.mark.asyncio
@@ -193,9 +193,7 @@ async def test_footer_fact_currency_follows_endpoint(tmp_path):
             "completions_url": "https://routerai.ru/api/v1/chat/completions",
         }
         scr._active_task_id = "t1"
-        app.active_runner = _FakeRunner(
-            (_billed_meta(2_000_000, 0, 20.0), _billed_meta(1_000_000, 0, 10.0))
-        )
+        app.active_runner = _FakeRunner((_billed_meta(2_000_000, 0, 20.0), _billed_meta(1_000_000, 0, 10.0)))
 
         right = scr._compose_footer_right().plain
         assert "₽" in right

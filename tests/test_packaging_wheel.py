@@ -10,6 +10,7 @@ tui/styles.tcss. Потом tui, cli, server и менеджер MCP уехал�
 манифест, разошедшийся по версии, обязан красить набор (см.
 test_versions_are_pinned_together).
 """
+
 import itertools
 import re
 import shutil
@@ -35,16 +36,23 @@ CORE_REQUIRED = [
 # Ядро не должно содержать код фронтендов — ради этого всё и затевалось.
 CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/"]
 
-MANIFESTS = {"gc_ua": ".", "gc_core": "packages/core", "gc_cli": "packages/cli",
-             "gc_tui": "packages/tui", "gc_server": "packages/server",
-             "gc_mcp": "packages/mcp"}
+MANIFESTS = {
+    "gc_ua": ".",
+    "gc_core": "packages/core",
+    "gc_cli": "packages/cli",
+    "gc_tui": "packages/tui",
+    "gc_server": "packages/server",
+    "gc_mcp": "packages/mcp",
+}
 
 
 def _build_all(out: Path) -> dict:
     for sub in MANIFESTS.values():
         r = subprocess.run(
             ["uv", "build", "--wheel", "-o", str(out), sub],
-            cwd=str(REPO), capture_output=True, text=True,
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stderr
     wheels = {}
@@ -112,15 +120,11 @@ def test_mcp_wheel_bundles_recipes_and_sources(wheels):
     assert any(n.startswith("recommended_mcp/") and n.endswith(".py") for n in names)
     # Внутри пакета, а не рядом: наверху `external` занимал бы родовое имя —
     # см. test_core_wheel_does_not_squat_generic_names.
-    assert "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml" in names, (
-        "ddgs-mcp не поставляется"
-    )
+    assert "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml" in names, "ddgs-mcp не поставляется"
     assert "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp/server.py" in names
 
     core = wheels["gc_core"]
-    assert not any(n.startswith("recommended_mcp/") for n in core), (
-        "ядро больше не должно тащить рецепты"
-    )
+    assert not any(n.startswith("recommended_mcp/") for n in core), "ядро больше не должно тащить рецепты"
 
 
 def test_core_wheel_does_not_squat_generic_names(wheels):
@@ -145,7 +149,12 @@ def test_core_wheel_does_not_squat_generic_names(wheels):
     оговорка «mcp_daemon_autostart тянет recommended_mcp.autostart» неверна.
     """
     squatted = {
-        "prompts", "skills", "config.default.yml", "assets", "tests", "src",
+        "prompts",
+        "skills",
+        "config.default.yml",
+        "assets",
+        "tests",
+        "src",
         # external — вендоры MCP: с 03.09.2026 внутри recommended_mcp/.
         "external",
     }
@@ -185,8 +194,7 @@ def test_tui_wheel_contents(wheels):
 def test_server_wheel_contents(wheels):
     names = wheels["gc_server"]
     assert {n.split("/")[0] for n in names} == {"gc_server"}, sorted(names)[:10]
-    for m in ("gc_server/server.py", "gc_server/rest_api/__init__.py",
-              "gc_server/swarm/runner.py"):
+    for m in ("gc_server/server.py", "gc_server/rest_api/__init__.py", "gc_server/swarm/runner.py"):
         assert m in names, m
 
 
@@ -203,16 +211,10 @@ def test_vendored_ddgs_ships_without_build_junk(wheels):
     (`"external/vendor/ddgs-mcp" = "recommended_mcp/external/vendor/ddgs-mcp"`)
     на копии, где ddgs-mcp собирали.
     """
-    shipped = {
-        n for n in wheels["gc_mcp"]
-        if n.startswith("recommended_mcp/external/")
-    }
+    shipped = {n for n in wheels["gc_mcp"] if n.startswith("recommended_mcp/external/")}
     assert shipped, "исходники ddgs-mcp вообще не попали в колесо"
 
-    junk = {
-        n for n in shipped
-        if "/build/" in n or ".egg-info" in n or n.endswith(("uv.lock", ".pyc"))
-    }
+    junk = {n for n in shipped if "/build/" in n or ".egg-info" in n or n.endswith(("uv.lock", ".pyc"))}
     assert not junk, f"в колесо уехали артефакты сборки: {sorted(junk)}"
 
     # Достаточность: без манифеста и исходников `pip install <path>` не соберёт
@@ -239,15 +241,11 @@ def test_server_wheel_ships_the_sandbox_wrapper(wheels, wheel_infos):
     """
     wrapper = "gc_server/swarm/run-cli-in-sandbox.sh"
     assert wrapper in wheels["gc_server"], (
-        f"{wrapper} не попал в колесо — swarm в установленном профиле не "
-        "поднимется: runner зовёт этот файл через Popen"
+        f"{wrapper} не попал в колесо — swarm в установленном профиле не поднимется: runner зовёт этот файл через Popen"
     )
 
     mode = wheel_infos["gc_server"][wrapper].external_attr >> 16
-    assert mode & 0o111, (
-        f"{wrapper} едет без исполняемого бита (режим {oct(mode)}) — "
-        "Popen даст PermissionError"
-    )
+    assert mode & 0o111, f"{wrapper} едет без исполняемого бита (режим {oct(mode)}) — Popen даст PermissionError"
 
 
 def test_cli_wheel_contents(wheels):
@@ -317,13 +315,9 @@ def test_command_names_do_not_collide_between_leaf_distributions():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         for cmd in man["project"].get("scripts", {}):
             assert cmd not in seen, (
-                f"команду {cmd!r} объявляют и {seen[cmd]}, и {sub} — "
-                f"uv откажется ставить второй дистрибутив"
+                f"команду {cmd!r} объявляют и {seen[cmd]}, и {sub} — uv откажется ставить второй дистрибутив"
             )
             seen[cmd] = sub
-
-
-
 
 
 def test_meta_pulls_every_profile():
@@ -340,7 +334,10 @@ def test_meta_pulls_every_profile():
     ver = root["project"]["version"]
     assert root["project"]["name"] == "gc-ua"
     assert set(root["project"]["dependencies"]) == {
-        f"gc-core=={ver}", f"gc-cli=={ver}", f"gc-tui=={ver}", f"gc-server=={ver}",
+        f"gc-core=={ver}",
+        f"gc-cli=={ver}",
+        f"gc-tui=={ver}",
+        f"gc-server=={ver}",
         f"gc-mcp=={ver}",
     }
 
@@ -362,8 +359,7 @@ def test_versions_are_pinned_together():
     """
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     ver = root["project"]["version"]
-    for sub in ("packages/core", "packages/cli", "packages/tui", "packages/server",
-                "packages/mcp"):
+    for sub in ("packages/core", "packages/cli", "packages/tui", "packages/server", "packages/mcp"):
         leaf = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         assert leaf["project"]["version"] == ver, f"{sub} разошёлся по версии"
     for sub in ("packages/cli", "packages/tui", "packages/server", "packages/mcp"):
@@ -385,12 +381,9 @@ def test_versions_are_pinned_together():
     # разойдётся со схемой ядра, которое стоит рядом. Подмена `==` на `>=` этой
     # строкой и красится — цикл выше её не держит, он смотрит только на gc-core
     # и gc-mcp.
-    server = tomllib.loads(
-        (REPO / "packages/server/pyproject.toml").read_text(encoding="utf-8")
-    )
+    server = tomllib.loads((REPO / "packages/server/pyproject.toml").read_text(encoding="utf-8"))
     assert f"gc-cli=={ver}" in server["project"]["dependencies"], (
-        "gc-server обязан пинить gc-cli точно — иначе sworm остаётся без CLI "
-        "или получает его из чужого коммита"
+        "gc-server обязан пинить gc-cli точно — иначе sworm остаётся без CLI или получает его из чужого коммита"
     )
 
 
@@ -405,6 +398,7 @@ def test_profile_subdirs_match_layout():
     сторожа.
     """
     from gc_core import app_version
+
     assert app_version.PROFILE_SUBDIRS == {
         "gc-core": "packages/core",
         "gc-cli": "packages/cli",
@@ -438,16 +432,19 @@ def test_force_include_keys_stay_inside_project_root():
     for name, sub in MANIFESTS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         targets = (
-            man.get("tool", {}).get("hatch", {}).get("build", {})
-            .get("targets", {}).get("wheel", {}).get("force-include", {})
+            man.get("tool", {})
+            .get("hatch", {})
+            .get("build", {})
+            .get("targets", {})
+            .get("wheel", {})
+            .get("force-include", {})
         )
         for key in targets:
             if key.startswith("..") or Path(key).is_absolute():
                 offenders.append(f"{sub}/pyproject.toml: {key}")
 
     assert not offenders, (
-        "force-include ведёт за пределы каталога пакета — колесо из sdist не "
-        "соберётся:\n  " + "\n  ".join(offenders)
+        "force-include ведёт за пределы каталога пакета — колесо из sdist не соберётся:\n  " + "\n  ".join(offenders)
     )
 
 
@@ -467,10 +464,7 @@ def test_vendored_sources_live_inside_their_package():
     assert len(names) >= 4, f"ожидалось четыре вендора, найдено: {names}"
 
     stale = REPO / "external" / "vendor"
-    assert not stale.exists(), (
-        f"{stale} существует — переезд сделан наполовину, и два места будут "
-        "расходиться"
-    )
+    assert not stale.exists(), f"{stale} существует — переезд сделан наполовину, и два места будут расходиться"
 
 
 def test_docs_never_offer_bare_pip_for_our_distributions():

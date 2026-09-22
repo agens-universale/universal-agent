@@ -19,14 +19,13 @@ def isolated_env(monkeypatch, tmp_path):
 def test_default_config_path_is_normalized():
     """Дефолтный bundled-конфиг без '..' — путь показывается пользователю в /config."""
     from gc_core.config import _default_config_path
+
     p = _default_config_path()
     assert ".." not in p
     assert p.endswith("config.default.yml")
 
 
-def test_resolve_paths_threads_default_under_state_projects_slug(
-    isolated_env, tmp_path
-):
+def test_resolve_paths_threads_default_under_state_projects_slug(isolated_env, tmp_path):
     cfg = AppConfig()
     resolve_paths(cfg, str(tmp_path))
     threads_path = Path(cfg.paths.threads_data_path)

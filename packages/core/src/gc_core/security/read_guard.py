@@ -8,6 +8,7 @@ path-policy). Контур 2 (sensitivity scan) и Контур 3 (anti-exfiltra
 Декоратор `enforce_read_guard` применяется к read-тулам аналогично тому,
 как `enforce_write_guard` применяется к write-тулам.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -47,6 +48,7 @@ def _resolve_skills_root(config_dict: dict[str, Any]) -> str | None:
     # 2. Three-layer mode → system root (<project_root>/skills).
     try:
         from gc_core.tools.skills.registry import _system_skills_root
+
         return os.path.abspath(_system_skills_root())
     except Exception:
         return None
@@ -55,6 +57,7 @@ def _resolve_skills_root(config_dict: dict[str, Any]) -> str | None:
 @dataclass(frozen=True)
 class ReadGuardConfig:
     """Runtime-конфиг read_guard (parsed out of config_dict)."""
+
     enabled: bool = True
     mode: str = "deny"
     allowed_read_roots: list[str] = field(default_factory=list)
@@ -66,6 +69,7 @@ class ReadGuardConfig:
 
 class ReadGuardViolation(ValueError):
     """Исключение path-policy чтения. Envelope в self.error."""
+
     def __init__(
         self,
         *,
@@ -144,10 +148,7 @@ def _is_within(candidate_abs: str, root_abs: str, *, case_insensitive: bool) -> 
 
 
 def _allow_by_default_wildcard(allowed_read_roots: list[str]) -> bool:
-    return any(
-        isinstance(r, str) and r.strip().lower() in _GLOB_WILDCARD_MARKERS
-        for r in allowed_read_roots
-    )
+    return any(isinstance(r, str) and r.strip().lower() in _GLOB_WILDCARD_MARKERS for r in allowed_read_roots)
 
 
 def _resolve_candidate(raw_path: str, launch_root: str) -> str:
@@ -176,7 +177,9 @@ def _resolve_candidate(raw_path: str, launch_root: str) -> str:
         return os.path.realpath(absolute)
 
 
-def _in_allow_override(candidate: str, cfg: ReadGuardConfig, extra_allowed_paths, launch_root: str, case_insensitive: bool) -> bool:
+def _in_allow_override(
+    candidate: str, cfg: ReadGuardConfig, extra_allowed_paths, launch_root: str, case_insensitive: bool
+) -> bool:
     # allowed_read_paths override — если путь явно разрешён, пропускаем
     # остальные проверки denied_*. `extra_allowed_paths` — программно добавленные
     # exceptions (например, путь до скиллов из get_skills_registry), не из конфига.
@@ -343,7 +346,10 @@ def _operational_read_block(func, args, kwargs, path_arg, path_extractor, contex
         reason_code="protected_read_deny",
     )
     return _read_guard_blocked_result(
-        func, err, args, kwargs,
+        func,
+        err,
+        args,
+        kwargs,
         blocked_result_factory=blocked_result_factory,
     )
 
@@ -368,19 +374,22 @@ def _resolve_read_violation(exc, cfg, context, tool_name, candidate_path, func, 
         return True, None
     if mode == "ask":
         _rg_path = exc.error.get("path", candidate_path)
-        confirmed = (yield OffLoop(functools.partial(
-            request_confirm,
-            title="Защита чтения",
-            question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
-            fields=[
-                ("Tool", tool_name),
-                ("Operation", "read"),
-                ("Path", _rg_path),
-                ("Reason", exc.error.get("reason", "")),
-            ],
-            ctx=context.ctx,
-            decision_key=f"read:{_rg_path}",
-        ), on_interrupt=False))
+        confirmed = yield OffLoop(
+            functools.partial(
+                request_confirm,
+                title="Защита чтения",
+                question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
+                fields=[
+                    ("Tool", tool_name),
+                    ("Operation", "read"),
+                    ("Path", _rg_path),
+                    ("Reason", exc.error.get("reason", "")),
+                ],
+                ctx=context.ctx,
+                decision_key=f"read:{_rg_path}",
+            ),
+            on_interrupt=False,
+        )
         if confirmed:
             audit_policy_decision(
                 context,
@@ -403,7 +412,10 @@ def _resolve_read_violation(exc, cfg, context, tool_name, candidate_path, func, 
         error_type=exc.error.get("type"),
     )
     return False, _read_guard_blocked_result(
-        func, exc.error, args, kwargs,
+        func,
+        exc.error,
+        args,
+        kwargs,
         blocked_result_factory=blocked_result_factory,
     )
 
@@ -419,7 +431,13 @@ def _read_guard_flow(func, args, kwargs, path_arg, path_extractor, blocked_resul
     # skills/instructions/none fall through to the normal flow.
     if protection_enabled(config_dict):
         blocked = _operational_read_block(
-            func, args, kwargs, path_arg, path_extractor, context, blocked_result_factory,
+            func,
+            args,
+            kwargs,
+            path_arg,
+            path_extractor,
+            context,
+            blocked_result_factory,
         )
         if blocked is not None:
             return blocked
@@ -435,7 +453,12 @@ def _read_guard_flow(func, args, kwargs, path_arg, path_extractor, blocked_resul
 
     try:
         candidate_path = _extract_named_value(
-            func, args, kwargs, path_arg, path_extractor, "path",
+            func,
+            args,
+            kwargs,
+            path_arg,
+            path_extractor,
+            "path",
         )
     except ValueError:
         # Аргумент path отсутствует/некорректен — пусть сам тул вернёт
@@ -453,8 +476,15 @@ def _read_guard_flow(func, args, kwargs, path_arg, path_extractor, blocked_resul
         )
     except ReadGuardViolation as exc:
         allowed, blocked = yield from _resolve_read_violation(
-            exc, cfg, context, _tool_name(func, args), candidate_path,
-            func, args, kwargs, blocked_result_factory,
+            exc,
+            cfg,
+            context,
+            _tool_name(func, args),
+            candidate_path,
+            func,
+            args,
+            kwargs,
+            blocked_result_factory,
         )
         if allowed:
             return (yield)
@@ -484,12 +514,22 @@ def enforce_read_guard(
     Не применяется к write-тулам (write_guard), execute-тулам (command_moderation)
     и url-тулам (url_policy).
     """
+
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         def _flow(*args: Any, **kwargs: Any):
-            return (yield from _read_guard_flow(
-                func, args, kwargs, path_arg, path_extractor, blocked_result_factory,
-            ))
+            return (
+                yield from _read_guard_flow(
+                    func,
+                    args,
+                    kwargs,
+                    path_arg,
+                    path_extractor,
+                    blocked_result_factory,
+                )
+            )
+
         return dual_wrap(func, _flow)
+
     return decorator
 
 

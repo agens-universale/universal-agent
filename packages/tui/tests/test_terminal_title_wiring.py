@@ -11,6 +11,7 @@ async def test_new_resets_terminal_title(tmp_path, monkeypatch):
     monkeypatch.setattr(tt, "set_terminal_title", lambda text, **k: calls.append(text))
     # main.py импортирует символы из модуля внутри функций — патчим там же:
     from gc_tui.screens import main as main_mod
+
     monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
@@ -37,8 +38,8 @@ async def test_resume_title_uses_session_last_prompt(tmp_path, monkeypatch):
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        scr._last_user_send_text = ""        # resume — в этом запуске ничего не слали
-        scr._resumed_prompt = "что ты умеешь?"   # кэш промпта сессии (attach прочитал из стора)
+        scr._last_user_send_text = ""  # resume — в этом запуске ничего не слали
+        scr._resumed_prompt = "что ты умеешь?"  # кэш промпта сессии (attach прочитал из стора)
         monkeypatch.setattr(scr, "_session_status_word", lambda: "completed")
         scr._update_terminal_title()
         assert calls[-1] == "✦ GigaCode ✓ что ты умеешь?", calls
@@ -66,9 +67,9 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         scr._update_terminal_title()
         assert calls[-1] == "✦ GigaCode ✓ p"
         calls.clear()
-        scr._update_terminal_title()              # тот же статус → дедуп, без записи
+        scr._update_terminal_title()  # тот же статус → дедуп, без записи
         assert calls == []
-        badge["v"] = "running"                     # статус сменился (старт прогона)
+        badge["v"] = "running"  # статус сменился (старт прогона)
         scr._update_terminal_title()
         assert calls == ["✦ GigaCode ▸ p"]
 
@@ -120,4 +121,4 @@ async def test_attach_resume_overwrites_prompt_from_store(tmp_path, monkeypatch)
         monkeypatch.setattr(scr, "_session_last_prompt", lambda: None)
         scr.attach_active_task("fresh-1", is_resume=False)
         await pilot.pause()
-        assert scr._resumed_prompt == "только что отправил"   # не затёрт
+        assert scr._resumed_prompt == "только что отправил"  # не затёрт

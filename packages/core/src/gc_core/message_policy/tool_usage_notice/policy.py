@@ -108,11 +108,7 @@ def collect_tool_usage_notices(
 
 def build_subagent_thread_memory_bootstrap_message(registers: dict[str, str] | None) -> str:
     reg = registers if isinstance(registers, dict) else {}
-    non_empty = {
-        name: content
-        for name, content in reg.items()
-        if isinstance(content, str) and content.strip()
-    }
+    non_empty = {name: content for name, content in reg.items() if isinstance(content, str) and content.strip()}
     if not non_empty:
         return (
             "Thread memory: no registers yet. "
@@ -135,11 +131,7 @@ def get_thread_memory_registers_from_shared(shared: Any) -> dict[str, str]:
     raw = getattr(shared, "working_memory", None)
     if not isinstance(raw, dict):
         return {}
-    return {
-        str(name): content
-        for name, content in raw.items()
-        if isinstance(name, str) and isinstance(content, str)
-    }
+    return {str(name): content for name, content in raw.items() if isinstance(name, str) and isinstance(content, str)}
 
 
 def subagent_thread_memory_bootstrap_text(

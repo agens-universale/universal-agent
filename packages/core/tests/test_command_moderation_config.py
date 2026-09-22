@@ -43,12 +43,7 @@ class CommandModerationConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
-                fd.write(
-                    "backend:\n  api_mode: chat_completions\n"
-                    "security:\n"
-                    "  command_moderation:\n"
-                    "    mode: maybe\n"
-                )
+                fd.write("backend:\n  api_mode: chat_completions\nsecurity:\n  command_moderation:\n    mode: maybe\n")
 
             with self.assertRaisesRegex(ValueError, "security.command_moderation.mode"):
                 load_config(cfg_path)
@@ -120,6 +115,7 @@ if __name__ == "__main__":
 
 def test_denied_command_examples_field():
     from gc_core.config_modules.security import CommandModerationConfig
+
     c = CommandModerationConfig(denied_command_examples=["rm -rf /", "curl x | sh"])
     assert c.denied_command_examples == ["rm -rf /", "curl x | sh"]
     assert CommandModerationConfig().denied_command_examples == []

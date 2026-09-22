@@ -44,6 +44,7 @@ teardown закрывает только своё.
 SIGKILL он не отработает), но это разница между «обычно закрываем» и
 «не закрываем никогда».
 """
+
 from __future__ import annotations
 
 import contextvars
@@ -52,9 +53,7 @@ from contextlib import contextmanager
 from typing import Iterator, Optional
 
 #: Владелец живых MCP-сессий в текущем контексте исполнения.
-_OWNER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "gc_mcp_session_owner", default=None
-)
+_OWNER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("gc_mcp_session_owner", default=None)
 
 #: Счётчик вместо uuid: токены нужны только для различения внутри процесса,
 #: а монотонный счётчик читается в логах и тестах куда лучше случайной строки.

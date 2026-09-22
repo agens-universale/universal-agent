@@ -42,7 +42,9 @@ class _EditBatch:
         self.failure: tuple[int, str, Dict[str, Any] | None] | None = None
 
 
-def _batch_arg_error(edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256) -> "tuple[str, Dict[str, Any]] | None":
+def _batch_arg_error(
+    edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
+) -> "tuple[str, Dict[str, Any]] | None":
     """(message, error) для первого невалидного аргумента батча либо None."""
     if not isinstance(edits, list) or len(edits) == 0:
         return "Argument 'edits' must be a non-empty array.", {"type": "invalid_argument", "field": "edits"}
@@ -55,13 +57,22 @@ def _batch_arg_error(edits, atomic, dry_run, backup, return_diff, diff_context_l
     if not isinstance(return_diff, bool):
         return "Argument 'return_diff' must be a boolean.", {"type": "invalid_argument", "field": "return_diff"}
     if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
-        return "Argument 'diff_context_lines' must be a non-negative integer.", {"type": "invalid_argument", "field": "diff_context_lines"}
+        return "Argument 'diff_context_lines' must be a non-negative integer.", {
+            "type": "invalid_argument",
+            "field": "diff_context_lines",
+        }
     if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
-        return "Argument 'max_diff_chars' must be a positive integer.", {"type": "invalid_argument", "field": "max_diff_chars"}
+        return "Argument 'max_diff_chars' must be a positive integer.", {
+            "type": "invalid_argument",
+            "field": "max_diff_chars",
+        }
     if expected_file_sha256 is not None and (
         not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256)
     ):
-        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {"type": "invalid_argument", "field": "expected_file_sha256"}
+        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {
+            "type": "invalid_argument",
+            "field": "expected_file_sha256",
+        }
     return None
 
 
@@ -99,21 +110,27 @@ def _select_matches(matches: list, occurrence: Any) -> tuple:
     if isinstance(occurrence, int):
         i = occurrence - 1
         if i < 0 or i >= match_count:
-            return None, ({
-                "matched": True,
-                "replaced": 0,
-                "match_count": match_count,
-                "line_numbers": [],
-                "match_ranges": [],
-            }, {"type": "occurrence_out_of_range"})
+            return None, (
+                {
+                    "matched": True,
+                    "replaced": 0,
+                    "match_count": match_count,
+                    "line_numbers": [],
+                    "match_ranges": [],
+                },
+                {"type": "occurrence_out_of_range"},
+            )
         return [matches[i]], None
-    return None, ({
-        "matched": False,
-        "replaced": 0,
-        "match_count": 0,
-        "line_numbers": [],
-        "match_ranges": [],
-    }, {"type": "invalid_argument", "field": "occurrence"})
+    return None, (
+        {
+            "matched": False,
+            "replaced": 0,
+            "match_count": 0,
+            "line_numbers": [],
+            "match_ranges": [],
+        },
+        {"type": "invalid_argument", "field": "occurrence"},
+    )
 
 
 def _splice_replacements(content: str, selected: list, search: str, replace: str) -> str:
@@ -152,7 +169,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                             "properties": {
                                 "search": {
                                     "type": "string",
-                                    "description": "The exact content to find and replace. Use a unique multi-line snippet to avoid accidental matches elsewhere in the file."
+                                    "description": "The exact content to find and replace. Use a unique multi-line snippet to avoid accidental matches elsewhere in the file.",
                                 },
                                 "replace": {"type": "string"},
                                 "expected_matches": {
@@ -225,7 +242,8 @@ class ApplyFileEdits(AbstractSimpleTool):
             "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
 
-    def _result(self,
+    def _result(
+        self,
         *,
         path: str,
         ok: bool,
@@ -266,7 +284,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             },
             ensure_ascii=False,
         )
-
 
     @staticmethod
     def _build_unified_diff(
@@ -312,24 +329,36 @@ class ApplyFileEdits(AbstractSimpleTool):
                 search=edit["search"],
                 content=content,
             )
-            return False, content, {
-                "matched": False,
-                "replaced": 0,
-                "match_count": 0,
-                "line_numbers": [],
-                "match_ranges": [],
-                "suggestions": suggestions,
-            }, {"type": "not_found"}, False
+            return (
+                False,
+                content,
+                {
+                    "matched": False,
+                    "replaced": 0,
+                    "match_count": 0,
+                    "line_numbers": [],
+                    "match_ranges": [],
+                    "suggestions": suggestions,
+                },
+                {"type": "not_found"},
+                False,
+            )
 
         if expected_matches is not None and match_count != expected_matches:
             ranges = [{"start_line": m[1], "end_line": m[2]} for m in matches]
-            return False, content, {
-                "matched": True,
-                "replaced": 0,
-                "match_count": match_count,
-                "line_numbers": sorted({m[1] for m in matches}),
-                "match_ranges": ranges,
-            }, {"type": "match_count_mismatch"}, False
+            return (
+                False,
+                content,
+                {
+                    "matched": True,
+                    "replaced": 0,
+                    "match_count": match_count,
+                    "line_numbers": sorted({m[1] for m in matches}),
+                    "match_ranges": ranges,
+                },
+                {"type": "match_count_mismatch"},
+                False,
+            )
 
         selected, select_error = _select_matches(matches, occurrence)
         if select_error is not None:
@@ -345,7 +374,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             "match_ranges": ranges,
         }
         return True, new_content, meta, None, resolved.eol_adapted
-
 
     async def _load_source(self, path: str, encoding: "str | None", expected_file_sha256: "str | None"):
         """(original_text, encoding_used) либо _LoadError с готовыми message/error."""
@@ -380,9 +408,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             if arg_error is not None:
                 batch.failure = (i, arg_error[0], arg_error[1])
                 return batch
-            ok_edit, next_content, meta, err, eol_adapted = self._apply_one_edit(
-                content=batch.content, edit=edit
-            )
+            ok_edit, next_content, meta, err, eol_adapted = self._apply_one_edit(content=batch.content, edit=edit)
             meta["index"] = i
             batch.edit_results.append(meta)
             batch.any_eol_adapted = batch.any_eol_adapted or eol_adapted
@@ -425,14 +451,22 @@ class ApplyFileEdits(AbstractSimpleTool):
         encoding = coalesce_optional_string(encoding)
         _result = functools.partial(self._result, path=path)
         fail = functools.partial(
-            _result, ok=False, applied=False, edits_would_apply=0, total_would_replace=0,
-            edits_applied=0, total_replaced=0, edit_results=[],
+            _result,
+            ok=False,
+            applied=False,
+            edits_would_apply=0,
+            total_would_replace=0,
+            edits_applied=0,
+            total_replaced=0,
+            edit_results=[],
         )
         arg_error = _batch_arg_error(
             edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
         )
         if not isinstance(path, str):
-            return fail(message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"})
+            return fail(
+                message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"}
+            )
         if arg_error is not None:
             return fail(message=arg_error[0], error=arg_error[1])
 
@@ -569,4 +603,3 @@ class ApplyFileEdits(AbstractSimpleTool):
             message="Batch edits applied successfully.",
             error=None,
         )
-

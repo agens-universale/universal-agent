@@ -1,4 +1,5 @@
 """Harbor walk B1: private 50M channel, fail-closed on ceiling hit."""
+
 import asyncio
 import threading
 
@@ -84,9 +85,7 @@ async def test_walk_hit_ceiling_raises(loop_in_thread):
         return FakeExecResult(stdout=body, return_code=0)
 
     env.exec = over
-    backend = HarborBackend(
-        env, loop_in_thread, walk_output_max_chars=ceiling
-    )
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=ceiling)
     with pytest.raises(WalkOutputTooLargeError) as ei:
         await backend.walk("/work")
     assert ei.value.ceiling_chars == ceiling
@@ -102,9 +101,7 @@ async def test_listdir_hit_ceiling_raises(loop_in_thread):
         return FakeExecResult(stdout=body, return_code=0)
 
     env.exec = over
-    backend = HarborBackend(
-        env, loop_in_thread, walk_output_max_chars=ceiling
-    )
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=ceiling)
     with pytest.raises(WalkOutputTooLargeError):
         await backend.listdir("/work")
 

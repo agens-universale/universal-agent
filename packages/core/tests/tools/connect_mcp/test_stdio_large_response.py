@@ -13,6 +13,7 @@ found, and chunk exceed the limit``, теряя буфер. Транспорт �
 Сервер здесь настоящий (отдельный процесс на stdin/stdout), а не подмена:
 дефект живёт ровно в чтении трубы, и мок его бы не показал.
 """
+
 import json
 import sys
 
@@ -20,7 +21,7 @@ import pytest
 from gc_core.tools.connect_mcp import transport
 
 # Одной строкой, длиннее 64 КиБ: столько инструментов и отдаёт болтливый сервер.
-_SERVER = r'''
+_SERVER = r"""
 import json, sys
 
 for line in sys.stdin:
@@ -45,7 +46,7 @@ for line in sys.stdin:
         body = {"content": [{"type": "text", "text": "ok"}]}
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": body}) + "\n")
     sys.stdout.flush()
-'''
+"""
 
 
 @pytest.fixture
@@ -62,8 +63,7 @@ def test_the_response_really_is_over_the_default_limit(big_server_cfg):
     и тест станет зелёным при вернувшемся дефекте, ничего не сказав.
     """
     tools = [
-        {"name": f"tool_{i:04d}", "description": "x" * 120,
-         "inputSchema": {"type": "object", "properties": {}}}
+        {"name": f"tool_{i:04d}", "description": "x" * 120, "inputSchema": {"type": "object", "properties": {}}}
         for i in range(600)
     ]
     line = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}})

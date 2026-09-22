@@ -11,6 +11,7 @@
 * ``StepTimings._emit`` читал ``self._fh`` вне лока, а писал внутри. Между
   чтением и локом успевал ``close()``, и запись уходила в закрытый файл.
 """
+
 import ast
 import sys
 import threading
@@ -40,12 +41,12 @@ def test_agent_run_closes_its_pool_in_finally():
     assert tries, "_agent_run без try/finally — пул не закроется на отказе"
     closed_in_finally = any(
         isinstance(c.func, ast.Name) and c.func.id == "aclose_clients"
-        for t in tries for stmt in t.finalbody for c in ast.walk(stmt)
+        for t in tries
+        for stmt in t.finalbody
+        for c in ast.walk(stmt)
         if isinstance(c, ast.Call)
     )
-    assert closed_in_finally, (
-        "aclose_clients() не в finally — клиент трайла доживёт до сборщика"
-    )
+    assert closed_in_finally, "aclose_clients() не в finally — клиент трайла доживёт до сборщика"
 
 
 def test_agent_run_releases_the_trial_logger_in_finally():
@@ -56,12 +57,12 @@ def test_agent_run_releases_the_trial_logger_in_finally():
     tries = [n for n in ast.walk(run) if isinstance(n, ast.Try)]
     released_in_finally = any(
         isinstance(c.func, ast.Name) and c.func.id == "release_run_logger"
-        for t in tries for stmt in t.finalbody for c in ast.walk(stmt)
+        for t in tries
+        for stmt in t.finalbody
+        for c in ast.walk(stmt)
         if isinstance(c, ast.Call)
     )
-    assert released_in_finally, (
-        "release_run_logger() не в finally — логгер трайла живёт до конца процесса"
-    )
+    assert released_in_finally, "release_run_logger() не в finally — логгер трайла живёт до конца процесса"
 
 
 def test_cancellation_is_recorded_before_the_executor_exists():
@@ -70,14 +71,10 @@ def test_cancellation_is_recorded_before_the_executor_exists():
     run = _func(tree, "_agent_run")
 
     names = {n.attr for n in ast.walk(run) if isinstance(n, ast.Attribute)}
-    assert "_cancelled" in names, (
-        "_agent_run не смотрит на отмену: отменённый трайл всё равно уйдёт в arun"
-    )
+    assert "_cancelled" in names, "_agent_run не смотрит на отмену: отменённый трайл всё равно уйдёт в arun"
     src = ADAPTER.read_text(encoding="utf-8")
     assert "self._cancelled = True" in src, "флаг отмены никто не ставит"
-    assert "_cancel_lock" in src, (
-        "флаг без лока: ставит его loop Harbor, читает рабочий поток агента"
-    )
+    assert "_cancel_lock" in src, "флаг без лока: ставит его loop Harbor, читает рабочий поток агента"
 
 
 def test_step_timings_reads_the_handle_under_the_lock():
@@ -91,13 +88,8 @@ def test_step_timings_reads_the_handle_under_the_lock():
     emit = _func(ast.parse(src), "_emit")
 
     # Первый оператор тела — вход в лок; чтение дескриптора уже внутри.
-    assert isinstance(emit.body[0], ast.With), (
-        "_emit снова читает self._fh до входа в лок"
-    )
-    read_lines = [
-        n.lineno for n in ast.walk(emit)
-        if isinstance(n, ast.Attribute) and n.attr == "_fh"
-    ]
+    assert isinstance(emit.body[0], ast.With), "_emit снова читает self._fh до входа в лок"
+    read_lines = [n.lineno for n in ast.walk(emit) if isinstance(n, ast.Attribute) and n.attr == "_fh"]
     assert read_lines and min(read_lines) > emit.body[0].lineno, read_lines
 
 

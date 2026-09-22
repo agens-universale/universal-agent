@@ -93,12 +93,13 @@ def test_persistent_and_oneshot_agree_on_netrc():
     from gc_core.tools.connect_mcp import stream_client as sc
 
     client = sc._make_httpx_factory(True, url="https://mcp.example/mcp")()
-    assert client.trust_env is False, (
-        "персистентный клиент снова читает ~/.netrc — Bearer будет перетёрт"
-    )
+    assert client.trust_env is False, "персистентный клиент снова читает ~/.netrc — Bearer будет перетёрт"
 
     direct = sc._make_stream_http_client(
-        token=None, extra_headers=None, timeout=5, verify=True,
+        token=None,
+        extra_headers=None,
+        timeout=5,
+        verify=True,
         base_url="https://mcp.example/mcp",
     )
     assert direct.trust_env is False

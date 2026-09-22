@@ -87,6 +87,7 @@ def _extract_frontmatter(skill_path: Path) -> dict:
     import re
 
     import yaml
+
     match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
     if not match:
         return {}
@@ -179,6 +180,7 @@ def _detect_source_layer(skill_path: Path) -> str:
         # где ядро не установлено, честнее уйти в fallback ниже, чем угадывать
         # исходники по соседнему дереву.
         from gc_core.config_modules.env_vars import gc_paths  # type: ignore
+
         user_skills_path = (gc_paths()["data"] / "skills").resolve()
     except Exception:
         # Hardcoded fallback per-OS
@@ -285,8 +287,7 @@ def _report_incomplete_dev(missing):
     for rel in REQUIRED_DEV_ARTIFACTS:
         print(f"  - _dev/{rel}", file=sys.stderr)
     print(
-        "\nДоделай self-check flow или удали _dev/intent_brief.md\n"
-        "(тогда упаковка пройдёт без demo/).",
+        "\nДоделай self-check flow или удали _dev/intent_brief.md\n(тогда упаковка пройдёт без demo/).",
         file=sys.stderr,
     )
 
@@ -308,6 +309,7 @@ def _add_tree(zipf, root, arc_root, *, skip_label):
 def _cleanup_dev_dir(dev_dir):
     try:
         import shutil
+
         shutil.rmtree(dev_dir)
         print(f"  Cleaned up: {dev_dir}")
     except OSError as e:
@@ -412,9 +414,7 @@ def _resolve_invocation() -> tuple[str, str | None, str | None]:
                 payload.get("source_layer"),
             )
 
-    parser = argparse.ArgumentParser(
-        description="Package a skill folder into skill-<id>.zip"
-    )
+    parser = argparse.ArgumentParser(description="Package a skill folder into skill-<id>.zip")
     parser.add_argument("skill_path", help="Path to the skill folder")
     parser.add_argument(
         "output_dir_pos",

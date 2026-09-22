@@ -22,9 +22,7 @@ class AbstractSimpleTool(ABC):
             )
         backend = getattr(ctx, "os_backend", None)
         if backend is None:
-            raise RuntimeError(
-                f"{type(self).__name__}: ctx.os_backend is missing; use acreate_run_context()"
-            )
+            raise RuntimeError(f"{type(self).__name__}: ctx.os_backend is missing; use acreate_run_context()")
         return backend
 
     @property

@@ -52,37 +52,43 @@ def test_raw_store_flags_require_at_least_one_enabled():
 
 def test_hook_skipped_on_responses_backend():
     state = _make_state()
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw='{"response":"hi"}',
-        state=state,
-        ctx=_ctx(backend="responses", tools=_tool("turn_ask_human")),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw='{"response":"hi"}',
+            state=state,
+            ctx=_ctx(backend="responses", tools=_tool("turn_ask_human")),
+        )
+    )
     assert state.current_user_intent == []
 
 
 def test_hook_skipped_without_intent_scope_on_ctx():
     state = _make_state()
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw='{"response":"hi"}',
-        state=state,
-        ctx=SimpleNamespace(
-            config_dict={"backend_api_mode": "chat_completions"},
-            logger=None,
-        ),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw='{"response":"hi"}',
+            state=state,
+            ctx=SimpleNamespace(
+                config_dict={"backend_api_mode": "chat_completions"},
+                logger=None,
+            ),
+        )
+    )
     assert state.current_user_intent == []
 
 
 def test_hook_skipped_when_tools_empty():
     state = _make_state()
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw='{"response":"hi"}',
-        state=state,
-        ctx=_ctx(backend="chat_completions", tools={}),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw='{"response":"hi"}',
+            state=state,
+            ctx=_ctx(backend="chat_completions", tools={}),
+        )
+    )
     assert state.current_user_intent == []
 
 
@@ -95,12 +101,14 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
         _fake_summary,
     )
     state = _make_state()
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw='{"response":"B"}',
-        state=state,
-        ctx=_ctx(backend="chat_completions", tools=_tool("turn_ask_human")),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw='{"response":"B"}',
+            state=state,
+            ctx=_ctx(backend="chat_completions", tools=_tool("turn_ask_human")),
+        )
+    )
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_AGGREGATED
@@ -119,16 +127,18 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
     )
     state = _make_state()
     huge = "z" * 20_000
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_finish",
-        tool_output_raw=json.dumps({"blob": huge}),
-        tool_arguments='{"task_report":"done"}',
-        state=state,
-        ctx=_ctx(
-            backend="chat_completions",
-            tools=_tool("turn_finish", record="raw"),
-        ),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_finish",
+            tool_output_raw=json.dumps({"blob": huge}),
+            tool_arguments='{"task_report":"done"}',
+            state=state,
+            ctx=_ctx(
+                backend="chat_completions",
+                tools=_tool("turn_finish", record="raw"),
+            ),
+        )
+    )
     record = state.current_user_intent[0]
     out_text = record.content["output"]
     assert isinstance(out_text, str)
@@ -226,11 +236,7 @@ async def test_finish_gate_reject_submit_in_current_without_flush():
     assert intent_user_ask_texts(state.user_intent_log) == ["closed turn"]
     assert intent_user_ask_texts(state.current_user_intent) == ["open question"]
 
-    submit_records = [
-        r
-        for r in state.current_user_intent
-        if getattr(r, "tool_name", None) == "turn_finish"
-    ]
+    submit_records = [r for r in state.current_user_intent if getattr(r, "tool_name", None) == "turn_finish"]
     assert len(submit_records) == 1
     assert submit_records[0].action == ACTION_TOOL_RAW
     output = submit_records[0].content.get("output")
@@ -249,17 +255,16 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
         _no_llm,
     )
     state = _make_state()
-    reject_output = (
-        '{"ok":false,"rejected_by_finish_gate":true,'
-        '"finish_gate":{"feedback":"fix tests"}}'
+    reject_output = '{"ok":false,"rejected_by_finish_gate":true,"finish_gate":{"feedback":"fix tests"}}'
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_finish",
+            tool_output_raw=reject_output,
+            tool_arguments='{"task_report":"done"}',
+            state=state,
+            ctx=_ctx(backend="chat_completions", tools=_tool("turn_finish", record="raw")),
+        )
     )
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_finish",
-        tool_output_raw=reject_output,
-        tool_arguments='{"task_report":"done"}',
-        state=state,
-        ctx=_ctx(backend="chat_completions", tools=_tool("turn_finish", record="raw")),
-    ))
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_RAW
@@ -277,22 +282,24 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
         _no_llm,
     )
     state = _make_state()
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_finish",
-        tool_output_raw='{"ok":true,"status":"submitted"}',
-        tool_arguments='{"task_report":"done"}',
-        state=state,
-        ctx=_ctx(
-            backend="chat_completions",
-            tools={
-                "turn_finish": IntentScopeToolConfig(
-                    record="raw",
-                    store_arguments=False,
-                    store_output=True,
-                )
-            },
-        ),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_finish",
+            tool_output_raw='{"ok":true,"status":"submitted"}',
+            tool_arguments='{"task_report":"done"}',
+            state=state,
+            ctx=_ctx(
+                backend="chat_completions",
+                tools={
+                    "turn_finish": IntentScopeToolConfig(
+                        record="raw",
+                        store_arguments=False,
+                        store_output=True,
+                    )
+                },
+            ),
+        )
+    )
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_RAW
@@ -310,16 +317,18 @@ def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch
     )
     state = _make_state()
     raw = '{"ok":false,"error":"validation"}'
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw=raw,
-        state=state,
-        ctx=_ctx(
-            backend="chat_completions",
-            tools=_tool("turn_ask_human", record="aggregated"),
-            fallback=True,
-        ),
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw=raw,
+            state=state,
+            ctx=_ctx(
+                backend="chat_completions",
+                tools=_tool("turn_ask_human", record="aggregated"),
+                fallback=True,
+            ),
+        )
+    )
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_AGGREGATED
@@ -337,18 +346,22 @@ def test_hook_dedup_within_current(monkeypatch):
     )
     state = _make_state()
     ctx = _ctx(backend="chat_completions", tools=_tool("turn_ask_human"))
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw="a",
-        state=state,
-        ctx=ctx,
-    ))
-    run_coro(amaybe_update_intent_scope_from_tool(
-        tool_name="turn_ask_human",
-        tool_output_raw="b",
-        state=state,
-        ctx=ctx,
-    ))
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw="a",
+            state=state,
+            ctx=ctx,
+        )
+    )
+    run_coro(
+        amaybe_update_intent_scope_from_tool(
+            tool_name="turn_ask_human",
+            tool_output_raw="b",
+            state=state,
+            ctx=ctx,
+        )
+    )
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].content == "same line"
 

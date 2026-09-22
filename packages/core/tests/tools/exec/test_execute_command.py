@@ -51,7 +51,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
 
     env_casted = json.loads(
         tool(
-            command=f'"{sys.executable}" -c "import os; print(os.getenv(\'K\')); print(os.getenv(\'NONE_V\'))"',
+            command=f"\"{sys.executable}\" -c \"import os; print(os.getenv('K')); print(os.getenv('NONE_V'))\"",
             env_vars=[{"name": "K", "value": "123"}, {"name": "NONE_V", "value": ""}],
         )
     )
@@ -77,7 +77,7 @@ def test_execute_env_vars_validation():
 def test_execute_empty_env_vars_list_inherits_parent_environ():
     """env_vars=[] must not wipe the process environment (same as omitting env_vars)."""
     tool = with_local_ctx(ExecuteCommand)
-    cmd = f'"{sys.executable}" -c "import os; print(os.getenv(\'PATH\', \'\')[:20])"'
+    cmd = f"\"{sys.executable}\" -c \"import os; print(os.getenv('PATH', '')[:20])\""
     with_vars = json.loads(tool(command=cmd, env_vars=[]))
     without = json.loads(tool(command=cmd))
     assert with_vars["ok"] is True

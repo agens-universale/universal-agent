@@ -15,6 +15,7 @@
 любое хранилище, совпавшее по именам и сигнатурам, — чужой объект из
 DI-контейнера наследовать нас не обязан.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set
@@ -103,11 +104,13 @@ class FileThreadStore(ThreadStoreBase):
         # НЕ копируем: append_new_thread_messages дописывает в этот же набор,
         # и вызывающий (ThreadSession.known_message_keys) рассчитывает увидеть
         # обновление у себя. Копия молча сломала бы дедупликацию на след. батче.
-        keys = known_keys if known_keys is not None else self._known_keys(
-            system_id, thread_id
-        )
+        keys = known_keys if known_keys is not None else self._known_keys(system_id, thread_id)
         return append_new_thread_messages(
-            self._dir, system_id, thread_id, list(messages), keys,
+            self._dir,
+            system_id,
+            thread_id,
+            list(messages),
+            keys,
             start_seq=start_seq,
         )
 
@@ -124,13 +127,15 @@ class FileThreadStore(ThreadStoreBase):
         session_meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         patch_runtime_flag(
-            self._dir, system_id, thread_id, flag,
-            active=active, session_meta=session_meta,
+            self._dir,
+            system_id,
+            thread_id,
+            flag,
+            active=active,
+            session_meta=session_meta,
         )
 
-    def update_runtime_meta(
-        self, system_id: str, thread_id: str, patch: Dict[str, Any]
-    ) -> None:
+    def update_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
         update_runtime_meta(self._dir, system_id, thread_id, patch)
 
     def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
@@ -154,9 +159,7 @@ class FileThreadStore(ThreadStoreBase):
         """
         from gc_core.thread_store import restore_subagent_trace_records
 
-        restore_subagent_trace_records(
-            self._dir, system_id, thread_id, list(records)
-        )
+        restore_subagent_trace_records(self._dir, system_id, thread_id, list(records))
 
     def append_subagent_trace(
         self,
@@ -169,21 +172,21 @@ class FileThreadStore(ThreadStoreBase):
         payload: Dict[str, Any],
     ) -> SubagentTraceRecord:
         return append_subagent_trace_record(
-            self._dir, system_id, thread_id,
-            parent_call_id=parent_call_id, child_run_id=child_run_id,
-            kind=kind, payload=payload,
+            self._dir,
+            system_id,
+            thread_id,
+            parent_call_id=parent_call_id,
+            child_run_id=child_run_id,
+            kind=kind,
+            payload=payload,
         )
 
-    def read_subagent_trace(
-        self, system_id: str, thread_id: str
-    ) -> List[SubagentTraceRecord]:
+    def read_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
         return read_subagent_trace(self._dir, system_id, thread_id) or []
 
     # --- необязательная способность: архив перед компакцией ------------------
 
-    def archive_and_replace(
-        self, system_id: str, thread_id: str, messages: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def archive_and_replace(self, system_id: str, thread_id: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Отложить историю в архив и заменить её на ``messages``.
 
         НЕ входит в одиннадцать методов контракта — это необязательная
@@ -201,9 +204,7 @@ class FileThreadStore(ThreadStoreBase):
         Возвращает ``{"archive_suffix", "archive_data_path", "archive_meta_path"}``;
         пути — ``None``, если архивировать было нечего.
         """
-        return archive_and_replace_thread_files(
-            self._dir, system_id, thread_id, messages
-        )
+        return archive_and_replace_thread_files(self._dir, system_id, thread_id, messages)
 
 
 __all__ = ["FileThreadStore"]

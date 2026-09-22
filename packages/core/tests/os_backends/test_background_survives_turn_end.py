@@ -16,6 +16,7 @@
 поведение мы сознательно больше не обещаем: у команды переднего плана труба
 закрывается вместе с вызовом. Свойство целиком переехало сюда, в фоновый режим.
 """
+
 import asyncio
 import gc
 import shlex
@@ -36,17 +37,14 @@ def test_background_writer_survives_the_end_of_the_turn(tmp_path):
         "        print('tick', i, file=ticks, flush=True)\n"
         "        time.sleep(0.1)\n"
     )
-    cmd = (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} "
-        f"{shlex.quote(str(log))}"
-    )
+    cmd = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} {shlex.quote(str(log))}"
 
     async def turn():
         started = await LocalFsBackend().aspawn_background(cmd)
         assert started["pid"] > 0
 
-    asyncio.run(turn())        # конец хода: loop закрыт, его задачи отменены
-    gc.collect()               # транспорты хода собраны
+    asyncio.run(turn())  # конец хода: loop закрыт, его задачи отменены
+    gc.collect()  # транспорты хода собраны
 
     early = log.read_text(encoding="utf-8").count("tick") if log.exists() else 0
     assert early < 20, f"потомок успел всё ({early}) внутри хода — тест холостой"
@@ -58,6 +56,4 @@ def test_background_writer_survives_the_end_of_the_turn(tmp_path):
         if text.count("tick") >= 20:
             break
         time.sleep(0.1)
-    assert text.count("tick") == 20, (
-        f"дописано {text.count('tick')} из 20: процесс не пережил конец хода"
-    )
+    assert text.count("tick") == 20, f"дописано {text.count('tick')} из 20: процесс не пережил конец хода"

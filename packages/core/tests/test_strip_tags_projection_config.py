@@ -26,9 +26,7 @@ def test_normalize_strips_angle_brackets():
 
 
 def test_normalize_warn_drop_invalid(caplog):
-    cfg = StripTagsProjectionConfig(
-        tags=["", "  ", "bad/name", "has space", "ok_tag", "think", "THINK"]
-    )
+    cfg = StripTagsProjectionConfig(tags=["", "  ", "bad/name", "has space", "ok_tag", "think", "THINK"])
     with caplog.at_level("WARNING"):
         normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == ["ok_tag", "think"]
@@ -42,12 +40,8 @@ def test_normalize_strip_think_default_true():
 def test_persist_reasoning_content_default_false():
     assert persist_reasoning_content_from_config({}) is False
     assert persist_reasoning_content_from_config(None) is False
-    assert persist_reasoning_content_from_config(
-        {"strip_tags_projection": {"strip_think": True}}
-    ) is False
-    assert persist_reasoning_content_from_config(
-        {"strip_tags_projection": {"strip_think": False}}
-    ) is True
+    assert persist_reasoning_content_from_config({"strip_tags_projection": {"strip_think": True}}) is False
+    assert persist_reasoning_content_from_config({"strip_tags_projection": {"strip_think": False}}) is True
 
 
 def test_normalize_keeps_think_in_tags():
@@ -88,8 +82,7 @@ def test_load_config_exposes_strip_tags_for_callers(tmp_path):
 def test_load_config_empty_tags_strips_only_think(tmp_path):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
-        "backend:\n  api_mode: chat_completions\n"
-        "strip_tags_projection:\n  tags: []\n",
+        "backend:\n  api_mode: chat_completions\nstrip_tags_projection:\n  tags: []\n",
         encoding="utf-8",
     )
 

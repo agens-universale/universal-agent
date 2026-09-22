@@ -14,6 +14,7 @@
 Результат байт-совместим с ``r.json()`` не-стримового ответа: downstream не
 должен знать, каким путём пришёл ответ.
 """
+
 from __future__ import annotations
 
 import json
@@ -80,7 +81,7 @@ class _InlineThinkSplitter:
         before = self._buf[:idx]
         if before:
             emit(self._kind(), before)
-        self._buf = self._buf[idx + len(tag):]
+        self._buf = self._buf[idx + len(tag) :]
         self._in_think = not self._in_think
 
     def _flush_keeping_partial(self, tag: str, emit: OnDelta) -> None:
@@ -145,7 +146,7 @@ class StreamAssembler:
         line = (line or "").strip()
         if not line or not line.startswith("data:"):
             return
-        data = line[len("data:"):].strip()
+        data = line[len("data:") :].strip()
         if data == "[DONE]":
             self.done = True
             return
@@ -205,7 +206,7 @@ class StreamAssembler:
             if self._splitter is not None:
                 self._splitter.feed(c, self._on_delta)
 
-        for tc in (delta.get("tool_calls") or []):
+        for tc in delta.get("tool_calls") or []:
             if isinstance(tc, dict):
                 self._absorb_tool_call(tc)
 
@@ -213,8 +214,7 @@ class StreamAssembler:
         idx = tc.get("index", 0)
         slot = self._tool_calls.setdefault(
             idx,
-            {"id": None, "type": "function",
-             "function": {"name": "", "arguments": ""}},
+            {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
         )
         if tc.get("id"):
             slot["id"] = tc["id"]
@@ -253,9 +253,7 @@ class StreamAssembler:
         result: Dict[str, Any] = {
             "id": self._resp_id,
             "model": self._model,
-            "choices": [
-                {"index": 0, "message": message, "finish_reason": self._finish_reason}
-            ],
+            "choices": [{"index": 0, "message": message, "finish_reason": self._finish_reason}],
         }
         if self._usage is not None:
             result["usage"] = self._usage

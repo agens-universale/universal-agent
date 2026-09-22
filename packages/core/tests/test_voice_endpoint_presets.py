@@ -1,4 +1,5 @@
 """voice_endpoint_presets: дефолты и чтение из сырого config-dict (спека §2)."""
+
 from gc_core.config_modules.endpoint_presets import EndpointPreset
 from gc_core.config_modules.root import AppConfig
 from gc_core.config_modules.voice_endpoint_presets import (
@@ -55,15 +56,12 @@ def test_load_config_flattens_custom_voice_presets_into_config_dict(tmp_path):
 
     conf = tmp_path / "config.yml"
     conf.write_text(
-        "voice_endpoint_presets:\n"
-        "  - name: My\n    url: http://x/v1/audio/transcriptions\n",
+        "voice_endpoint_presets:\n  - name: My\n    url: http://x/v1/audio/transcriptions\n",
         encoding="utf-8",
     )
     config_dict = cfgmod.load_config(str(conf))
 
-    assert config_dict["voice_endpoint_presets"] == [
-        {"name": "My", "url": "http://x/v1/audio/transcriptions"}
-    ]
+    assert config_dict["voice_endpoint_presets"] == [{"name": "My", "url": "http://x/v1/audio/transcriptions"}]
     assert voice_endpoint_presets_from_config(config_dict) == [
         EndpointPreset(name="My", url="http://x/v1/audio/transcriptions")
     ]

@@ -45,9 +45,7 @@ def _host_caps():
 
 _HOST_HAS_GREP, _HOST_HAS_FIND = _host_caps()
 
-requires_grep = pytest.mark.skipif(
-    not _HOST_HAS_GREP, reason="host grep recipe is not usable"
-)
+requires_grep = pytest.mark.skipif(not _HOST_HAS_GREP, reason="host grep recipe is not usable")
 # Пайплайн find | xargs | grep требует ОБА бинаря: тесты ниже утверждают
 # search_backend == "grep", поэтому без grep они не «падают», а не применимы
 # (на Windows find из Git Bash есть, GNU grep нет — движок честно уходит в Python).
@@ -119,9 +117,7 @@ async def test_dir_search_uses_find_xargs_grep_pipeline(tmp_path, monkeypatch):
 
     tool = _tool(tmp_path)
     calls = await _spy_exec(monkeypatch, tool._backend)
-    data = json.loads(
-        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
-    )
+    data = json.loads(await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 1
@@ -140,9 +136,7 @@ async def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
 
     tool = _tool(tmp_path)
     calls = await _spy_exec(monkeypatch, tool._backend)
-    data = json.loads(
-        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
-    )
+    data = json.loads(await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
 
     assert data["search_backend"] == "grep"
     files = [m["file"] for m in data["matches"]]
@@ -155,9 +149,7 @@ async def test_find_prunes_hard_exclude_dirs(tmp_path, monkeypatch):
 @requires_native_search
 def test_native_context_is_a_plus_minus_five_window(tmp_path):
     """After grep hits, context is the ±5 neighborhood, not a match-line duplicate."""
-    (tmp_path / "app.py").write_text(
-        "\n".join(f"line_{i}" for i in range(1, 21)) + "\n", encoding="utf-8"
-    )
+    (tmp_path / "app.py").write_text("\n".join(f"line_{i}" for i in range(1, 21)) + "\n", encoding="utf-8")
 
     data = _call_tool(tmp_path, pattern="line_10", query_mode="text")
 
@@ -203,9 +195,7 @@ def test_native_dir_mode_omits_context_when_file_exceeds_max_bytes(tmp_path, mon
 
 @requires_native_search
 async def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypatch):
-    body = "\n".join(
-        ["alpha", "TOKEN first", "beta", "gamma", "TOKEN second", "delta"]
-    ) + "\n"
+    body = "\n".join(["alpha", "TOKEN first", "beta", "gamma", "TOKEN second", "delta"]) + "\n"
     (tmp_path / "app.py").write_text(body, encoding="utf-8")
 
     tool = _tool(tmp_path)
@@ -224,9 +214,7 @@ async def test_native_context_downloads_each_shown_file_once(tmp_path, monkeypat
 
     monkeypatch.setattr(tool._backend, "read_bytes", _read)
     monkeypatch.setattr(tool._backend, "getsize", _size)
-    data = json.loads(
-        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
-    )
+    data = json.loads(await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 2
@@ -250,9 +238,7 @@ async def test_native_context_omitted_on_read_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tool._backend, "getsize", _size)
     monkeypatch.setattr(tool._backend, "read_bytes", _read)
-    data = json.loads(
-        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
-    )
+    data = json.loads(await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 1
@@ -279,9 +265,7 @@ async def test_native_context_omitted_on_stat_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tool._backend, "getsize", _size)
     monkeypatch.setattr(tool._backend, "read_bytes", _read)
-    data = json.loads(
-        await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
-    )
+    data = json.loads(await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text"))
 
     assert data["search_backend"] == "grep"
     assert data["count"] == 1
@@ -339,9 +323,7 @@ def test_native_context_clips_long_lines_to_budget(tmp_path):
 @requires_native_search
 def test_native_clips_long_line_to_the_head_budget(tmp_path):
     """Without match offsets grep clips the first N chars (Python keeps the hit)."""
-    (tmp_path / "one.txt").write_text(
-        "a" * 3000 + "NEEDLE" + "b" * 3000, encoding="utf-8"
-    )
+    (tmp_path / "one.txt").write_text("a" * 3000 + "NEEDLE" + "b" * 3000, encoding="utf-8")
 
     data = _call_tool(tmp_path, pattern="NEEDLE", query_mode="text")
 

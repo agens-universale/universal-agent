@@ -4,6 +4,7 @@
 проверяется, что состояние вынесено корректно: кормить можно построчно
 (как это делает транспорт) и чанки могут приходить как угодно нарезанными.
 """
+
 import json
 
 from gc_core.utils.chat_completions_stream import assemble_streamed_completion
@@ -27,8 +28,7 @@ def test_assembles_content_and_usage_from_lines():
     for line in _lines(
         _delta("при"),
         _delta("вет"),
-        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-         "usage": {"completion_tokens": 2}},
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"completion_tokens": 2}},
     ):
         asm.feed_line(line)
     asm.flush()
@@ -78,11 +78,16 @@ def test_think_tag_split_across_chunks():
 
 def test_tool_calls_are_joined_by_index():
     asm = StreamAssembler()
-    asm.feed_payload(json.dumps(_delta(tool_calls=[
-        {"index": 0, "id": "c1", "type": "function",
-         "function": {"name": "calc", "arguments": '{"a"'}}])))
-    asm.feed_payload(json.dumps(_delta(tool_calls=[
-        {"index": 0, "function": {"arguments": ': 1}'}}])))
+    asm.feed_payload(
+        json.dumps(
+            _delta(
+                tool_calls=[
+                    {"index": 0, "id": "c1", "type": "function", "function": {"name": "calc", "arguments": '{"a"'}}
+                ]
+            )
+        )
+    )
+    asm.feed_payload(json.dumps(_delta(tool_calls=[{"index": 0, "function": {"arguments": ": 1}"}}])))
     asm.flush()
 
     calls = asm.result()["choices"][0]["message"]["tool_calls"]

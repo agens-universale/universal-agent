@@ -11,7 +11,7 @@ def _fenced_json_object(raw: str) -> str | None:
         close = raw.find("```", opening.end())
         if close == -1:
             return None
-        body = raw[opening.end():close].strip()
+        body = raw[opening.end() : close].strip()
         if body.startswith("{") and body.endswith("}"):
             return body
     return None

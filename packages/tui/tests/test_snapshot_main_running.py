@@ -1,4 +1,5 @@
 """Main-screen в состоянии running — header + начало trace."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -20,8 +21,9 @@ def test_main_running_snapshot(snap_compare, tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "CodeAgent", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+    )
 
     async def setup(pilot):
         await pilot.pause()

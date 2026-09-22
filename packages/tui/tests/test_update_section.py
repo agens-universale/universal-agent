@@ -9,19 +9,28 @@ async def test_update_section_shows_actions_and_hint(tmp_path, monkeypatch):
     from gc_core.updater import check as check_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://gitverse.ru/x/y", "master", "abc", False))
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://gitverse.ru/x/y", "master", "abc", False),
+    )
     monkeypatch.setattr(app_version, "agent_version", lambda: "0.3.0")
     # вход в секцию авто-проверяет → мок без сети
-    monkeypatch.setattr(check_mod, "check_for_update",
-                        lambda source, **k: check_mod.CheckResult("current", "abc", "установлена последняя версия"))
-    cfg_file = tmp_path / "config.yml"; cfg_file.write_text("backend:\n  completions_url: \"http://x/v1\"\n", encoding="utf-8")
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",
+        lambda source, **k: check_mod.CheckResult("current", "abc", "установлена последняя версия"),
+    )
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text('backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "Обновить агента" in body
         assert "Проверить обновления" in body
@@ -37,30 +46,37 @@ async def test_update_section_auto_checks_on_entry_and_cursor_on_top(tmp_path, m
     from gc_core.updater.check import CheckResult
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     calls = []
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
 
     def _fake_check(source, **k):
         calls.append(source)
         return CheckResult("update", "new", "доступна новая версия")
 
     monkeypatch.setattr(check_mod, "check_for_update", _fake_check)
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
         open_settings_section(scr, "Обновление")
-        await pilot.pause(); await pilot.pause()
-        assert calls                                   # авто-проверка сработала на входе
-        assert scr._update_idx == 0                    # курсор на верхнем действии
+        await pilot.pause()
+        await pilot.pause()
+        assert calls  # авто-проверка сработала на входе
+        assert scr._update_idx == 0  # курсор на верхнем действии
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "доступна новая версия" in body
         n = len(calls)
-        open_settings_section(scr, "Обновление"); await pilot.pause()       # повторный вход
-        assert len(calls) == n                          # без нового запроса (кэш)
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()  # повторный вход
+        assert len(calls) == n  # без нового запроса (кэш)
 
 
 async def test_check_updates_sets_status(tmp_path, monkeypatch):
@@ -69,19 +85,27 @@ async def test_check_updates_sets_status(tmp_path, monkeypatch):
     from gc_core.updater.check import CheckResult
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",
-                        lambda source, **k: CheckResult("update", "new", "доступна новая версия"))
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod, "check_for_update", lambda source, **k: CheckResult("update", "new", "доступна новая версия")
+    )
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
-        scr._check_updates_now()                          # синхронный вход в воркер (инъекция)
-        await pilot.pause(); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        scr._check_updates_now()  # синхронный вход в воркер (инъекция)
+        await pilot.pause()
+        await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "доступна новая версия" in body or "Обновить агента" in body
 
@@ -95,18 +119,28 @@ async def test_update_confirm_and_hint_text_use_location_phrase(tmp_path, monkey
     from gc_core.updater import runner as runner_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     monkeypatch.setattr(runner_mod, "install_location_phrase", lambda: "в фоне")
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",
-                        lambda source, **k: check_mod.CheckResult("update", "new", "доступна новая версия"))
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",
+        lambda source, **k: check_mod.CheckResult("update", "new", "доступна новая версия"),
+    )
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause(); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        await pilot.pause()
         hint_body = " ".join(str(w.render()) for w in scr.query(".set-hint"))
         assert "в фоне" in hint_body and "в отдельном окне" not in hint_body
         scr._request_update()
@@ -120,26 +154,34 @@ async def test_update_confirm_banner_then_spawn(tmp_path, monkeypatch):
     from gc_core.updater import runner as runner_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
-                        lambda source, **k: check_mod.CheckResult("update", "new", "доступна новая версия"))
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",  # вход авто-проверяет → без сети
+        lambda source, **k: check_mod.CheckResult("update", "new", "доступна новая версия"),
+    )
     spawned = {}
-    monkeypatch.setattr(runner_mod, "spawn_detached_update",
-                        lambda command, **k: spawned.update(cmd=command, kw=k))
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(runner_mod, "spawn_detached_update", lambda command, **k: spawned.update(cmd=command, kw=k))
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
-        scr._request_update()                             # показать confirm
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        scr._request_update()  # показать confirm
         assert scr._update_awaiting_confirm is True
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "закроется" in body and "Enter — обновить" in body
-        scr._confirm_update()                             # подтвердить
-        assert "cmd" in spawned                           # спавн вызван
+        scr._confirm_update()  # подтвердить
+        assert "cmd" in spawned  # спавн вызван
 
 
 async def test_update_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
@@ -151,33 +193,42 @@ async def test_update_confirm_banner_blocks_section_switch(tmp_path, monkeypatch
     from gc_core.updater import check as check_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
-                        lambda source, **k: check_mod.CheckResult("update", "new", "доступна новая версия"))
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",  # вход авто-проверяет → без сети
+        lambda source, **k: check_mod.CheckResult("update", "new", "доступна новая версия"),
+    )
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
-        scr._request_update()                             # поднять confirm-баннер
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        scr._request_update()  # поднять confirm-баннер
         await pilot.pause()
         assert scr._update_awaiting_confirm is True
-        await pilot.press("pageup")                       # попытка листнуть секцию
+        await pilot.press("pageup")  # попытка листнуть секцию
         await pilot.pause()
-        assert scr._view == settings_section_index("Обновление")                             # секция НЕ сменилась
-        assert scr._update_awaiting_confirm is True       # баннер жив
-        assert list(scr.query(".set-confirm"))            # виджет баннера на месте
-        await pilot.press("pagedown")                     # и в другую сторону
+        assert scr._view == settings_section_index("Обновление")  # секция НЕ сменилась
+        assert scr._update_awaiting_confirm is True  # баннер жив
+        assert list(scr.query(".set-confirm"))  # виджет баннера на месте
+        await pilot.press("pagedown")  # и в другую сторону
         await pilot.pause()
         assert scr._view == settings_section_index("Обновление")
         assert scr._update_awaiting_confirm is True
-        await pilot.press("escape")                       # отмена confirm
+        await pilot.press("escape")  # отмена confirm
         await pilot.pause()
         assert scr._update_awaiting_confirm is False
-        assert scr._view == settings_section_index("Обновление")                             # escape отменил confirm, не секцию
+        assert scr._view == settings_section_index("Обновление")  # escape отменил confirm, не секцию
 
 
 async def test_update_blocked_when_current(tmp_path, monkeypatch):
@@ -188,20 +239,29 @@ async def test_update_blocked_when_current(tmp_path, monkeypatch):
     from gc_core.updater.check import CheckResult
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",
-                        lambda source, **k: CheckResult("current", "old", "установлена последняя версия"))
-    cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod, "check_for_update", lambda source, **k: CheckResult("current", "old", "установлена последняя версия")
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause(); await pilot.pause()
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        await pilot.pause()
         scr._request_update()
-        assert scr._update_awaiting_confirm is False              # confirm НЕ поднят
+        assert scr._update_awaiting_confirm is False  # confirm НЕ поднят
         title = str(scr.query_one("#set-title").render())
-        assert "последняя версия" in title                       # title-note о том, что уже актуально
+        assert "последняя версия" in title  # title-note о том, что уже актуально
 
 
 async def test_apply_check_result_persists_even_if_view_changed(tmp_path, monkeypatch):
@@ -214,22 +274,31 @@ async def test_apply_check_result_persists_even_if_view_changed(tmp_path, monkey
     from gc_core.updater.check import CheckResult
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
-                        lambda source, **k: CheckResult("current", "old", "установлена последняя версия"))
-    cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",  # вход авто-проверяет → без сети
+        lambda source, **k: CheckResult("current", "old", "установлена последняя версия"),
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
-        scr._update_checking = True                      # воркер в полёте
-        scr._view = 0                                     # юзер успел уйти из секции «Обновление»
+        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        scr._update_checking = True  # воркер в полёте
+        scr._view = 0  # юзер успел уйти из секции «Обновление»
         scr._apply_check_result(CheckResult("current", "old", "установлена последняя версия"))
-        assert scr._update_checking is False              # НЕ залипло
-        assert scr._update_check_result is not None       # результат сохранён
+        assert scr._update_checking is False  # НЕ залипло
+        assert scr._update_check_result is not None  # результат сохранён
 
 
 async def test_apply_check_result_persists_verdict_and_syncs_main_card(tmp_path, monkeypatch):
@@ -241,19 +310,29 @@ async def test_apply_check_result_persists_verdict_and_syncs_main_card(tmp_path,
     from gc_core.updater import check as check_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
-                        lambda source, **k: check_mod.CheckResult("current", "old", "установлена последняя версия"))
-    cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",  # вход авто-проверяет → без сети
+        lambda source, **k: check_mod.CheckResult("current", "old", "установлена последняя версия"),
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause(); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        await pilot.pause()
         scr._apply_check_result(check_mod.CheckResult("update", "newcommit", "доступна новая версия"))
         assert app._update_available is True
         state = upgrade_gate.read_state()
@@ -273,26 +352,36 @@ async def test_apply_check_result_unknown_keeps_known_update_verdict(tmp_path, m
     from gc_core.updater import check as check_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
-                        lambda source, **k: check_mod.CheckResult("current", "old", "установлена последняя версия"))
-    cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",  # вход авто-проверяет → без сети
+        lambda source, **k: check_mod.CheckResult("current", "old", "установлена последняя версия"),
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause(); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        await pilot.pause()
         scr._apply_check_result(check_mod.CheckResult("update", "newcommit", "доступна новая версия"))
         assert app._update_available is True
         scr._apply_check_result(check_mod.CheckResult("unknown", None, "не удалось: офлайн"))
-        assert app._update_available is True               # флаг выжил
+        assert app._update_available is True  # флаг выжил
         main = app._main_screen()
         card = str(main._mcp_status_row.render())
-        assert "↑ доступна новая версия" in card            # строка в карточке выжила
+        assert "↑ доступна новая версия" in card  # строка в карточке выжила
 
 
 async def test_apply_check_result_current_clears_available(tmp_path, monkeypatch):
@@ -302,19 +391,29 @@ async def test_apply_check_result_current_clears_available(tmp_path, monkeypatch
     from gc_core.updater import check as check_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
-                        lambda source, **k: check_mod.CheckResult("current", "old", "установлена последняя версия"))
-    cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",  # вход авто-проверяет → без сети
+        lambda source, **k: check_mod.CheckResult("current", "old", "установлена последняя версия"),
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause(); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        await pilot.pause()
         scr._apply_check_result(check_mod.CheckResult("update", "newcommit", "доступна новая версия"))
         assert app._update_available is True
         scr._apply_check_result(check_mod.CheckResult("current", "old", "установлена последняя версия"))
@@ -328,21 +427,29 @@ async def test_checked_line_unknown_is_dash_not_warn(tmp_path, monkeypatch):
     from gc_core.updater.check import CheckResult
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
-    monkeypatch.setattr(check_mod, "check_for_update",
-                        lambda source, **k: CheckResult("unknown", None, "нет соединения"))
-    cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False),
+    )
+    monkeypatch.setattr(
+        check_mod, "check_for_update", lambda source, **k: CheckResult("unknown", None, "нет соединения")
+    )
+    cfg = tmp_path / "c.yml"
+    cfg.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause(); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        await pilot.pause()
         line = str(scr._checked_line_text())
         assert line.startswith("Проверено") and "—" in line and "⚠" not in line
         glyph, _ = scr._menu_glyph(settings_section_index("Обновление"))
-        assert glyph == "—"                                # меню-глиф тоже без вердикта, не !
+        assert glyph == "—"  # меню-глиф тоже без вердикта, не !
 
 
 async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
@@ -351,20 +458,27 @@ async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
     from gc_core import app_version
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source",
-                        lambda _read=None: app_version.InstallSource("https://gitverse.ru/x/y", "master", "abc", False))
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource("https://gitverse.ru/x/y", "master", "abc", False),
+    )
 
     class _Runner:
-        def __init__(self, running): self._r = running
-        def is_running(self): return self._r
+        def __init__(self, running):
+            self._r = running
+
+        def is_running(self):
+            return self._r
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text("backend:\n  completions_url: \"http://x/v1\"\n", encoding="utf-8")
+    cfg_file.write_text('backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
 
         app.active_runner = _Runner(True)
         assert "Идёт выполнение" in scr._update_confirm_text()
@@ -374,24 +488,28 @@ async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
         assert "Идёт выполнение" not in scr._update_confirm_text()
         assert "Агент закроется" in scr._update_confirm_text()
 
-        app.active_runner = None            # раннера нет вовсе — тоже «агент закроется»
+        app.active_runner = None  # раннера нет вовсе — тоже «агент закроется»
         assert "Агент закроется" in scr._update_confirm_text()
 
 
 # --- Task 14: «Сбросить конфиг к умолчанию» (спека §11) ---
 
+
 async def test_reset_action_present_next_to_sync(tmp_path, monkeypatch):
     from gc_core import app_version
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)   # dev, без сети
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)  # dev, без сети
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
         assert scr._update_actions == [scr._UPDATE_ACTION_SYNC, scr._UPDATE_ACTION_RESET]
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "Сбросить конфиг к умолчанию" in body
@@ -401,8 +519,10 @@ async def test_reset_confirm_banner_then_reset_reloads_and_notices_backup(tmp_pa
     from gc_core import app_version, config_sync
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     called = {}
 
     def _fake_reset(path, **k):
@@ -413,18 +533,21 @@ async def test_reset_confirm_banner_then_reset_reloads_and_notices_backup(tmp_pa
     applied = []
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file),
-                             on_apply=lambda: applied.append(1), probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr = SettingsScreen(
+            config={}, config_path=str(cfg_file), on_apply=lambda: applied.append(1), probe_fn=lambda *a, **k: None
+        )
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
         scr._request_reset()
         assert scr._reset_awaiting_confirm is True
         confirm_body = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
         assert "Enter — сбросить" in confirm_body
         scr._confirm_reset()
-        await pilot.pause()                                # notice-виджет монтируется асинхронно
+        await pilot.pause()  # notice-виджет монтируется асинхронно
         assert called["path"] == str(cfg_file)
-        assert applied == [1]                              # конфиг перечитан после сброса
+        assert applied == [1]  # конфиг перечитан после сброса
         assert scr._reset_awaiting_confirm is False
         notice = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "сброшен к умолчанию" in notice and ".bak-x" in notice
@@ -437,14 +560,17 @@ async def test_reset_confirm_banner_blocks_section_switch(tmp_path, monkeypatch)
     from gc_testkit.tui_support import settings_section_index
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
         scr._request_reset()
         await pilot.pause()
         assert scr._reset_awaiting_confirm is True
@@ -464,20 +590,23 @@ async def test_reset_action_blocked_when_not_writable(tmp_path, monkeypatch):
     from gc_core import config as config_mod
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
     monkeypatch.setattr(config_mod, "_default_config_path", lambda: str(cfg_file))
     called = []
     monkeypatch.setattr(config_sync, "reset_config", lambda *a, **k: called.append(1))
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
         scr._request_reset()
         scr._confirm_reset()
-        await pilot.pause()                                # notice-виджет монтируется асинхронно
+        await pilot.pause()  # notice-виджет монтируется асинхронно
         assert called == []
         body = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert "не сбрасывается" in body
@@ -490,25 +619,29 @@ async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(t
     from gc_core import app_version, config_sync
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
-    cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    monkeypatch.setattr(config_sync, "reset_config",
-                        lambda path, **k: config_sync.ResetReport(str(cfg_file) + ".bak-x"))
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        config_sync, "reset_config", lambda path, **k: config_sync.ResetReport(str(cfg_file) + ".bak-x")
+    )
     app = app_mod.TuiApp(config={})
     app._session_overrides = {"profile": "work"}
 
     def _apply() -> None:
-        app._config = {}          # эмулируем реальный reload_config на плейсхолдерах
+        app._config = {}  # эмулируем реальный reload_config на плейсхолдерах
 
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=_apply,
-                             probe_fn=lambda *a, **k: None)
-        app.push_screen(scr); await pilot.pause()
-        open_settings_section(scr, "Обновление"); await pilot.pause()
+        scr = SettingsScreen(config={}, config_path=str(cfg_file), on_apply=_apply, probe_fn=lambda *a, **k: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
         scr._request_reset()
         scr._confirm_reset()
-        await pilot.pause()                                # notice-виджет монтируется асинхронно
+        await pilot.pause()  # notice-виджет монтируется асинхронно
         notice = " ".join(str(w.render()) for w in scr.query(".set-dyn"))
         assert 'профиле "work"' in notice
         assert "настройка не завершена" in notice
-        assert app._session_overrides == {"profile": "work"}   # сброс базы сессию не трогает
+        assert app._session_overrides == {"profile": "work"}  # сброс базы сессию не трогает

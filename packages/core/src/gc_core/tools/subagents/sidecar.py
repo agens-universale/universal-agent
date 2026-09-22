@@ -22,9 +22,7 @@ class SidecarIdentity:
     child_run_id: str
 
 
-def bind_thread_identity(
-    ctx: Any, *, threads_dir: str, system_id: str, thread_id: str
-) -> None:
+def bind_thread_identity(ctx: Any, *, threads_dir: str, system_id: str, thread_id: str) -> None:
     """Записать thread identity на ctx (parent run с тредом)."""
     ctx.threads_dir = threads_dir
     ctx.system_id = system_id
@@ -84,9 +82,7 @@ def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
     )
 
 
-async def apersist_subagent_trace(
-    ctx: Any, *, kind: str, payload: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+async def apersist_subagent_trace(ctx: Any, *, kind: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Дописать sidecar-запись, если гейт пропустил. Иначе no-op.
 
     ЕДИНСТВЕННАЯ форма. Синхронный близнец снят: он умел писать только в

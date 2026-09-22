@@ -6,6 +6,7 @@
 
 Технический слой — без бизнес-логики.
 """
+
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -68,8 +69,7 @@ _GC_CORE_NAME = re.compile(r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', 
 def _declares_gc_core(candidate: Path) -> bool:
     """Лежит ли в `candidate` наш `packages/core/pyproject.toml`."""
     try:
-        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(
-            encoding="utf-8")
+        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
     return _GC_CORE_NAME.search(text) is not None

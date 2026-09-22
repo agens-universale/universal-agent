@@ -45,10 +45,7 @@ def test_session_memory_block_inlined():
         summary_text="S",
         last_dialog_steps="",
         session_memory_block=(
-            "<session_memory>\n"
-            "<goal>full goal body</goal>\n"
-            "<knowledge>secret knowledge</knowledge>\n"
-            "</session_memory>"
+            "<session_memory>\n<goal>full goal body</goal>\n<knowledge>secret knowledge</knowledge>\n</session_memory>"
         ),
     )
     assert "<session_memory>" in body

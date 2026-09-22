@@ -28,6 +28,7 @@ sync- и async-копией, — это дыра, которую никто не
             return dual_wrap(func, _flow)
         return decorator
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -65,9 +66,7 @@ def _start(flow: Generator) -> tuple[bool, Any]:
 _GUARD_SLOTS = threading.BoundedSemaphore(32)
 
 
-async def _off_loop(
-    fn: Callable[..., Any], *args: Any, on_abandoned: Callable[[], None] | None = None
-) -> Any:
+async def _off_loop(fn: Callable[..., Any], *args: Any, on_abandoned: Callable[[], None] | None = None) -> Any:
     """Исполнить блокирующую часть гварда вне loop — на своём потоке.
 
     Не ``asyncio.to_thread``: его пул общий и небольшой, и тело гварда встало
@@ -148,8 +147,7 @@ class OffLoop:
 
     __slots__ = ("args", "fn", "on_interrupt")
 
-    def __init__(self, fn: Callable[..., Any], *args: Any,
-                 on_interrupt: Any = _NO_INTERRUPT) -> None:
+    def __init__(self, fn: Callable[..., Any], *args: Any, on_interrupt: Any = _NO_INTERRUPT) -> None:
         self.fn = fn
         self.args = args
         self.on_interrupt = on_interrupt
@@ -202,18 +200,14 @@ async def _await_off_loop(request: OffLoop, *, on_abandoned: Callable[[], None])
     interrupted = loop.create_future()
 
     def _on_sigint() -> None:
-        loop.call_soon_threadsafe(
-            lambda: interrupted.done() or interrupted.set_result(True)
-        )
+        loop.call_soon_threadsafe(lambda: interrupted.done() or interrupted.set_result(True))
 
     try:
         with intercept_sigint(_on_sigint):
-            done, _ = await asyncio.wait(
-                {task, interrupted}, return_when=asyncio.FIRST_COMPLETED
-            )
+            done, _ = await asyncio.wait({task, interrupted}, return_when=asyncio.FIRST_COMPLETED)
             if task in done:
                 return task.result()
-            task.cancel()                  # человека ждать больше не нужно
+            task.cancel()  # человека ждать больше не нужно
             return request.on_interrupt
     finally:
         if not interrupted.done():
@@ -297,8 +291,7 @@ def _forbid_second_call(again: bool) -> None:
     """
     if again:
         raise RuntimeError(
-            "тело гварда отдало управление дважды: у него должен быть ровно "
-            "один yield на путь исполнения"
+            "тело гварда отдало управление дважды: у него должен быть ровно один yield на путь исполнения"
         )
 
 
@@ -329,6 +322,7 @@ def dual_wrap(
     через ``await``, и запуск процесса остаётся асинхронным.
     """
     if inspect.iscoroutinefunction(func):
+
         @functools.wraps(func)
         async def awrapper(*args: Any, **kwargs: Any) -> Any:
             gen = flow(*args, **kwargs)
@@ -349,9 +343,7 @@ def dual_wrap(
             # через его запросы (`AwaitOnCaller`, `OffLoop`), см. канал выше.
             if body_may_block:
                 try:
-                    needs_call, early = await _off_loop(
-                        _start, gen, on_abandoned=lambda: _close_quietly(gen)
-                    )
+                    needs_call, early = await _off_loop(_start, gen, on_abandoned=lambda: _close_quietly(gen))
                 except asyncio.CancelledError:
                     # Вызывающего сняли, пока тело работало в своём потоке.
                     # Поток мы не остановим — он в блокирующем вызове, и

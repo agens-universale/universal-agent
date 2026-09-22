@@ -14,15 +14,15 @@ def test_value_patterns_masked():
 def test_github_and_vendor_tokens_masked():
     r = Redactor()
     secrets = [
-        "ghp_FAKE1234567890abcdefABCDEF1234567890",   # GitHub PAT
-        "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",   # GitHub OAuth
-        "github_pat_11ABCDEFG0aBcDeFgHiJkL_mnopAB",   # fine-grained PAT
-        "sk_live_ABCDEF0123456789abcdef",             # Stripe
-        "AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456",    # Google API key
-        "ya29.A0ARrdaMabcdef_GHIJKL-0123456789",      # Google OAuth
-        "glpat-ABCDEFGHIJ0123456789",                 # GitLab PAT
-        "npm_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",   # npm
-        "xoxb-99887766-SECRETTAILxyz",                # Slack
+        "ghp_FAKE1234567890abcdefABCDEF1234567890",  # GitHub PAT
+        "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",  # GitHub OAuth
+        "github_pat_11ABCDEFG0aBcDeFgHiJkL_mnopAB",  # fine-grained PAT
+        "sk_live_ABCDEF0123456789abcdef",  # Stripe
+        "AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456",  # Google API key
+        "ya29.A0ARrdaMabcdef_GHIJKL-0123456789",  # Google OAuth
+        "glpat-ABCDEFGHIJ0123456789",  # GitLab PAT
+        "npm_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",  # npm
+        "xoxb-99887766-SECRETTAILxyz",  # Slack
     ]
     for s in secrets:
         out = r.redact(f"value: {s} end")
@@ -95,13 +95,15 @@ def test_bad_extra_pattern_skipped():
 def test_token_count_keys_not_masked():
     """prompt_tokens / completion_tokens / max_tokens — счётчики, НЕ секреты."""
     r = Redactor()
-    out = r.redact({
-        "prompt_tokens": 123,
-        "completion_tokens": 45,
-        "total_tokens": 168,
-        "max_tokens": 32768,
-        "tokenizer": "bpe",
-    })
+    out = r.redact(
+        {
+            "prompt_tokens": 123,
+            "completion_tokens": 45,
+            "total_tokens": 168,
+            "max_tokens": 32768,
+            "tokenizer": "bpe",
+        }
+    )
     assert out["prompt_tokens"] == 123
     assert out["completion_tokens"] == 45
     assert out["total_tokens"] == 168

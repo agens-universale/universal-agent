@@ -12,6 +12,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/r
 - done     — есть result: ✓/✗;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
+
 from __future__ import annotations
 
 import time
@@ -36,8 +37,16 @@ from gc_tui.widgets.click_model import ClickModelMixin
 # RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. on_mount) → плавное
 # дыхание 10fps; 10 кадров → цикл ≈1.0с.
 _PULSE_SHADES = [
-    "#8a6a3a", "#977448", "#a47f55", "#b18a62", "#c4986b",
-    "#d4a574", "#c4986b", "#b18a62", "#a47f55", "#977448",
+    "#8a6a3a",
+    "#977448",
+    "#a47f55",
+    "#b18a62",
+    "#c4986b",
+    "#d4a574",
+    "#c4986b",
+    "#b18a62",
+    "#a47f55",
+    "#977448",
 ]
 
 
@@ -73,12 +82,20 @@ class ToolCallRow(ClickModelMixin, Widget):
     """
     can_focus = True
 
-    _PREFIX = "   "   # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
+    _PREFIX = "   "  # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
     _NESTED_PREFIX = "       "  # nested под subagent: +4 пробела
 
-    def __init__(self, *, call_id: str, tool_name: str,
-                 args_summary: str, event_no: int = 0,
-                 waiting: bool = False, nested: bool = False, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        args_summary: str,
+        event_no: int = 0,
+        waiting: bool = False,
+        nested: bool = False,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.call_id = call_id
         self._tool_name = tool_name
@@ -93,7 +110,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
-        self._pulse_timer = None     # собственный 0.1с-тик дыхания ▸ (on_mount)
+        self._pulse_timer = None  # собственный 0.1с-тик дыхания ▸ (on_mount)
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
         if self._nested:
@@ -106,9 +123,7 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal():
-            self._prefix_static = Static(
-                self._render_prefix(), classes="trace-prefix", markup=False
-            )
+            self._prefix_static = Static(self._render_prefix(), classes="trace-prefix", markup=False)
             yield self._prefix_static
             self._content_static = Static(
                 self._render_content(),
@@ -193,12 +208,7 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def pause(self) -> None:
         """Заморозить elapsed на человеко-ожидании. Waiting/done — no-op."""
-        if (
-            self._paused_at is None
-            and self._result is None
-            and not self._interrupted
-            and not self._waiting
-        ):
+        if self._paused_at is None and self._result is None and not self._interrupted and not self._waiting:
             self._paused_at = time.monotonic()
 
     def resume(self) -> None:
@@ -255,4 +265,5 @@ class ToolCallRow(ClickModelMixin, Widget):
     def _open_request(self) -> Optional[Message]:
         # Клик/Enter → детальный экран call + output.
         from gc_tui.messages import OpenToolCallDetailRequest
+
         return OpenToolCallDetailRequest(self.call_id)

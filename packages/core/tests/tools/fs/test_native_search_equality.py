@@ -1,4 +1,5 @@
 """List/by-name walk enumeration + native grep smoke (gate-pass patterns)."""
+
 import json
 
 from gc_core.tools.fs.find_files_by_name import FindFilesByName
@@ -20,9 +21,7 @@ def test_list_files_walk_envelope(tmp_path):
 def test_find_by_name_walk_envelope(tmp_path):
     """By-name uses iter_walk only; no tool-exec find dump."""
     (tmp_path / "hello_world.py").write_text("x", encoding="utf-8")
-    data = json.loads(
-        with_local_ctx(FindFilesByName)(path=str(tmp_path), query="hello")
-    )
+    data = json.loads(with_local_ctx(FindFilesByName)(path=str(tmp_path), query="hello"))
     assert data["ok"] is True
     assert data["count"] >= 1
     assert "listing_backend" not in data
@@ -47,25 +46,17 @@ def test_list_and_by_name_do_not_use_exec_for_tree(tmp_path, monkeypatch):
 
     list_data = json.loads(with_local_ctx(ListFiles)(path=str(tmp_path), max_depth=2))
     assert list_data["ok"] is True
-    by_name = json.loads(
-        with_local_ctx(FindFilesByName)(path=str(tmp_path), query="*.py")
-    )
+    by_name = json.loads(with_local_ctx(FindFilesByName)(path=str(tmp_path), query="*.py"))
     assert by_name["ok"] is True
 
-    find_dumps = [
-        c for c in calls if c and c[0] == "find" and any("-printf" in str(a) for a in c)
-    ]
+    find_dumps = [c for c in calls if c and c[0] == "find" and any("-printf" in str(a) for a in c)]
     assert find_dumps == [], f"list/by-name must not exec find dump: {find_dumps}"
 
 
 def test_find_in_files_literal_native_or_python(tmp_path):
     (tmp_path / "a.py").write_text("TODO fix\n", encoding="utf-8")
     (tmp_path / "b.py").write_text("other\n", encoding="utf-8")
-    data = json.loads(
-        with_local_ctx(FindInFiles)(
-            path=str(tmp_path), pattern="TODO", query_mode="text"
-        )
-    )
+    data = json.loads(with_local_ctx(FindInFiles)(path=str(tmp_path), pattern="TODO", query_mode="text"))
     assert data["ok"] is True
     assert data["count"] == 1
     assert data.get("search_backend") in ("grep", "python")
@@ -74,11 +65,7 @@ def test_find_in_files_literal_native_or_python(tmp_path):
 
 def test_find_in_files_denylist_stays_python(tmp_path):
     (tmp_path / "a.py").write_text("digit 12\n", encoding="utf-8")
-    data = json.loads(
-        with_local_ctx(FindInFiles)(
-            path=str(tmp_path), pattern=r"\d+", query_mode="python-re"
-        )
-    )
+    data = json.loads(with_local_ctx(FindInFiles)(path=str(tmp_path), pattern=r"\d+", query_mode="python-re"))
     assert data["ok"] is True
     assert data.get("search_backend") == "python"
     assert data["count"] == 1

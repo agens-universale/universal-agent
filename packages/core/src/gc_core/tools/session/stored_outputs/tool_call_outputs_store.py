@@ -152,4 +152,3 @@ class ToolCallOutputsStore:
 
         store._records = reconstructed
         return store
-

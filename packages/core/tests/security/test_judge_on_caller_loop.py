@@ -11,6 +11,7 @@
 судью — через ``AwaitOnCaller`` (ждётся на loop вызывающего), ожидание
 человека — через ``OffLoop`` (у него асинхронной формы нет).
 """
+
 import asyncio
 
 from gc_core.security import command_moderation as cm
@@ -36,9 +37,7 @@ async def test_async_judge_runs_on_the_callers_loop():
     guarded = dual_wrap(_tool, _flow)
     assert await guarded() == "ok"
 
-    assert seen == [asyncio.get_running_loop()], (
-        "судья ушёл на чужой loop — значит опять свой пул и своё рукопожатие"
-    )
+    assert seen == [asyncio.get_running_loop()], "судья ушёл на чужой loop — значит опять свой пул и своё рукопожатие"
 
 
 async def test_sync_judge_still_goes_to_a_thread():
@@ -59,9 +58,7 @@ async def test_sync_judge_still_goes_to_a_thread():
         return "ok"
 
     assert await dual_wrap(_tool, _flow)() == "ok"
-    assert seen and seen[0] is not threading.current_thread(), (
-        "синхронный судья исполнился прямо на loop"
-    )
+    assert seen and seen[0] is not threading.current_thread(), "синхронный судья исполнился прямо на loop"
 
 
 async def test_judge_failure_lands_in_the_bodys_except():
@@ -100,12 +97,8 @@ def test_moderation_body_no_longer_owns_a_loop():
     src = inspect.getsource(cm)
     # Именно ВЫЗОВ, а не упоминание: разбор причины в комментарии полезен и
     # должен пережить этот тест.
-    assert "run_coro_blocking(" not in src, (
-        "модерация снова поднимает свой loop — это и есть лишнее рукопожатие"
-    )
-    assert "body_may_block=True" not in src, (
-        "тело снова уезжает в поток целиком, вместе с непереносимой работой"
-    )
+    assert "run_coro_blocking(" not in src, "модерация снова поднимает свой loop — это и есть лишнее рукопожатие"
+    assert "body_may_block=True" not in src, "тело снова уезжает в поток целиком, вместе с непереносимой работой"
 
 
 async def test_human_wait_still_leaves_the_loop_responsive():

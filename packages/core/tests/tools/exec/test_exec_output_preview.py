@@ -25,9 +25,7 @@ def _cfg(cap: int = CAP, edge: int = EDGE) -> dict:
 
 
 def _tool(cls, *, state=None, config_dict=None):
-    return with_local_ctx(
-        cls, state=state, call_id="call-1", config_dict=config_dict or _cfg()
-    )
+    return with_local_ctx(cls, state=state, call_id="call-1", config_dict=config_dict or _cfg())
 
 
 def _print_command(count: int) -> str:
@@ -97,11 +95,7 @@ def test_streams_are_independent():
 
 def test_no_hidden_four_thousand_limit():
     """Без max_output_chars=4000: 3500 символов при cap 10000 приходят целиком."""
-    r = json.loads(
-        _tool(ExecuteCommand, config_dict=_cfg(cap=10000, edge=100))(
-            command=_print_command(3500)
-        )
-    )
+    r = json.loads(_tool(ExecuteCommand, config_dict=_cfg(cap=10000, edge=100))(command=_print_command(3500)))
 
     assert "truncated" not in r["stdout"]
     assert r["stdout"]["total_chars"] == 3500
@@ -118,9 +112,7 @@ def test_max_output_chars_argument_is_ignored():
 
 def test_exec_python_uses_the_same_contract():
     state = _state()
-    r = json.loads(
-        _tool(RunPythonCode, state=state)(code="import sys; sys.stdout.write('A'*500)")
-    )
+    r = json.loads(_tool(RunPythonCode, state=state)(code="import sys; sys.stdout.write('A'*500)"))
 
     assert r["return_code"] == 0
     assert r["truncated"] is True
@@ -132,21 +124,15 @@ def test_exec_python_uses_the_same_contract():
 
 
 def test_exec_python_max_output_chars_argument_is_ignored():
-    r = json.loads(
-        _tool(RunPythonCode)(code="import sys; sys.stdout.write('A'*80)", max_output_chars=5)
-    )
+    r = json.loads(_tool(RunPythonCode)(code="import sys; sys.stdout.write('A'*80)", max_output_chars=5))
 
     assert "truncated" not in r["stdout"]
     assert r["stdout"]["total_chars"] == 80
 
 
 def test_timeout_returns_observed_edges():
-    code = (
-        "import sys, time; sys.stdout.write('A'*500); sys.stdout.flush(); time.sleep(30)"
-    )
-    r = json.loads(
-        _tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"', timeout=1)
-    )
+    code = "import sys, time; sys.stdout.write('A'*500); sys.stdout.flush(); time.sleep(30)"
+    r = json.loads(_tool(ExecuteCommand)(command=f'"{sys.executable}" -c "{code}"', timeout=1))
 
     assert r["timed_out"] is True
     assert r["exit_code"] is None
@@ -168,9 +154,7 @@ async def test_backend_result_without_stream_structure_still_builds_envelope():
         exec_output_capture_max_chars = CAP
 
         def exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
-            return SimpleNamespace(
-                stdout="hi", stderr="", return_code=0, timed_out=False
-            )
+            return SimpleNamespace(stdout="hi", stderr="", return_code=0, timed_out=False)
 
         async def is_dir(self, path):
             return True

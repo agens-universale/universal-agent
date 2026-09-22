@@ -21,9 +21,7 @@ def teardown_module(_module) -> None:
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+        proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
 
 
 def _stub_tools_modules() -> None:
@@ -123,9 +121,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
             ],
         }
 
-    monkeypatch.setattr(
-        processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers)
-    )
+    monkeypatch.setattr(processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers))
     monkeypatch.setattr(
         "gc_core.request_backend_policy.arequest_backend_chat_completions",
         _fake_request_backend_chat_completions,
@@ -162,14 +158,16 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         logger=None,
     )
 
-    run_coro(processing_module._arequest_backend_canonical(
-        [{"role": "user", "content": "next", "id": "m_1"}],
-        state,
-        ctx,
-    ))
+    run_coro(
+        processing_module._arequest_backend_canonical(
+            [{"role": "user", "content": "next", "id": "m_1"}],
+            state,
+            ctx,
+        )
+    )
 
     payload_messages = captured["messages"]
     assert len(payload_messages) == 2
     assert payload_messages[0]["role"] == "user"
-    assert "<technical type=\"error_message\">" in payload_messages[0]["content"]
+    assert '<technical type="error_message">' in payload_messages[0]["content"]
     assert payload_messages[1]["role"] == "user"

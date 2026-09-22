@@ -5,6 +5,7 @@
 - /help (генерится из реестра),
 - closest-match (`difflib.get_close_matches`).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -89,34 +90,35 @@ def build_default_registry() -> CommandRegistry:
 
     cmds = [
         Command("help", (), "", "Справка по командам", hotkey="F1 · Ctrl+/"),
-        Command("sessions", (), "", "Список сессий — выбрать и продолжить",
-                hotkey="F2 · Ctrl+S"),
-        Command("diff", (), "", "Просмотр pending-диффов, принять/откатить",
-                hotkey="F3 · Ctrl+D"),
-        Command("view", (), "<path>", "Постраничный просмотр текстового файла",
-                arg_file=True),
-        Command("notices", (), "", "Уведомления (старт + runtime)",
-                hotkey="F4 · Ctrl+O"),
+        Command("sessions", (), "", "Список сессий — выбрать и продолжить", hotkey="F2 · Ctrl+S"),
+        Command("diff", (), "", "Просмотр pending-диффов, принять/откатить", hotkey="F3 · Ctrl+D"),
+        Command("view", (), "<path>", "Постраничный просмотр текстового файла", arg_file=True),
+        Command("notices", (), "", "Уведомления (старт + runtime)", hotkey="F4 · Ctrl+O"),
         Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
-        Command("config", (), "", "Конфиг сессии + пути к файлам",
-                hotkey="F5 · Ctrl+G"),
+        Command("config", (), "", "Конфиг сессии + пути к файлам", hotkey="F5 · Ctrl+G"),
         # Перечисляет секции экрана (`SECTIONS`, tui/screens/settings.py) — строку
         # видно при каждом открытии палитры, расхождение с составом читается как
         # «секции нет». Без ведущего «Настройки:»: имя команды стоит колонкой слева,
         # а описание тут самое длинное — префикс двигал бы колонку хоткеев вправо
         # ради слова, которое уже прочитано.
-        Command("settings", (), "",
-                "Подключение, модели, профили, MCP, голосовой ввод, режимы, обновление",
-                hotkey="F6"),
+        Command(
+            "settings", (), "", "Подключение, модели, профили, MCP, голосовой ввод, режимы, обновление", hotkey="F6"
+        ),
         # Стоп и отмена здесь не перечисляются: их показывает сама пилюля записи
         # («Ctrl+T / Enter — стоп · Esc — отмена»), пока диктовка идёт.
-        Command("voice", (), "", "Голосовой ввод: надиктовать сообщение",
-                hotkey="Ctrl+T"),
-        Command("export", (), "[txt|json|log-txt|log-json]", "Экспорт сессии",
-                arg_options=(("txt", "Вся сессия в читаемом виде"),
-                             ("json", "Структурированные данные сессии"),
-                             ("log-txt", "Лог-файл агента, текущий запуск (.log)"),
-                             ("log-json", "JSONL-файл треда (вся сессия)"))),
+        Command("voice", (), "", "Голосовой ввод: надиктовать сообщение", hotkey="Ctrl+T"),
+        Command(
+            "export",
+            (),
+            "[txt|json|log-txt|log-json]",
+            "Экспорт сессии",
+            arg_options=(
+                ("txt", "Вся сессия в читаемом виде"),
+                ("json", "Структурированные данные сессии"),
+                ("log-txt", "Лог-файл агента, текущий запуск (.log)"),
+                ("log-json", "JSONL-файл треда (вся сессия)"),
+            ),
+        ),
         Command("compact", ("сжать",), "", "Сжать контекст сессии сейчас"),
         Command("init", (), "", "Анализ проекта и генерация AGENTS.md"),
         Command("skills", (), "", "Обзор навыков"),
@@ -129,12 +131,16 @@ def build_default_registry() -> CommandRegistry:
         # Переключатели палитры «чем работаем» (←/→/Enter, спека §12.1):
         # уровень модели и профиль — над группой строгости завершения хода.
         Command(
-            "level", ("models",), "",
+            "level",
+            ("models",),
+            "",
             _cap(f"{TOGGLES['level'].label}: {TOGGLES['level'].summary}"),
             is_toggle=True,
         ),
         Command(
-            "profiles", (), "[профиль]",
+            "profiles",
+            (),
+            "[профиль]",
             _cap(f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"),
             is_toggle=True,
             arg_options_provider=profile_picker_options,
@@ -142,17 +148,23 @@ def build_default_registry() -> CommandRegistry:
         ),
         # Переключатели палитры (←/→/Enter): самопроверка хода и формат финала.
         Command(
-            "rigor", (), "",
+            "rigor",
+            (),
+            "",
             _cap(f"{TOGGLES['rigor'].label}: {TOGGLES['rigor'].summary}"),
             is_toggle=True,
         ),
         Command(
-            "gate", (), "",
+            "gate",
+            (),
+            "",
             _cap(f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}"),
             is_toggle=True,
         ),
         Command(
-            "answers", (), "",
+            "answers",
+            (),
+            "",
             _cap(f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}"),
             is_toggle=True,
         ),

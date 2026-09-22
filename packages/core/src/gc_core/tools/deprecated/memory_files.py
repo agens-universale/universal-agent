@@ -17,10 +17,7 @@ def _validate_file_name(name: str) -> Optional[str]:
     if not isinstance(name, str):
         return "file_name must be a string"
     if not _VALID_NAME_RE.match(name):
-        return (
-            "file_name must be 1-64 chars: lowercase letters, digits, underscores; "
-            "must start with a letter."
-        )
+        return "file_name must be 1-64 chars: lowercase letters, digits, underscores; must start with a letter."
     return None
 
 
@@ -128,11 +125,9 @@ class MemoryFiles(AbstractSimpleTool):
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         cfg = config_dict or {}
         max_file_chars = cls._cfg_int(cfg, "memory_files_max_file_chars", _DEFAULT_MAX_FILE_CHARS)
-        total_budget_chars = cls._cfg_int(
-            cfg, "memory_files_total_budget_chars", _DEFAULT_TOTAL_BUDGET_CHARS
-        )
+        total_budget_chars = cls._cfg_int(cfg, "memory_files_total_budget_chars", _DEFAULT_TOTAL_BUDGET_CHARS)
         max_files = cls._cfg_int(cfg, "memory_files_max_files", _DEFAULT_MAX_FILES)
-        return f'''Tool name: memory_files
+        return f"""Tool name: memory_files
 Tool description: Persistent named memory files for the current thread (INTERNAL AGENT MEMORY ONLY).
 WARNING: This tool does NOT write files to the disk/filesystem. To write .py, .json, .txt or any other files on disk, use write_to_file tool.
 Each file is a separate markdown register that survives summarization.
@@ -178,7 +173,7 @@ Return format (JSON string):
   "hint": "..." (only for list when files is empty - nudge to start using memory),
   "content": "..." (only for read)
 }}
-'''
+"""
 
     def _get_files(self) -> Dict[str, str]:
         shared = getattr(self._state, "shared", None)
@@ -395,9 +390,7 @@ Return format (JSON string):
                 f"but the per-file limit is {self.MAX_FILE_CHARS} chars. "
                 "Read the file first, then rewrite it more compactly.",
             )
-        projected_total = (
-            sum(len(v) for k, v in files.items() if k != target_name) + len(new_text)
-        )
+        projected_total = sum(len(v) for k, v in files.items() if k != target_name) + len(new_text)
         if projected_total > self.TOTAL_BUDGET_CHARS:
             return self._error(
                 "write",

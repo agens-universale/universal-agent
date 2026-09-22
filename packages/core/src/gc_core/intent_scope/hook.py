@@ -21,8 +21,6 @@ from gc_core.intent_scope.summarizer import asummarize_tool_intent_line, build_f
 _logger = logging.getLogger(__name__)
 
 
-
-
 def _parse_tool_arguments(raw: str) -> dict[str, Any]:
     text = str(raw or "").strip()
     if not text:
@@ -73,9 +71,7 @@ async def _aappend_aggregated_tool_intent(
     )
     used_fallback = False
     if not summary_line and scope_cfg is not None and scope_cfg.fallback_raw_on_llm_error:
-        summary_line = build_fallback_aggregated_content(
-            ctx=ctx, tool_output_raw=tool_output_raw
-        )
+        summary_line = build_fallback_aggregated_content(ctx=ctx, tool_output_raw=tool_output_raw)
         used_fallback = bool(summary_line)
         if used_fallback:
             log_intent_scope_summary_done(
@@ -86,18 +82,12 @@ async def _aappend_aggregated_tool_intent(
             )
 
     if not summary_line:
-        log_intent_scope_skipped(
-            log, tool_name=tool_name, reason="empty_summary"
-        )
+        log_intent_scope_skipped(log, tool_name=tool_name, reason="empty_summary")
         return
 
-    appended = append_tool_aggregated_to_current(
-        state, tool_name, summary_line, fallback=used_fallback
-    )
+    appended = append_tool_aggregated_to_current(state, tool_name, summary_line, fallback=used_fallback)
     if appended:
-        log_intent_scope_delta_appended(
-            log, tool_name=tool_name, delta_chars=len(summary_line)
-        )
+        log_intent_scope_delta_appended(log, tool_name=tool_name, delta_chars=len(summary_line))
 
 
 def _append_raw_tool_intent(
@@ -117,9 +107,7 @@ def _append_raw_tool_intent(
     arguments = _parse_tool_arguments(tool_arguments) if store_arguments else None
     output = _parse_tool_output(tool_output_raw) if store_output else None
     if store_arguments:
-        arguments, output = truncate_raw_tool_payload(
-            arguments or {}, output, max_chars=max_raw
-        )
+        arguments, output = truncate_raw_tool_payload(arguments or {}, output, max_chars=max_raw)
         if not store_output:
             output = None
     elif store_output:
@@ -162,9 +150,7 @@ async def amaybe_update_intent_scope_from_tool(
 
     config_dict = getattr(ctx, "config_dict", {}) or {}
     if str(config_dict.get("backend_api_mode", "responses")).strip().lower() != "chat_completions":
-        log_intent_scope_skipped(
-            log, tool_name=tool_name, reason="backend_not_chat_completions"
-        )
+        log_intent_scope_skipped(log, tool_name=tool_name, reason="backend_not_chat_completions")
         return
     if not intent_scope_active(scope_cfg):
         log_intent_scope_skipped(log, tool_name=tool_name, reason="tools_empty")
@@ -206,5 +192,3 @@ async def amaybe_update_intent_scope_from_tool(
         ctx=ctx,
         log=log,
     )
-
-

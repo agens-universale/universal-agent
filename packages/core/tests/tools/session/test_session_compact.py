@@ -14,9 +14,7 @@ from gc_testkit.helpers.tool_ctx import CallableTool
 def _state(*, backend_api_mode="chat_completions", messages=None):
     return types.SimpleNamespace(
         backend_api_mode=backend_api_mode,
-        messages=messages
-        if messages is not None
-        else [{"role": "user", "content": "hello", "id": "u1"}],
+        messages=messages if messages is not None else [{"role": "user", "content": "hello", "id": "u1"}],
         thread_id="t1",
         user_intent_log=[],
         current_user_intent=[],
@@ -72,9 +70,7 @@ def test_session_compact_rejects_empty_reason():
 
 
 def test_session_compact_rejects_responses_backend():
-    res = json.loads(
-        CallableTool(SessionCompact(state=_state(backend_api_mode="responses")))(reason="phase done")
-    )
+    res = json.loads(CallableTool(SessionCompact(state=_state(backend_api_mode="responses")))(reason="phase done"))
     assert res["ok"] is False
     assert res["error"]["type"] == "unsupported_backend"
 
@@ -142,12 +138,14 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
         lambda tool_res, **_kw: tool_res,
     )
 
-    out = run_coro(aprocess_tool_calls(
-        batch,
-        state,
-        ctx=SimpleNamespace(config_dict={}),
-        run_agent_func=lambda *_a, **_k: None,
-    ))
+    out = run_coro(
+        aprocess_tool_calls(
+            batch,
+            state,
+            ctx=SimpleNamespace(config_dict={}),
+            run_agent_func=lambda *_a, **_k: None,
+        )
+    )
 
     assert len(out) == 1
     assert out[0]["role"] == "user"
@@ -202,18 +200,16 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
         lambda tool_res, **_kw: tool_res,
     )
 
-    out = run_coro(aprocess_tool_calls(
-        batch,
-        state,
-        ctx=SimpleNamespace(config_dict={}),
-        run_agent_func=lambda *_a, **_k: None,
-    ))
+    out = run_coro(
+        aprocess_tool_calls(
+            batch,
+            state,
+            ctx=SimpleNamespace(config_dict={}),
+            run_agent_func=lambda *_a, **_k: None,
+        )
+    )
 
-    call_ids = [
-        m.get("call_id")
-        for m in out
-        if m.get("type") in ("function_call", "function_call_output")
-    ]
+    call_ids = [m.get("call_id") for m in out if m.get("type") in ("function_call", "function_call_output")]
     assert call_ids == ["c_other", "c_other"]
     assert out[-1]["role"] == "user"
     assert "session_compact finished" in str(out[-1].get("content") or "")

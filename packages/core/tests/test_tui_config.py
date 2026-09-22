@@ -70,8 +70,7 @@ def test_flatten_exposes_tui_file_view(tmp_path):
 
     conf = tmp_path / "config.yml"
     conf.write_text(
-        "tui:\n  file_view:\n    enabled: false\n    max_file_bytes: 1024\n"
-        "    page_lines: 40\n",
+        "tui:\n  file_view:\n    enabled: false\n    max_file_bytes: 1024\n    page_lines: 40\n",
         encoding="utf-8",
     )
     cfg = cfgmod.load_config(str(conf))

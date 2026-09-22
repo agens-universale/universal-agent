@@ -63,9 +63,11 @@ def test_invalid_call_does_not_drop_siblings(monkeypatch):
 
 def test_invalid_call_output_is_an_invalid_arguments_envelope(monkeypatch):
     _patch(monkeypatch, [])
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages=[_fc("session_think", "c1", '{"bogus": 1}')], state=_state(), ctx=_ctx(), run_agent_func=None
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages=[_fc("session_think", "c1", '{"bogus": 1}')], state=_state(), ctx=_ctx(), run_agent_func=None
+        )
+    )
     payload = json.loads(outs[0]["output"])
     assert payload["ok"] is False
     assert payload["error"]["type"] == "invalid_arguments"
@@ -79,18 +81,28 @@ def test_invalid_call_output_is_an_invalid_arguments_envelope(monkeypatch):
 def test_invalid_calls_are_counted_for_the_error_budget(monkeypatch):
     _patch(monkeypatch, [])
     state = _state()
-    run_coro(pr.aprocess_tool_calls(
-        messages=[_fc("session_think", "c1"), _fc("subagent_worker", "c2")], state=state, ctx=_ctx(), run_agent_func=None
-    ))
+    run_coro(
+        pr.aprocess_tool_calls(
+            messages=[_fc("session_think", "c1"), _fc("subagent_worker", "c2")],
+            state=state,
+            ctx=_ctx(),
+            run_agent_func=None,
+        )
+    )
     assert state.last_batch_invalid_arguments_count == 1
     assert state.last_batch_unknown_tool_count == 0
 
 
 def test_truncated_output_hint_when_finish_reason_is_length(monkeypatch):
     _patch(monkeypatch, [])
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages=[_fc("session_think", "c1")], state=_state(last_finish_reason="length"), ctx=_ctx(), run_agent_func=None
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages=[_fc("session_think", "c1")],
+            state=_state(last_finish_reason="length"),
+            ctx=_ctx(),
+            run_agent_func=None,
+        )
+    )
     assert "Output was truncated" in json.loads(outs[0]["output"])["message"]
 
 
@@ -105,7 +117,9 @@ def test_envelope_shape():
 def test_truncation_hint_is_appended_to_the_tool_hint_not_instead_of_it(monkeypatch):
     def fake_apply_tool(**kw):
         raise pr.WrongFunctionArgumentsException(
-            "Unexpected field 'bogus'", received_args=kw["arguments"], tool_name="session_think",
+            "Unexpected field 'bogus'",
+            received_args=kw["arguments"],
+            tool_name="session_think",
             extra_hint="TOOL HINT: allowed fields are thought, next_step",
         )
 
@@ -114,9 +128,14 @@ def test_truncation_hint_is_appended_to_the_tool_hint_not_instead_of_it(monkeypa
     monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
-    outs = run_coro(pr.aprocess_tool_calls(
-        messages=[_fc("session_think", "c1")], state=_state(last_finish_reason="length"), ctx=_ctx(), run_agent_func=None
-    ))
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages=[_fc("session_think", "c1")],
+            state=_state(last_finish_reason="length"),
+            ctx=_ctx(),
+            run_agent_func=None,
+        )
+    )
     message = json.loads(outs[0]["output"])["message"]
     assert "TOOL HINT: allowed fields are thought, next_step" in message
     assert "Output was truncated" in message
@@ -159,7 +178,9 @@ def test_a_finalizer_with_invalid_arguments_does_not_skip_its_siblings(monkeypat
     _patch_ask_human(monkeypatch, calls)
     batch = [_fc("turn_ask_human", "c1", '{"bogus": 1}'), _fc("session_memory", "c2", '{"action": "read"}')]
 
-    outs = run_coro(pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+    )
 
     assert calls == ["turn_ask_human", "session_memory"]
     assert json.loads(outs[0]["output"])["error"]["type"] == "invalid_arguments"
@@ -169,9 +190,14 @@ def test_a_finalizer_with_invalid_arguments_does_not_skip_its_siblings(monkeypat
 def test_a_valid_ask_human_skips_later_work_siblings(monkeypatch):
     calls: list[str] = []
     _patch_ask_human(monkeypatch, calls)
-    batch = [_fc("turn_ask_human", "c1", '{"question": "which one?"}'), _fc("session_memory", "c2", '{"action": "read"}')]
+    batch = [
+        _fc("turn_ask_human", "c1", '{"question": "which one?"}'),
+        _fc("session_memory", "c2", '{"action": "read"}'),
+    ]
 
-    outs = run_coro(pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+    )
 
     assert calls == ["turn_ask_human"]
     assert json.loads(outs[1]["output"])["skipped"] is True
@@ -185,7 +211,9 @@ def test_a_valid_ask_human_skips_turn_finish(monkeypatch):
         _fc("turn_finish", "c2", '{"solution_type": "full_solution"}'),
     ]
 
-    outs = run_coro(pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+    )
 
     assert calls == ["turn_ask_human"]
     assert json.loads(outs[1]["output"])["skipped"] is True
@@ -199,7 +227,9 @@ def test_an_invalid_ask_human_does_not_skip_turn_finish(monkeypatch):
         _fc("turn_finish", "c2", '{"solution_type": "full_solution"}'),
     ]
 
-    outs = run_coro(pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages=batch, state=_state(), ctx=_ctx_with_ask_human_spec(), run_agent_func=None)
+    )
 
     assert calls == ["turn_ask_human", "turn_finish"]
     assert json.loads(outs[0]["output"])["error"]["type"] == "invalid_arguments"

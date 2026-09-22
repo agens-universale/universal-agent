@@ -10,41 +10,50 @@ def _io(answers):
 
 
 def test_model_pick_from_list():
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"},
-           "model": onboarding.MODEL_SENTINEL}
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
     fake = lambda url, auth, **k: [ModelInfo("Qwen", tool_capable=True), ModelInfo("CodeChat", tool_capable=False)]
-    io, _ = _io(["1"])   # выбрать пункт 1 (Qwen)
+    io, _ = _io(["1"])  # выбрать пункт 1 (Qwen)
     values = {}
     wz._collect_model(io, cfg, values, fetch=fake)
     assert values["model"] == "Qwen"
 
 
 def test_model_manual_fallback_when_no_list():
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"},
-           "model": onboarding.MODEL_SENTINEL}
-    fake = lambda url, auth, **k: None   # список не получен
-    io, _ = _io(["vllm/Qwen3-Coder-Next-262k"])   # ручной ввод
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
+    fake = lambda url, auth, **k: None  # список не получен
+    io, _ = _io(["vllm/Qwen3-Coder-Next-262k"])  # ручной ввод
     values = {}
     wz._collect_model(io, cfg, values, fetch=fake)
     assert values["model"] == "vllm/Qwen3-Coder-Next-262k"
 
 
 def test_model_warning_shown_only_with_non_tool():
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}, "model": onboarding.MODEL_SENTINEL}
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
     io, out = _io(["1"])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: [ModelInfo("Q", tool_capable=True)])
-    assert not any("⚠" in m for m in out)   # все tool-capable → без ⚠
+    assert not any("⚠" in m for m in out)  # все tool-capable → без ⚠
 
 
 def test_model_manual_fallback_when_empty_list():
     """fetch_models -> [] (пустой список) → ручной ввод, не пустое меню."""
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"},
-           "model": onboarding.MODEL_SENTINEL}
-    fake = lambda url, auth, **k: []   # пустой список
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
+    fake = lambda url, auth, **k: []  # пустой список
     io, _ = _io(["vllm/SomeModel"])
     values = {}
     wz._collect_model(io, cfg, values, fetch=fake)
@@ -55,8 +64,7 @@ def test_choice_is_confirmed_after_a_pick_and_silent_on_skip():
     """Промах на соседнюю строку (`claude-sonnet-5` / `claude-sonnet-5:batch`)
     раньше всплывал только в финальной сводке — после успешной записи, когда
     его уже не отменить не заметив. Подтверждение печатается сразу."""
-    cfg = {"completions_url": "https://h/v1/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}}
+    cfg = {"completions_url": "https://h/v1/chat/completions", "chat_completion_headers": {"Authorization": "Bearer x"}}
     io, out = _io(["1"])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _models3())
     assert "  выбрано для default: gigacode" in out
@@ -69,9 +77,11 @@ def test_choice_is_confirmed_after_manual_entry_when_no_list():
     """Тот же риск, что и со списком, только на другой ветке: без списка
     человек вписывает id вручную, и опечатка там всплыла бы только в
     финальной сводке — после записи в файл — если бы не эта строка."""
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"},
-           "model": onboarding.MODEL_SENTINEL}
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
     io, out = _io(["vllm/Qwen3-Coder-Next-262k"])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: None)
     assert "  выбрано для default: vllm/Qwen3-Coder-Next-262k" in out
@@ -84,8 +94,7 @@ def test_network_is_reached_only_after_the_header_is_printed():
     так виден точный порядок событий."""
     out = []
     io = wz.WizardIO(reader=lambda p, s: "", printer=out.append)
-    cfg = {"completions_url": "https://h/v1/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}}
+    cfg = {"completions_url": "https://h/v1/chat/completions", "chat_completion_headers": {"Authorization": "Bearer x"}}
 
     def fake_fetch(url, auth, **k):
         out.append("<fetch>")
@@ -98,25 +107,31 @@ def test_network_is_reached_only_after_the_header_is_printed():
 
 def test_model_warning_shown_when_non_tool_present():
     """⚠-подсказка появляется, если хотя бы одна модель tool_capable is False."""
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}, "model": onboarding.MODEL_SENTINEL}
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
     io, out = _io(["1"])
-    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: [
-        ModelInfo("Q", tool_capable=True), ModelInfo("C", tool_capable=False)
-    ])
+    wz._collect_model(
+        io, cfg, {}, fetch=lambda *a, **k: [ModelInfo("Q", tool_capable=True), ModelInfo("C", tool_capable=False)]
+    )
     assert any("⚠ отмеченные модели" in m for m in out)
 
 
 def test_model_section_header_and_marker_consistent_when_no_list():
     # единый плоский стиль: заголовок «  Модель» даже без списка, приглашение «  > », без labeled-текста
-    cfg = {"completions_url": "https://h/api/v2/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}, "model": onboarding.MODEL_SENTINEL}
+    cfg = {
+        "completions_url": "https://h/api/v2/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": onboarding.MODEL_SENTINEL,
+    }
     prompts, out = [], []
     io = wz.WizardIO(reader=lambda p, s: prompts.append(p) or "", printer=out.append)
-    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: None)   # список не получен
-    assert any(l.strip() == "Модель" for l in out)       # заголовок секции есть всегда
-    assert "  > " in prompts                             # приглашение в общем стиле
-    assert not any("Имя модели" in p for p in prompts)   # старое labeled-приглашение убрано
+    wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: None)  # список не получен
+    assert any(l.strip() == "Модель" for l in out)  # заголовок секции есть всегда
+    assert "  > " in prompts  # приглашение в общем стиле
+    assert not any("Имя модели" in p for p in prompts)  # старое labeled-приглашение убрано
 
 
 def _many(n: int) -> list:
@@ -127,9 +142,11 @@ def _many(n: int) -> list:
 def _models3() -> list:
     """Три модели с говорящими именами — для тестов, где важен не размер списка,
     а поведение выбора. В файле такого хелпера ещё нет."""
-    return [ModelInfo("gigacode", tool_capable=True),
-            ModelInfo("glm-5.2-fp8", tool_capable=True),
-            ModelInfo("openai/gpt-5.6-terra", tool_capable=True)]
+    return [
+        ModelInfo("gigacode", tool_capable=True),
+        ModelInfo("glm-5.2-fp8", tool_capable=True),
+        ModelInfo("openai/gpt-5.6-terra", tool_capable=True),
+    ]
 
 
 def test_short_list_is_shown_whole_without_a_counter():
@@ -212,15 +229,14 @@ def test_a_superscript_digit_is_a_query_not_a_crash():
 
 
 def test_current_line_names_the_registry_entry():
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
-           "slots": {"default": "fast"}}
+    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {"default": "fast"}}
     assert wz._current_line(cfg, "default", "qwen/qwen3-8b") == (
-        "сейчас: qwen/qwen3-8b  (имя записи «fast») · Enter — оставить")
+        "сейчас: qwen/qwen3-8b  (имя записи «fast») · Enter — оставить"
+    )
 
 
 def test_current_line_without_a_slot_has_no_entry_name():
-    assert wz._current_line({}, "default", "vllm/Own") == (
-        "сейчас: vllm/Own · Enter — оставить")
+    assert wz._current_line({}, "default", "vllm/Own") == ("сейчас: vllm/Own · Enter — оставить")
 
 
 def test_current_line_of_an_empty_level():
@@ -231,8 +247,7 @@ def test_current_line_omits_the_entry_name_when_it_equals_the_id():
     """Запись с именем, совпадающим с id модели (типовой конфиг `models: {gigacode:
     {}}`), не должна повторять то же слово в скобках."""
     cfg = {"models": {"gigacode": {}}, "slots": {"light": "gigacode"}}
-    assert wz._current_line(cfg, "light", "gigacode") == (
-        "сейчас: gigacode · Enter — оставить")
+    assert wz._current_line(cfg, "light", "gigacode") == ("сейчас: gigacode · Enter — оставить")
 
 
 def test_current_model_is_marked_in_the_list():
@@ -265,20 +280,22 @@ def test_blank_line_separates_each_list_print():
     io, out = _io(["qwen", "1"])
     wz._choose_model(io, models, current="")
 
-    first_row = out.index("  1) gigacode")           # первая строка первого списка
-    last_row = out.index("  4) qwen/qwen3-8b")        # его последняя строка (счётчика нет)
-    second_row = out.index("  1) qwen/qwen3-8b")      # первая строка списка после запроса
-    counter = out.index("  найдено 1 из 4 · * — весь каталог")   # счётчик второго показа
+    first_row = out.index("  1) gigacode")  # первая строка первого списка
+    last_row = out.index("  4) qwen/qwen3-8b")  # его последняя строка (счётчика нет)
+    second_row = out.index("  1) qwen/qwen3-8b")  # первая строка списка после запроса
+    counter = out.index("  найдено 1 из 4 · * — весь каталог")  # счётчик второго показа
 
-    assert first_row > 0 and out[first_row - 1] == ""            # воздух ПЕРЕД списком
-    assert last_row + 1 < len(out) and out[last_row + 1] == ""   # воздух ПОСЛЕ блока без счётчика
-    assert second_row > 0 and out[second_row - 1] == ""          # воздух перед повторным списком
-    assert counter + 1 < len(out) and out[counter + 1] == ""     # воздух ПОСЛЕ счётчика, не перед ним
+    assert first_row > 0 and out[first_row - 1] == ""  # воздух ПЕРЕД списком
+    assert last_row + 1 < len(out) and out[last_row + 1] == ""  # воздух ПОСЛЕ блока без счётчика
+    assert second_row > 0 and out[second_row - 1] == ""  # воздух перед повторным списком
+    assert counter + 1 < len(out) and out[counter + 1] == ""  # воздух ПОСЛЕ счётчика, не перед ним
 
 
 def test_query_then_number_picks_from_the_matches():
-    models = _many(30) + [ModelInfo("qwen/qwen3-8b", tool_capable=True),
-                          ModelInfo("qwen/qwen3-235b", tool_capable=True)]
+    models = _many(30) + [
+        ModelInfo("qwen/qwen3-8b", tool_capable=True),
+        ModelInfo("qwen/qwen3-235b", tool_capable=True),
+    ]
     io, _ = _io(["qwen", "2"])
     assert wz._choose_model(io, models, current="") == "qwen/qwen3-235b"
 
@@ -354,8 +371,7 @@ def test_no_matches_prompt_names_three_outcomes():
     слова — и это самый вероятный промах живого прогона."""
     prompts = []
     seq = iter(["vllm/Own", "n", ""])
-    io = wz.WizardIO(reader=lambda p, s: (prompts.append(p), next(seq))[1],
-                     printer=lambda m: None)
+    io = wz.WizardIO(reader=lambda p, s: (prompts.append(p), next(seq))[1], printer=lambda m: None)
     wz._choose_model(io, _models3(), current="")
     assert "  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): " in prompts
 
@@ -373,8 +389,7 @@ def test_star_prints_the_whole_list():
 
 
 def test_model_step_names_its_level():
-    cfg = {"completions_url": "https://h/v1/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"}}
+    cfg = {"completions_url": "https://h/v1/chat/completions", "chat_completion_headers": {"Authorization": "Bearer x"}}
     io, out = _io([""])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _models3())
     assert any("уровень default" in m for m in out)
@@ -382,17 +397,18 @@ def test_model_step_names_its_level():
 
 # --- «сейчас» шага — про слот default, а не про активный уровень ---------------
 
+
 def _two_level_registry() -> dict:
-    return {"completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "models": {"fast": {"model": "qwen/qwen3-8b"},
-                       "brain": {"model": "qwen/qwen3-235b"}},
-            "slots": {"default": "fast", "max": "brain"}}
+    return {
+        "completions_url": "https://h/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "models": {"fast": {"model": "qwen/qwen3-8b"}, "brain": {"model": "qwen/qwen3-235b"}},
+        "slots": {"default": "fast", "max": "brain"},
+    }
 
 
 def _qwen2() -> list:
-    return [ModelInfo("qwen/qwen3-8b", tool_capable=True),
-            ModelInfo("qwen/qwen3-235b", tool_capable=True)]
+    return [ModelInfo("qwen/qwen3-8b", tool_capable=True), ModelInfo("qwen/qwen3-235b", tool_capable=True)]
 
 
 def test_the_model_step_shows_the_default_slot_not_the_active_level():
@@ -413,9 +429,12 @@ def test_the_model_step_keeps_showing_the_legacy_model_on_a_flat_config():
     """Сторож фоллбэка: без реестра слотов нет вовсе, единственная модель конфига —
     легаси `agent.model`, и действует она на любом уровне (`level` её не сдвигает).
     Не показать её значило бы отнять «сейчас» у всех конфигов до волны B."""
-    cfg = {"completions_url": "https://h/v1/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer x"},
-           "model": "gigacode_agent_v1.6_rc", "level": "max"}
+    cfg = {
+        "completions_url": "https://h/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "model": "gigacode_agent_v1.6_rc",
+        "level": "max",
+    }
     io, out = _io([""])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: None)
     assert "  сейчас: gigacode_agent_v1.6_rc · Enter — оставить" in out
@@ -432,10 +451,9 @@ def test_an_unset_default_slot_shows_the_fallback_model_with_its_source():
     io, out = _io([""])
     values = {}
     wz._collect_model(io, cfg, values, fetch=lambda *a, **k: _qwen2())
-    assert ("  сейчас: qwen/qwen3-235b  (default не задан — работает max)"
-            " · Enter — оставить") in out
+    assert ("  сейчас: qwen/qwen3-235b  (default не задан — работает max) · Enter — оставить") in out
     assert any("qwen3-235b" in m and "← сейчас" in m for m in out)
-    assert values == {}                                   # проход насквозь не пишет
+    assert values == {}  # проход насквозь не пишет
 
 
 def test_a_single_entry_registry_without_slots_is_still_shown_as_current():
@@ -443,8 +461,7 @@ def test_a_single_entry_registry_without_slots_is_still_shown_as_current():
     запись реестра и ни одного слота. Резолв тут от уровня не зависит (единственная
     модель реестра работает на любом), и «сейчас» обязана её назвать — как и до
     правки про активный уровень; без имени записи в скобках: слот не задан."""
-    cfg = {**_two_level_registry(), "models": {"fast": {"model": "qwen/qwen3-8b"}},
-           "slots": {}, "level": "max"}
+    cfg = {**_two_level_registry(), "models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {}, "level": "max"}
     io, out = _io([""])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _qwen2())
     assert "  сейчас: qwen/qwen3-8b · Enter — оставить" in out

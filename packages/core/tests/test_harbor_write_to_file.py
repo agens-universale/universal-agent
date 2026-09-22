@@ -5,6 +5,7 @@ file is the oracle — the same base tool driven by an in-memory FakeBackend mus
 an IDENTICAL envelope (path/backup_path fields stripped) and IDENTICAL resulting file
 content for the same input. `_run_both` feeds one case through both backends.
 """
+
 import json
 
 import pytest
@@ -74,17 +75,17 @@ def _cmp(tmp_path, initial_content, call_kwargs, *, path_name="f.txt"):
 
 _CASES = [
     # (id, initial_content_or_None, kwargs)
-    ("create_new",              None,       {"content": "hello\nworld\n"}),
-    ("overwrite",               "old\n",    {"content": "new\n"}),
-    ("create_only_new",         None,       {"content": "x\n", "mode": "create_only"}),
-    ("create_only_existing_fails", "x\n",  {"content": "y\n", "mode": "create_only"}),
-    ("fail_if_missing_absent_fails", None,  {"content": "x\n", "mode": "fail_if_missing"}),
-    ("fail_if_missing_exists",  "old\n",   {"content": "new\n", "mode": "fail_if_missing"}),
-    ("newline_lf",              None,       {"content": "a\r\nb\r\nc\n", "newline": "lf"}),
-    ("newline_crlf",            None,       {"content": "a\nb\nc\n", "newline": "crlf"}),
-    ("newline_preserve",        None,       {"content": "a\r\nb\n", "newline": "preserve"}),
-    ("backup_existing",         "original\n", {"content": "updated\n", "backup": True}),
-    ("backup_no_prior_file",    None,       {"content": "fresh\n", "backup": True}),
+    ("create_new", None, {"content": "hello\nworld\n"}),
+    ("overwrite", "old\n", {"content": "new\n"}),
+    ("create_only_new", None, {"content": "x\n", "mode": "create_only"}),
+    ("create_only_existing_fails", "x\n", {"content": "y\n", "mode": "create_only"}),
+    ("fail_if_missing_absent_fails", None, {"content": "x\n", "mode": "fail_if_missing"}),
+    ("fail_if_missing_exists", "old\n", {"content": "new\n", "mode": "fail_if_missing"}),
+    ("newline_lf", None, {"content": "a\r\nb\r\nc\n", "newline": "lf"}),
+    ("newline_crlf", None, {"content": "a\nb\nc\n", "newline": "crlf"}),
+    ("newline_preserve", None, {"content": "a\r\nb\n", "newline": "preserve"}),
+    ("backup_existing", "original\n", {"content": "updated\n", "backup": True}),
+    ("backup_no_prior_file", None, {"content": "fresh\n", "backup": True}),
 ]
 
 
@@ -92,14 +93,16 @@ _CASES = [
 def test_identical_to_base(tmp_path, case):
     _id, initial, kw = case
     b_env, b_content, h_env, h_content = _run_both(tmp_path, initial, "f.txt", kw)
-    assert strip_path_fields(h_env, "path", "backup_path") == strip_path_fields(b_env, "path", "backup_path"), \
+    assert strip_path_fields(h_env, "path", "backup_path") == strip_path_fields(b_env, "path", "backup_path"), (
         f"envelope diverged for case={_id}: harbor={h_env} base={b_env}"
+    )
     assert h_content == b_content, f"content diverged for case={_id}"
 
 
 # ---------------------------------------------------------------------------
 # Targeted assertions
 # ---------------------------------------------------------------------------
+
 
 def test_create_new_writes_content(tmp_path):
     _, h_env = _cmp(tmp_path, None, {"content": "hello\n"})

@@ -6,6 +6,7 @@
 номер кадра. Визуал зафиксирован единый (живая приёмка 2026-07-05), без
 конфигурации. Спека: docs/tui/specs/2026-07-05-voice-input-design.md.
 """
+
 from __future__ import annotations
 
 import math
@@ -20,12 +21,12 @@ PILL_WIDTH = 21
 # Рампа уровней (индекс 0 = «пусто», виден только градиент): braille — рисуется
 # любым терминальным шрифтом (блок-«восьмушки» ▁▂▃ есть не везде, живой прогон).
 _RAMP = " ⡀⣀⣤⣶⣿"
-_MAX_LEVEL = len(_RAMP) - 1   # уровни 0..5
-_WAVE = (1, 3, 5, 3, 1)       # симметричный «пик» (расщепление, распознавание)
-_FLIGHT_CELLS = 7             # путь копии от центра до растворения (ячеек)
-_CYCLE_FRAMES = 32            # полный цикл пары (~2.6с при кадре 0.08с)
+_MAX_LEVEL = len(_RAMP) - 1  # уровни 0..5
+_WAVE = (1, 3, 5, 3, 1)  # симметричный «пик» (расщепление, распознавание)
+_FLIGHT_CELLS = 7  # путь копии от центра до растворения (ячеек)
+_CYCLE_FRAMES = 32  # полный цикл пары (~2.6с при кадре 0.08с)
 _WAVE_HALF = len(_WAVE) // 2
-_SPARK_MIN = 0.35             # ниже — ячейка гаснет (иначе за волной тянется грязь)
+_SPARK_MIN = 0.35  # ниже — ячейка гаснет (иначе за волной тянется грязь)
 
 
 def format_rec_time(seconds: float) -> str:
@@ -51,7 +52,7 @@ def _gradient_bg(pos: float) -> str:
     return _lerp_hex(palette.OLIVE, palette.ACCENT, (pos - 0.5) * 2)
 
 
-_WAVE_NODES = (0.0,) + tuple(float(v) for v in _WAVE) + (0.0,)   # мягкие концы
+_WAVE_NODES = (0.0,) + tuple(float(v) for v in _WAVE) + (0.0,)  # мягкие концы
 _WAVE_CENTER_NODE = _WAVE_HALF + 1
 
 
@@ -84,13 +85,13 @@ def _transcribing_levels(frame: int) -> list[int]:
     acc = [0.0] * PILL_WIDTH
     center = PILL_WIDTH // 2
     for phase_shift in (0, _CYCLE_FRAMES // 2):
-        p = ((frame + phase_shift) % _CYCLE_FRAMES) / _CYCLE_FRAMES   # 0..1
+        p = ((frame + phase_shift) % _CYCLE_FRAMES) / _CYCLE_FRAMES  # 0..1
         if p >= 0.92:
-            continue                       # копия догорела — следующая уже в пути
+            continue  # копия догорела — следующая уже в пути
         offset = 1.0 + p * _FLIGHT_CELLS
         decay = 1.0 - p * 0.85
         for direction in (-1, 1):
-            head = center + direction * offset       # центр копии, ДРОБНЫЙ
+            head = center + direction * offset  # центр копии, ДРОБНЫЙ
             for pos in range(PILL_WIDTH):
                 value = _wave_at(abs(pos - head)) * decay
                 if value > acc[pos]:
@@ -106,10 +107,10 @@ def _transcribing_levels(frame: int) -> list[int]:
     return levels
 
 
-_REC_LABEL_START = 2                  # отступ метки «● REC» от левого края
-_METER_START = _REC_LABEL_START + 6   # спектр-эквалайзер — правее «● REC »
-_METER_WIDTH = 7                      # ячеек метра (правее — зазор и таймер)
-_METER_FLOOR = 0.003                  # шумовой гейт: ниже — метр пуст
+_REC_LABEL_START = 2  # отступ метки «● REC» от левого края
+_METER_START = _REC_LABEL_START + 6  # спектр-эквалайзер — правее «● REC »
+_METER_WIDTH = 7  # ячеек метра (правее — зазор и таймер)
+_METER_FLOOR = 0.003  # шумовой гейт: ниже — метр пуст
 
 
 def _recording_cells(frame: int, bands: tuple) -> list[str]:
@@ -139,24 +140,21 @@ def _recording_cells(frame: int, bands: tuple) -> list[str]:
     return cells
 
 
-def render_pill(stage: str, elapsed: float, frame: int,
-                bands: tuple = ()) -> Text:
+def render_pill(stage: str, elapsed: float, frame: int, bands: tuple = ()) -> Text:
     """stage: "recording" | "transcribing" → Text ровно PILL_WIDTH ячеек.
 
     bands — спектр микрофона по полосам 0..1 (эквалайзер записи)."""
-    timer = (format_rec_time(elapsed) if stage == "recording"
-             else format_stt_time(elapsed))
+    timer = format_rec_time(elapsed) if stage == "recording" else format_stt_time(elapsed)
     if stage == "recording":
         cells = _recording_cells(frame, bands)
     else:
         cells = [_RAMP[lvl] for lvl in _transcribing_levels(frame)]
-    t_start = PILL_WIDTH - len(timer) - 1   # таймер поверх правого края
+    t_start = PILL_WIDTH - len(timer) - 1  # таймер поверх правого края
     for i, ch in enumerate(timer):
         cells[t_start + i] = ch
     if t_start - 1 >= 0:
-        cells[t_start - 1] = " "            # зазор-воздух между анимацией и таймером
+        cells[t_start - 1] = " "  # зазор-воздух между анимацией и таймером
     text = Text()
     for i, ch in enumerate(cells):
-        text.append(ch, style=Style(color=TEXT_ON_FILL,
-                                    bgcolor=_gradient_bg(i / (PILL_WIDTH - 1))))
+        text.append(ch, style=Style(color=TEXT_ON_FILL, bgcolor=_gradient_bg(i / (PILL_WIDTH - 1))))
     return text

@@ -7,13 +7,14 @@ docs 2026-08-09-profiles-a-migration-plan).
 При нехватке ширины имя профиля сначала усекается (потолок 14 колонок,
 дальше — до минимума 5, Task 11 + Task 17), и только ниже минимума снимается
 целиком — точка остаётся всегда."""
+
 from pathlib import Path
 
 import pytest
 
-_LONG_NAME = "very-long-profile-name"   # 22 символа
-_CEILING = _LONG_NAME[:13] + "…"        # потолок: 13 символов + «…» = 14 колонок
-_FLOOR = _LONG_NAME[:4] + "…"           # минимум: 4 символа + «…» = 5 колонок
+_LONG_NAME = "very-long-profile-name"  # 22 символа
+_CEILING = _LONG_NAME[:13] + "…"  # потолок: 13 символов + «…» = 14 колонок
+_FLOOR = _LONG_NAME[:4] + "…"  # минимум: 4 символа + «…» = 5 колонок
 
 
 @pytest.mark.asyncio
@@ -226,8 +227,7 @@ async def test_footer_stacks_usage_before_dropping_profile(tmp_path, monkeypatch
         acc.add(CATEGORY_MAIN, inp, out)
         return acc.to_meta()
 
-    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-               "per_tokens": 1_000_000}
+    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": pricing})
     app._config_path = str(tmp_path / "config.yml")
@@ -239,24 +239,30 @@ async def test_footer_stacks_usage_before_dropping_profile(tmp_path, monkeypatch
         app.active_runner = _FakeRunner((_meta(2_000_000, 0), _meta(1_000_000, 0)))
 
         request_seg, session_seg = scr._usage_segments()
-        assert request_seg is not None and session_seg is not None   # оба сегмента активны
+        assert request_seg is not None and session_seg is not None  # оба сегмента активны
 
         # available_width=10_000 → compose_adaptive_footer_right всегда отдаёт
         # однострочную склейку (порог заведомо не пройден) — считаем длины обоих
         # вариантов, чтобы не хардкодить конкретные числа символов.
         single_with_profile = compose_adaptive_footer_right(
-            scr._footer_head(with_profile=True), request_seg, session_seg, available_width=10_000,
+            scr._footer_head(with_profile=True),
+            request_seg,
+            session_seg,
+            available_width=10_000,
         )
         single_without_profile = compose_adaptive_footer_right(
-            scr._footer_head(with_profile=False), request_seg, session_seg, available_width=10_000,
+            scr._footer_head(with_profile=False),
+            request_seg,
+            session_seg,
+            available_width=10_000,
         )
         avail = cell_len(single_without_profile.plain)
-        assert cell_len(single_with_profile.plain) > avail   # с профилем в этот бюджет не влезло бы
+        assert cell_len(single_with_profile.plain) > avail  # с профилем в этот бюджет не влезло бы
 
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: avail)
         plain = scr._compose_footer_right().plain
-        first, second = plain.split("\n")                     # цены уехали вниз
-        assert first == f"{_CEILING} ● m"                     # имя профиля цело (в потолке)
+        first, second = plain.split("\n")  # цены уехали вниз
+        assert first == f"{_CEILING} ● m"  # имя профиля цело (в потолке)
         assert "запрос" in second and "сессия" in second
 
 
@@ -288,6 +294,7 @@ def _pinned_runner(level: str, router):
 def _pinned_runner_with_usage(level: str, router, usage_snapshot):
     """Как `_pinned_runner`, но и с активными usage-сегментами (запрос ·
     сессия) — нужно, чтобы вынудить usage-блок на 2-ю строку (Task 16)."""
+
     class _FakeRunner:
         def is_running(self):
             return True
@@ -317,8 +324,7 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(tmp_
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner("light", pinned_router)
@@ -355,9 +361,9 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
 
         plain = scr._compose_footer_right().plain
         assert plain == "other ● minimax-m3 → ● opus-4.8"
-        assert plain.startswith("other ")            # новое имя профиля слева
+        assert plain.startswith("other ")  # новое имя профиля слева
         assert "minimax-m3" in plain and "opus-4.8" in plain
-        assert "→ ●" in plain                         # точка перехода справа
+        assert "→ ●" in plain  # точка перехода справа
 
 
 @pytest.mark.asyncio
@@ -421,8 +427,7 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
 
@@ -459,8 +464,7 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(tmp_pa
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner("light", pinned_router)
@@ -491,8 +495,7 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner("light", pinned_router)
@@ -538,18 +541,17 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(tmp_path, mon
         acc.add(CATEGORY_MAIN, inp, out)
         return acc.to_meta()
 
-    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-               "per_tokens": 1_000_000}
+    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": pricing})
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0)))
+            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
@@ -564,7 +566,7 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(tmp_path, mon
         two_line = compose_adaptive_footer_right(head, request_seg, session_seg, available_width=0)
         avail = max(cell_len(line) for line in two_line.plain.split("\n"))
         single = compose_adaptive_footer_right(head, request_seg, session_seg, available_width=10_000)
-        assert cell_len(single.plain) > avail   # одна строка при этой ширине не влезает
+        assert cell_len(single.plain) > avail  # одна строка при этой ширине не влезает
 
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: avail)
         plain = scr._compose_footer_right().plain
@@ -595,18 +597,17 @@ async def test_footer_two_line_layout_drops_profile_before_transition(tmp_path, 
         acc.add(CATEGORY_MAIN, inp, out)
         return acc.to_meta()
 
-    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-               "per_tokens": 1_000_000}
+    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": pricing})
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0)))
+            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="very-long-profile-name", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
@@ -616,12 +617,14 @@ async def test_footer_two_line_layout_drops_profile_before_transition(tmp_path, 
 
         head_no_profile = scr._footer_head(with_profile=False, snapshot=head_snapshot)
         two_line_no_profile = compose_adaptive_footer_right(
-            head_no_profile, request_seg, session_seg, available_width=0)
+            head_no_profile, request_seg, session_seg, available_width=0
+        )
         avail = max(cell_len(line) for line in two_line_no_profile.plain.split("\n"))
 
         head_with_profile = scr._footer_head(with_profile=True, snapshot=head_snapshot)
         two_line_with_profile = compose_adaptive_footer_right(
-            head_with_profile, request_seg, session_seg, available_width=0)
+            head_with_profile, request_seg, session_seg, available_width=0
+        )
         assert max(cell_len(line) for line in two_line_with_profile.plain.split("\n")) > avail
 
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: avail)
@@ -649,18 +652,17 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(tmp_p
         acc.add(CATEGORY_MAIN, inp, out)
         return acc.to_meta()
 
-    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-               "per_tokens": 1_000_000}
+    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": pricing})
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0)))
+            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
 
         head_snapshot = scr._footer_head_snapshot()
@@ -694,18 +696,17 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(t
         acc.add(CATEGORY_MAIN, inp, out)
         return acc.to_meta()
 
-    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-               "per_tokens": 1_000_000}
+    pricing = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": pricing})
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                    "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+        snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
         pinned_router = ModelRouter(snapshot, level_provider=lambda: "light")
         live_router = ModelRouter(snapshot, level_provider=lambda: "max")
         app.active_runner = _pinned_runner_with_usage(
-            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0)))
+            "light", pinned_router, (_meta(2_000_000, 0), _meta(1_000_000, 0))
+        )
         monkeypatch.setattr(app, "display_router", lambda: live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
@@ -730,9 +731,8 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(t
 # 14 к 5; 5) имя снимается — только когда слева двигать нечего; 6) снимается
 # блок за стрелкой.
 
-_FOOTER_CHROME = 5   # padding'и футера + зазор между колонками (main.py)
-_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-            "per_tokens": 1_000_000}
+_FOOTER_CHROME = 5  # padding'и футера + зазор между колонками (main.py)
+_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
 # Имя профиля видно, пока от него остаются хотя бы первые символы (минимум —
 # 4 символа + «…»): по ним и опознаём «имя на месте» в переборе ширин.
 _PROFILE_MIN_VISIBLE = 4
@@ -740,6 +740,7 @@ _PROFILE_MIN_VISIBLE = 4
 
 def _usage_meta(inp, out):
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, inp, out)
     return acc.to_meta()
@@ -750,6 +751,7 @@ def _rows(text: str, width: int) -> int:
     рисует Rich (перенос по словам), с учётом явных переносов."""
     from rich.console import Console
     from rich.text import Text
+
     console = Console(width=width)
     return sum(len(Text(line).wrap(console, width)) for line in text.split("\n"))
 
@@ -758,19 +760,24 @@ def _left_rows_beside(scr, total: int, right_plain: str) -> int:
     """Сколько рядов займёт левая колонка, когда правая забрала своё."""
     from gc_tui.services.notices_ui import footer_left_with_badge, format_notices_badge
     from rich.cells import cell_len
+
     need = max(cell_len(line) for line in right_plain.split("\n"))
     width = total - need - _FOOTER_CHROME
     if width <= 0:
         return 99
-    return _rows(footer_left_with_badge(
-        scr._footer_left_commands(),
-        format_notices_badge(scr._collect_footer_notices()), width=width), width)
+    return _rows(
+        footer_left_with_badge(
+            scr._footer_left_commands(), format_notices_badge(scr._collect_footer_notices()), width=width
+        ),
+        width,
+    )
 
 
 def _visible_profile_cols(right_plain: str) -> int:
     """Сколько колонок занимает ВИДИМОЕ имя профиля (0 — имя снято). Имя стоит
     в начале 1-й строки, до точки-индикатора уровня."""
     from rich.cells import cell_len
+
     head_line = right_plain.split("\n")[0]
     if head_line.startswith("●"):
         return 0
@@ -783,13 +790,14 @@ def _left_rows_requested(scr, total: int, right_plain: str) -> int:
     что сторож любой запрос кламповал бы до двух)."""
     from gc_tui.services.notices_ui import footer_left_rows, format_notices_badge
     from rich.cells import cell_len
+
     need = max(cell_len(line) for line in right_plain.split("\n"))
     width = total - need - _FOOTER_CHROME
     if width <= 0:
         return 99
-    return footer_left_rows(scr._footer_left_commands(),
-                            format_notices_badge(scr._collect_footer_notices()),
-                            width=width)
+    return footer_left_rows(
+        scr._footer_left_commands(), format_notices_badge(scr._collect_footer_notices()), width=width
+    )
 
 
 def _narrowest_named_variant(scr, cols: int) -> str:
@@ -797,8 +805,8 @@ def _narrowest_named_variant(scr, cols: int) -> str:
     именем в `cols` колонок и цены внизу — последняя ступень перед снятием
     имени. Собирается тем же кодом, что и лесенка."""
     from gc_tui.services.usage_meter import compose_adaptive_footer_right
-    head = scr._footer_head(with_profile=True, profile_name_cols=cols,
-                            snapshot=scr._footer_head_snapshot())
+
+    head = scr._footer_head(with_profile=True, profile_name_cols=cols, snapshot=scr._footer_head_snapshot())
     request_seg, session_seg = scr._usage_segments()
     if request_seg is None and session_seg is None:
         return head.plain
@@ -810,18 +818,17 @@ def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
     активный профиль — общая обвязка ступенчатых тестов."""
     from gc_core.config_modules.profiles import ProfileRef
     from gc_core.model_router import ModelRouter
-    snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
-                "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
+
+    snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}}, "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
     pinned = ModelRouter(snapshot, level_provider=lambda: "light")
     live = ModelRouter(snapshot, level_provider=lambda: "max")
-    app.active_runner = (_pinned_runner_with_usage("light", pinned, usage) if usage
-                         else _pinned_runner("light", pinned))
+    app.active_runner = _pinned_runner_with_usage("light", pinned, usage) if usage else _pinned_runner("light", pinned)
     monkeypatch.setattr(app, "display_router", lambda: live)
     monkeypatch.setattr(app, "collect_footer_notices", list)
     if profile is not None:
-        monkeypatch.setattr(app, "active_profile_ref",
-                            lambda: ProfileRef(name=profile, path=Path("x"),
-                                               root_kind="project"))
+        monkeypatch.setattr(
+            app, "active_profile_ref", lambda: ProfileRef(name=profile, path=Path("x"), root_kind="project")
+        )
 
 
 @pytest.mark.asyncio
@@ -836,13 +843,13 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(tmp_pat
     from gc_tui.services.usage_meter import compose_adaptive_footer_right
     from rich.cells import cell_len
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"),
-                 config={"model": "m", "pricing": _PRICING})
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": _PRICING})
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME,
-                        usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)))
+        _arm_transition(
+            app, monkeypatch, profile=_LONG_NAME, usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0))
+        )
 
         request_seg, session_seg = scr._usage_segments()
         head = scr._footer_head(with_profile=True, snapshot=scr._footer_head_snapshot())
@@ -851,8 +858,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(tmp_pat
         commands = scr._footer_left_commands()
         # Ширина: правой ровно на «цены вниз» с полным именем, левой — ровно
         # столько, сколько ей нужно на ДВА ряда (одного ряда уже не хватает).
-        left_two = min(w for w in range(20, cell_len(commands) + 1)
-                       if _rows(commands, w) <= 2)
+        left_two = min(w for w in range(20, cell_len(commands) + 1) if _rows(commands, w) <= 2)
         total = need + _FOOTER_CHROME + left_two
 
         await pilot.resize_terminal(total, 30)
@@ -860,8 +866,8 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(tmp_pat
 
         assert plain == stacked.plain
         first, second = plain.split("\n")
-        assert first.startswith(_CEILING)          # имя профиля цело (в потолке)
-        assert "→" in first                        # и переход тоже
+        assert first.startswith(_CEILING)  # имя профиля цело (в потолке)
+        assert "→" in first  # и переход тоже
         assert "запрос" in second and "сессия" in second
         assert _left_rows_beside(scr, total, plain) == 2
 
@@ -888,9 +894,11 @@ async def test_footer_moves_left_to_two_rows_before_shrinking_profile(tmp_path, 
         scr = pilot.app.screen
         _arm_transition(app, monkeypatch, profile=_LONG_NAME)
 
-        ceiling_need = cell_len(scr._footer_head(
-            with_profile=True, profile_name_cols=_PROFILE_NAME_MAX_COLS,
-            snapshot=scr._footer_head_snapshot()).plain)
+        ceiling_need = cell_len(
+            scr._footer_head(
+                with_profile=True, profile_name_cols=_PROFILE_NAME_MAX_COLS, snapshot=scr._footer_head_snapshot()
+            ).plain
+        )
         commands = scr._footer_left_commands()
         # Ровно одной колонки не хватает, чтобы потолок имени ужился с левой в
         # одном ряду: прежний порядок резал здесь имя, новый — переносит левую.
@@ -899,7 +907,7 @@ async def test_footer_moves_left_to_two_rows_before_shrinking_profile(tmp_path, 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
-        assert plain.startswith(_CEILING)           # имя целое, не ужато
+        assert plain.startswith(_CEILING)  # имя целое, не ужато
         assert "→" in plain
         assert _left_rows_beside(scr, total, plain) == 2
 
@@ -922,9 +930,9 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(tmp_path, monke
         _arm_transition(app, monkeypatch, profile=_LONG_NAME)
 
         snapshot = scr._footer_head_snapshot()
-        floor_need = cell_len(scr._footer_head(
-            with_profile=True, profile_name_cols=_PROFILE_NAME_MIN_COLS,
-            snapshot=snapshot).plain)
+        floor_need = cell_len(
+            scr._footer_head(with_profile=True, profile_name_cols=_PROFILE_NAME_MIN_COLS, snapshot=snapshot).plain
+        )
         commands = scr._footer_left_commands()
         # Левой на один ряд не хватает одной колонки даже при самом узком
         # варианте правой с именем — значит, придётся идти в два ряда.
@@ -933,7 +941,7 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(tmp_path, monke
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
-        assert plain.startswith(_CEILING)           # имя в потолке, не ужато
+        assert plain.startswith(_CEILING)  # имя в потолке, не ужато
         assert "→" in plain
         assert _left_rows_beside(scr, total, plain) == 2
 
@@ -956,19 +964,18 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(tmp_path, monkeypatch)
         _arm_transition(app, monkeypatch, profile=_LONG_NAME)
 
         snapshot = scr._footer_head_snapshot()
-        ceiling_need = cell_len(scr._footer_head(
-            with_profile=True, profile_name_cols=_PROFILE_NAME_MAX_COLS,
-            snapshot=snapshot).plain)
+        ceiling_need = cell_len(
+            scr._footer_head(with_profile=True, profile_name_cols=_PROFILE_NAME_MAX_COLS, snapshot=snapshot).plain
+        )
         commands = scr._footer_left_commands()
-        left_two = min(w for w in range(20, cell_len(commands) + 1)
-                       if _rows(commands, w) <= 2)
+        left_two = min(w for w in range(20, cell_len(commands) + 1) if _rows(commands, w) <= 2)
         # На одну колонку уже, чем нужно потолку при двухрядной левой.
         total = ceiling_need + _FOOTER_CHROME + left_two - 1
 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
-        assert plain.startswith(_LONG_NAME[:12] + "…")   # 13 колонок вместо 14
+        assert plain.startswith(_LONG_NAME[:12] + "…")  # 13 колонок вместо 14
         assert "→" in plain
         assert _left_rows_beside(scr, total, plain) == 2
 
@@ -1013,18 +1020,18 @@ async def test_footer_ladder_order_holds_across_terminal_widths(tmp_path, monkey
             if prev_profile_cols is not None:
                 assert profile_cols <= prev_profile_cols, (
                     f"ширина {total}: имя профиля выросло с {prev_profile_cols} "
-                    f"до {profile_cols} колонок при сужении — {plain!r}")
+                    f"до {profile_cols} колонок при сужении — {plain!r}"
+                )
             prev_profile_cols = profile_cols
             if not has_profile:
                 seen_profile_dropped = True
                 floor = _narrowest_named_variant(scr, _PROFILE_NAME_MIN_COLS)
                 assert _left_rows_requested(scr, total, floor) > 2, (
-                    f"ширина {total}: имя снято, хотя с минимальным именем "
-                    f"левой хватило бы двух рядов — {plain!r}")
+                    f"ширина {total}: имя снято, хотя с минимальным именем левой хватило бы двух рядов — {plain!r}"
+                )
             if "→" not in plain:
                 seen_transition_dropped = True
-                assert not has_profile, (
-                    f"ширина {total}: переход снят раньше имени профиля — {plain!r}")
+                assert not has_profile, f"ширина {total}: переход снят раньше имени профиля — {plain!r}"
         assert seen_profile_dropped and seen_transition_dropped
 
 
@@ -1053,21 +1060,21 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(tmp_path, mon
 
     class _UsageOnlyRunner:
         """Только usage-сегменты: хода нет — значит, нет и блока за стрелкой."""
+
         def is_running(self):
             return False
 
         def usage_snapshot(self):
             return (_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0))
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"),
-                 config={"model": "m", "pricing": _PRICING})
+    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "pricing": _PRICING})
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(app, "collect_footer_notices", list)
-        monkeypatch.setattr(app, "active_profile_ref",
-                            lambda: ProfileRef(name=_LONG_NAME, path=Path("x"),
-                                               root_kind="project"))
+        monkeypatch.setattr(
+            app, "active_profile_ref", lambda: ProfileRef(name=_LONG_NAME, path=Path("x"), root_kind="project")
+        )
         app.active_runner = _UsageOnlyRunner()
 
         stacked_at = None
@@ -1080,12 +1087,14 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(tmp_path, mon
             elif stacked_at is not None:
                 raise AssertionError(
                     f"ширина {total}: цены вернулись на 1-ю строку после того, "
-                    f"как уехали вниз на {stacked_at} — {plain!r}")
+                    f"как уехали вниз на {stacked_at} — {plain!r}"
+                )
             profile_cols = _visible_profile_cols(plain)
             if prev_profile_cols is not None:
                 assert profile_cols <= prev_profile_cols, (
                     f"ширина {total}: имя профиля выросло с {prev_profile_cols} "
-                    f"до {profile_cols} колонок при сужении — {plain!r}")
+                    f"до {profile_cols} колонок при сужении — {plain!r}"
+                )
             prev_profile_cols = profile_cols
         assert stacked_at is not None, "цены так и не уехали вниз — перебор ничего не стерёг"
 
@@ -1100,27 +1109,33 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(tmp_pa
     from gc_tui.app import TuiApp
 
     tid = "ctx0000000000000000000000000017a"
-    meta = {"thread_id": tid, "system_id": "cli",
-            "runtime": {"live_history_chars": 500, "live_msg_count": 1}}
+    meta = {"thread_id": tid, "system_id": "cli", "runtime": {"live_history_chars": 500, "live_msg_count": 1}}
     (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={
-        "model": "m", "pricing": _PRICING, "backend_api_mode": "chat_completions",
-        "summary_params": {"chat_completions_summary_trigger_chars": 1000},
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "m",
+            "pricing": _PRICING,
+            "backend_api_mode": "chat_completions",
+            "summary_params": {"chat_completions_summary_trigger_chars": 1000},
+        },
+    )
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME,
-                        usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)))
+        _arm_transition(
+            app, monkeypatch, profile=_LONG_NAME, usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0))
+        )
         assert scr._context_meter() is not None
 
         for total in (200, 140, 120, 110, 100, 90, 80, 70, 60):
             await pilot.resize_terminal(total, 30)
             first = scr._compose_footer_right().plain.split("\n")[0]
             assert "контекст" in first, (total, first)
-            assert "●" in first          # точка уровня и модель хода — там же
+            assert "●" in first  # точка уровня и модель хода — там же
             assert "m" in first
 
 
@@ -1138,20 +1153,26 @@ async def test_footer_resolves_context_meter_once_per_frame(tmp_path, monkeypatc
     from gc_tui.app import TuiApp
 
     tid = "ctx0000000000000000000000000017b"
-    meta = {"thread_id": tid, "system_id": "cli",
-            "runtime": {"live_history_chars": 500, "live_msg_count": 1}}
+    meta = {"thread_id": tid, "system_id": "cli", "runtime": {"live_history_chars": 500, "live_msg_count": 1}}
     (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={
-        "model": "m", "pricing": _PRICING, "backend_api_mode": "chat_completions",
-        "summary_params": {"chat_completions_summary_trigger_chars": 1000},
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "m",
+            "pricing": _PRICING,
+            "backend_api_mode": "chat_completions",
+            "summary_params": {"chat_completions_summary_trigger_chars": 1000},
+        },
+    )
     async with app.run_test(size=(70, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME,
-                        usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)))
+        _arm_transition(
+            app, monkeypatch, profile=_LONG_NAME, usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0))
+        )
 
         calls = []
         original = scr._context_meter
@@ -1162,5 +1183,5 @@ async def test_footer_resolves_context_meter_once_per_frame(tmp_path, monkeypatc
 
         monkeypatch.setattr(scr, "_context_meter", _counted)
         plain = scr._compose_footer_right().plain
-        assert "контекст" in plain          # метр действительно участвовал
+        assert "контекст" in plain  # метр действительно участвовал
         assert len(calls) == 1, f"метр контекста резолвился {len(calls)} раз(а) за кадр"

@@ -1,6 +1,7 @@
 """Отменённый ход — тоже ход: спадающий фронт is_running монтирует CTA про диффы
 заново. Если состав pending не менялся и CTA уже последний в трейсе — повтор
 не нужен (смок 2026-08-02: четыре одинаковых блока подряд)."""
+
 import json
 
 import pytest
@@ -22,6 +23,7 @@ class _FakeDiffService:
 def _cta_rows(scr):
     """Строки трейса, которые являются CTA про диффы."""
     from gc_tui.widgets.trace_row import TraceRow
+
     return [w for w in scr.query(TraceRow) if "F3/diff" in getattr(w, "_content", "")]
 
 
@@ -37,7 +39,7 @@ async def test_second_identical_cta_is_not_mounted():
         scr._maybe_mount_diff_pending_cta()
         await pilot.pause()
         assert len(_cta_rows(scr)) == 1
-        scr._maybe_mount_diff_pending_cta()          # второй отменённый ход
+        scr._maybe_mount_diff_pending_cta()  # второй отменённый ход
         await pilot.pause()
         assert len(_cta_rows(scr)) == 1, "CTA продублировался подряд"
 
@@ -53,8 +55,7 @@ async def test_cta_returns_after_other_output():
         scr._diff_service_for_preview = lambda: _FakeDiffService([".gitignore"])
         scr._maybe_mount_diff_pending_cta()
         await pilot.pause()
-        scr._mount_trace_row(prefix="", content="ответ агента",
-                             kind_class="line-meta", focusable=False)
+        scr._mount_trace_row(prefix="", content="ответ агента", kind_class="line-meta", focusable=False)
         await pilot.pause()
         scr._maybe_mount_diff_pending_cta()
         await pilot.pause()
@@ -83,7 +84,7 @@ def test_flag_not_set_when_agent_produced_nothing():
     не могли, напоминать не о чем (правило B)."""
     from gc_tui.screens.main import TraceScreen
 
-    scr = TraceScreen.__new__(TraceScreen)      # без монтажа: проверяем чистую логику
+    scr = TraceScreen.__new__(TraceScreen)  # без монтажа: проверяем чистую логику
     scr._diff_pending_cta_pending = False
     scr._events_since_last_user_send = 0
     assert TraceScreen._should_arm_diff_cta(scr) is False
@@ -101,14 +102,14 @@ def test_flag_set_when_agent_produced_events():
 
 class _IdleRunner:
     """Раннер, только что завершивший ход (is_running() уже False)."""
+
     def is_running(self):
         return False
 
 
 def _write_empty_task(tmp_path, tid):
     """meta + пустой data-файл — минимальный тред для прямого вызова _poll_active."""
-    (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8")
+    (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8")
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
@@ -135,20 +136,31 @@ async def test_cta_shows_after_fast_turn_error_same_tick(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._diff_service_for_preview = lambda: _FakeDiffService([".gitignore"])
-        assert scr._events_since_last_user_send == 0   # до тика — ничего не рендерилось
+        assert scr._events_since_last_user_send == 0  # до тика — ничего не рендерилось
         # Хвост этого тика: единственное событие хода — быстрая ошибка провайдера.
         # Пишем ПОСЛЕ attach, чтобы попасть в tail, а не в начальный снимок.
         with open(tmp_path / f"data_cli_{tid}.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "type": "message", "thread_id": tid, "system": "cli", "seq": 1,
-                "ts": "2026-08-03T10:00:00Z",
-                "payload": {
-                    "id": "e1", "role": "user",
-                    "content": wrap_technical_user_content(
-                        "401 Unauthorized", technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
-                    ),
-                },
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "thread_id": tid,
+                        "system": "cli",
+                        "seq": 1,
+                        "ts": "2026-08-03T10:00:00Z",
+                        "payload": {
+                            "id": "e1",
+                            "role": "user",
+                            "content": wrap_technical_user_content(
+                                "401 Unauthorized",
+                                technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
+                            ),
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
         # Один и тот же тик: спадающий фронт is_running (ход только закончился)
         # и рендер хвоста с ошибкой — оба внутри одного вызова _poll_active.
         scr._was_running = True
@@ -175,8 +187,8 @@ async def test_wipe_restore_shows_cta_at_zero_counter(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._diff_service_for_preview = lambda: _FakeDiffService([".gitignore"])
-        assert scr._events_since_last_user_send == 0   # хода не было вовсе
-        assert scr._was_running is False                 # не спадающий фронт хода
+        assert scr._events_since_last_user_send == 0  # хода не было вовсе
+        assert scr._was_running is False  # не спадающий фронт хода
         # storage_epoch меняется, как после компакции, — tail_events увидит
         # stream_reset, трейс перерисуется с нуля.
         meta_path = tmp_path / f"meta_cli_{tid}.json"

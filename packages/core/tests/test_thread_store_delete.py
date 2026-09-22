@@ -14,14 +14,16 @@ def test_delete_thread_removes_all_shapes(tmp_path):
     # session lock живёт в подпапке locks/
     os.makedirs(os.path.join(d, "locks"), exist_ok=True)
     files_in_root = [
-        f"data_{sys_}_{tid}.jsonl", f"meta_{sys_}_{tid}.json",          # canonical
-        f"data_{tid}.jsonl", f"meta_{tid}.json",                        # legacy
-        f"data_{sys_}_{tid}__pre_summary__20260101_000000.jsonl",       # архив 1
+        f"data_{sys_}_{tid}.jsonl",
+        f"meta_{sys_}_{tid}.json",  # canonical
+        f"data_{tid}.jsonl",
+        f"meta_{tid}.json",  # legacy
+        f"data_{sys_}_{tid}__pre_summary__20260101_000000.jsonl",  # архив 1
         f"meta_{sys_}_{tid}__pre_summary__20260101_000000.json",
-        f"data_{sys_}_{tid}__pre_summary__20260102_000000.jsonl",       # архив 2
+        f"data_{sys_}_{tid}__pre_summary__20260102_000000.jsonl",  # архив 2
         f"meta_{sys_}_{tid}__pre_summary__20260102_000000.json",
     ]
-    files_in_locks = [f"lock_{sys_}_{tid}.json"]                        # session lock
+    files_in_locks = [f"lock_{sys_}_{tid}.json"]  # session lock
     for name in files_in_root:
         _touch(os.path.join(d, name))
     for name in files_in_locks:

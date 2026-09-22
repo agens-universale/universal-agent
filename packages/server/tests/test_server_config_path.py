@@ -35,7 +35,8 @@ def test_load_server_config_logs_which_candidate_won(monkeypatch, tmp_path, capl
     неоткуда: молчаливый промах резолва однажды поднял сервер с auth_token=None.
     """
     (tmp_path / "config_server.yml").write_text(
-        "server:\n  port: 7777\n", encoding="utf-8",
+        "server:\n  port: 7777\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
     monkeypatch.chdir(tmp_path)
@@ -90,9 +91,7 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
         },
     )
 
-    cfg = server_config.build_agent_config_for_server(
-        {"agent_overrides": {"model": "forced-model"}}
-    )
+    cfg = server_config.build_agent_config_for_server({"agent_overrides": {"model": "forced-model"}})
 
     assert cli_forces_legacy_model(cfg) is True
     router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=True)
@@ -109,9 +108,7 @@ def test_agent_overrides_without_model_is_not_forced(monkeypatch):
         lambda: {"models": {"flash": {}}, "slots": {"default": "flash"}},
     )
 
-    cfg = server_config.build_agent_config_for_server(
-        {"agent_overrides": {"stop_tools": ["write_to_file"]}}
-    )
+    cfg = server_config.build_agent_config_for_server({"agent_overrides": {"stop_tools": ["write_to_file"]}})
 
     assert cli_forces_legacy_model(cfg) is False
 

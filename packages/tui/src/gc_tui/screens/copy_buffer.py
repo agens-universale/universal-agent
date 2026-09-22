@@ -7,6 +7,7 @@ Paste: OS-first, откат к внутреннему app.clipboard (как в �
 Копирование/Ctrl+C не дописывает буфер сам в себя — маркер `_is_copy_buffer_screen`
 гейтит `_push_session_copy_buffer` в app.py (B8).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -85,8 +86,7 @@ class CopyBufferScreen(Screen):
         self._store = store
         self._active_task_id = task_id
         self._footer_hint = footer_hint or (
-            "Esc — сохранить и закрыть · Ctrl+V / Ctrl+Shift+V вставить · "
-            "длинные строки переносятся"
+            "Esc — сохранить и закрыть · Ctrl+V / Ctrl+Shift+V вставить · длинные строки переносятся"
         )
         # Исходный текст — для сравнения «что-то меняли» (B7).
         self._initial_text: str = ""
@@ -143,9 +143,7 @@ class CopyBufferScreen(Screen):
         if self._store is not None and self._active_task_id:
             try:
                 saved = clamp_copy_buffer(current, max_size=COPY_BUFFER_MAX)
-                self._store.update_tui_meta(
-                    self._active_task_id, {"copy_buffer": saved}
-                )
+                self._store.update_tui_meta(self._active_task_id, {"copy_buffer": saved})
             except Exception:
                 pass  # best-effort: не роняем закрытие экрана
         self.app.pop_screen()

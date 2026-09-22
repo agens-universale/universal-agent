@@ -22,8 +22,12 @@ def test_one_model_no_slots_ok():
 
 def test_cross_layer_reference_checked_on_merged_only():
     # слот в config.yml на алиас из профиля: фаза 1 не проверяет ссылки — проверка только тут
-    assert validate_model_sections(AppConfig.model_validate(
-        {"models": {"from-profile": {}}, "slots": {"light": "from-profile"}})) == []
+    assert (
+        validate_model_sections(
+            AppConfig.model_validate({"models": {"from-profile": {}}, "slots": {"light": "from-profile"}})
+        )
+        == []
+    )
 
 
 def test_three_models_one_slot_set_default_resolves_via_matrix():
@@ -60,35 +64,43 @@ def test_assign_value_auto_forbidden():
 
 
 def test_assign_subagents_known_name_ok():
-    cfg = AppConfig.model_validate({
-        "models": {"deepseek-max": {}},
-        "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
-    })
+    cfg = AppConfig.model_validate(
+        {
+            "models": {"deepseek-max": {}},
+            "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+        }
+    )
     assert validate_model_sections(cfg) == []
 
 
 def test_assign_subagents_wildcard_ok():
-    cfg = AppConfig.model_validate({
-        "models": {"a": {}},
-        "assign": {"subagents": {"*": "light"}},
-    })
+    cfg = AppConfig.model_validate(
+        {
+            "models": {"a": {}},
+            "assign": {"subagents": {"*": "light"}},
+        }
+    )
     assert validate_model_sections(cfg) == []
 
 
 def test_assign_subagents_unknown_name_errors_with_coordinate():
-    cfg = AppConfig.model_validate({
-        "models": {"a": {}},
-        "assign": {"subagents": {"subagent_bogus": "light"}},
-    })
+    cfg = AppConfig.model_validate(
+        {
+            "models": {"a": {}},
+            "assign": {"subagents": {"subagent_bogus": "light"}},
+        }
+    )
     with pytest.raises(Exception, match=r"assign\.subagents\.subagent_bogus"):
         validate_model_sections(cfg)
 
 
 def test_assign_subagents_value_auto_forbidden():
-    cfg = AppConfig.model_validate({
-        "models": {"a": {}},
-        "assign": {"subagents": {"subagent_planner": "auto"}},
-    })
+    cfg = AppConfig.model_validate(
+        {
+            "models": {"a": {}},
+            "assign": {"subagents": {"subagent_planner": "auto"}},
+        }
+    )
     with pytest.raises(Exception, match="auto"):
         validate_model_sections(cfg)
 
@@ -126,9 +138,11 @@ def test_inherited_pair_with_ssl_off_warns_about_the_shared_token():
     не меняют адрес, а ослабляют защиту запроса. Но запрос этот идёт с ОБЩИМ токеном
     (пара унаследована), и уходит он по ослабленному каналу — про это предупреждаем при
     старте. Notice, а не отказ: сетап с самоподписанным сертификатом законен."""
-    cfg = AppConfig.model_validate({
-        "models": {"gc": {"model": "x", "backend": {"use_ssl": False}}},
-    })
+    cfg = AppConfig.model_validate(
+        {
+            "models": {"gc": {"model": "x", "backend": {"use_ssl": False}}},
+        }
+    )
     assert validate_model_sections(cfg) == [_WEAKENED]
 
 
@@ -143,10 +157,11 @@ def test_inherited_pair_with_client_cert_warns_too():
 def test_own_pair_with_ssl_off_is_not_warned_about():
     """Своя пара — свой токен: ослабленный канал уносит СВОЙ ключ записи на СВОЙ адрес,
     и предупреждать про общий токен здесь не о чем (он туда не идёт, §2)."""
-    cfg = AppConfig.model_validate({
-        "models": {"gc": {"url": "http://own/v1", "token": "sk-own",
-                          "backend": {"use_ssl": False}}},
-    })
+    cfg = AppConfig.model_validate(
+        {
+            "models": {"gc": {"url": "http://own/v1", "token": "sk-own", "backend": {"use_ssl": False}}},
+        }
+    )
     assert validate_model_sections(cfg) == []
 
 
@@ -165,14 +180,17 @@ def test_level_fallback_matrix():
     }
 
 
-@pytest.mark.parametrize("raw, expected", [
-    ({"models": {"a": {}}}, False),                                   # одна модель резолвится сама
-    ({"models": {}}, False),                                          # реестра нет — нечего резолвить
-    ({"models": {"a": {}, "b": {}}}, True),                           # две и ни одного слота
-    ({"models": {"a": {}, "b": {}}, "slots": {"default": "a"}}, False),
-    ({"models": {"a": {}, "b": {}}, "slots": {"light": "a"}}, False),  # любой слот включает матрицу
-    ({"models": {"a": {}, "b": {}}, "slots": {"max": "a"}}, False),
-])
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ({"models": {"a": {}}}, False),  # одна модель резолвится сама
+        ({"models": {}}, False),  # реестра нет — нечего резолвить
+        ({"models": {"a": {}, "b": {}}}, True),  # две и ни одного слота
+        ({"models": {"a": {}, "b": {}}, "slots": {"default": "a"}}, False),
+        ({"models": {"a": {}, "b": {}}, "slots": {"light": "a"}}, False),  # любой слот включает матрицу
+        ({"models": {"a": {}, "b": {}}, "slots": {"max": "a"}}, False),
+    ],
+)
 def test_default_slot_required_names_the_rule_once(raw, expected):
     """Правило §4 отдельным предикатом: его спрашивают двое — валидатор (жалуется)
     и слой записи (спрашивает ДО записи). Написанное дважды от руки, оно уже

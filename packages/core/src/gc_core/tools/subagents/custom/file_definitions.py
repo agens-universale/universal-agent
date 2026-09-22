@@ -6,6 +6,7 @@
 Модуль намеренно не импортирует ``registry``: тот импортирует адаптер, который
 импортирует этот модуль, и обратная связь замкнула бы граф.
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,7 +107,7 @@ def _split_frontmatter(path: str, text: str) -> Tuple[str, str]:
     if idx >= len(lines):
         raise SubagentDefinitionError(path, "frontmatter не закрыт ('---')")
 
-    return "".join(fm_lines), "".join(lines[idx + 1:])
+    return "".join(fm_lines), "".join(lines[idx + 1 :])
 
 
 def _require_name(path: str, meta: Dict[str, Any]) -> str:
@@ -167,8 +168,7 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
     if unknown:
         raise SubagentDefinitionError(
             path,
-            "неизвестные ключи frontmatter: " + ", ".join(unknown)
-            + "; допустимы: " + ", ".join(sorted(_ALLOWED_KEYS)),
+            "неизвестные ключи frontmatter: " + ", ".join(unknown) + "; допустимы: " + ", ".join(sorted(_ALLOWED_KEYS)),
         )
 
     name = _require_name(path, meta)
@@ -241,15 +241,28 @@ def discover_subagent_definitions(
         return []
 
     if not os.path.isdir(base_dir):
-        _warn(logger, "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
-              base_dir, event="subagents_dir_missing", diagnostics=diagnostics, dir=base_dir)
+        _warn(
+            logger,
+            "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
+            base_dir,
+            event="subagents_dir_missing",
+            diagnostics=diagnostics,
+            dir=base_dir,
+        )
         return []
 
     try:
         entries = sorted(os.listdir(base_dir))
     except OSError as exc:
-        _warn(logger, "subagents_dir_unreadable dir=%s error=%s", base_dir, exc,
-              event="subagents_dir_unreadable", diagnostics=diagnostics, dir=base_dir)
+        _warn(
+            logger,
+            "subagents_dir_unreadable dir=%s error=%s",
+            base_dir,
+            exc,
+            event="subagents_dir_unreadable",
+            diagnostics=diagnostics,
+            dir=base_dir,
+        )
         return []
 
     taken: Dict[str, SubagentDefinition] = {}
@@ -268,28 +281,42 @@ def discover_subagent_definitions(
             # весь старт агента, хотя обещание модуля — «битый файл не лишает
             # оператора остальных».
             definition = parse_subagent_file(path, read_user_text(path))
-        except (OSError, ValueError) as exc:   # ValueError ⊇ SubagentDefinitionError
-            _warn(logger, "subagent_definition_invalid error=%s", exc,
-                  event="subagent_definition_invalid", diagnostics=diagnostics,
-                  path=path, reason=getattr(exc, "reason", str(exc)))
+        except (OSError, ValueError) as exc:  # ValueError ⊇ SubagentDefinitionError
+            _warn(
+                logger,
+                "subagent_definition_invalid error=%s",
+                exc,
+                event="subagent_definition_invalid",
+                diagnostics=diagnostics,
+                path=path,
+                reason=getattr(exc, "reason", str(exc)),
+            )
             continue
 
         if definition.name in builtin:
             _warn(
                 logger,
                 "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
-                definition.name, path,
-                event="subagent_name_collision", diagnostics=diagnostics,
-                subagent_name=definition.name, path=path, winner="builtin",
+                definition.name,
+                path,
+                event="subagent_name_collision",
+                diagnostics=diagnostics,
+                subagent_name=definition.name,
+                path=path,
+                winner="builtin",
             )
             continue
         if definition.name in taken:
             _warn(
                 logger,
                 "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
-                definition.name, path, taken[definition.name].source_path,
-                event="subagent_name_collision", diagnostics=diagnostics,
-                subagent_name=definition.name, path=path,
+                definition.name,
+                path,
+                taken[definition.name].source_path,
+                event="subagent_name_collision",
+                diagnostics=diagnostics,
+                subagent_name=definition.name,
+                path=path,
                 winner=taken[definition.name].source_path,
             )
             continue

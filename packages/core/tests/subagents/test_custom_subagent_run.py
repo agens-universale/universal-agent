@@ -1,4 +1,5 @@
 """Раннер с кастомным сабагентом: прокидывание allow/stop в дочерний ран."""
+
 from types import SimpleNamespace
 
 import pytest
@@ -22,9 +23,7 @@ def _agent_file(tmp_path, name="subagent_alpha", tools=None, stop_tools=()):
         lines.append("tools: [" + ", ".join(tools) + "]")
     if stop_tools:
         lines.append("stop_tools: [" + ", ".join(stop_tools) + "]")
-    (agents / f"{name}.md").write_text(
-        "---\n" + "\n".join(lines) + "\n---\nТы — альфа.\n", encoding="utf-8"
-    )
+    (agents / f"{name}.md").write_text("---\n" + "\n".join(lines) + "\n---\nТы — альфа.\n", encoding="utf-8")
     return str(agents)
 
 
@@ -90,7 +89,7 @@ class TestChildConfig:
         from gc_core.tools import abuild_tools_data
 
         data, _spec, _descr, _mcp = await abuild_tools_data(child)
-        assert "exec_python" not in data   # глобальный запрет
+        assert "exec_python" not in data  # глобальный запрет
         assert "exec_command" not in data  # запрет из файла
 
 

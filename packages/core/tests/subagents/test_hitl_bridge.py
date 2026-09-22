@@ -1,4 +1,5 @@
 """Step 5: child HITL emit (ask_human / confirm) + tui_confirm on child ctx."""
+
 from __future__ import annotations
 
 import json
@@ -141,12 +142,15 @@ class TestConfirmEmit:
         ctx.tui_confirm = tui_confirm
         ctx.permission_store = None
 
-        assert request_confirm(
-            title="Write",
-            question="Allow write?",
-            fields=[("Path", "/x")],
-            ctx=ctx,
-        ) is True
+        assert (
+            request_confirm(
+                title="Write",
+                question="Allow write?",
+                fields=[("Path", "/x")],
+                ctx=ctx,
+            )
+            is True
+        )
         evs = sink.drain()
         assert [e.kind for e in evs] == ["confirm", "confirm_done"]
         assert evs[0].prose == "Allow write?"

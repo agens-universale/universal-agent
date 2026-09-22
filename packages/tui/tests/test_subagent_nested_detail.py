@@ -174,10 +174,7 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
         nested = scr._nested_tool_rows.get("call_child_9")
         assert nested is not None
         # nested отсутствует в parent _task_events
-        assert not any(
-            ev.call_id == "call_child_9" and ev.kind == "call"
-            for ev in scr._task_events
-        )
+        assert not any(ev.call_id == "call_child_9" and ev.kind == "call" for ev in scr._task_events)
 
         click = events.Click(
             widget=nested,
@@ -197,9 +194,7 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
         assert isinstance(pilot.app.screen, ToolCallDetailScreen)
         header = str(pilot.app.screen.query_one("#header").render())
         assert "fs_read_file" in header
-        body = "\n".join(
-            str(s.render()) for s in pilot.app.screen.query("Static")
-        )
+        body = "\n".join(str(s.render()) for s in pilot.app.screen.query("Static"))
         assert "nested.py" in body or "path" in body
         assert "print(1)" in body
 
@@ -285,8 +280,6 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
         await pilot.pause(0.2)
 
         assert isinstance(pilot.app.screen, ToolCallDetailScreen)
-        body = "\n".join(
-            str(s.render()) for s in pilot.app.screen.query("Static")
-        )
+        body = "\n".join(str(s.render()) for s in pilot.app.screen.query("Static"))
         assert "pwd" in body
         assert "/tmp" in body

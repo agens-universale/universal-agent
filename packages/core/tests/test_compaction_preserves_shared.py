@@ -59,19 +59,22 @@ class CompactionPreservesSharedTest(unittest.TestCase):
         ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
         captured: dict = {}
 
-        with patch(
-            "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions", _fake_summarize
-        ), patch(
-            "gc_core.summarize.compaction.apply_summary_state_patch",
-            lambda **_kw: "dialog-body",
+        with (
+            patch("gc_core.summarize.compaction.asummarize_dialog_via_chat_completions", _fake_summarize),
+            patch(
+                "gc_core.summarize.compaction.apply_summary_state_patch",
+                lambda **_kw: "dialog-body",
+            ),
         ):
-            run_coro(arun_summary_compaction(
-                ctx=ctx,
-                state=state,
-                trigger_reason="test",
-                is_cli_mode=False,
-                on_summary_applied=lambda event: captured.update(event),
-            ))
+            run_coro(
+                arun_summary_compaction(
+                    ctx=ctx,
+                    state=state,
+                    trigger_reason="test",
+                    is_cli_mode=False,
+                    on_summary_applied=lambda event: captured.update(event),
+                )
+            )
 
         shared = captured["summary_payload"]["shared"]
         # Поля, которые молча терялись: они есть в SharedStateData и должны доехать.

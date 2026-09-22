@@ -1,4 +1,5 @@
 """User-stop envelopes A/B — отдельные от cycle-stop status."""
+
 from __future__ import annotations
 
 import json
@@ -40,8 +41,6 @@ def test_envelope_a_without_meta_omits_meta_key():
 
 
 def test_envelope_a_message_customizable():
-    data = json.loads(
-        cancelled_by_user_output("x", message="custom stop msg")
-    )
+    data = json.loads(cancelled_by_user_output("x", message="custom stop msg"))
     assert data["message"] == "custom stop msg"
     assert data["error"]["message"] == "custom stop msg"

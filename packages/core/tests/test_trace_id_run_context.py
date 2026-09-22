@@ -51,9 +51,7 @@ async def test_trace_binding_event_records_header_names(tmp_path):
 
 
 async def test_trace_binding_reflects_header_override(tmp_path):
-    ctx = await acreate_run_context(
-        _base_config(tmp_path, trace_id="wf-42", trace_id_header_name="X-Trace-Id")
-    )
+    ctx = await acreate_run_context(_base_config(tmp_path, trace_id="wf-42", trace_id_header_name="X-Trace-Id"))
     binding = [e for e in _events(ctx.logging_path) if e.get("event") == "trace_binding"]
     assert binding[0]["model_header"] == "X-Trace-Id"
     assert binding[0]["mcp_header"] == "X-Trace-Id"

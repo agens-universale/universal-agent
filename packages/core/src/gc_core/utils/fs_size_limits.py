@@ -75,10 +75,7 @@ def file_too_large_error(
     operation: str | None = None,
 ) -> dict[str, Any]:
     if operation:
-        message = (
-            f"File is too large for {operation}: {actual_bytes} bytes "
-            f"(max {max_bytes} bytes)."
-        )
+        message = f"File is too large for {operation}: {actual_bytes} bytes (max {max_bytes} bytes)."
     else:
         message = f"File is {actual_bytes} bytes; limit is {max_bytes} bytes."
     return {

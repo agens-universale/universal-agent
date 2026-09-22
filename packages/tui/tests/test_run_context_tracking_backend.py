@@ -10,6 +10,7 @@
 сменила сторону: раньше стерегла, что ядро оборачивает, теперь — что ядро НЕ
 оборачивает, а TUI оборачивает.
 """
+
 from gc_core.backends.local import LocalFsBackend
 from gc_core.run_context import acreate_run_context
 
@@ -69,6 +70,4 @@ def test_app_turns_the_journal_on():
     from gc_tui.app import TuiApp
 
     src = inspect.getsource(TuiApp._build_real_executor)
-    assert "attach_to_context" in src, (
-        "TuiApp перестал включать diff-журнал — F3 останется пустым"
-    )
+    assert "attach_to_context" in src, "TuiApp перестал включать diff-журнал — F3 останется пустым"

@@ -60,9 +60,7 @@ def resolve_intent_log_preview_chars(summary_params: Mapping[str, Any] | None) -
     if not isinstance(summary_params, Mapping):
         return DEFAULT_INTENT_LOG_PREVIEW_CHARS
     try:
-        value = int(
-            summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS)
-        )
+        value = int(summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS))
     except (TypeError, ValueError):
         value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
@@ -79,9 +77,7 @@ def build_intent_blocks_prefix(
     Closed log: ``tail_preview``. Open turn: full JSONL. См. ``build_dialog_summary_content``.
     """
     safe_chars = (
-        int(intent_log_preview_chars)
-        if int(intent_log_preview_chars) > 0
-        else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+        int(intent_log_preview_chars) if int(intent_log_preview_chars) > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
     )
     preview = tail_preview(list(closed_records), safe_chars)
     parts: list[str] = []

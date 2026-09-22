@@ -77,11 +77,7 @@ async def arepair_summary_text(
         missing_line = f"Missing child tags (must add): {', '.join(missing_tags)}.\n"
     previous_block = ""
     if (previous_summary or "").strip():
-        previous_block = (
-            "<previous_summary>\n"
-            f"{previous_summary.strip()}\n"
-            "</previous_summary>\n\n"
-        )
+        previous_block = f"<previous_summary>\n{previous_summary.strip()}\n</previous_summary>\n\n"
     user = (
         f"Previous summary is invalid. Reason: {reason}.\n"
         f"{missing_line}\n"

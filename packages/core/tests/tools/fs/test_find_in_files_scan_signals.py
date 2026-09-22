@@ -115,9 +115,7 @@ def test_show_excluded_dirs_is_answered_not_dropped(tmp_path, monkeypatch):
     monkeypatch.setattr(backend_cls, "has_grep", True, raising=False)
     monkeypatch.setattr(backend_cls, "has_find", True, raising=False)
 
-    data = _call(
-        tool, tmp_path, pattern="KEY", query_mode="text", show_excluded_dirs=True
-    )
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text", show_excluded_dirs=True)
 
     assert native_calls == []
     assert data["search_backend"] == "python"
@@ -223,6 +221,7 @@ def test_builtin_tools_data_schema_uses_live_config():
 
 # --- честность движка: fallback_reason и output_capped -----------------------
 
+
 def _native_ready(tool, monkeypatch, *, has_grep=True):
     backend_cls = type(tool._backend)
     monkeypatch.setattr(backend_cls, "has_grep", has_grep, raising=False)
@@ -233,10 +232,15 @@ def _native_result(tmp_path, *, truncated=False, hit_cap=False, failure=None):
     from gc_core.utils.native_fs_search import NativeGrepResult
 
     return NativeGrepResult(
-        matches=[{
-            "file": str(tmp_path / "a.py"), "line": 1, "end_line": 1,
-            "line_content": "KEY = 1", "context": "KEY = 1\n",
-        }],
+        matches=[
+            {
+                "file": str(tmp_path / "a.py"),
+                "line": 1,
+                "end_line": 1,
+                "line_content": "KEY = 1",
+                "context": "KEY = 1\n",
+            }
+        ],
         truncated=truncated,
         hit_capture_cap=hit_cap,
         failure=failure,
@@ -304,9 +308,7 @@ def test_native_path_does_not_count_candidates_before_grep(tmp_path, monkeypatch
     from gc_core.utils import native_fs_search as native_fs_search
 
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
-    monkeypatch.setattr(
-        native_fs_search, "arun_native_grep", as_coro(lambda *a, **k: _native_result(tmp_path))
-    )
+    monkeypatch.setattr(native_fs_search, "arun_native_grep", as_coro(lambda *a, **k: _native_result(tmp_path)))
 
     tool = _tool(tmp_path)
     _native_ready(tool, monkeypatch)
@@ -324,7 +326,8 @@ def test_capture_cap_below_limit_is_reported_as_output_capped(tmp_path, monkeypa
 
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
     monkeypatch.setattr(
-        native_fs_search, "arun_native_grep",
+        native_fs_search,
+        "arun_native_grep",
         as_coro(lambda *a, **k: _native_result(tmp_path, truncated=True, hit_cap=True)),
     )
     tool = _tool(tmp_path)
@@ -351,9 +354,7 @@ def test_capture_cap_with_native_failure_does_not_fall_to_python(tmp_path, monke
         native_fs_search,
         "arun_native_grep",
         as_coro(
-            lambda *a, **k: NativeGrepResult(
-                matches=[], truncated=True, hit_capture_cap=True, failure="native_error"
-            )
+            lambda *a, **k: NativeGrepResult(matches=[], truncated=True, hit_capture_cap=True, failure="native_error")
         ),
     )
     tool = _tool(tmp_path)
@@ -369,6 +370,7 @@ def test_capture_cap_with_native_failure_does_not_fall_to_python(tmp_path, monke
 
 
 # --- call-time exclude_dirs stay on the native path ----------------------------
+
 
 def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
     from gc_core.utils import native_fs_search as native_fs_search
@@ -397,6 +399,7 @@ def test_call_time_exclude_dirs_stay_on_the_native_path(tmp_path, monkeypatch):
 
 
 # --- needle prefilter drives the Python path -----------------------------------
+
 
 def _prefilter_ready(tool, monkeypatch, paths, failure=None):
     from gc_core.utils import native_fs_search as native_fs_search
@@ -495,6 +498,7 @@ def test_prefiltered_candidates_still_honour_file_pattern(tmp_path, monkeypatch)
 
 # --- обход с размерами и prune на стороне бэкенда ------------------------------
 
+
 def test_walk_sizes_spare_the_per_file_stat():
     """Размер известен из обхода (find -printf %s) — getsize на каждый файл лишний."""
     from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
@@ -577,12 +581,7 @@ async def test_prefiltered_entries_respect_the_path_boundary(tmp_path):
     inside = root / "y.py"
     tool = _tool(tmp_path)
 
-    rels = [
-        e.rel
-        async for e in tool._prefiltered_entries(
-            str(root), [str(sibling), str(inside)]
-        )
-    ]
+    rels = [e.rel async for e in tool._prefiltered_entries(str(root), [str(sibling), str(inside)])]
 
     assert rels == ["x.py", "y.py"]  # сосед с общим префиксом имени — не «2/x.py»
 
@@ -601,14 +600,20 @@ def test_prefilter_timeout_is_reported_and_the_walk_answers(tmp_path, monkeypatc
 
 # --- порядок совпадений при limit одинаков для обоих движков ------------------
 
+
 def _native_disk_order(tmp_path, monkeypatch):
     """grep отдаёт совпадения в порядке find (диск), не по релевантности."""
     from gc_core.utils import native_fs_search as native_fs_search
     from gc_core.utils.native_fs_search import NativeGrepResult
 
     def _m(name, line):
-        return {"file": str(tmp_path / name), "line": line, "end_line": line,
-                "line_content": "needle", "context": "needle"}
+        return {
+            "file": str(tmp_path / name),
+            "line": line,
+            "end_line": line,
+            "line_content": "needle",
+            "context": "needle",
+        }
 
     seen = {}
 
@@ -659,6 +664,7 @@ def test_native_ranking_keeps_line_order_inside_a_file(tmp_path, monkeypatch):
 
 
 # --- честность флагов: files_too_large, пропуски, сбой native, слепое чтение с хоста ---
+
 
 def test_files_too_large_makes_the_scan_incomplete(tmp_path, monkeypatch):
     """Кандидат не прочитан из-за размера — «0 совпадений» не доказательство отсутствия."""
@@ -734,7 +740,8 @@ def test_native_timeout_is_an_honest_refusal_in_the_sandbox(tmp_path, monkeypatc
 
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
     monkeypatch.setattr(
-        native_fs_search, "arun_native_grep",
+        native_fs_search,
+        "arun_native_grep",
         as_coro(lambda *a, **k: _native_result(tmp_path, failure="native_timeout")),
     )
     tool = _tool(tmp_path)
@@ -763,7 +770,8 @@ def test_native_failure_falls_back_to_python_on_a_local_backend(tmp_path, monkey
 
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
     monkeypatch.setattr(
-        native_fs_search, "arun_native_grep",
+        native_fs_search,
+        "arun_native_grep",
         as_coro(lambda *a, **k: _native_result(tmp_path, failure="native_error")),
     )
     tool = _tool(tmp_path)
@@ -772,9 +780,9 @@ def test_native_failure_falls_back_to_python_on_a_local_backend(tmp_path, monkey
     data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
 
     assert data["ok"] is True
-    assert data["search_backend"] == "python"      # откатились
+    assert data["search_backend"] == "python"  # откатились
     assert data["fallback_reason"] == "native_error"
-    assert data["count"] == 1                      # и ответили верно
+    assert data["count"] == 1  # и ответили верно
     assert data["scan_complete"] is True
 
 
@@ -855,13 +863,18 @@ def test_output_capped_on_native_names_the_densest_dirs(tmp_path, monkeypatch):
     from gc_core.utils.native_fs_search import NativeGrepResult
 
     def _m(*parts):
-        return {"file": str(tmp_path.joinpath(*parts)), "line": 1, "end_line": 1,
-                "line_content": "KEY", "context": "KEY\n"}
+        return {
+            "file": str(tmp_path.joinpath(*parts)),
+            "line": 1,
+            "end_line": 1,
+            "line_content": "KEY",
+            "context": "KEY\n",
+        }
 
-    matches = [_m("src", "a.py"), _m("src", "a.py"), _m("src", "b.py"),
-               _m("docs", "d.md"), _m("root.py")]
+    matches = [_m("src", "a.py"), _m("src", "a.py"), _m("src", "b.py"), _m("docs", "d.md"), _m("root.py")]
     monkeypatch.setattr(
-        native_fs_search, "arun_native_grep",
+        native_fs_search,
+        "arun_native_grep",
         as_coro(lambda *a, **k: NativeGrepResult(matches=list(matches), truncated=False, hit_capture_cap=True)),
     )
     tool = _tool(tmp_path)
@@ -885,7 +898,8 @@ def test_output_capped_map_is_only_for_the_capped_case(tmp_path, monkeypatch):
 
     (tmp_path / "a.py").write_text("KEY = 1\n", encoding="utf-8")
     monkeypatch.setattr(
-        native_fs_search, "arun_native_grep",
+        native_fs_search,
+        "arun_native_grep",
         as_coro(lambda *a, **k: _native_result(tmp_path, truncated=True)),
     )
     tool = _tool(tmp_path)
@@ -939,12 +953,19 @@ def test_native_branch_streams_top_k_and_maps_from_files_seen(tmp_path, monkeypa
     def fake_run(*args, **kwargs):
         seen.update(kwargs)
         return NativeGrepResult(
-            matches=[{"file": str(tmp_path / "src" / "a.py"), "line": 1, "end_line": 1,
-                      "line_content": "KEY", "context": "KEY\n"}],
-            truncated=False, hit_capture_cap=True,
+            matches=[
+                {
+                    "file": str(tmp_path / "src" / "a.py"),
+                    "line": 1,
+                    "end_line": 1,
+                    "line_content": "KEY",
+                    "context": "KEY\n",
+                }
+            ],
+            truncated=False,
+            hit_capture_cap=True,
             total_matches=1000,
-            files_seen={str(tmp_path / "src" / f"m{i}.py") for i in range(7)}
-            | {str(tmp_path / "docs" / "d.md")},
+            files_seen={str(tmp_path / "src" / f"m{i}.py") for i in range(7)} | {str(tmp_path / "docs" / "d.md")},
         )
 
     monkeypatch.setattr(native_fs_search, "arun_native_grep", as_coro(fake_run))

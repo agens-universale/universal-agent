@@ -1,4 +1,5 @@
 """Чистая проза: контент стрим-ряда и финал-ряда идентичны (оба render_prose)."""
+
 from gc_tui.services.markdown_render import render_prose, segment_answer
 from gc_tui.services.trace_render import build_agent_widgets
 from gc_tui.widgets.trace_row import TraceRow
@@ -20,5 +21,5 @@ def test_pure_prose_stream_equals_final_content():
 def test_final_multiparagraph_is_single_trace_row():
     ws = build_agent_widgets("абзац1\n\nабзац2", event_no=1)
     rows = [w for w in ws if isinstance(w, TraceRow)]
-    assert len(rows) == 1                       # один прогон → один ряд (не по-строчно)
-    assert rows[0]._content.plain == "абзац1\n\nабзац2"   # пустая строка сохранена
+    assert len(rows) == 1  # один прогон → один ряд (не по-строчно)
+    assert rows[0]._content.plain == "абзац1\n\nабзац2"  # пустая строка сохранена

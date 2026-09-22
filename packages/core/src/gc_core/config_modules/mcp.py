@@ -17,9 +17,7 @@ class McpToolsWhitelistConfig(BaseModel):
         if value is None:
             return []
         if not isinstance(value, list):
-            raise ValueError(
-                "mcp.servers.<name>.whitelist.tools должен быть списком строк"
-            )
+            raise ValueError("mcp.servers.<name>.whitelist.tools должен быть списком строк")
         seen: set[str] = set()
         out: list[str] = []
         for item in value:
@@ -82,8 +80,7 @@ class McpServerConfig(BaseModel):
     client_key: str | None = Field(default=None, alias="client-key")
 
     @field_validator(
-        "url", "token", "server_name", "description", "command", "cwd",
-        "client_cert", "client_key", mode="before"
+        "url", "token", "server_name", "description", "command", "cwd", "client_cert", "client_key", mode="before"
     )
     @classmethod
     def normalize_optional_text(cls, value: object) -> str | None:
@@ -121,24 +118,16 @@ class McpServerConfig(BaseModel):
 
     @field_validator("loop_control_tools", mode="before")
     @classmethod
-    def normalize_loop_control_tools(
-        cls, value: object
-    ) -> Literal["all"] | list[str]:
+    def normalize_loop_control_tools(cls, value: object) -> Literal["all"] | list[str]:
         if value is None:
             return []
         if isinstance(value, str):
             text = value.strip()
             if text == "all":
                 return "all"
-            raise ValueError(
-                'mcp.servers.<name>.loop_control_tools должен быть "all" '
-                "или списком имён тулов"
-            )
+            raise ValueError('mcp.servers.<name>.loop_control_tools должен быть "all" или списком имён тулов')
         if not isinstance(value, list):
-            raise ValueError(
-                'mcp.servers.<name>.loop_control_tools должен быть "all" '
-                "или списком имён тулов"
-            )
+            raise ValueError('mcp.servers.<name>.loop_control_tools должен быть "all" или списком имён тулов')
         seen: set[str] = set()
         out: list[str] = []
         for item in value:
@@ -155,12 +144,12 @@ class McpMetaConfig(BaseModel):
     tools_cache_ttl: int = Field(default=3600, alias="tools-cache-ttl")
     request_timeout_sec: int = 600
     discovery_timeout_sec: int = 30
-    recommended_mcp_manifest: str | None = Field(
-        default=None, alias="recommended-mcp-manifest"
-    )
+    recommended_mcp_manifest: str | None = Field(default=None, alias="recommended-mcp-manifest")
 
     @field_validator(
-        "tools_cache_ttl", "request_timeout_sec", "discovery_timeout_sec",
+        "tools_cache_ttl",
+        "request_timeout_sec",
+        "discovery_timeout_sec",
         mode="before",
     )
     @classmethod

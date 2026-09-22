@@ -234,6 +234,7 @@ async def test_successful_run_has_no_failure():
 
 # --- call-time exclude_dirs on the native recipe: find -path … -prune -------------
 
+
 def test_prune_argv_excludes_call_time_paths():
     argv = _build_find_prune_argv(
         "/work",
@@ -272,9 +273,6 @@ async def test_run_native_grep_prunes_call_time_paths():
         exclude_paths=["/work/vendor"],
     )
     assert "-path /work/vendor" in backend.commands[0]
-
-
-
 
 
 def _needles(required=None, or_group=None):
@@ -394,6 +392,7 @@ async def test_prefilter_candidates_capped_output_is_named():
 
 # --- --null: имя файла с двоеточием больше не ломает разбор ----------------------
 
+
 async def test_production_grep_terminates_file_names_with_nul():
     """GNU и BSD grep понимают --null (короткий -Z у BSD значит «распаковать как zgrep»)."""
     backend = _Backend(stdout="/work/a.py\x001:KEY\n")
@@ -428,6 +427,7 @@ async def test_colon_form_is_still_accepted_for_greps_without_nul():
 
 # --- LC_ALL=C для ASCII-паттерна: cp1251-файл не пропускается молча ---------------
 
+
 class _EnvSpyBackend(_Backend):
     def exec(self, cmd, timeout=None, env=None, **kwargs):
         self.env = env
@@ -449,9 +449,15 @@ async def test_non_ascii_pattern_keeps_the_locale():
     """Кириллический паттерн байтами не ищется — локаль остаётся, как была."""
     backend = _EnvSpyBackend(stdout="")
     await arun_native_grep(
-        backend, "/work", NativeGrepPlan(fixed=True, pattern="ключ", case_insensitive=False),
-        exclude_dir_names=[], exclude_nested_dot_dirs=False, file_pattern=None,
-        max_matches=10, report_path=lambda p: p, is_dir_target=True,
+        backend,
+        "/work",
+        NativeGrepPlan(fixed=True, pattern="ключ", case_insensitive=False),
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=False,
+        file_pattern=None,
+        max_matches=10,
+        report_path=lambda p: p,
+        is_dir_target=True,
     )
     assert "LC_ALL" not in backend.env
 
@@ -473,9 +479,15 @@ async def test_ere_ascii_pattern_keeps_the_locale():
     байтовая локаль только для фикс-строк."""
     backend = _EnvSpyBackend(stdout="")
     await arun_native_grep(
-        backend, "/work", NativeGrepPlan(fixed=False, pattern="caf.s", case_insensitive=False),
-        exclude_dir_names=[".git"], exclude_nested_dot_dirs=True, file_pattern=None,
-        max_matches=10, report_path=lambda p: p, is_dir_target=True,
+        backend,
+        "/work",
+        NativeGrepPlan(fixed=False, pattern="caf.s", case_insensitive=False),
+        exclude_dir_names=[".git"],
+        exclude_nested_dot_dirs=True,
+        file_pattern=None,
+        max_matches=10,
+        report_path=lambda p: p,
+        is_dir_target=True,
     )
     assert "LC_ALL" not in (backend.env or {})
     tail = backend.commands[0].split("| xargs -0 -r ", 1)[1]

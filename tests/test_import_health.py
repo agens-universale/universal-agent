@@ -67,8 +67,7 @@ def test_no_broken_imports():
     # в одиночном запуске он даёт hits=0 и молчит.
     files = ih._python_files()
     assert len(files) > 500, (
-        f"обход нашёл всего {len(files)} файлов — сетка смотрит не туда "
-        "(в дереве их больше тысячи)"
+        f"обход нашёл всего {len(files)} файлов — сетка смотрит не туда (в дереве их больше тысячи)"
     )
 
     findings = scan()
@@ -113,9 +112,7 @@ def test_legacy_toplevel_import_is_found(monkeypatch, tmp_path):
     # корень на время подмены — tmp_path).
     planted_file = tmp_path / "legacy_module.py"
     planted_file.write_text(
-        "from usage.account import spend\n"
-        "from tools.registry import build\n"
-        "import tui.app\n",
+        "from usage.account import spend\nfrom tools.registry import build\nimport tui.app\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(ih, "REPO", tmp_path)
@@ -132,16 +129,13 @@ def test_legacy_list_covers_module_map():
     синхронизация, и сторожит её этот тест: новое имя в `module_map.json` без
     имени в константе означает дыру в классе 3.
     """
-    mapping = json.loads(
-        (Path(gc_testkit.__file__).parent / "module_map.json").read_text(encoding="utf-8")
-    )
+    mapping = json.loads((Path(gc_testkit.__file__).parent / "module_map.json").read_text(encoding="utf-8"))
     # Тот же класс вакуума: `assert not missing` верно и на ПУСТОЙ карте, а её
     # пустота означала бы, что `module_dir()` перестал находить что бы то ни
     # было. Порог грубый нарочно — точное число дразнило бы правку при каждом
     # новом модуле.
     assert len(mapping) > 40, (
-        f"module_map.json содержит всего {len(mapping)} записей — похоже, карта "
-        "пуста или прочитана не та"
+        f"module_map.json содержит всего {len(mapping)} записей — похоже, карта пуста или прочитана не та"
     )
 
     missing = sorted(set(mapping) - ih.LEGACY_TOPLEVEL)
@@ -161,9 +155,7 @@ def test_alien_dependency_is_a_skip_not_a_finding(monkeypatch):
 
     def alien(name, package=None):
         if name == child:
-            raise ModuleNotFoundError(
-                "No module named 'pydantic_settings'", name="pydantic_settings"
-            )
+            raise ModuleNotFoundError("No module named 'pydantic_settings'", name="pydantic_settings")
         return real(name, package)
 
     monkeypatch.setattr(ih, "_SKIPPED", {})
@@ -203,9 +195,7 @@ def test_main_reports_skipped_modules(monkeypatch, capsys):
     чистый, и с находками, — потому что хвост про пропуски легко потерять в
     одном из них.
     """
-    monkeypatch.setattr(
-        ih, "_SKIPPED", {"gc_core.config": "нет зависимости 'pydantic_settings'"}
-    )
+    monkeypatch.setattr(ih, "_SKIPPED", {"gc_core.config": "нет зависимости 'pydantic_settings'"})
     monkeypatch.setattr(sys, "argv", ["import_health"])
 
     monkeypatch.setattr(ih, "scan", list)
@@ -214,9 +204,7 @@ def test_main_reports_skipped_modules(monkeypatch, capsys):
     assert "ПРОПУЩЕНО модулей: 1" in clean, clean
     assert "gc_core.config — нет зависимости" in clean, clean
 
-    finding = ih.Finding(
-        "tests/x.py", 1, "missing_name", "в `gc_core.config` нет имени `nope`"
-    )
+    finding = ih.Finding("tests/x.py", 1, "missing_name", "в `gc_core.config` нет имени `nope`")
     monkeypatch.setattr(ih, "scan", lambda: [finding])
     assert ih.main() == 1
     loud = capsys.readouterr().out

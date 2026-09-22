@@ -56,9 +56,7 @@ def render_system_prompt(
 
     # Tag block variant
     if "</user_info>" in system_prompt:
-        system_prompt = _replace_tag_block(
-            system_prompt, "user_info", user_info_inner
-        )
+        system_prompt = _replace_tag_block(system_prompt, "user_info", user_info_inner)
     # Legacy placeholder variant (no closing tag present)
     elif "<user_info>" in system_prompt:
         system_prompt = system_prompt.replace("<user_info>", user_info_inner)
@@ -68,9 +66,7 @@ def render_system_prompt(
         specific_role = "Specific role is not provided. Follow the common prompt instructions."
 
     if "</specific_role>" in system_prompt:
-        system_prompt = _replace_tag_block(
-            system_prompt, "specific_role", str(specific_role)
-        )
+        system_prompt = _replace_tag_block(system_prompt, "specific_role", str(specific_role))
     elif "<specific_role>" in system_prompt:
         system_prompt = system_prompt.replace("<specific_role>", str(specific_role))
 
@@ -79,4 +75,3 @@ def render_system_prompt(
         system_prompt = _replace_tag_block(system_prompt, "special_instructions", special_instructions or "")
 
     return system_prompt
-

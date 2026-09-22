@@ -6,4 +6,3 @@ __all__ = [
     "get_skills_registry",
     "get_skills_tools_data",
 ]
-

@@ -1,4 +1,5 @@
 """MainScreen: batch waiting/active + drain nested subagent progress."""
+
 from __future__ import annotations
 
 import pytest

@@ -4,6 +4,7 @@
 (popitem(last=False)), продление жизни при cache-hit (move_to_end), round-trip
 через serialize_shared_block (Order сохраняется в JSON).
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
 from gc_testkit.helpers.tool_ctx import CallableTool
 
 # ── Стаб shared/state для _get_cache ──────────────────────────────────────────
+
 
 class _Shared:
     def __init__(self) -> None:
@@ -36,6 +38,7 @@ def _make_simple_fetch() -> SimpleFetchUrl:
 
 
 # ── Нормализация dict→OrderedDict ─────────────────────────────────────────────
+
 
 def test_get_cache_normalizes_plain_dict_to_ordereddict():
     f = _make_fetch()
@@ -62,6 +65,7 @@ def test_get_cache_returns_none_when_no_shared():
 
 # ── Эвикция: лимит 10, popitem(last=False) ────────────────────────────────────
 
+
 def _fill_cache(f: FetchUrl, n: int) -> None:
     """Записывает n URL через публичный метод записи кэша."""
     for i in range(n):
@@ -87,6 +91,7 @@ def test_cache_keeps_exactly_limit_at_boundary():
 
 
 # ── LRU: move_to_end на cache-hit ────────────────────────────────────────────
+
 
 def test_cache_hit_moves_to_end():
     f = _make_fetch()
@@ -123,6 +128,7 @@ def test_repeatedly_read_url_survives_eviction():
 
 # ── Round-trip через meta: OrderedDict → JSON → SharedStateData ───────────────
 
+
 def test_cache_order_survives_serialize_roundtrip():
     """Порядок ключей (LRU-возраст) сохраняется при персистентности в meta."""
     shared = SharedStateData()
@@ -136,9 +142,7 @@ def test_cache_order_survives_serialize_roundtrip():
     restored_shared = ThreadMetaMapper.shared_from_meta(restored_meta)
     assert restored_shared is not None
     # Содержимое и порядок сохранены.
-    assert list(restored_shared.fetch_url_cache.keys()) == [
-        f"https://example.com/{i}" for i in range(10)
-    ]
+    assert list(restored_shared.fetch_url_cache.keys()) == [f"https://example.com/{i}" for i in range(10)]
 
 
 def test_cache_ordereddict_equals_plain_dict_for_compatibility():
@@ -156,8 +160,8 @@ def test_max_size_constant_is_ten():
     assert FetchUrl.fetch_url_cache_max_size == 10
 
 
-
 # ── Прямые тесты методов _get_from_cache / _put_to_cache ──────────────────────
+
 
 def test_get_from_cache_returns_content_and_meta():
     f = _make_fetch()
@@ -210,6 +214,7 @@ def test_get_from_cache_updates_lru_order():
 
 
 # ── SimpleFetchUrl: тот же LRU API (общий shared.fetch_url_cache) ─────────────
+
 
 def test_simple_fetch_max_size_matches_fetch_url():
     assert SimpleFetchUrl.fetch_url_cache_max_size == FetchUrl.fetch_url_cache_max_size == 10

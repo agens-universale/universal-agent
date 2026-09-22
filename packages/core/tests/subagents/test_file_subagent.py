@@ -1,4 +1,5 @@
 """Адаптер FileDefinedSubagent и проверка обязательных инструментов."""
+
 import asyncio
 
 import pytest
@@ -37,9 +38,7 @@ class TestRequiredTools:
 
     def test_allowlist_without_required_is_not_a_problem(self):
         # Главное изменение: ядро не нужно упоминать в tools.
-        assert FileDefinedSubagent.required_tools_banned(
-            _definition(tools=("fs_read_file",))
-        ) == []
+        assert FileDefinedSubagent.required_tools_banned(_definition(tools=("fs_read_file",))) == []
 
     def test_empty_allowlist_is_not_a_problem(self):
         assert FileDefinedSubagent.required_tools_banned(_definition(tools=())) == []
@@ -47,19 +46,13 @@ class TestRequiredTools:
     @pytest.mark.parametrize("banned", REQUIRED)
     def test_stop_tools_ban_is_reported(self, banned):
         # Запрет не исполняется, но оператор должен узнать, что он проигнорирован.
-        assert FileDefinedSubagent.required_tools_banned(
-            _definition(stop_tools=(banned,))
-        ) == [banned]
+        assert FileDefinedSubagent.required_tools_banned(_definition(stop_tools=(banned,))) == [banned]
 
     def test_all_bans_reported_at_once(self):
-        assert FileDefinedSubagent.required_tools_banned(
-            _definition(stop_tools=REQUIRED)
-        ) == sorted(REQUIRED)
+        assert FileDefinedSubagent.required_tools_banned(_definition(stop_tools=REQUIRED)) == sorted(REQUIRED)
 
     def test_unrelated_stop_tools_are_ignored(self):
-        assert FileDefinedSubagent.required_tools_banned(
-            _definition(stop_tools=("exec_python",))
-        ) == []
+        assert FileDefinedSubagent.required_tools_banned(_definition(stop_tools=("exec_python",))) == []
 
     def test_required_set_is_exact(self):
         assert set(REQUIRED) == REQUIRED_TOOL_NAMES
@@ -80,9 +73,7 @@ class TestSpecification:
 class TestInstance:
     def _instance(self, **kw):
         return asyncio.run(
-            FileDefinedSubagent.create_instance(
-                definition=_definition(**kw), task="сделай Х", reason="потому что"
-            )
+            FileDefinedSubagent.create_instance(definition=_definition(**kw), task="сделай Х", reason="потому что")
         )
 
     def test_agent_name_comes_from_definition(self):

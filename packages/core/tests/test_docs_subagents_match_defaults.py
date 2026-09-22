@@ -5,6 +5,7 @@
 и правка про порт ответа в дочернем контексте понадобилась именно поэтому.
 Читатель по документу делал ровно неверный вывод.
 """
+
 import re
 
 from gc_testkit.paths import REPO
@@ -22,8 +23,7 @@ def _default_stop_tools() -> list:
 def test_stop_tools_is_empty_by_default():
     """Опора документа: если дефолт изменится, тест ниже станет неверным."""
     assert _default_stop_tools() == [], (
-        "дефолт `stop_tools` перестал быть пустым — текст в docs/subagents.md "
-        "надо перечитать заново"
+        "дефолт `stop_tools` перестал быть пустым — текст в docs/subagents.md надо перечитать заново"
     )
 
 

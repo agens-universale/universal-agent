@@ -97,9 +97,7 @@ def test_file_info_cp1251_not_binary(tmp_path):
     data = text.encode("cp1251")
     path = tmp_path / "legacy.txt"
     path.write_bytes(data)
-    res = json.loads(
-        with_local_ctx(FileInfo)(path=str(path), include_hash=True, include_line_count=True)
-    )
+    res = json.loads(with_local_ctx(FileInfo)(path=str(path), include_hash=True, include_line_count=True))
     assert res["ok"] is True
     assert res["is_binary"] is False
     assert res["binary_detection_reason"] is None
@@ -136,4 +134,3 @@ def test_file_info_symlink_to_file_follow(tmp_path):
     assert res["ok"] is True
     assert res["type"] == "file"
     assert res["size_bytes"] == len("payload")
-

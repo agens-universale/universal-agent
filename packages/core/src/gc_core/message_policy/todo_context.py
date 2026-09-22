@@ -14,6 +14,7 @@ persistence их сохраняет, а здесь они превращаютс
 
 Пустой чеклист рендерится в пустую строку: блока в промпте быть не должно.
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterable

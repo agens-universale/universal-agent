@@ -9,11 +9,13 @@ Covers:
 - D5: level markers + one final hint only on truncation
 - D7: get_listing and get_listing_from_backend agree
 """
+
 from gc_core.utils.project_data import cut_second, get_listing, get_listing_from_backend
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeBackend:
     """Stand-in FsBackend: returns a predefined listdir, no real FS."""
@@ -64,6 +66,7 @@ def _children_of(listing: str, dirname: str) -> list[str]:
 # D4 — cut_second default
 # ---------------------------------------------------------------------------
 
+
 def test_cut_second_at_least_120():
     assert cut_second >= 120, f"cut_second={cut_second}, expected >= 120"
 
@@ -84,6 +87,7 @@ async def test_gc_dir_excluded_from_listing(tmp_path):
 # ---------------------------------------------------------------------------
 # D2 — stable sort: dirs first, casefold, repeatable
 # ---------------------------------------------------------------------------
+
 
 async def test_get_listing_stable_order_repeatable(tmp_path):
     """Multiple calls return the same order."""
@@ -146,6 +150,7 @@ async def test_backend_listing_agrees_with_filesystem_listing(tmp_path):
 # D3 — limit counts shown names, not raw index
 # ---------------------------------------------------------------------------
 
+
 async def test_truncation_ignores_stop_folders_in_counter(tmp_path, monkeypatch):
     """
     Classic as-is bug: stop_folders early in listdir inflate enumerate index,
@@ -191,6 +196,7 @@ async def test_truncation_uses_shown_count_not_raw_index(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # D5 — truncate markers
 # ---------------------------------------------------------------------------
+
 
 async def test_no_truncation_marker_when_under_limit(tmp_path, monkeypatch):
     """When no truncation occurs, no level markers and no final hint."""
@@ -283,6 +289,7 @@ async def test_backend_and_fs_agree_on_truncation_markers(tmp_path, monkeypatch)
 # Integration: children of src/ under cut_second (the original bug surface)
 # ---------------------------------------------------------------------------
 
+
 async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     """
     Acceptance §6: project root listing must show both ``tui/`` and ``diff_tui/``
@@ -317,7 +324,5 @@ async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     monkeypatch.setattr(project_data, "cut_second", 30)
     listing_old = await get_listing(str(tmp_path))
     old_children = _children_of(listing_old, "src/")
-    assert "tui/" not in old_children, (
-        "fixture invalid: cut_second=30 should hide tui/ so the 120 case is meaningful"
-    )
+    assert "tui/" not in old_children, "fixture invalid: cut_second=30 should hide tui/ so the 120 case is meaningful"
     assert any("30/53" in c for c in old_children), f"Expected level marker:\n{listing_old}"

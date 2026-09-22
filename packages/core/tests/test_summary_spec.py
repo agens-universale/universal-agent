@@ -72,9 +72,7 @@ class SummarySpecTest(unittest.TestCase):
 
     def test_merge_repair_keeps_preserved_tags(self) -> None:
         pad = "- test content for validation padding."
-        invalid = assemble_summary_xml(
-            {"task_and_context": f"keep-me\n{pad}", "open_tasks": f"mode: execution\n{pad}"}
-        )
+        invalid = assemble_summary_xml({"task_and_context": f"keep-me\n{pad}", "open_tasks": f"mode: execution\n{pad}"})
         repaired = assemble_summary_xml(
             {
                 "do_not_redo": pad,
@@ -153,9 +151,7 @@ class SummarySpecTest(unittest.TestCase):
 
     def test_merge_repaired_summary_empty_repair_tag_wipes_section(self) -> None:
         pad = "- test content for validation padding."
-        invalid = assemble_summary_xml(
-            {"task_and_context": f"keep-me\n{pad}", "open_tasks": f"mode: execution\n{pad}"}
-        )
+        invalid = assemble_summary_xml({"task_and_context": f"keep-me\n{pad}", "open_tasks": f"mode: execution\n{pad}"})
         repaired = assemble_summary_xml({"open_tasks": ""}, only_present=True)
         merged = merge_repaired_summary(invalid_text=invalid, repaired_text=repaired)
         self.assertIn("keep-me", merged)
@@ -199,10 +195,7 @@ class SummarySpecTest(unittest.TestCase):
 
     def test_extract_duplicate_tag_uses_last_match(self) -> None:
         bodies = extract_summary_bodies(
-            "<summary>"
-            "<open_tasks>first</open_tasks>"
-            "<open_tasks>second</open_tasks>"
-            "</summary>"
+            "<summary><open_tasks>first</open_tasks><open_tasks>second</open_tasks></summary>"
         )
         self.assertEqual(bodies["open_tasks"], "second")
 

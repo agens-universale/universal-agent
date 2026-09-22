@@ -11,6 +11,7 @@
 протокола НЕ закрыло утиный путь: диспетчер по-прежнему смотрит на имена, а не
 на наследование.
 """
+
 import pytest
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_base import (
@@ -37,10 +38,7 @@ def test_the_order_is_the_declaration_order():
     запусками, а имена попадают в сообщения об ошибках, где скачущий порядок
     мешает сравнивать два прогона глазами.
     """
-    declared = [
-        name for name, attr in ThreadStoreBase.__dict__.items()
-        if getattr(attr, "__isabstractmethod__", False)
-    ]
+    declared = [name for name, attr in ThreadStoreBase.__dict__.items() if getattr(attr, "__isabstractmethod__", False)]
     assert list(CONTRACT_METHODS) == declared
 
 
@@ -54,9 +52,7 @@ def test_the_protocol_is_gone():
     """Второго объявления быть не должно — ради этого всё и делалось."""
     import gc_core.thread_store_types as types_mod
 
-    assert not hasattr(types_mod, "ThreadStore"), (
-        "класс-протокол вернулся: контракт снова объявлен дважды"
-    )
+    assert not hasattr(types_mod, "ThreadStore"), "класс-протокол вернулся: контракт снова объявлен дважды"
     assert not hasattr(types_mod, "CONTRACT_METHODS_HINT"), (
         "список методов вернулся в модуль типов — он выводится из ABC"
     )
@@ -82,9 +78,7 @@ def test_removing_the_protocol_did_not_close_the_duck_path():
     proxy = _Proxy()
     assert not isinstance(proxy, ThreadStoreBase), "проверка пустая: прокси наследует"
 
-    assert athread_store(proxy) is not None, (
-        "утиное хранилище перестало приниматься — ABC стал гейтом"
-    )
+    assert athread_store(proxy) is not None, "утиное хранилище перестало приниматься — ABC стал гейтом"
 
 
 def test_a_store_missing_one_method_is_still_refused():
@@ -106,6 +100,7 @@ def test_a_store_missing_one_method_is_still_refused():
 
 
 # --- дрейф умолчаний: два драйвера над одним порядком ввода-вывода ----------
+
 
 def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]]]":
     """Последовательность обращений к хранилищу у каждого умолчания — по AST.
@@ -129,12 +124,8 @@ def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]
     tree = ast.parse(pathlib.Path(mod.__file__).read_text(encoding="utf-8"))
 
     def methods(class_name):
-        cls = next(
-            n for n in tree.body
-            if isinstance(n, ast.ClassDef) and n.name == class_name
-        )
-        return [m for m in cls.body
-                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == class_name)
+        return [m for m in cls.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
     sync_methods = methods("ThreadStoreBase")
     sync_names = {m.name for m in sync_methods}
@@ -154,9 +145,7 @@ def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]
                 if not isinstance(node, ast.Call):
                     continue
                 fn = node.func
-                if not (isinstance(fn, ast.Attribute)
-                        and isinstance(fn.value, ast.Name)
-                        and fn.value.id == "self"):
+                if not (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name) and fn.value.id == "self"):
                     continue
                 name = unprefix(fn.attr)
                 if name in sync_names:

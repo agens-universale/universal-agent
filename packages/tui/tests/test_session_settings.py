@@ -36,16 +36,22 @@ def test_diff_vs_base_compares_effective_default_not_raw_value():
     «Сохранить как умолчание» не появится никогда и записать это умолчание из UI
     нечем (схемный дефолт плоского ключа тоже 'on', сравнение по сырому значению
     расхождения не видит)."""
-    base = {"tui_finish_gate_mode": "on", "tui_finish_gate_mode_explicit": False,
-            "strict_turn_finish_explicit_false": True}
+    base = {
+        "tui_finish_gate_mode": "on",
+        "tui_finish_gate_mode_explicit": False,
+        "strict_turn_finish_explicit_false": True,
+    }
     assert diff_vs_base(base, {"tui.finish_gate_mode": "on"}) == {"tui.finish_gate_mode": "on"}
 
 
 def test_diff_vs_base_ignores_value_equal_to_effective_default():
     """Обратная сторона того же правила: сессия выставила ровно то, что и так
     действует — сохранять нечего, строки-действия быть не должно."""
-    base = {"tui_finish_gate_mode": "on", "tui_finish_gate_mode_explicit": False,
-            "strict_turn_finish_explicit_false": True}
+    base = {
+        "tui_finish_gate_mode": "on",
+        "tui_finish_gate_mode_explicit": False,
+        "strict_turn_finish_explicit_false": True,
+    }
     assert diff_vs_base(base, {"tui.finish_gate_mode": "off"}) == {}
 
 
@@ -54,6 +60,7 @@ def test_every_toggle_key_is_session_overridable():
     не применялся бы — apply_overrides игнорирует неизвестный ключ, исключения нет,
     строка продолжает рендерить старое значение (переключатель выглядит залипшим)."""
     from gc_tui.toggles import TOGGLES
+
     # Пресет-тогглы (/rigor) не пишут напрямую — dotted="" (спека §6, Task 4);
     # проверка адресует только single-key тогглы.
     assert [s.dotted for s in TOGGLES.values() if s.dotted and s.dotted not in SESSION_KEYS] == []
@@ -62,13 +69,13 @@ def test_every_toggle_key_is_session_overridable():
 def test_new_session_key_works_without_code_changes(monkeypatch):
     """Расширяемость: новый ключ в белом списке проходит весь путь наложения."""
     from gc_tui import session_settings as ss
+
     monkeypatch.setitem(
-        ss.SESSION_KEYS, "tui.fake_mode",
+        ss.SESSION_KEYS,
+        "tui.fake_mode",
         ss.SessionKey("tui.fake_mode", "tui_fake_mode", None),
     )
     cfg = {"tui_fake_mode": "a"}
     ss.apply_overrides(cfg, {"tui.fake_mode": "b"})
     assert cfg["tui_fake_mode"] == "b"
-    assert ss.diff_vs_base({"tui_fake_mode": "a"}, {"tui.fake_mode": "b"}) == {
-        "tui.fake_mode": "b"
-    }
+    assert ss.diff_vs_base({"tui_fake_mode": "a"}, {"tui.fake_mode": "b"}) == {"tui.fake_mode": "b"}

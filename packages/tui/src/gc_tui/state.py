@@ -3,6 +3,7 @@
 Хранит активную задачу (`active_task_id`), выбранный скилл (`pending_skill_id`)
 и состояние ask_human (`ask_human_state` — читает header для бейджа `[asking]`).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

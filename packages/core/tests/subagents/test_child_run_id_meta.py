@@ -1,4 +1,5 @@
 """child_run_id в output meta (без path к логу)."""
+
 from __future__ import annotations
 
 import json
@@ -50,13 +51,10 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
+
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
-    )
-    monkeypatch.setattr(
-        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
-    )
+    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
+    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: "")
     monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
 
     async def _create(*a, **k):

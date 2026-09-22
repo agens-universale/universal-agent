@@ -125,9 +125,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         assert "<original_user_messages>" not in first_compact_content
         assert "Summarized context from previous dialogue." in first_compact_content
 
-        state.user_intent_log.extend(
-            deserialize_list(["third request", "fourth request"])
-        )
+        state.user_intent_log.extend(deserialize_list(["third request", "fourth request"]))
         await session.apersist_batch(
             [
                 {"role": "user", "content": "third request"},
@@ -165,9 +163,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
         assert meta_after_second.get("messages_count") == 1
         assert meta_after_second.get("previous_response_id") is None
-        assert intent_user_ask_texts(
-            deserialize_list(meta_after_second.get("user_intent_log"))
-        ) == [
+        assert intent_user_ask_texts(deserialize_list(meta_after_second.get("user_intent_log"))) == [
             "first request",
             "second request",
             "third request",

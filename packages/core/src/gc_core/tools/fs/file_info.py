@@ -136,7 +136,6 @@ class FileInfo(AbstractSimpleTool):
             message=str(error.get("message") or "Read operation is outside allowed read_guard perimeter."),
         )
 
-
     async def _classify(self, probe: "_FileProbe", stat_path: str) -> None:
         sample = await self._backend.read_head_bytes(stat_path, BINARY_SAMPLE_BYTES)
         classification = classify_content_from_sample(stat_path, sample)
@@ -162,7 +161,9 @@ class FileInfo(AbstractSimpleTool):
             return str(e), "Failed to read file for hash."
         return None
 
-    async def _probe_file(self, probe: "_FileProbe", stat_path: str, size_bytes, include_line_count: bool, include_hash: bool) -> "tuple[str, str] | None":
+    async def _probe_file(
+        self, probe: "_FileProbe", stat_path: str, size_bytes, include_line_count: bool, include_hash: bool
+    ) -> "tuple[str, str] | None":
         """Бинарность/кодировка, счётчик строк и хеш; (str(e), message) при ошибке чтения."""
         await self._classify(probe, stat_path)
 
@@ -252,7 +253,8 @@ class FileInfo(AbstractSimpleTool):
         permissions = self._format_permissions(info["mode"]) if info["mode"] is not None else None
         modified_time = (
             datetime.fromtimestamp(info["mtime"], tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            if info["mtime"] is not None else None
+            if info["mtime"] is not None
+            else None
         )
 
         probe = _FileProbe()
@@ -263,7 +265,7 @@ class FileInfo(AbstractSimpleTool):
                     path=path,
                     error={"type": "read_failed", "message": read_error[0]},
                     message=read_error[1],
-                        )
+                )
 
         return self._result(
             ok=True,

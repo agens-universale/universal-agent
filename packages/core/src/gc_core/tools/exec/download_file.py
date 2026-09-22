@@ -42,14 +42,23 @@ class DownloadFile(AbstractSimpleTool):
     max_retries = 2
     retry_backoff_seconds = 1.0
     default_user_agent = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
-    ALLOWED_EXTENSIONS = frozenset({
-        ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
-        ".txt", ".md", ".json",
-    })
+    ALLOWED_EXTENSIONS = frozenset(
+        {
+            ".pdf",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".pptx",
+            ".csv",
+            ".html",
+            ".msg",
+            ".txt",
+            ".md",
+            ".json",
+        }
+    )
     _BOM_PREFIXES = (
         b"\xef\xbb\xbf",
         b"\xff\xfe",
@@ -105,7 +114,8 @@ class DownloadFile(AbstractSimpleTool):
             "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, .json, ...).\n"
         )
 
-    def _result(self,
+    def _result(
+        self,
         *,
         ok: bool = False,
         path: str = "",
@@ -156,7 +166,10 @@ class DownloadFile(AbstractSimpleTool):
         if os.path.basename(name) != name or "/" in name or "\\" in name:
             return {"type": "invalid_filename", "message": "filename must be a basename without path separators."}
         if "\x00" in name or "\r" in name or "\n" in name:
-            return {"type": "invalid_filename", "message": "filename contains unsupported characters (null byte or newline)."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename contains unsupported characters (null byte or newline).",
+            }
         if len(name) > 255:
             return {"type": "invalid_filename", "message": "filename is too long."}
         ext = os.path.splitext(name)[1].lower()
@@ -173,7 +186,7 @@ class DownloadFile(AbstractSimpleTool):
         if ext in {".docx", ".xlsx", ".pptx"}:
             return body.startswith(b"PK\x03\x04")
         if ext in {".xls", ".msg"}:
-            return body.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
+            return body.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
         if ext in {".csv", ".txt", ".md", _HTML_EXT, ".json"}:
             if b"\x00" in body[:4096]:
                 return False
@@ -186,7 +199,7 @@ class DownloadFile(AbstractSimpleTool):
         payload = body
         for bom in cls._BOM_PREFIXES:
             if payload.startswith(bom):
-                payload = payload[len(bom):]
+                payload = payload[len(bom) :]
                 break
         for byte in payload:
             if byte in (9, 10, 13, 32):
@@ -219,6 +232,7 @@ class DownloadFile(AbstractSimpleTool):
                 return None
             if wg_mode == "ask":
                 from gc_core.security.confirm_port import request_confirm
+
                 confirmed = request_confirm(
                     title="Защита записи",
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
@@ -278,15 +292,16 @@ class DownloadFile(AbstractSimpleTool):
         большой» надо принимать до того, как он приедет в память.
         """
         return stream_validating_redirects(
-            session, start_url, headers, timeout,
+            session,
+            start_url,
+            headers,
+            timeout,
             allowed_schemes=allowed_schemes,
             url_blacklist=url_blacklist,
             max_redirects=DEFAULT_MAX_REDIRECTS,
         )
 
-    async def _read_bounded(
-        self, response: "httpx.Response", max_bytes: int
-    ) -> tuple[bytes, Optional[Dict[str, Any]]]:
+    async def _read_bounded(self, response: "httpx.Response", max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
         """Прочитать тело, оборвав его на ``max_bytes``.
 
         Сначала — заявленный ``Content-Length``: если сервер честно сказал, что
@@ -312,7 +327,6 @@ class DownloadFile(AbstractSimpleTool):
             chunks.append(chunk)
         return b"".join(chunks), None
 
-
     async def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
         context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
         headers = {
@@ -327,9 +341,7 @@ class DownloadFile(AbstractSimpleTool):
         response = None
         attempts = 1 + self.max_retries
         # Клиент общий и переиспользуемый — закрывать его здесь нельзя.
-        session = get_async_client(
-            proxies=resolve_proxies(None, os.environ, url)
-        )
+        session = get_async_client(proxies=resolve_proxies(None, os.environ, url))
         for attempt in range(1, attempts + 1):
             try:
                 async with self._stream_with_redirect_validation(
@@ -396,7 +408,6 @@ class DownloadFile(AbstractSimpleTool):
             return {"type": "write_failed", "message": str(exc)}
         return None
 
-
     @enforce_url_policy(url_arg="url")
     async def acall(self, url: str, filename: str, **kwargs: Any) -> str:
         if not isinstance(url, str):
@@ -406,7 +417,11 @@ class DownloadFile(AbstractSimpleTool):
             return self._result(error={"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."})
         if not normalized_url.startswith(("http://", "https://")):
             return self._result(
-                error={"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "url",
+                    "message": "URL must start with http:// or https://.",
+                },
             )
 
         filename_result = self._validate_filename(filename)

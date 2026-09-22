@@ -14,6 +14,7 @@
 правилом — иначе они разойдутся в том, что считают текущим значением ключа.
 Слой не зависит ни от `TuiApp`, ни от презентации — направление только сюда.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -54,11 +55,15 @@ class SessionKey:
 
 SESSION_KEYS: Dict[str, SessionKey] = {
     "tui.finish_gate_mode": SessionKey(
-        "tui.finish_gate_mode", "tui_finish_gate_mode", "tui_finish_gate_mode_explicit",
+        "tui.finish_gate_mode",
+        "tui_finish_gate_mode",
+        "tui_finish_gate_mode_explicit",
         effective_finish_gate_mode,
     ),
     "tui.text_answer_mode": SessionKey(
-        "tui.text_answer_mode", "tui_text_answer_mode", None,
+        "tui.text_answer_mode",
+        "tui_text_answer_mode",
+        None,
         effective_text_answer_mode,
     ),
     # Профили и уровни: `level` — обычный ключ, накладывается флагом на плоский

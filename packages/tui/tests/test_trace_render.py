@@ -1,23 +1,26 @@
 """trace_render — общие строители виджетов трейса (Spec B / A+)."""
+
 import pytest
 
 
 def test_compaction_label_with_chars():
-    comp = {"messages_in_segment": 8, "chars_before": 12300,
-            "chars_after": 3100, "synthesis": "x"}
+    comp = {"messages_in_segment": 8, "chars_before": 12300, "chars_after": 3100, "synthesis": "x"}
     from gc_tui.services.trace_render import build_compaction_label
+
     assert build_compaction_label(1, comp) == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
 
 
 def test_compaction_label_legacy_no_chars():
     comp = {"messages_in_segment": 5, "synthesis": "x"}
     from gc_tui.services.trace_render import build_compaction_label
+
     assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
 
 
 def test_block_panel_for_code_with_lang():
     pytest.importorskip("textual")
     from gc_tui.widgets.block_panel import BlockPanel
+
     w = BlockPanel.for_code("print(1)", "python", event_no=1)
     assert w.has_class("code-block-panel")
 
@@ -25,6 +28,7 @@ def test_block_panel_for_code_with_lang():
 def test_block_panel_for_code_unknown_lang_fallback():
     pytest.importorskip("textual")
     from gc_tui.widgets.block_panel import BlockPanel
+
     w = BlockPanel.for_code("x = 1", "no-such-lang-xyz", event_no=2)
     assert w.has_class("code-block-panel")
 
@@ -32,6 +36,7 @@ def test_block_panel_for_code_unknown_lang_fallback():
 def test_block_panel_for_code_no_lang_fallback():
     pytest.importorskip("textual")
     from gc_tui.widgets.block_panel import BlockPanel
+
     w = BlockPanel.for_code("plain text", None, event_no=3)
     assert w.has_class("code-block-panel")
 
@@ -39,26 +44,28 @@ def test_block_panel_for_code_no_lang_fallback():
 def test_build_agent_widgets_prose():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_agent_widgets
+
     ws = build_agent_widgets("просто текст ответа", event_no=5)
     assert len(ws) == 1
     from gc_tui.widgets.trace_row import TraceRow
+
     assert isinstance(ws[0], TraceRow)
 
 
 def test_build_agent_widgets_code_and_prose_order_and_focus():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_agent_widgets
+
     md = "вступление\n\n```python\nprint(1)\n```\n\nитог"
     ws = build_agent_widgets(md, event_no=7)
     # 3 виджета: proza, code-block, proza — в порядке
     assert len(ws) == 3
     assert ws[0].has_class("code-block-panel") is False  # первый proza
-    assert ws[1].has_class("code-block-panel") is True    # code-block
+    assert ws[1].has_class("code-block-panel") is True  # code-block
 
 
 def _env(payload, ts="2026-05-30T10:00:00Z"):
-    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1,
-            "ts": ts, "payload": payload}
+    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1, "ts": ts, "payload": payload}
 
 
 @pytest.mark.asyncio
@@ -72,12 +79,28 @@ async def test_render_thread_readonly_kinds():
 
     records = [
         _env({"role": "user", "content": "привет", "id": "m1"}),
-        _env({"id": "a1", "type": "message", "role": "assistant", "status": "completed",
-              "content": [{"type": "output_text", "text": "ответ агента", "annotations": []}]}),
-        _env({"type": "function_call", "id": "fc1", "call_id": "c1", "name": "read_file",
-              "arguments": '{"path": "x.py"}', "status": "completed"}),
-        _env({"id": "fco1", "type": "function_call_output", "call_id": "c1",
-              "output": '{"ok": true, "total_lines": 10}'}),
+        _env(
+            {
+                "id": "a1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "ответ агента", "annotations": []}],
+            }
+        ),
+        _env(
+            {
+                "type": "function_call",
+                "id": "fc1",
+                "call_id": "c1",
+                "name": "read_file",
+                "arguments": '{"path": "x.py"}',
+                "status": "completed",
+            }
+        ),
+        _env(
+            {"id": "fco1", "type": "function_call_output", "call_id": "c1", "output": '{"ok": true, "total_lines": 10}'}
+        ),
     ]
 
     class _A(App):
@@ -97,11 +120,8 @@ async def test_render_thread_readonly_kinds():
 
 
 def _seg(payloads, synthesis=None, n=0, index=0):
-    comp = None if synthesis is None else {
-        "ts": "t", "messages_in_segment": n, "synthesis": synthesis}
-    return {"index": index,
-            "messages": [_env(p) for p in payloads],
-            "compacted_by": comp}
+    comp = None if synthesis is None else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
+    return {"index": index, "messages": [_env(p) for p in payloads], "compacted_by": comp}
 
 
 @pytest.mark.asyncio
@@ -115,20 +135,35 @@ async def test_render_segments_readonly_parity():
     from textual.containers import VerticalScroll
 
     segments = [
-        _seg([
-            {"role": "user", "content": "вопрос", "id": "m1"},
-            {"type": "function_call", "id": "fc1", "call_id": "c1",
-             "name": "intermediate_reply",
-             "arguments": '{"answer": "промежуточный"}'},
-            {"role": "user", "id": "mp",
-             "content": '<technical type="technical">служебное</technical>'},
-        ], synthesis="СИНТЕЗ-X", n=3, index=0),
-        _seg([
-            {"id": "a1", "type": "message", "role": "assistant", "status": "completed",
-             "content": [{"type": "output_text", "text": "финал", "annotations": []}]},
-            {"role": "user", "id": "me",
-             "content": '<technical type="error_message">ошибка бэка</technical>'},
-        ], index=1),
+        _seg(
+            [
+                {"role": "user", "content": "вопрос", "id": "m1"},
+                {
+                    "type": "function_call",
+                    "id": "fc1",
+                    "call_id": "c1",
+                    "name": "intermediate_reply",
+                    "arguments": '{"answer": "промежуточный"}',
+                },
+                {"role": "user", "id": "mp", "content": '<technical type="technical">служебное</technical>'},
+            ],
+            synthesis="СИНТЕЗ-X",
+            n=3,
+            index=0,
+        ),
+        _seg(
+            [
+                {
+                    "id": "a1",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": "финал", "annotations": []}],
+                },
+                {"role": "user", "id": "me", "content": '<technical type="error_message">ошибка бэка</technical>'},
+            ],
+            index=1,
+        ),
     ]
 
     class _A(App):
@@ -161,6 +196,7 @@ async def test_render_segments_readonly_parity():
 def test_build_agent_widgets_has_bullet_prefix():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_agent_widgets
+
     ws = build_agent_widgets("просто текст", event_no=1)
     assert ws[0]._prefix == "● "
 
@@ -171,6 +207,7 @@ def test_build_intermediate_widgets_renders_code_block():
     и класс line-intermediate сохранены."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_intermediate_widgets
+
     md = "вступление\n\n```python\nprint(1)\n```"
     ws = build_intermediate_widgets(md, event_no=9)
     assert ws[0]._prefix == "· "
@@ -184,6 +221,7 @@ def test_build_intermediate_widgets_plain_text_single_row():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_intermediate_widgets
     from gc_tui.widgets.trace_row import TraceRow
+
     ws = build_intermediate_widgets("промежуточный ответ", event_no=1)
     assert len(ws) == 1 and isinstance(ws[0], TraceRow)
     assert ws[0]._prefix == "· " and ws[0].has_class("line-intermediate")
@@ -193,6 +231,7 @@ def test_build_block_widgets_no_bullet_prefix():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
     from gc_tui.widgets.trace_row import TraceRow
+
     ws = build_block_widgets("просто текст", prose_bullet=False, event_no=1)
     assert len(ws) == 1 and isinstance(ws[0], TraceRow)
     assert ws[0]._prefix == ""
@@ -201,8 +240,8 @@ def test_build_block_widgets_no_bullet_prefix():
 def test_build_block_widgets_table_widget():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
-    ws = build_block_widgets("| A | B |\n|---|---|\n| 1 | 2 |",
-                             prose_bullet=True, event_no=1)
+
+    ws = build_block_widgets("| A | B |\n|---|---|\n| 1 | 2 |", prose_bullet=True, event_no=1)
     assert len(ws) == 1
     assert ws[0].has_class("table-block")
 
@@ -212,6 +251,7 @@ def test_build_block_widgets_table_indent_only_with_bullet():
     Баннер (prose_bullet=False): без отступа — вровень с прозой на колонке 0."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
+
     md = "| A | B |\n|---|---|\n| 1 | 2 |"
     trace = build_block_widgets(md, prose_bullet=True, event_no=1)
     banner = build_block_widgets(md, prose_bullet=False, event_no=1)
@@ -225,6 +265,7 @@ def test_build_block_widgets_code_indent_only_with_bullet():
     (как таблицы) — чтобы код в ask_human был вровень с прозой на колонке 0."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
+
     md = "```python\nprint(1)\n```"
     trace = build_block_widgets(md, prose_bullet=True, event_no=1)
     banner = build_block_widgets(md, prose_bullet=False, event_no=1)
@@ -244,10 +285,23 @@ async def test_readonly_submit_note_label():
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    segments = [{"index": 0, "compacted_by": None, "messages": [_env({
-        "type": "function_call", "id": "fc", "call_id": "c", "name": "submit_solution",
-        "arguments": _json.dumps({"task_report": "готово", "comment": "проверь X"}),
-    })]}]
+    segments = [
+        {
+            "index": 0,
+            "compacted_by": None,
+            "messages": [
+                _env(
+                    {
+                        "type": "function_call",
+                        "id": "fc",
+                        "call_id": "c",
+                        "name": "submit_solution",
+                        "arguments": _json.dumps({"task_report": "готово", "comment": "проверь X"}),
+                    }
+                )
+            ],
+        }
+    ]
 
     class _A(App):
         def compose(self):
@@ -267,8 +321,7 @@ def test_code_block_builds_block_panel():
     from gc_tui.services.trace_render import build_block_widgets
     from gc_tui.widgets.block_panel import BlockPanel
 
-    widgets = build_block_widgets("текст\n\n```python\nx = 1\n```",
-                                  prose_bullet=True, event_no=5)
+    widgets = build_block_widgets("текст\n\n```python\nx = 1\n```", prose_bullet=True, event_no=5)
     panels = [w for w in widgets if isinstance(w, BlockPanel)]
     assert len(panels) == 1
     assert panels[0].has_class("code-block-panel")
@@ -281,8 +334,7 @@ def test_table_builds_block_panel():
     from gc_tui.widgets.block_panel import BlockPanel
 
     text = "до\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
-    panels = [w for w in build_block_widgets(text, prose_bullet=True, event_no=6)
-              if isinstance(w, BlockPanel)]
+    panels = [w for w in build_block_widgets(text, prose_bullet=True, event_no=6) if isinstance(w, BlockPanel)]
     assert len(panels) == 1
     assert panels[0].has_class("table-block")
 
@@ -292,8 +344,7 @@ def test_banner_blocks_have_no_indent():
     from gc_tui.services.trace_render import build_block_widgets
     from gc_tui.widgets.block_panel import BlockPanel
 
-    widgets = build_block_widgets("```python\nx = 1\n```",
-                                  prose_bullet=False, event_no=1)
+    widgets = build_block_widgets("```python\nx = 1\n```", prose_bullet=False, event_no=1)
     panel = next(w for w in widgets if isinstance(w, BlockPanel))
     assert not panel.has_class("code-indent")
 
@@ -301,16 +352,16 @@ def test_banner_blocks_have_no_indent():
 def test_first_widget_is_the_only_tab_stop():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
-    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```\n\nещё проза",
-                                  prose_bullet=True, event_no=5)
+
+    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```\n\nещё проза", prose_bullet=True, event_no=5)
     assert [w.can_focus for w in widgets] == [True, False, False]
 
 
 def test_event_no_bound_to_every_widget():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
-    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```",
-                                  prose_bullet=True, event_no=9)
+
+    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```", prose_bullet=True, event_no=9)
     assert all(w._event_no == 9 for w in widgets)
 
 
@@ -326,8 +377,7 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        row = TraceRow(prefix="· ", content="промежуточный ответ",
-                       kind_class="line-intermediate")
+        row = TraceRow(prefix="· ", content="промежуточный ответ", kind_class="line-intermediate")
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()
         assert row.styles.margin.top == 1
@@ -344,12 +394,22 @@ def test_dispatch_readonly_renders_todo_checklist():
     from gc_tui.widgets.trace_row import TraceRow
 
     ev = map_message(
-        {"type": "function_call", "name": "session_todo", "call_id": "c1",
-         "arguments": json.dumps({"todos": [
-             {"content": "Изучить", "status": "completed"},
-             {"content": "Тест", "status": "in_progress"},
-         ]}, ensure_ascii=False)},
-        no=1, ts="t",
+        {
+            "type": "function_call",
+            "name": "session_todo",
+            "call_id": "c1",
+            "arguments": json.dumps(
+                {
+                    "todos": [
+                        {"content": "Изучить", "status": "completed"},
+                        {"content": "Тест", "status": "in_progress"},
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+        },
+        no=1,
+        ts="t",
     )
     assert ev.kind == "todo"
 
@@ -367,7 +427,7 @@ def test_dispatch_readonly_renders_todo_checklist():
     rows = block.todo_rows
     assert len(rows) == 3
     assert all(isinstance(row, TraceRow) for row in rows)
-    assert rows[0].has_class("line-todo")      # НЕ line-meta
+    assert rows[0].has_class("line-todo")  # НЕ line-meta
 
 
 def test_kind_literal_includes_todo():
@@ -375,6 +435,7 @@ def test_kind_literal_includes_todo():
     from typing import get_args
 
     from gc_tui.models import Kind
+
     assert "todo" in get_args(Kind)
 
 
@@ -384,13 +445,18 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     from gc_tui.services.trace_render import _dispatch_readonly
     from rich.text import Text as RichText
 
-    todos = [{"content": "Шаг раз", "status": "completed"},
-             {"content": "Шаг два", "status": "in_progress"}]
-    payload = {"type": "function_call", "name": "session_todo",
-               "arguments": {"todos": todos}}
-    ev = TraceEvent(no=1, event_ts_utc_iso="", kind="todo", title="session_todo",
-                    summary="чек-лист 1/2", full_payload=payload,
-                    call_id="c1", tool_name="session_todo")
+    todos = [{"content": "Шаг раз", "status": "completed"}, {"content": "Шаг два", "status": "in_progress"}]
+    payload = {"type": "function_call", "name": "session_todo", "arguments": {"todos": todos}}
+    ev = TraceEvent(
+        no=1,
+        event_ts_utc_iso="",
+        kind="todo",
+        title="session_todo",
+        summary="чек-лист 1/2",
+        full_payload=payload,
+        call_id="c1",
+        tool_name="session_todo",
+    )
 
     mounted = []
 
@@ -430,19 +496,32 @@ def test_readonly_error_msg_finalizes_its_call_row():
     mounted = []
 
     class _Target:
-        children = ()          # is_tool_group_start смотрит на потомков контейнера
+        children = ()  # is_tool_group_start смотрит на потомков контейнера
 
         def mount(self, w, **kw):
             mounted.append(w)
 
     calls: dict = {}
-    call_ev = TraceEvent(no=1, event_ts_utc_iso="", kind="call", title="session_todo",
-                         summary="session_todo(todos=<list 1>)", full_payload={},
-                         call_id="c1", tool_name="session_todo")
+    call_ev = TraceEvent(
+        no=1,
+        event_ts_utc_iso="",
+        kind="call",
+        title="session_todo",
+        summary="session_todo(todos=<list 1>)",
+        full_payload={},
+        call_id="c1",
+        tool_name="session_todo",
+    )
     _dispatch_readonly(_Target(), call_ev, calls)
-    err_ev = TraceEvent(no=2, event_ts_utc_iso="", kind="error_msg", title="",
-                        summary="Wrong arguments for `session_todo`", full_payload={},
-                        call_id="c1")
+    err_ev = TraceEvent(
+        no=2,
+        event_ts_utc_iso="",
+        kind="error_msg",
+        title="",
+        summary="Wrong arguments for `session_todo`",
+        full_payload={},
+        call_id="c1",
+    )
     _dispatch_readonly(_Target(), err_ev, calls)
 
     assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
@@ -463,7 +542,14 @@ def test_readonly_error_msg_without_call_row_still_shown():
         def mount(self, w, **kw):
             mounted.append(w)
 
-    ev = TraceEvent(no=1, event_ts_utc_iso="", kind="error_msg", title="",
-                    summary="что-то сломалось", full_payload={}, call_id="unknown")
+    ev = TraceEvent(
+        no=1,
+        event_ts_utc_iso="",
+        kind="error_msg",
+        title="",
+        summary="что-то сломалось",
+        full_payload={},
+        call_id="unknown",
+    )
     _dispatch_readonly(_Target(), ev, {})
     assert len(mounted) == 1

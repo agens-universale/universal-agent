@@ -47,9 +47,7 @@ class ReadStoredToolOutput(AbstractSimpleTool):
                     },
                     "offset": {
                         "type": "integer",
-                        "description": (
-                            "Character offset (Unicode code points) into the stored body. Default: 0."
-                        ),
+                        "description": ("Character offset (Unicode code points) into the stored body. Default: 0."),
                     },
                     "limit": {
                         "type": "integer",
@@ -105,7 +103,6 @@ Behavior:
             read_via=cls.registered_tool_name(),
         )
 
-
     async def acall(
         self,
         output_ref: str,
@@ -131,7 +128,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "output_ref", "message": "output_ref must be a non-empty string."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "output_ref",
+                    "message": "output_ref must be a non-empty string.",
+                },
                 hint="Invalid output_ref argument.",
             )
 
@@ -277,10 +278,7 @@ Behavior:
                 "If record is gone (LRU), re-invoke source_tool."
             )
         else:
-            hint = (
-                "Last page of stored tool output (EOF). "
-                f"{PAGINATION_EOF_MARKER_DOC}"
-            )
+            hint = f"Last page of stored tool output (EOF). {PAGINATION_EOF_MARKER_DOC}"
         return self._payload(
             ok=True,
             stored=True,

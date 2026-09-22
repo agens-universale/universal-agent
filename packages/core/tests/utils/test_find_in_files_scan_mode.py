@@ -157,20 +157,14 @@ def test_affix_or(pattern, req, ors):
 
 
 def test_common_prefix_or_is_or_simple_not_pref():
-    sp = classify_scan_pattern(
-        "request_auxiliary_completion_text|"
-        "request_chat_completion_text|"
-        "request_summary_text"
-    )
+    sp = classify_scan_pattern("request_auxiliary_completion_text|request_chat_completion_text|request_summary_text")
     assert sp.mode is PatternMode.OR_SIMPLE
     assert sp.required_literal is None
     assert len(sp.or_group) == 3
 
 
 def test_quoted_subagent_is_or_simple():
-    sp = classify_scan_pattern(
-        '"subagent_planner"|"subagent_worker"|"subagent_critic"'
-    )
+    sp = classify_scan_pattern('"subagent_planner"|"subagent_worker"|"subagent_critic"')
     assert sp.mode is PatternMode.OR_SIMPLE
     assert set(sp.or_group) == {
         '"subagent_planner"',

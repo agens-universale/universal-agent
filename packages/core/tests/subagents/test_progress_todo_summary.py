@@ -72,6 +72,7 @@ def test_parse_accepts_fully_valid_list():
 
 # --- Микро-фикс честности: битые аргументы -> НЕ чек-лист -------------------
 
+
 def test_parse_garbage_returns_none_not_empty():
     """None = «не удалось прочитать как чек-лист»; [] зарезервирован за
     валидной очисткой (todos: []). Различие маршрутизирует рендер."""
@@ -108,8 +109,7 @@ def test_brief_summary_partially_broken_list_falls_back_to_generic():
 
 def test_brief_summary_truncates_long_current_item():
     """Однострочная сводка обязана соблюдать общий лимит, как все прочие тулы."""
-    long_item = {"content": "Пройти по всем файлам сервиса и " + "деталь " * 40,
-                 "status": "in_progress"}
+    long_item = {"content": "Пройти по всем файлам сервиса и " + "деталь " * 40, "status": "in_progress"}
     out = brief_args_summary({"todos": [long_item]}, tool_name=SESSION_TODO_TOOL_NAME)
     assert len(out) <= 81, f"сводка длиной {len(out)}: {out[:120]}"
     assert out.startswith("чек-лист 0/1 · ")

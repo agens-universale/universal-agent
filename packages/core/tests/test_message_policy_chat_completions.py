@@ -98,7 +98,7 @@ def test_repair_tool_call_pairing_handles_canonical_function_call_history():
             "id": "fco_ok",
             "type": "function_call_output",
             "call_id": "call_ok",
-            "output": "{\"ok\": true}",
+            "output": '{"ok": true}',
         },
     ]
 
@@ -112,8 +112,16 @@ def test_repair_tool_call_pairing_handles_canonical_function_call_history():
 
 def test_coalesce_consecutive_assistant_tool_calls_merges_parallel_batch():
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}]},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}}],
+        },
         {"role": "tool", "tool_call_id": "a", "content": "1"},
         {"role": "tool", "tool_call_id": "b", "content": "2"},
     ]
@@ -127,7 +135,11 @@ def test_coalesce_consecutive_assistant_tool_calls_merges_parallel_batch():
 def test_coalesce_merges_leading_assistant_text_before_tool_calls():
     messages = [
         {"role": "assistant", "content": "planning", "tool_calls": []},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+        },
         {"role": "tool", "tool_call_id": "a", "content": "ok"},
     ]
     coalesced = coalesce_consecutive_assistant_tool_calls(messages)
@@ -192,8 +204,16 @@ def test_prepare_keeps_reasoning_content_after_coalesce():
 def test_prepare_chat_completion_messages_for_api_parallel_planner_shape():
     messages = [
         {"role": "user", "content": "task"},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}}]},
-        {"role": "assistant", "content": "", "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}}],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "r1"},
         {"role": "tool", "tool_call_id": "c2", "content": "r2"},
     ]
@@ -206,9 +226,13 @@ def test_prepare_chat_completion_messages_for_api_parallel_planner_shape():
 def test_inject_assistant_after_tool_followed_by_user_inserts_synthetic_ack():
     """Stop посреди агентского хода: tool → user без assistant между → вставка ack."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         {"role": "user", "content": "продолжи"},
     ]
@@ -224,10 +248,14 @@ def test_inject_assistant_after_tool_followed_by_user_inserts_synthetic_ack():
 def test_inject_assistant_handles_multiple_tool_messages_in_series():
     """Серия tool-сообщений (несколько call'ов в одном assistant) — ack один."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-            {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+                {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}},
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "r1"},
         {"role": "tool", "tool_call_id": "c2", "content": "r2"},
         {"role": "user", "content": "продолжи"},
@@ -242,9 +270,13 @@ def test_inject_assistant_handles_multiple_tool_messages_in_series():
 def test_inject_assistant_inert_when_tool_followed_by_assistant():
     """Здоровый поток tool → assistant — вставки нет."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         {"role": "assistant", "content": "финальный ответ"},
         {"role": "user", "content": "следующий вопрос"},
@@ -283,9 +315,13 @@ def test_inject_assistant_inert_on_consecutive_user_messages():
 def test_inject_assistant_before_system_after_tool():
     """tool → system — тоже вставка ack ([policy] feedback message и т.п.)."""
     messages = [
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
         {"role": "system", "content": "[policy] something"},
     ]
@@ -304,12 +340,20 @@ def test_prepare_chat_completion_messages_repairs_stop_corrupted_history():
     messages = [
         {"role": "user", "content": "расскажи о проекте"},
         {"role": "assistant", "content": "думаю..."},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c1", "type": "function", "function": {"name": "long_memory", "arguments": "{}"}},
-        ]},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "long_memory", "arguments": "{}"}},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
         {"role": "tool", "tool_call_id": "c1", "content": "memory data"},
         {"role": "tool", "tool_call_id": "c2", "content": "file data"},
         # STOP HERE — assistant final response не пришёл

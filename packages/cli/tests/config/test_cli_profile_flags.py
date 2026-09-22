@@ -3,6 +3,7 @@
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-10-brief.md,
 docs/specs/2026-07-23-profiles-design.md §2, §12.1.
 """
+
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,7 @@ def _parse(argv, monkeypatch):
     import importlib
 
     from gc_cli import arg_parser as ap_mod
+
     importlib.reload(ap_mod)
     return ap_mod
 
@@ -77,6 +79,7 @@ def test_level_flag_absent_does_not_add_override(monkeypatch):
 def test_level_flag_rejects_invalid_choice(monkeypatch):
     monkeypatch.setattr("sys.argv", ["gc-cli", "-q", "hi", "--level", "bogus"])
     import importlib
+
     with pytest.raises(SystemExit):
         importlib.reload(importlib.import_module("gc_cli.arg_parser"))
 
@@ -185,9 +188,7 @@ def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
 # --- Интеграция: --model при непустом реестре -> force_legacy=True, security профиля жива --
 
 
-def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_security(
-    isolated_cwd, tmp_path
-):
+def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_security(isolated_cwd, tmp_path):
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(
@@ -240,9 +241,7 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(isolated_cwd
 
     assert cli_forces_legacy_model(cfg) is False
 
-    router = ModelRouter(
-        cfg, level_provider=lambda: "default", force_legacy=cli_forces_legacy_model(cfg)
-    )
+    router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=cli_forces_legacy_model(cfg))
     resolved = router.resolve("main")
     assert resolved.model == "forced-model"
     assert resolved.source == "легаси"
@@ -262,9 +261,12 @@ def test_cli_models_override_carries_its_own_token_to_the_router():
         "completions_url": "https://common/v1/chat/completions",
         "chat_completion_headers": {"Authorization": "Bearer sk-common"},
     }
-    apply_cli_overrides(cfg, extra_overrides={
-        "models": {"gc": {"url": "https://own/v1/chat/completions", "token": "sk-own"}},
-    })
+    apply_cli_overrides(
+        cfg,
+        extra_overrides={
+            "models": {"gc": {"url": "https://own/v1/chat/completions", "token": "sk-own"}},
+        },
+    )
 
     resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
 

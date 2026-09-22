@@ -3,6 +3,7 @@ from gc_core.security.protected_paths import protected_decision, protection_enab
 
 def test_decisions(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     proj = tmp_path / "proj"
 

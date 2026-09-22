@@ -3,6 +3,7 @@
 `+` → OK (зелёный), `-` → ERR (красный), заголовки/@@ → MUTED,
 контекст и прочее — CODE_BLOCK (как раньше монохромный дифф).
 """
+
 from __future__ import annotations
 
 from rich.text import Text

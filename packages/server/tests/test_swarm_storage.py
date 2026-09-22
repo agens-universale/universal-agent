@@ -67,7 +67,8 @@ def test_load_meta_corrupted_json_returns_empty(tmp_path):
 def test_save_meta_atomic_replaces_tmp(tmp_path):
     """После save файл .tmp не должен оставаться, только meta.json."""
     storage.save_swarm_meta(
-        str(tmp_path), "atom",
+        str(tmp_path),
+        "atom",
         base_meta={"system": "s", "task_id": "t"},
         swarm_meta_patch={"id": "atom", "status": "queued"},
     )
@@ -137,10 +138,7 @@ def test_load_messages_skips_corrupted_lines(tmp_path):
     base = tmp_path / "skip"
     base.mkdir()
     (base / "messages.jsonl").write_text(
-        '{"ts":"x","stream":"stdout","message":"ok"}\n'
-        "garbage line\n"
-        '{"ts":"y","stream":"stdout","message":"ok2"}\n'
-        "\n"
+        '{"ts":"x","stream":"stdout","message":"ok"}\ngarbage line\n{"ts":"y","stream":"stdout","message":"ok2"}\n\n'
     )
     msgs = storage.load_swarm_messages(str(tmp_path), "skip")
     assert len(msgs) == 2
@@ -165,16 +163,20 @@ def test_resolve_messages_path_legacy_when_no_sandbox(tmp_path):
 
 def test_resolve_messages_path_legacy_when_sandbox_file_missing(tmp_path):
     """Sandbox задан, но файла там нет — fallback на legacy путь."""
-    threads = tmp_path / "th"; threads.mkdir()
-    sandbox = tmp_path / "sb"; sandbox.mkdir()
+    threads = tmp_path / "th"
+    threads.mkdir()
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
     result = storage._resolve_messages_path(str(threads), "sid", str(sandbox))
     assert result == str(threads / "sid" / "messages.jsonl")
 
 
 def test_resolve_messages_path_prefers_sandbox_when_exists(tmp_path):
     """Если в sandbox есть файл — используем его (это и есть канал E)."""
-    threads = tmp_path / "th"; threads.mkdir()
-    sandbox = tmp_path / "sb"; sandbox.mkdir()
+    threads = tmp_path / "th"
+    threads.mkdir()
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
     # Создаём канал-E путь в sandbox.
     sandbox_path = sandbox / "sid" / ".gc" / "threads" / "sid"
     sandbox_path.mkdir(parents=True)
@@ -186,13 +188,13 @@ def test_resolve_messages_path_prefers_sandbox_when_exists(tmp_path):
 
 def test_load_swarm_messages_reads_from_sandbox(tmp_path):
     """Полный round-trip: канал-E messages.jsonl читается через load_swarm_messages."""
-    threads = tmp_path / "th"; threads.mkdir()
-    sandbox = tmp_path / "sb"; sandbox.mkdir()
+    threads = tmp_path / "th"
+    threads.mkdir()
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
     sandbox_path = sandbox / "sid" / ".gc" / "threads" / "sid"
     sandbox_path.mkdir(parents=True)
-    (sandbox_path / "messages.jsonl").write_text(
-        '{"ts":"2026-06-04T10:00:00Z","stream":"stdout","message":"hello"}\n'
-    )
+    (sandbox_path / "messages.jsonl").write_text('{"ts":"2026-06-04T10:00:00Z","stream":"stdout","message":"hello"}\n')
 
     msgs = storage.load_swarm_messages(str(threads), "sid", str(sandbox))
     assert len(msgs) == 1
@@ -232,8 +234,8 @@ def test_load_stdout_stderr_survives_undecodable_bytes(tmp_path):
 
     out, err = storage.load_swarm_stdout_stderr(str(tmp_path), "sid")
 
-    assert out[0] == "ok line"          # читаемое доехало целиком
-    assert len(out) == 2 and out[1]     # битая строка не потеряна, а помечена
+    assert out[0] == "ok line"  # читаемое доехало целиком
+    assert len(out) == 2 and out[1]  # битая строка не потеряна, а помечена
     assert len(err) == 1 and "err" in err[0]
 
 

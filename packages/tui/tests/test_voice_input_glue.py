@@ -1,4 +1,5 @@
 """TUI-клей: Ctrl+T → запись (бордер+пилюля), Enter → стоп+вставка, Esc → отмена."""
+
 import pytest
 
 
@@ -21,14 +22,22 @@ class FakeRecorder:
         self.cancelled = True
 
 
-VOICE_CFG = {"provider": "openai", "url": "https://stt.local/v1/audio/transcriptions",
-             "token": "t", "model": "whisper-1", "language": "ru",
-             "max_seconds": 120, "timeout_seconds": 60, "verify_ssl": True}
+VOICE_CFG = {
+    "provider": "openai",
+    "url": "https://stt.local/v1/audio/transcriptions",
+    "token": "t",
+    "model": "whisper-1",
+    "language": "ru",
+    "max_seconds": 120,
+    "timeout_seconds": 60,
+    "verify_ssl": True,
+}
 
 
 def _wire_fake_voice(screen, rec, transcribe):
     """Подменить flow фейками через тестовый шов (_ensure_voice_flow вернёт его)."""
     from gc_tui.services.voice_input import VoiceInputFlow
+
     screen._voice = VoiceInputFlow(
         VOICE_CFG,
         recorder_factory=lambda: rec,
@@ -61,7 +70,7 @@ async def test_ctrl_t_records_enter_inserts(monkeypatch):
         assert screen._voice.state == "recording"
         assert pilot.app.query_one("#input-row", Horizontal).has_class("recording")
         footer = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "стоп" in footer          # dim-хвост подсказки при записи
+        assert "стоп" in footer  # dim-хвост подсказки при записи
 
         rec.elapsed = 2.0
         await pilot.press("enter")
@@ -99,14 +108,14 @@ async def test_ctrl_t_without_config_shows_hint_toast():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(config={"model": "M"})   # секции voice нет
+    app = TuiApp(config={"model": "M"})  # секции voice нет
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         calls = []
-        screen.notify = lambda msg, **kw: calls.append(msg)   # перехват toast
+        screen.notify = lambda msg, **kw: calls.append(msg)  # перехват toast
         await pilot.press("ctrl+t")
         await pilot.pause()
-        assert screen._voice is None      # flow даже не создавался
+        assert screen._voice is None  # flow даже не создавался
         assert any("/settings → Голосовой ввод" in msg for msg in calls)
 
 
@@ -124,7 +133,7 @@ async def test_ensure_voice_flow_builds_real_flow(monkeypatch):
         flow = screen._ensure_voice_flow()
         assert flow is screen._voice
         assert flow.state == "idle"
-        assert screen._ensure_voice_flow() is flow   # повторный вызов — тот же объект
+        assert screen._ensure_voice_flow() is flow  # повторный вызов — тот же объект
 
 
 @pytest.mark.asyncio
@@ -135,13 +144,12 @@ async def test_paste_chip_survives_enter_stop_of_recording(monkeypatch, tmp_path
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
 
-    class _Fake:                                      # no-op executor: финальный Enter
+    class _Fake:  # no-op executor: финальный Enter
         async def arun(self, messages, *, thread_id, **kw):  # не строит реальный AgentExecutor
             pass
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
-    app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)},
-                 threads_dir=str(tmp_path))
+    app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)}, threads_dir=str(tmp_path))
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -149,25 +157,25 @@ async def test_paste_chip_survives_enter_stop_of_recording(monkeypatch, tmp_path
         _wire_fake_voice(screen, rec, lambda pcm, cfg: "голос")
 
         inp = pilot.app.query_one("#cmdinput", CommandTextArea)
-        inp._handle_paste("l1\nl2\nl3\nl4\nl5\nl6")   # свернётся в плашку
+        inp._handle_paste("l1\nl2\nl3\nl4\nl5\nl6")  # свернётся в плашку
         await pilot.pause()
         assert "[Вставка" in inp.text
 
-        await pilot.press("ctrl+t")                   # запись
+        await pilot.press("ctrl+t")  # запись
         rec.elapsed = 2.0
-        await pilot.press("enter")                    # стоп+распознать (НЕ отправка)
+        await pilot.press("enter")  # стоп+распознать (НЕ отправка)
         await pilot.pause()
         assert screen._voice.state == "idle"
-        assert "голос" in inp.text                    # вставлено, поле не очищено
+        assert "голос" in inp.text  # вставлено, поле не очищено
         sub = inp.submission_text()
-        assert "l1\nl2" in sub                        # плашка развернулась содержимым
-        assert "[Вставка" not in sub                  # не литеральный ярлык
+        assert "l1\nl2" in sub  # плашка развернулась содержимым
+        assert "[Вставка" not in sub  # не литеральный ярлык
 
-        await pilot.press("enter")                    # теперь настоящая отправка
+        await pilot.press("enter")  # теперь настоящая отправка
         await pilot.pause()
-        assert inp.text == ""                         # буфер очищен → чипы сброшены
-        inp._handle_paste("l1\nl2\nl3\nl4\nl5\nl6")   # повторная вставка сворачивается
-        await pilot.pause()                           # заново с #1 (стор сброшен)
+        assert inp.text == ""  # буфер очищен → чипы сброшены
+        inp._handle_paste("l1\nl2\nl3\nl4\nl5\nl6")  # повторная вставка сворачивается
+        await pilot.pause()  # заново с #1 (стор сброшен)
         assert inp.text == "[Вставка #1 · 6 строк]"
 
 
@@ -198,7 +206,7 @@ async def test_footer_right_width_accounts_for_voice_pill(monkeypatch):
         pill = screen._voice_footer_render().plain
         assert pill.strip()
         measured = screen._footer_left_commands()
-        assert measured == pill                   # мерим пилюлю, а не команды
+        assert measured == pill  # мерим пилюлю, а не команды
         assert measured != idle_commands
 
 
@@ -247,8 +255,7 @@ async def test_slash_voice_unconfigured_toast(monkeypatch):
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         toasts = []
-        monkeypatch.setattr(screen, "notify",
-                            lambda msg, **kw: toasts.append(msg), raising=False)
+        monkeypatch.setattr(screen, "notify", lambda msg, **kw: toasts.append(msg), raising=False)
         inp = screen.query_one("#cmdinput")
         inp.insert("/voice")
         await pilot.press("enter")
@@ -273,16 +280,14 @@ async def test_voice_flow_cache_dropped_on_config_hot_reload(monkeypatch, tmp_pa
     monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: tmp_path / "no-managed.yml")
     monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(
-        "voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n",
-        encoding="utf-8")
+    cfg_file.write_text("voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n", encoding="utf-8")
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     app._config_path = str(cfg_file)
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         old = screen._ensure_voice_flow()
         assert old._cfg["url"] == VOICE_CFG["url"]
-        app.reload_config()                      # тот же путь, что у /settings → _on_apply
+        app.reload_config()  # тот же путь, что у /settings → _on_apply
         await pilot.pause()
         new = screen._ensure_voice_flow()
         assert new is not old
@@ -298,8 +303,7 @@ async def test_voice_flow_cache_kept_while_recording(monkeypatch, tmp_path):
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text("voice:\n  url: https://new.x/v1/audio/transcriptions\n",
-                        encoding="utf-8")
+    cfg_file.write_text("voice:\n  url: https://new.x/v1/audio/transcriptions\n", encoding="utf-8")
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     app._config_path = str(cfg_file)
     async with app.run_test() as pilot:
@@ -312,7 +316,7 @@ async def test_voice_flow_cache_kept_while_recording(monkeypatch, tmp_path):
         assert flow.state == "recording"
         app.reload_config()
         await pilot.pause()
-        assert screen._voice is flow                # запись не осиротела
+        assert screen._voice is flow  # запись не осиротела
 
 
 @pytest.mark.asyncio
@@ -330,8 +334,7 @@ async def test_ctrl_t_raises_a_dead_local_service_instead_of_recording(monkeypat
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive", lambda: False)
     raised = []
-    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service",
-                        lambda cfg: raised.append(cfg) or True)
+    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service", lambda cfg: raised.append(cfg) or True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -357,8 +360,9 @@ async def test_ctrl_t_records_when_the_local_service_answers(monkeypatch):
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive", lambda: True)
-    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service",
-                        lambda cfg: pytest.fail("живой сервис поднимать незачем"))
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.autostart.ensure_voice_service", lambda cfg: pytest.fail("живой сервис поднимать незачем")
+    )
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -383,8 +387,7 @@ async def test_cloud_endpoint_is_not_probed_before_recording(monkeypatch):
     from gc_tui.app import TuiApp
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
-    monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive",
-                        lambda: pytest.fail("облачный режим порт не меряет"))
+    monkeypatch.setattr("gc_tui.services.voice_setup.probe_alive", lambda: pytest.fail("облачный режим порт не меряет"))
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -397,8 +400,7 @@ async def test_cloud_endpoint_is_not_probed_before_recording(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
-        monkeypatch, tmp_path):
+async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(monkeypatch, tmp_path):
     """…а как только запись кончилась — кэш всё-таки сбрасывается: следующая диктовка
     идёт на НОВЫЙ endpoint.
 
@@ -412,9 +414,7 @@ async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
     monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: tmp_path / "no-managed.yml")
     monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(
-        "voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n",
-        encoding="utf-8")
+    cfg_file.write_text("voice:\n  url: https://new.x/v1/audio/transcriptions\n  token: t2\n", encoding="utf-8")
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})
     app._config_path = str(cfg_file)
     async with app.run_test() as pilot:
@@ -426,12 +426,12 @@ async def test_voice_flow_rebuilds_after_the_recording_that_survived_a_reload(
         await pilot.pause()
         assert flow.state == "recording"
 
-        app.reload_config()                         # смена endpoint посреди записи
+        app.reload_config()  # смена endpoint посреди записи
         await pilot.pause()
-        assert screen._voice is flow                # её не рвём
+        assert screen._voice is flow  # её не рвём
 
         rec.elapsed = 2.0
-        await pilot.press("enter")                  # стоп → распознавание → idle
+        await pilot.press("enter")  # стоп → распознавание → idle
         await pilot.pause()
         assert flow.state == "idle"
 
@@ -454,27 +454,34 @@ async def test_voice_config_follows_the_session_profile(tmp_path, monkeypatch):
     from gc_core.config import load_config_ex
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path",
-                        lambda: tmp_path / "no-managed.yml")
+    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: tmp_path / "no-managed.yml")
     monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
     base = tmp_path / "config.yml"
-    base.write_text(yaml.safe_dump(
-        {"backend": {"completions_url": "http://h/v1/chat/completions"},
-         "agent": {"model": "M"},
-         "voice": dict(VOICE_CFG)}, allow_unicode=True), encoding="utf-8")
+    base.write_text(
+        yaml.safe_dump(
+            {
+                "backend": {"completions_url": "http://h/v1/chat/completions"},
+                "agent": {"model": "M"},
+                "voice": dict(VOICE_CFG),
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
     (tmp_path / "profiles").mkdir()
     (tmp_path / "profiles" / "work.yml").write_text(
-        "voice:\n  url: https://from-profile/v1/audio/transcriptions\n  token: pt\n",
-        encoding="utf-8")
+        "voice:\n  url: https://from-profile/v1/audio/transcriptions\n  token: pt\n", encoding="utf-8"
+    )
 
     cfg, _meta = load_config_ex(str(base))
     app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
     app.set_config_path(str(base))
     async with app.run_test() as pilot:
         screen = pilot.app.screen
-        assert screen._voice_config()["url"] == VOICE_CFG["url"]   # предусловие
+        assert screen._voice_config()["url"] == VOICE_CFG["url"]  # предусловие
         app.switch_session_profile("work")
         await pilot.pause()
-        assert app.effective_config()["voice"]["url"] == \
-            "https://from-profile/v1/audio/transcriptions", "предусловие: профиль лёг"
+        assert app.effective_config()["voice"]["url"] == "https://from-profile/v1/audio/transcriptions", (
+            "предусловие: профиль лёг"
+        )
         assert screen._voice_config()["url"] == "https://from-profile/v1/audio/transcriptions"

@@ -1,6 +1,7 @@
 """Лоадер профилей-файлов (спека `docs/specs/2026-07-23-profiles-design.md` §3):
 два корня, поиск по имени, двухфазная валидация, оверлей-слой в `load_config_ex`.
 """
+
 from pathlib import Path
 
 import pytest
@@ -335,8 +336,7 @@ def test_base_root_profile_literal_token_does_not_warn(isolated_env, isolated_cw
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "work"})
     _write_yaml(
         base_config.parent / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://x/v1/chat/completions",
-                              "token": "sk-literal-secret"}}},
+        {"models": {"flash": {"url": "http://x/v1/chat/completions", "token": "sk-literal-secret"}}},
     )
 
     cfg, meta = load_config_ex(str(base_config))
@@ -369,26 +369,36 @@ def test_registry_merges_across_layers_overlay_cannot_remove_a_model(isolated_cw
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
-        "profile": "work",
-        "models": {"keep": {"url": "http://keep/v1", "token": "sk-keep"},
-                   "shared": {"url": "http://base/v1", "token": "sk-base"}},
-        "slots": {"default": "keep"},
-    })
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {
+            "profile": "work",
+            "models": {
+                "keep": {"url": "http://keep/v1", "token": "sk-keep"},
+                "shared": {"url": "http://base/v1", "token": "sk-base"},
+            },
+            "slots": {"default": "keep"},
+        },
+    )
     # Перекрытие алиаса — парой целиком (§2): слой, задавший только адрес, увёз бы
     # токен базы на свой хост и отвергается правилом ещё до мержа.
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
-        "models": {"shared": {"url": "http://profile/v1", "token": "sk-profile"},
-                   "added": {"url": "http://added/v1", "token": "sk-added"}},
-    })
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {
+            "models": {
+                "shared": {"url": "http://profile/v1", "token": "sk-profile"},
+                "added": {"url": "http://added/v1", "token": "sk-added"},
+            },
+        },
+    )
 
     cfg, _meta = load_config_ex(str(base_config))
     models = cfg["models"]
 
     assert set(models) == {"keep", "shared", "added"}
-    assert models["keep"]["url"] == "http://keep/v1"          # оверлей не убрал
-    assert models["shared"]["url"] == "http://profile/v1"     # оверлей перекрыл
-    assert models["added"]["url"] == "http://added/v1"        # оверлей добавил
+    assert models["keep"]["url"] == "http://keep/v1"  # оверлей не убрал
+    assert models["shared"]["url"] == "http://profile/v1"  # оверлей перекрыл
+    assert models["added"]["url"] == "http://added/v1"  # оверлей добавил
 
 
 def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_path):
@@ -402,14 +412,20 @@ def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_pat
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
-        "profile": "work",
-        "models": {"bare": {}},
-        "slots": {"default": "bare"},
-    })
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
-        "backend": {"completions_url": "http://from-profile/v1/chat/completions"},
-    })
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {
+            "profile": "work",
+            "models": {"bare": {}},
+            "slots": {"default": "bare"},
+        },
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {
+            "backend": {"completions_url": "http://from-profile/v1/chat/completions"},
+        },
+    )
 
     cfg, _meta = load_config_ex(str(base_config))
     resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
@@ -418,9 +434,7 @@ def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_pat
     assert resolved.url == "http://from-profile/v1/chat/completions"
 
 
-def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(
-    isolated_cwd, tmp_path
-):
+def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(isolated_cwd, tmp_path):
     """Раскладка ревью: указатель `profile: "work"` в базе, а `profiles/work.yml`
     создан КАТАЛОГОМ. Загрузка обязана отказать `ValueError` — тем классом, что
     ловят обе точки входа и лестница починки; `PermissionError`/`IsADirectoryError`
@@ -433,6 +447,8 @@ def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(
 
     with pytest.raises(ValueError):
         load_config_ex(str(base_config))
+
+
 def test_the_read_failure_is_self_sufficient(tmp_path):
     """Текст отказа чтения профиля самодостаточен: путь + причина.
 
@@ -451,4 +467,4 @@ def test_the_read_failure_is_self_sufficient(tmp_path):
     broken.write_text("a: : :\n", encoding="utf-8")
     yaml_summary = profile_display_summary(broken)
     assert yaml_summary.error is not None
-    assert str(broken) in yaml_summary.error       # и у YAML-ошибки путь свой
+    assert str(broken) in yaml_summary.error  # и у YAML-ошибки путь свой

@@ -15,6 +15,7 @@
 здесь проверяется, что расхождение попадает в лог как предупреждение — и что
 на законных конфигурациях оно молчит.
 """
+
 import logging
 
 from gc_core.tools.connect_mcp.agent_tools import _prepare_mcp_tools_data
@@ -45,8 +46,7 @@ def test_a_foreign_cache_without_a_sandbox_is_reported(caplog):
         _prepare_mcp_tools_data(_cfg(), tools_cache=cache, os_backend=_Sandbox())
 
     assert any("fs" in r.message and r.levelno >= logging.WARNING for r in caplog.records), (
-        "обход песочницы прошёл молча: в логах ничего выше debug "
-        f"({[r.message for r in caplog.records]})"
+        f"обход песочницы прошёл молча: в логах ничего выше debug ({[r.message for r in caplog.records]})"
     )
 
 

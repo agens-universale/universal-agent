@@ -1,4 +1,5 @@
 """Live usage: incremental child→parent merge, no double-count in finally."""
+
 from __future__ import annotations
 
 import json
@@ -41,13 +42,10 @@ def _wire_runner(monkeypatch, runner, child):
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
+
     monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
-    )
-    monkeypatch.setattr(
-        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
-    )
+    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
+    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: "")
     monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
 
     async def _create(*a, **k):
@@ -89,9 +87,7 @@ async def test_live_delta_then_finally_no_double_count(monkeypatch):
         assert orch.usage.by_category["subagent"]["output"] == 22
         return "done"
 
-    out = await runner._arun_internal(
-        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
-    )
+    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     payload = json.loads(out)
     assert payload["ok"] is True
     # finally не удваивает уже запушенные дельты

@@ -5,6 +5,7 @@
 subprocess) блокирующие — их прервать нечем, поэтому они уходят в поток,
 который можно бросить по дедлайну.
 """
+
 import inspect
 import threading
 
@@ -14,8 +15,7 @@ from gc_core.tools.connect_mcp.agent_tools import MCPToolWrapper
 
 _REGISTRY = {
     "mcp_srv_echo": {
-        "tool": {"name": "mcp_srv_echo", "parameters": {"type": "object",
-                                                        "properties": {}}},
+        "tool": {"name": "mcp_srv_echo", "parameters": {"type": "object", "properties": {}}},
         "metadata": {"mcp_server_key": "srv", "mcp_tool_name": "echo"},
     }
 }
@@ -30,9 +30,7 @@ def test_the_only_entry_is_a_coroutine():
     того как дискавери пошла нативно, его не звал никто.
     """
     assert inspect.iscoroutinefunction(api.acall_mcp_tool)
-    assert not hasattr(api, "call_mcp_tool"), (
-        "вернулся синхронный вход — значит вернулся и маршрут, который его звал"
-    )
+    assert not hasattr(api, "call_mcp_tool"), "вернулся синхронный вход — значит вернулся и маршрут, который его звал"
 
 
 async def test_sdk_transport_runs_without_spawning_a_thread(monkeypatch):
@@ -55,9 +53,7 @@ async def test_sdk_transport_runs_without_spawning_a_thread(monkeypatch):
     monkeypatch.setattr(client_port, "acall_tool_stream_http", _fake_call)
     monkeypatch.setattr(threading, "Thread", _Counting)
 
-    out = await api.acall_mcp_tool(
-        "mcp_srv_echo", {}, _SDK_CFG, _REGISTRY, timeout=5
-    )
+    out = await api.acall_mcp_tool("mcp_srv_echo", {}, _SDK_CFG, _REGISTRY, timeout=5)
 
     assert "ответ тула" in out
     assert spawned == [], f"SDK-путь завёл потоки: {spawned}"
@@ -91,9 +87,7 @@ async def test_legacy_http_runs_natively_without_a_thread(monkeypatch):
     monkeypatch.setattr(legacy_client, "_acall_mcp_tool", _fake_call)
     monkeypatch.setattr(threading, "Thread", _Counting)
 
-    out = await api.acall_mcp_tool(
-        "mcp_srv_echo", {}, _LEGACY_CFG, _REGISTRY, timeout=5
-    )
+    out = await api.acall_mcp_tool("mcp_srv_echo", {}, _LEGACY_CFG, _REGISTRY, timeout=5)
 
     assert "ответ легаси" in out
     assert spawned == [], f"легаси-HTTP снова завёл потоки: {spawned}"
@@ -114,16 +108,12 @@ async def test_persistent_stdio_still_goes_to_an_abandonable_thread(monkeypatch)
         seen["thread"] = threading.current_thread().name
         return {"tool": "mcp_srv_echo", "ok": True}
 
-    monkeypatch.setattr(
-        client_port.AgentRuntimeClient, "call_tool", _fake_sync, raising=True
-    )
+    monkeypatch.setattr(client_port.AgentRuntimeClient, "call_tool", _fake_sync, raising=True)
 
     out = await api.acall_mcp_tool("mcp_srv_echo", {}, cfg, _REGISTRY, timeout=5)
 
     assert '"ok": true' in out
-    assert seen["thread"] != threading.main_thread().name, (
-        "персистентная сессия должна была уйти с основного потока"
-    )
+    assert seen["thread"] != threading.main_thread().name, "персистентная сессия должна была уйти с основного потока"
 
 
 async def test_validation_errors_come_from_the_shared_preparation(monkeypatch):
@@ -147,7 +137,6 @@ def test_tool_wrapper_exposes_only_the_async_entry():
 
     assert inspect.iscoroutinefunction(tool.acall)
     assert not callable(tool), "у MCP-обёртки снова появился синхронный вход"
-
 
 
 async def test_dispatcher_awaits_acall_without_a_thread(monkeypatch):

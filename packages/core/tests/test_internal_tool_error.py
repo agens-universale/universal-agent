@@ -1,4 +1,5 @@
 """Spec: apply_tool internal exceptions → slim JSON, no traceback in tool output."""
+
 from __future__ import annotations
 
 import json
@@ -70,25 +71,19 @@ class TestFormatInternalToolErrorOutput:
             assert banned not in raw
 
     def test_omits_empty_tool_and_call_id(self):
-        payload = json.loads(
-            format_internal_tool_error_output(tool_name="", exc=RuntimeError("x"))
-        )
+        payload = json.loads(format_internal_tool_error_output(tool_name="", exc=RuntimeError("x")))
         assert "tool" not in payload
         assert "call_id" not in payload
         assert payload["message"] == "x"
         assert payload["exception_type"] == "RuntimeError"
 
     def test_empty_str_exc_falls_back_to_type_name(self):
-        payload = json.loads(
-            format_internal_tool_error_output(tool_name="t", exc=RuntimeError())
-        )
+        payload = json.loads(format_internal_tool_error_output(tool_name="t", exc=RuntimeError()))
         assert payload["message"] == "RuntimeError"
 
     def test_message_truncated(self):
         long = "x" * 600
-        payload = json.loads(
-            format_internal_tool_error_output(tool_name="t", exc=ValueError(long))
-        )
+        payload = json.loads(format_internal_tool_error_output(tool_name="t", exc=ValueError(long)))
         assert len(payload["message"]) == 500
         assert payload["message"].endswith("...")
 
@@ -100,23 +95,29 @@ class TestIsInternalToolErrorOutput:
         assert is_unknown_tool_output(raw) is False
 
     def test_negative_unknown_and_domain(self):
-        assert is_internal_tool_error_output(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": {"type": "unknown_tool", "message": "x"},
-                    "message": "x",
-                }
+        assert (
+            is_internal_tool_error_output(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": {"type": "unknown_tool", "message": "x"},
+                        "message": "x",
+                    }
+                )
             )
-        ) is False
-        assert is_internal_tool_error_output(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": {"type": "invalid_argument", "message": "bad"},
-                }
+            is False
+        )
+        assert (
+            is_internal_tool_error_output(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": {"type": "invalid_argument", "message": "bad"},
+                    }
+                )
             )
-        ) is False
+            is False
+        )
         assert is_internal_tool_error_output("not json") is False
         assert is_internal_tool_error_output("") is False
 
@@ -149,9 +150,7 @@ class TestApplyToolInternalError:
         with caplog.at_level(logging.ERROR, logger=logger.name):
             raw = await aapply_tool(
                 tool_name="fs_find_in_files",
-                arguments=json.dumps(
-                    {"path": "/tmp/x", "pattern": "def test_"}
-                ),
+                arguments=json.dumps({"path": "/tmp/x", "pattern": "def test_"}),
                 ctx=ctx,
                 call_id="b4zQxElPLq4I0jqTKnW5UeTWH5URyawf",
             )
@@ -170,9 +169,7 @@ class TestApplyToolInternalError:
         assert is_internal_tool_error_output(raw) is True
 
         assert any(
-            "apply_tool internal error" in rec.getMessage()
-            and rec.exc_info is not None
-            for rec in caplog.records
+            "apply_tool internal error" in rec.getMessage() and rec.exc_info is not None for rec in caplog.records
         )
 
     async def test_async_entry_gives_the_same_slim_envelope(self, caplog):
@@ -183,6 +180,7 @@ class TestApplyToolInternalError:
         traceback. Именно так `aapply_tool` и жил после вливания веток, потому
         что проверка была только на синхронный вход.
         """
+
         class BoomTool:
             def __init__(self, **_kw):
                 pass
@@ -221,9 +219,7 @@ class TestApplyToolInternalError:
         assert is_internal_tool_error_output(raw) is True
 
         assert any(
-            "apply_tool internal error" in rec.getMessage()
-            and rec.exc_info is not None
-            for rec in caplog.records
+            "apply_tool internal error" in rec.getMessage() and rec.exc_info is not None for rec in caplog.records
         )
 
     async def test_domain_ok_false_return_not_rewrapped(self):

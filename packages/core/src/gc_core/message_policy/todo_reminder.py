@@ -6,6 +6,7 @@
 (пусто ИЛИ всё закрыто) — мягкое «если задача того стоит, заведи», один раз.
 Вызывается из ``apply_tool_usage_notice_before_llm`` (chat_completions-only).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -25,10 +26,7 @@ def _todo_items(state: Any) -> list[dict]:
 
 
 def has_open_todos(items: list) -> bool:
-    return any(
-        isinstance(item, dict) and item.get("status") in _OPEN_STATUSES
-        for item in items
-    )
+    return any(isinstance(item, dict) and item.get("status") in _OPEN_STATUSES for item in items)
 
 
 def build_todo_create_nudge_text() -> str:
@@ -61,9 +59,7 @@ def _stopped(config_dict: Any) -> bool:
     stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
     if not isinstance(stop, list):
         return False
-    return SESSION_TODO_TOOL_NAME in {
-        str(item).strip() for item in stop if isinstance(item, str)
-    }
+    return SESSION_TODO_TOOL_NAME in {str(item).strip() for item in stop if isinstance(item, str)}
 
 
 def apply_todo_reminder(
@@ -82,9 +78,7 @@ def apply_todo_reminder(
     видит только глобальный ``stop_tools``, а набор сужается ещё и файлом
     сабагента / harbor / неподнявшимся MCP.
     """
-    steps_limit = todo_reminder_steps_from_config(
-        config_dict if isinstance(config_dict, dict) else None
-    )
+    steps_limit = todo_reminder_steps_from_config(config_dict if isinstance(config_dict, dict) else None)
     if steps_limit <= 0 or _stopped(config_dict):
         return messages
     if not tool_is_available(available_tools, SESSION_TODO_TOOL_NAME):

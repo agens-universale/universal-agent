@@ -12,7 +12,7 @@ def test_user_event_uses_display_content():
 def test_user_event_empty_display_is_skipped():
     msg = {"role": "user", "content": "<skill>", "display_content": ""}
     ev = map_message(msg, no=1, ts="")
-    assert ev is None            # mid-run доставка — не рисуем реплику
+    assert ev is None  # mid-run доставка — не рисуем реплику
 
 
 def test_user_event_without_display_unchanged():

@@ -4,6 +4,7 @@
 цель переезда: event loop встраивающего приложения остаётся живым, пока агент
 ходит в сеть и исполняет тулы.
 """
+
 import asyncio
 import json
 import os
@@ -55,9 +56,15 @@ def _stub_turn_finish(monkeypatch):
 #: Ход 2 — финализатор. Ход 3 — вердикт судьи finish-gate.
 TURNS = [
     assistant_tool_call("exec_sleep", {"seconds": 0.3}, call_id="c1"),
-    assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer", "task_report": "поспал", "handoff": "{}",
-    }, call_id="c2"),
+    assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": "поспал",
+            "handoff": "{}",
+        },
+        call_id="c2",
+    ),
     judge_accept(),
 ]
 
@@ -116,23 +123,23 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
         # параллельность.
         cfg_a = parity_config(tmp_path / "a", monkeypatch, model="агент-а")
         cfg_b = parity_config(tmp_path / "b", monkeypatch, model="агент-б")
-        install_many(monkeypatch, {
-            "агент-а": ScriptedBackend(list(TURNS)),
-            "агент-б": ScriptedBackend(list(TURNS)),
-        })
+        install_many(
+            monkeypatch,
+            {
+                "агент-а": ScriptedBackend(list(TURNS)),
+                "агент-б": ScriptedBackend(list(TURNS)),
+            },
+        )
         a = await AsyncAgent.create(cfg_a)
         b = await AsyncAgent.create(cfg_b)
         started = time.monotonic()
         async with a, b:
-            r1, r2 = await asyncio.gather(
-                a.run("поспи", thread_id="t1"), b.run("поспи", thread_id="t2")
-            )
+            r1, r2 = await asyncio.gather(a.run("поспи", thread_id="t1"), b.run("поспи", thread_id="t2"))
         pair = time.monotonic() - started
 
     assert r1 and r2
     assert pair < single * 1.6, (
-        f"два агента заняли {pair:.2f}с при одиночном {single:.2f}с — "
-        f"похоже, шли последовательно"
+        f"два агента заняли {pair:.2f}с при одиночном {single:.2f}с — похоже, шли последовательно"
     )
 
 
@@ -179,9 +186,7 @@ print(json.dumps(leaked))
     env = dict(os.environ)
     src_dirs = [str(d) for d in package_src_dirs()]
     if src_dirs:
-        env["PYTHONPATH"] = os.pathsep.join(
-            src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
-        )
+        env["PYTHONPATH"] = os.pathsep.join(src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
 
     out = subprocess.run(
         [sys.executable, "-c", script],

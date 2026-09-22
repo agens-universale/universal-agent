@@ -36,11 +36,13 @@ def test_outbound_keeps_think_as_in_messages(capture_outbound):
     ctx, state = make_ctx_state()
     before = copy.deepcopy(state.messages)
 
-    run_coro(pr._arequest_backend_canonical(
-        [{"id": "u2", "type": "message", "role": "user", "content": "продолжай"}],
-        state,
-        ctx,
-    ))
+    run_coro(
+        pr._arequest_backend_canonical(
+            [{"id": "u2", "type": "message", "role": "user", "content": "продолжай"}],
+            state,
+            ctx,
+        )
+    )
 
     outbound = capture_outbound["messages"]
     assert outbound is not None
@@ -84,9 +86,7 @@ def test_trigger_volume_on_same_dirty_history_excludes_think():
         if m.get("role") == "assistant" and m.get("type") == "message":
             raw = m.get("content")
             if isinstance(raw, list):
-                dirty_assistant_lens += sum(
-                    len(p.get("text", "")) for p in raw if isinstance(p, dict)
-                )
+                dirty_assistant_lens += sum(len(p.get("text", "")) for p in raw if isinstance(p, dict))
             elif isinstance(raw, str):
                 dirty_assistant_lens += len(raw)
     assert sum(len(t) for t in assistant_projected) < dirty_assistant_lens

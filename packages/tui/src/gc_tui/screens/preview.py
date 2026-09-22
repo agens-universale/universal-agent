@@ -3,6 +3,7 @@
 Esc → dismiss(False) (назад). Enter → dismiss(True) (продолжить сессию).
 Шапка: слева «превью · сессия <id>», справа — путь проекта. Футер — подсказки клавиш.
 Промпт сессии виден в самом трейсе ниже, поэтому в шапку не дублируется."""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult
@@ -27,9 +28,9 @@ class PreviewScreen(Screen[bool]):
         Binding("escape", "back", "назад", priority=True),
     ]
 
-    def __init__(self, *, segments: list, thread_id: str = "",
-                 project_path: str = "",
-                 subagent_records: list | None = None) -> None:
+    def __init__(
+        self, *, segments: list, thread_id: str = "", project_path: str = "", subagent_records: list | None = None
+    ) -> None:
         super().__init__()
         self._segments = segments
         self._thread_id = thread_id
@@ -39,17 +40,18 @@ class PreviewScreen(Screen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static(f"превью · сессия {self._thread_id[:8]}",
-                             id="header-left", markup=False)
-                yield Static(truncate_path_left(self._project_path, _PATH_MAXLEN),
-                             id="header-right", markup=False)
+                yield Static(f"превью · сессия {self._thread_id[:8]}", id="header-left", markup=False)
+                yield Static(truncate_path_left(self._project_path, _PATH_MAXLEN), id="header-right", markup=False)
             yield VerticalScroll(id="trace")
             yield Static(
                 "[Esc] назад  ·  [Enter] продолжить сессию  ·  [↑↓ / PgUp PgDn] прокрутка",
-                id="preview-footer", markup=False)
+                id="preview-footer",
+                markup=False,
+            )
 
     def on_mount(self) -> None:
         from gc_tui.services.trace_render import merge_nested_readonly, render_segments_readonly
+
         trace = self.query_one("#trace", VerticalScroll)
         calls = render_segments_readonly(trace, self._segments)
         if self._subagent_records:
@@ -65,6 +67,7 @@ class PreviewScreen(Screen[bool]):
         """Клик по маркеру сжатия → раскрыть/свернуть тело сводки (маркер
         non-focusable — Enter отдан резюму треда). Тело находим по event_no."""
         from gc_tui.widgets.trace_row import SummaryMarker
+
         body = marker = None
         for w in self.query(SummaryMarker):
             if getattr(w, "_event_no", None) != message.event_no:

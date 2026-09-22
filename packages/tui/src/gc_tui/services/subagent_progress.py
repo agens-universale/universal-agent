@@ -3,6 +3,7 @@
 Runtime кладёт события в QueueSubagentProgressSink (worker-поток).
 Этот модуль — только UI: plan/apply действий, без оркестрации execute.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,10 +45,7 @@ def reconcile_batch_phases(rows: Sequence[Any]) -> None:
     Одинаково для любых тулов (не special-case subagent). rows — в порядке
     появления в batch (insertion order _active_calls).
     """
-    pending = [
-        r for r in rows
-        if getattr(r, "_result", None) is None and not getattr(r, "_interrupted", False)
-    ]
+    pending = [r for r in rows if getattr(r, "_result", None) is None and not getattr(r, "_interrupted", False)]
     if not pending:
         return
     first, *rest = pending
@@ -311,9 +309,7 @@ class SubagentProgressConsumer:
         self._seen_tool_calls.clear()
 
 
-def format_parent_live_status(
-    *, step: int, max_steps: int, last_tool: Optional[str]
-) -> str:
+def format_parent_live_status(*, step: int, max_steps: int, last_tool: Optional[str]) -> str:
     """Хвост корневой строки субагента: `step 4/100 · last=fs_read_file`."""
     parts = [f"step {step}/{max_steps}" if max_steps else f"step {step}"]
     if last_tool:

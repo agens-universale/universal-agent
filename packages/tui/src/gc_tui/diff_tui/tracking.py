@@ -3,6 +3,7 @@
 Тулы не импортируют diff_tui: обёртка перехватывает write/append/exec/run_python.
 Harbor / non-TUI — без этой обёртки.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,9 +55,7 @@ def _perimeter(ctx: Any) -> tuple[str, list, list[str], int]:
     wg = config_dict.get("write_guard") or {}
     extra_paths = list(wg.get("extra_paths") or []) if isinstance(wg, dict) else []
     protected = config_dict.get("protected_paths") or {}
-    protected_extra = (
-        list(protected.get("extra") or []) if isinstance(protected, dict) else []
-    )
+    protected_extra = list(protected.get("extra") or []) if isinstance(protected, dict) else []
     diff_cfg = config_dict.get("diff_tui") or {}
     if not isinstance(diff_cfg, dict):
         diff_cfg = {}
@@ -70,9 +69,7 @@ def _rel_for_check_ignore(path: str, launch_root: str, key: Optional[str]) -> st
     if key is not None and not Path(key).is_absolute():
         return key
     try:
-        return Path(path).resolve().relative_to(
-            Path(launch_root).resolve()
-        ).as_posix()
+        return Path(path).resolve().relative_to(Path(launch_root).resolve()).as_posix()
     except ValueError:
         return path
 
@@ -127,8 +124,7 @@ class TrackingFsBackend:
         # без фона и отказывал бы в TUI, хотя под ней обычный LocalFsBackend.
         self.supports_background = bool(getattr(inner, "supports_background", False))
 
-    async def aspawn_background(self, command: str, *, cwd: Any = None,
-                                env: Any = None) -> dict:
+    async def aspawn_background(self, command: str, *, cwd: Any = None, env: Any = None) -> dict:
         """Фоновый запуск проксируем как есть, без дельты diff-журнала.
 
         Журнал снимает изменения ВОКРУГ вызова, а этот возвращается мгновенно:
@@ -175,9 +171,7 @@ class TrackingFsBackend:
         return self._inner
 
     def _active(self) -> bool:
-        return bool(getattr(self._ctx, "is_tui", False)) and _identity_from_ctx(
-            self._ctx
-        ) is not None
+        return bool(getattr(self._ctx, "is_tui", False)) and _identity_from_ctx(self._ctx) is not None
 
     def _journal(self) -> TouchedJournal | None:
         ident = _identity_from_ctx(self._ctx)
@@ -210,9 +204,7 @@ class TrackingFsBackend:
         if not self._active() or not isinstance(path, str) or not path:
             return
         try:
-            launch_root, extra_paths, protected_extra, cache_max_orig = _perimeter(
-                self._ctx
-            )
+            launch_root, extra_paths, protected_extra, cache_max_orig = _perimeter(self._ctx)
             if not launch_root:
                 return
             key = canonical_path_key(
@@ -274,9 +266,7 @@ class TrackingFsBackend:
                     entries = await asyncio.to_thread(git_ops.git_status, launch_root)
                     before = {e.path for e in entries}
             except Exception:
-                _logger.warning(
-                    "shell mutation scope: pre-status failed", exc_info=True
-                )
+                _logger.warning("shell mutation scope: pre-status failed", exc_info=True)
                 before = None
         result = await run()
         if before is not None:
@@ -288,9 +278,7 @@ class TrackingFsBackend:
                     for rel in sorted(after - before):
                         journal.add(rel)
             except Exception:
-                _logger.warning(
-                    "shell mutation scope: post-status failed", exc_info=True
-                )
+                _logger.warning("shell mutation scope: post-status failed", exc_info=True)
         return result
 
     async def aexec(
@@ -478,9 +466,7 @@ class TrackingFsBackend:
             yield item
 
     async def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
-        return await self._inner.walk_entries(
-            path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
-        )
+        return await self._inner.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
 
     async def iter_walk_entries(
         self,

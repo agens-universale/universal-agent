@@ -14,6 +14,7 @@ loop'ов и пик в 10 потоков на ОДНУ сборку**: ворк�
 Дорогая часть здесь одна — MCP-дискавери (866–1405 мс против 2.4–6.9 мс на всё
 остальное), и async-двойники сделаны ровно под неё.
 """
+
 import ast
 import asyncio
 import threading
@@ -50,8 +51,7 @@ async def test_build_does_not_spawn_threads():
 
     assert ctx.tools_data, "контекст собрался пустым — тест ничего не проверил"
     assert peak[0] - before <= 1, (
-        f"сборка подняла {peak[0] - before} потоков — похоже, вернулась форма "
-        f"to_thread(create_run_context)"
+        f"сборка подняла {peak[0] - before} потоков — похоже, вернулась форма to_thread(create_run_context)"
     )
 
 
@@ -89,10 +89,7 @@ async def test_loop_stays_free_during_build(monkeypatch):
         async with LoopPulse(step=0.005) as pulse:
             await acreate_run_context(cfg)
 
-    assert pulse.worst() < 0.25, (
-        f"loop залипал на {pulse.worst():.3f}с при сборке контекста "
-        f"({pulse.report()})"
-    )
+    assert pulse.worst() < 0.25, f"loop залипал на {pulse.worst():.3f}с при сборке контекста ({pulse.report()})"
 
 
 def test_acreate_is_not_a_thread_wrapper():
@@ -103,17 +100,12 @@ def test_acreate_is_not_a_thread_wrapper():
     """
     src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
-    fn = next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context"
-    )
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
     calls = {
-        getattr(c.func, "attr", None) or getattr(c.func, "id", None)
-        for c in ast.walk(fn) if isinstance(c, ast.Call)
+        getattr(c.func, "attr", None) or getattr(c.func, "id", None) for c in ast.walk(fn) if isinstance(c, ast.Call)
     }
     assert "to_thread" not in calls, (
-        "acreate_run_context снова обёртка над потоком — 8 loop'ов и 10 потоков "
-        "на сборку вместо одного"
+        "acreate_run_context снова обёртка над потоком — 8 loop'ов и 10 потоков на сборку вместо одного"
     )
 
 
@@ -136,19 +128,15 @@ def test_context_assembly_has_exactly_one_form():
     tree = ast.parse(src)
 
     sync_forms = [
-        n.name for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and "run_context" in n.name
-        and not n.name.startswith("_")
+        n.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and "run_context" in n.name and not n.name.startswith("_")
     ]
     assert sync_forms == [], f"вернулась синхронная сборка контекста: {sync_forms}"
 
-    build = next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context"
-    )
+    build = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
     calls = {
-        getattr(c.func, "id", None) or getattr(c.func, "attr", None)
-        for c in ast.walk(build) if isinstance(c, ast.Call)
+        getattr(c.func, "id", None) or getattr(c.func, "attr", None) for c in ast.walk(build) if isinstance(c, ast.Call)
     }
     for helper in ("_prepare_run_context", "_finish_run_context"):
         assert helper in calls, f"acreate_run_context не зовёт {helper}"
@@ -165,15 +153,8 @@ def test_subagent_builds_use_the_async_form():
     Синхронная форма там подняла бы ещё один loop в отдельном потоке
     (``run_coro_blocking``), а это ровно то, от чего уходили.
     """
-    src = (
-        REPO / "packages/core/src/gc_core/tools/subagents/runner.py"
-    ).read_text(encoding="utf-8")
+    src = (REPO / "packages/core/src/gc_core/tools/subagents/runner.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
-    names = {
-        getattr(c.func, "id", None)
-        for c in ast.walk(tree) if isinstance(c, ast.Call)
-    }
+    names = {getattr(c.func, "id", None) for c in ast.walk(tree) if isinstance(c, ast.Call)}
     assert "abuild_tools_data" in names
-    assert "build_tools_data" not in names, (
-        "спавн субагента зовёт синхронную сборку тулов из-под работающего loop"
-    )
+    assert "build_tools_data" not in names, "спавн субагента зовёт синхронную сборку тулов из-под работающего loop"

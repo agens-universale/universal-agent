@@ -4,6 +4,7 @@ Bug 1: Skill-реплика дублируется в трейсе (реконс
 Bug 2: Skill-реплика на resume показывается как [!] failed (wire ∉ delivered_wires).
 Bug 3: CSS: отсутствует .skill-marker в styles.tcss (отступ под маркером).
 """
+
 import json
 
 import pytest
@@ -12,6 +13,7 @@ from gc_testkit.paths import TUI_PKG
 # ---------------------------------------------------------------------------
 # Bug 1: дублирование user-reply для skill-сообщений
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
@@ -53,12 +55,8 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
         await pilot.pause()
 
         count_after = len(list(scr.query(UserReplyContainer)))
-        assert count_after == 1, (
-            f"НЕ должен появляться дубликат: до={count_before}, после={count_after}"
-        )
-        assert "c1" not in scr._pending_user_widgets, (
-            "После реконсайла c1 должен быть удалён из _pending_user_widgets"
-        )
+        assert count_after == 1, f"НЕ должен появляться дубликат: до={count_before}, после={count_after}"
+        assert "c1" not in scr._pending_user_widgets, "После реконсайла c1 должен быть удалён из _pending_user_widgets"
 
 
 @pytest.mark.asyncio
@@ -101,6 +99,7 @@ async def test_skill_reply_without_payload_falls_back_to_summary(tmp_path):
 # Bug 2: skill-реплика на resume показывается как [!] failed
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_mount_failed_skips_skill_message_via_display_content(tmp_path):
     """Skill-запись: content='давай' (clean), wire_content=wire.
@@ -118,21 +117,30 @@ async def test_mount_failed_skips_skill_message_via_display_content(tmp_path):
     threads_dir.mkdir()
 
     (threads_dir / f"data_cli_{thread_id}.jsonl").write_text("", encoding="utf-8")
-    (threads_dir / f"meta_cli_{thread_id}.json").write_text(json.dumps({
-        "thread_id": thread_id,
-        "status": "stopped",
-        "updated_at": "2026-06-26T10:00:00+00:00",
-        "messages_count": 0,
-        # user_messages_log хранит display_content (clean)
-        "user_messages_log": [display],
-        "tui": {"pending_user_messages": [{
-            "client_id": "c1",
-            "content": display,           # clean (display_content)
-            "wire_content": wire,          # wire (длинный с инструкцией)
-            "status": "pending",
-            "ts_utc_iso": "2026-06-26T10:00:00+00:00",
-        }]},
-    }), encoding="utf-8")
+    (threads_dir / f"meta_cli_{thread_id}.json").write_text(
+        json.dumps(
+            {
+                "thread_id": thread_id,
+                "status": "stopped",
+                "updated_at": "2026-06-26T10:00:00+00:00",
+                "messages_count": 0,
+                # user_messages_log хранит display_content (clean)
+                "user_messages_log": [display],
+                "tui": {
+                    "pending_user_messages": [
+                        {
+                            "client_id": "c1",
+                            "content": display,  # clean (display_content)
+                            "wire_content": wire,  # wire (длинный с инструкцией)
+                            "status": "pending",
+                            "ts_utc_iso": "2026-06-26T10:00:00+00:00",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
     async with app.run_test() as pilot:
@@ -163,21 +171,30 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
     threads_dir.mkdir()
 
     (threads_dir / f"data_cli_{thread_id}.jsonl").write_text("", encoding="utf-8")
-    (threads_dir / f"meta_cli_{thread_id}.json").write_text(json.dumps({
-        "thread_id": thread_id,
-        "status": "stopped",
-        "updated_at": "2026-06-26T10:00:00+00:00",
-        "messages_count": 0,
-        # user_messages_log пуст — сообщение так и не дошло до агента
-        "user_messages_log": [],
-        "tui": {"pending_user_messages": [{
-            "client_id": "c1",
-            "content": display,
-            "wire_content": wire,
-            "status": "pending",
-            "ts_utc_iso": "2026-06-26T10:00:00+00:00",
-        }]},
-    }), encoding="utf-8")
+    (threads_dir / f"meta_cli_{thread_id}.json").write_text(
+        json.dumps(
+            {
+                "thread_id": thread_id,
+                "status": "stopped",
+                "updated_at": "2026-06-26T10:00:00+00:00",
+                "messages_count": 0,
+                # user_messages_log пуст — сообщение так и не дошло до агента
+                "user_messages_log": [],
+                "tui": {
+                    "pending_user_messages": [
+                        {
+                            "client_id": "c1",
+                            "content": display,
+                            "wire_content": wire,
+                            "status": "pending",
+                            "ts_utc_iso": "2026-06-26T10:00:00+00:00",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
     async with app.run_test() as pilot:
@@ -196,6 +213,7 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
 # ---------------------------------------------------------------------------
 # Bug 3: .skill-marker существует в styles.tcss
 # ---------------------------------------------------------------------------
+
 
 def test_skill_marker_css_rule_exists():
     """styles.tcss содержит правило .skill-marker."""
@@ -235,6 +253,5 @@ async def test_skill_marker_has_css_class(tmp_path):
 
         markers = [w for w in scr.query(TraceRow) if w.has_class("skill-marker")]
         assert len(markers) == 1, (
-            f"_mount_skill_marker должен добавлять класс skill-marker, "
-            f"нашли {len(markers)} виджетов с таким классом"
+            f"_mount_skill_marker должен добавлять класс skill-marker, нашли {len(markers)} виджетов с таким классом"
         )

@@ -33,6 +33,7 @@ def _ensure_project_gc_dir() -> None:
     """Создаёт <cwd>/.gc/ при старте gc-cli. Делегирует общему хелперу
     (тот же вызывает gc-ua) — см. env_vars.ensure_project_gc_dir."""
     from gc_core.config_modules.env_vars import ensure_project_gc_dir
+
     ensure_project_gc_dir()
 
 
@@ -46,6 +47,7 @@ def _ensure_user_skills_dir() -> None:
     """
     try:
         from gc_core.config_modules.env_vars import gc_paths
+
         os.makedirs(gc_paths()["data"] / "skills", exist_ok=True)
     except (PermissionError, OSError):
         pass
@@ -147,16 +149,20 @@ def _run_init() -> int:
         print(f"[gc] {loaded.message}", file=sys.stderr)
     if _interactive():
         from gc_cli import onboarding_wizard
+
         configured = onboarding_wizard.run(
-            config_dict, path, review_all=True,
-            io=onboarding_wizard.default_io(),   # без mcp — gc-cli не ставит MCP
+            config_dict,
+            path,
+            review_all=True,
+            io=onboarding_wizard.default_io(),  # без mcp — gc-cli не ставит MCP
             # Ступень «без профиля» значит, что конфиг собрался только со снятым
             # профилем: финал обязан снять и указатель, иначе записать починку
             # некуда. Но снять его мастер может не всегда (указатель в managed-слое),
             # и судит об этом лестница: своя редакция признака обещала бы человеку
             # деактивацию, которую писатель не сделает, — а пустой якорь в базу
             # уже уехал бы (ревью D3).
-            deactivate_profile=loaded.deactivate_profile)
+            deactivate_profile=loaded.deactivate_profile,
+        )
         # run() отдаёт False не только на трейсбеке, но и когда человек прошёл
         # мастер, а конфиг всё равно остался ненастроенным (пропущенные поля,
         # отказ записи, файл, который не удалось перечитать) — код возврата
@@ -165,8 +171,7 @@ def _run_init() -> int:
     else:
         # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
         # запускать» врало бы человеку, чей следующий старт падает.
-        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created,
-                                     repair=loaded), file=sys.stderr)
+        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created, repair=loaded), file=sys.stderr)
     return 0
 
 
@@ -265,14 +270,14 @@ def _run_reset_config() -> int:
         return 1
     if not _interactive():
         print(
-            "[gc] --reset-config требует интерактивного подтверждения (TTY) — "
-            "запустите в терминале и подтвердите y/N.",
+            "[gc] --reset-config требует интерактивного подтверждения (TTY) — запустите в терминале и подтвердите y/N.",
             file=sys.stderr,
         )
         return 1
     print(
         f"[gc] Сбросить {target} к пакетному умолчанию? Текущий файл уйдёт в бэкап. [y/N]: ",
-        file=sys.stderr, end="",
+        file=sys.stderr,
+        end="",
     )
     sys.stderr.flush()
     try:
@@ -288,8 +293,7 @@ def _run_reset_config() -> int:
         print(f"[gc] config.yml НЕ сброшен: {exc}", file=sys.stderr)
         return 1
     print(
-        f"[gc] ✓ config.yml сброшен к пакетному умолчанию: {target}\n"
-        f"     бэкап: {report.backup_path}",
+        f"[gc] ✓ config.yml сброшен к пакетному умолчанию: {target}\n     бэкап: {report.backup_path}",
         file=sys.stderr,
     )
     return 0
@@ -423,9 +427,10 @@ async def arun_cli() -> int:
         # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
         # тот же, что грузили: по указателю из файла объяснение описывало бы
         # чужой стек.
-        print(onboarding.explain_broken_config(
-            resolve_config_path(config_arg), exc, profile_override=profile_arg),
-            file=sys.stderr)
+        print(
+            onboarding.explain_broken_config(resolve_config_path(config_arg), exc, profile_override=profile_arg),
+            file=sys.stderr,
+        )
         return 1
 
     # Единая точка применения CLI-override поверх config.yml.
@@ -445,10 +450,9 @@ async def arun_cli() -> int:
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
     force_legacy = cli_forces_legacy_model(config_dict)
     if force_legacy:
-        config_dict.setdefault("compat_notices", []).append(
-            "--model: уровни отключены на этот запуск (легаси-форс)"
-        )
+        config_dict.setdefault("compat_notices", []).append("--model: уровни отключены на этот запуск (легаси-форс)")
     from gc_core import upgrade_gate
+
     _upgrade_info = upgrade_gate.detect_upgrade()
 
     # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
@@ -460,24 +464,18 @@ async def arun_cli() -> int:
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
-    forced_skill_id = await _resolve_forced_skill(
-        arg_parser.run_args.skill, config_dict
-    )
+    forced_skill_id = await _resolve_forced_skill(arg_parser.run_args.skill, config_dict)
 
     auth_connector = build_auth_connector(config_dict)
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
         # У gc-cli автозапуск opt-in: выключается тем, что `-a` не передан.
         # Флага `--no-auto-mcp` здесь нет — он живёт только у gc-ua.
-        ensure_mcp_daemons(
-            config_dict, disable_hint="отключить автозапуск: запустите без `-a`"
-        )
+        ensure_mcp_daemons(config_dict, disable_hint="отключить автозапуск: запустите без `-a`")
     # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
-    ctx = await acreate_run_context(
-        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
-    )
+    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
     # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
     # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
     # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
@@ -488,6 +486,7 @@ async def arun_cli() -> int:
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli
     from gc_core.tools.registry import all_builtin_tool_names
+
     _notices = collect_startup_notices(
         config_dict,
         all_builtin_tool_names(config_dict),
@@ -505,9 +504,7 @@ async def arun_cli() -> int:
     if arg_parser.run_args.wrap_technical:
         user_parts[0] = wrap_technical_user_content(user_parts[0])
     if forced_skill_id:
-        user_parts.append(
-            wrap_skill_resolution_technical_instruction(forced_skill_id)
-        )
+        user_parts.append(wrap_skill_resolution_technical_instruction(forced_skill_id))
 
     verbose = arg_parser.run_args.verbose
     thread_id = arg_parser.run_args.thread_id

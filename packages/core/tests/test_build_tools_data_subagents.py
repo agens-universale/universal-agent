@@ -33,6 +33,7 @@ class TestSubagentsInBuildToolsData:
     async def test_present_when_enabled_and_chat_completions(self):
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+
         cfg = _base_config(use_local_subagents=True, backend_api_mode="chat_completions")
         tools_data, tools_spec, tools_descr, _ = await abuild_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
@@ -42,6 +43,7 @@ class TestSubagentsInBuildToolsData:
     async def test_absent_when_disabled(self):
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+
         cfg = _base_config(use_local_subagents=False, backend_api_mode="chat_completions")
         tools_data, _, _, _ = await abuild_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
@@ -51,6 +53,7 @@ class TestSubagentsInBuildToolsData:
     async def test_absent_when_responses_mode(self):
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+
         cfg = _base_config(use_local_subagents=True, backend_api_mode="responses")
         tools_data, _, _, _ = await abuild_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
@@ -60,6 +63,7 @@ class TestSubagentsInBuildToolsData:
     async def test_absent_when_flag_missing(self):
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+
         cfg = _base_config(backend_api_mode="chat_completions")
         del cfg["use_local_subagents"]
         tools_data, _, _, _ = await abuild_tools_data(cfg)
@@ -70,6 +74,7 @@ class TestSubagentsInBuildToolsData:
     async def test_specs_have_required_field(self):
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+
         cfg = _base_config(use_local_subagents=True, backend_api_mode="chat_completions")
         tools_data, _, _, _ = await abuild_tools_data(cfg)
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
@@ -83,6 +88,7 @@ class TestSubagentsInBuildToolsData:
     async def test_subagent_specs_in_tools_spec_list(self):
         from gc_core.tools import abuild_tools_data
         from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+
         cfg = _base_config(use_local_subagents=True, backend_api_mode="chat_completions")
         _, tools_spec, _, _ = await abuild_tools_data(cfg)
         spec_names = {s["name"] for s in tools_spec}

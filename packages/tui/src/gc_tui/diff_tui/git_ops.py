@@ -1,4 +1,5 @@
 """Тонкие обёртки git для Diff-TUI (cwd=launch_root, timeout). Без UX."""
+
 from __future__ import annotations
 
 import subprocess
@@ -72,9 +73,7 @@ def _parse_porcelain_line(line: str) -> Optional[GitStatusEntry]:
         return None
 
     if xy == "??":
-        return GitStatusEntry(
-            path=path, kind="created", state="pending", xy=xy
-        )
+        return GitStatusEntry(path=path, kind="created", state="pending", xy=xy)
 
     x, y = xy[0], xy[1]
     # worktree dirty (y != ' ') → pending; чистое staging (x set, y space) → approved
@@ -113,7 +112,6 @@ def git_add(launch_root: PathLike, path: str) -> GitRunResult:
 def git_restore_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     """``git restore --worktree -- <path>`` — worktree ← index; staging не трогаем."""
     return _run_git(launch_root, ["restore", "--worktree", "--", path])
-
 
 
 def git_show_index(launch_root: PathLike, path: str) -> GitRunResult:

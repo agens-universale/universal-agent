@@ -5,6 +5,7 @@
 `consumer` id и резолвится через `ctx.model_router.resolve(consumer)`. См.
 .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-6-brief.md.
 """
+
 import json
 import logging
 from types import SimpleNamespace
@@ -30,9 +31,7 @@ def _canonical_once(processing_module, *args, **kwargs):
     """
     import asyncio
 
-    return asyncio.run(
-        processing_module._arequest_backend_canonical_once(*args, **kwargs)
-    )
+    return asyncio.run(processing_module._arequest_backend_canonical_once(*args, **kwargs))
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -92,9 +91,7 @@ def test_create_call_headers_authorization_value_used_as_is():
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = build_call_headers(
-        _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
-    )
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization="Bearer model-token"))
     assert headers["Authorization"] == "Bearer model-token"
 
 
@@ -104,9 +101,7 @@ async def test_create_call_headers_responses_mode_ignores_resolved_authorization
         config_dict={"backend_api_mode": "responses", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = await acreate_call_headers(
-        _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
-    )
+    headers = await acreate_call_headers(_state(), ctx, resolved=_resolved(authorization="Bearer model-token"))
     assert headers["Authorization"] == "Bearer tok-123"
 
 
@@ -125,9 +120,7 @@ def test_create_call_headers_model_token_survives_global_chat_completion_headers
         },
         auth_connector=None,
     )
-    headers = build_call_headers(
-        _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
-    )
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization="Bearer model-token"))
     assert headers["Authorization"] == "Bearer model-token"
     assert headers["X-Custom"] == "keep-me"
 
@@ -155,9 +148,7 @@ def test_create_call_headers_lowercase_global_authorization_also_yields_to_model
         },
         auth_connector=None,
     )
-    headers = build_call_headers(
-        _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
-    )
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization="Bearer model-token"))
     assert headers["Authorization"] == "Bearer model-token"
     assert "authorization" not in headers
 
@@ -226,16 +217,10 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}}]}, captured["payload"]
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     router = SimpleNamespace(
-        resolve=Mock(
-            return_value=_resolved(
-                model="light-model", url="http://alias.local/v1/chat/completions"
-            )
-        )
+        resolve=Mock(return_value=_resolved(model="light-model", url="http://alias.local/v1/chat/completions"))
     )
     ctx = SimpleNamespace(
         config_dict={
@@ -245,13 +230,15 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
         model_router=router,
         logger=None,
     )
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_state(),
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="summary",
+        )
+    )
     assert captured["url"] == "http://alias.local/v1/chat/completions"
     assert captured["payload"]["model"] == "light-model"
     router.resolve.assert_called_once_with("summary")
@@ -295,9 +282,7 @@ def test_create_call_headers_backend_overrides_chat_completion_headers():
     headers = build_call_headers(
         _state(),
         ctx,
-        resolved=_resolved(
-            backend_overrides={"chat_completion_headers": {"X-Model": "model-value"}}
-        ),
+        resolved=_resolved(backend_overrides={"chat_completion_headers": {"X-Model": "model-value"}}),
     )
     assert headers["X-Model"] == "model-value"
     assert "X-Base" not in headers
@@ -312,16 +297,10 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
         return {"choices": [{"message": {"content": "ok"}}]}, payload
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     router = SimpleNamespace(
-        resolve=Mock(
-            return_value=_resolved(
-                backend_overrides={"use_ssl": False, "request_timeout_sec": 42}
-            )
-        )
+        resolve=Mock(return_value=_resolved(backend_overrides={"use_ssl": False, "request_timeout_sec": 42}))
     )
     ctx = SimpleNamespace(
         config_dict={
@@ -332,13 +311,15 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
         model_router=router,
         logger=None,
     )
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_state(),
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_state(),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="summary",
+        )
+    )
     assert captured["verify"] is False
     assert captured["timeout"] == 42.0
 
@@ -357,9 +338,7 @@ _FINISH_GATE_JSON = json.dumps(
         "report_mismatches": [],
     }
 )
-_JUDGE_JSON = json.dumps(
-    {"verdict": "safe", "reasons": ["ok"], "risk_flags": [], "confidence": 0.9}
-)
+_JUDGE_JSON = json.dumps({"verdict": "safe", "reasons": ["ok"], "risk_flags": [], "confidence": 0.9})
 
 
 def _router_ctx(**cfg_overrides):
@@ -373,9 +352,7 @@ def _router_ctx(**cfg_overrides):
     ctx = SimpleNamespace(
         config_dict=cfg,
         model_router=router,
-        auxiliary_llm=SimpleNamespace(
-            max_tokens=500, judge_max_tokens=200, completion_kwargs={}
-        ),
+        auxiliary_llm=SimpleNamespace(max_tokens=500, judge_max_tokens=200, completion_kwargs={}),
         logger=None,
         auth_connector=None,
         is_tui=False,
@@ -392,9 +369,7 @@ def _patch_llm_transport(monkeypatch, response_text: str) -> list:
         return {"choices": [{"message": {"content": response_text}}]}, payload
 
     # Форма у воронки одна — корутинная; синхронного имени в модуле нет.
-    monkeypatch.setattr(
-        llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy)
-    )
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     return captured
 
 
@@ -427,13 +402,15 @@ def test_finish_gate_declares_own_consumer(monkeypatch):
     _patch_llm_transport(monkeypatch, _FINISH_GATE_JSON)
     ctx, router = _router_ctx()
     digest = FinishGateTraceDigest(trace_digest_text="<message>...</message>", digest_chars=20)
-    result = run_coro(avalidate_final_report_vs_user_intent(
-        ctx=ctx,
-        state=_state(),
-        current_user_requests=["do x"],
-        finish_handoff_arguments="done",
-        trace_digest=digest,
-    ))
+    result = run_coro(
+        avalidate_final_report_vs_user_intent(
+            ctx=ctx,
+            state=_state(),
+            current_user_requests=["do x"],
+            finish_handoff_arguments="done",
+            trace_digest=digest,
+        )
+    )
     assert result.action == "accept"
     router.resolve.assert_called_once_with("finish_gate")
 
@@ -457,13 +434,15 @@ def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "a summary line")
     ctx, router = _router_ctx()
-    line = run_coro(summarizer.asummarize_tool_intent_line(
-        ctx=ctx,
-        state=_state(current_user_intent=[]),
-        tool_name="turn_ask_human",
-        tool_arguments="{}",
-        tool_output_raw="raw tool output",
-    ))
+    line = run_coro(
+        summarizer.asummarize_tool_intent_line(
+            ctx=ctx,
+            state=_state(current_user_intent=[]),
+            tool_name="turn_ask_human",
+            tool_arguments="{}",
+            tool_output_raw="raw tool output",
+        )
+    )
     assert line == "a summary line"
     router.resolve.assert_called_once_with("intent_scope")
 
@@ -473,11 +452,13 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "final answer summary")
     ctx, router = _router_ctx()
-    line = run_coro(summarizer.asummarize_final_answer_line(
-        ctx=ctx,
-        state=_state(current_user_intent=[]),
-        assistant_text="a very long final answer" * 5,
-    ))
+    line = run_coro(
+        summarizer.asummarize_final_answer_line(
+            ctx=ctx,
+            state=_state(current_user_intent=[]),
+            assistant_text="a very long final answer" * 5,
+        )
+    )
     assert line == "final answer summary"
     router.resolve.assert_called_once_with("intent_scope")
 
@@ -487,9 +468,7 @@ def test_summary_compress_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "short")
     ctx, router = _router_ctx()
-    out = run_coro(acompress_summary_text(
-        ctx=ctx, state=_state(), summary_text="x" * 100, max_chars=10, max_tokens=50
-    ))
+    out = run_coro(acompress_summary_text(ctx=ctx, state=_state(), summary_text="x" * 100, max_chars=10, max_tokens=50))
     assert out == "short"
     router.resolve.assert_called_once_with("summary")
 
@@ -499,15 +478,17 @@ def test_summary_repair_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "<summary>fixed</summary>")
     ctx, router = _router_ctx()
-    out = run_coro(arepair_summary_text(
-        ctx=ctx,
-        state=_state(),
-        history_text="history",
-        persistent_state_prefix="",
-        invalid_summary="broken",
-        reason="missing tags",
-        max_tokens=50,
-    ))
+    out = run_coro(
+        arepair_summary_text(
+            ctx=ctx,
+            state=_state(),
+            history_text="history",
+            persistent_state_prefix="",
+            invalid_summary="broken",
+            reason="missing tags",
+            max_tokens=50,
+        )
+    )
     assert out == "<summary>fixed</summary>"
     router.resolve.assert_called_once_with("summary")
 
@@ -517,9 +498,7 @@ def test_memory_patch_replace_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "<goal>x</goal>")
     ctx, router = _router_ctx()
-    result = run_coro(arequest_patch_replace(
-        ctx=ctx, state=_state(), history_text="hist", summary_text="sum"
-    ))
+    result = run_coro(arequest_patch_replace(ctx=ctx, state=_state(), history_text="hist", summary_text="sum"))
     assert result.raw_response == "<goal>x</goal>"
     router.resolve.assert_called_once_with("summary")
 
@@ -587,14 +566,15 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
         {"type": "message", "role": "assistant", "content": "first assistant"},
     ]
 
-    result = run_coro(asummarize_dialog_via_chat_completions(
-        ctx=ctx,
-        state=state,
-        full_history_messages=history,
-    ))
+    result = run_coro(
+        asummarize_dialog_via_chat_completions(
+            ctx=ctx,
+            state=state,
+            full_history_messages=history,
+        )
+    )
     assert captured["consumer"] == "summary"
     assert "batch summary" in result["raw_summary"]
-
 
 
 def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
@@ -760,14 +740,10 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     captured = {}
 
     def _fake_request_backend(call_data, headers, *, url, verify, cert, use_retry, logger, timeout, config_proxy):
-        captured.update(
-            {"verify": verify, "cert": cert, "timeout": timeout, "config_proxy": config_proxy}
-        )
+        captured.update({"verify": verify, "cert": cert, "timeout": timeout, "config_proxy": config_proxy})
         return {"id": "resp_1", "output": []}, {}
 
-    monkeypatch.setattr(
-        processing_module, "arequest_backend", as_coro(_fake_request_backend)
-    )
+    monkeypatch.setattr(processing_module, "arequest_backend", as_coro(_fake_request_backend))
 
     router = SimpleNamespace(
         resolve=Mock(
@@ -841,9 +817,7 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}}]}, captured["payload"]
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     ctx = SimpleNamespace(
         config_dict={
@@ -852,13 +826,15 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
         },
         logger=None,
     )
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_state(default_model="legacy-model"),
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_state(default_model="legacy-model"),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="summary",
+        )
+    )
     assert captured["url"] == "http://legacy.local/v1/chat/completions"
     assert captured["payload"]["model"] == "legacy-model"
 
@@ -877,20 +853,31 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkey
         captured.update(kwargs)
         captured["initial_max_tokens"] = initial_max_tokens
         payload_factory(initial_max_tokens)
-        return {"id": "chat_1", "choices": [{"index": 0, "message": {
-            "role": "assistant", "content": "hi", "tool_calls": []},
-            "finish_reason": "stop"}]}, {}
+        return {
+            "id": "chat_1",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "hi", "tool_calls": []},
+                    "finish_reason": "stop",
+                }
+            ],
+        }, {}
 
     monkeypatch.setattr(processing_module, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
-    router = SimpleNamespace(resolve=Mock(return_value=_resolved(
-        model="tiny-model",
-        backend_overrides={
-            "retry_embedded_choice_errors": False,
-            "chat_completions_max_tokens": 4096,
-            "chat_completions_min_response_tokens": 256,
-        },
-    )))
+    router = SimpleNamespace(
+        resolve=Mock(
+            return_value=_resolved(
+                model="tiny-model",
+                backend_overrides={
+                    "retry_embedded_choice_errors": False,
+                    "chat_completions_max_tokens": 4096,
+                    "chat_completions_min_response_tokens": 256,
+                },
+            )
+        )
+    )
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "chat_completions",
@@ -907,8 +894,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkey
         logger=None,
     )
 
-    _canonical_once(processing_module,
-        [{"role": "user", "content": "hi"}], _state(default_model="legacy-model"), ctx)
+    _canonical_once(processing_module, [{"role": "user", "content": "hi"}], _state(default_model="legacy-model"), ctx)
 
     assert captured["retry_embedded_choice_errors"] is False
     assert captured["initial_max_tokens"] == 4096
@@ -926,11 +912,11 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
         return {"choices": [{"message": {"content": "ok"}}]}, {}
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
-    router = SimpleNamespace(resolve=Mock(return_value=_resolved(
-        backend_overrides={"retry_embedded_choice_errors": False})))
+    router = SimpleNamespace(
+        resolve=Mock(return_value=_resolved(backend_overrides={"retry_embedded_choice_errors": False}))
+    )
     ctx = SimpleNamespace(
         config_dict={
             "completions_url": "http://legacy.local/v1/chat/completions",
@@ -940,9 +926,11 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
         model_router=router,
         logger=None,
     )
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx, state=_state(), messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10, consumer="summary"))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx, state=_state(), messages=[{"role": "user", "content": "hi"}], max_tokens=10, consumer="summary"
+        )
+    )
 
     assert captured["retry_embedded_choice_errors"] is False
 
@@ -959,16 +947,20 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
 
 # Читаются из resolved.backend_overrides по факту вызова.
 _HONORED_PER_MODEL = {
-    "cert_path", "key_path",                        # utils/connect_backend.effective_cert_config
-    "chat_completion_headers",                      # create_call_headers
-    "chat_completion_kwargs",                       # сборка payload обеих воронок
-    "chat_completions_max_tokens",                  # потолок адаптивного цикла
-    "chat_completions_min_response_tokens",         # пол адаптивного цикла
-    "completions_url",                              # model_router: адрес модели
-    "claude_prompt_cache",                                 # разметка prompt cache: create_call_data_completions
-    "proxy", "request_timeout_sec", "use_retry", "use_ssl",   # resolve_network_params
-    "retry_embedded_choice_errors",                 # там же
-    "use_max_tokens_param",                         # выбор max_tokens/max_completion_tokens
+    "cert_path",
+    "key_path",  # utils/connect_backend.effective_cert_config
+    "chat_completion_headers",  # create_call_headers
+    "chat_completion_kwargs",  # сборка payload обеих воронок
+    "chat_completions_max_tokens",  # потолок адаптивного цикла
+    "chat_completions_min_response_tokens",  # пол адаптивного цикла
+    "completions_url",  # model_router: адрес модели
+    "claude_prompt_cache",  # разметка prompt cache: create_call_data_completions
+    "proxy",
+    "request_timeout_sec",
+    "use_retry",
+    "use_ssl",  # resolve_network_params
+    "retry_embedded_choice_errors",  # там же
+    "use_max_tokens_param",  # выбор max_tokens/max_completion_tokens
 }
 
 # Остаются глобальными ОСОЗНАННО — с причиной у каждого.
@@ -992,7 +984,8 @@ def test_every_backend_field_is_classified_per_model_or_global():
     assert not unclassified, (
         f"поля backend без решения про per-model: {sorted(unclassified)}. "
         "Секция модели их уже принимает — либо прочитайте в воронке, либо "
-        "назовите глобальными с причиной")
+        "назовите глобальными с причиной"
+    )
     stale = (_HONORED_PER_MODEL | set(_GLOBAL_ONLY)) - schema_fields
     assert not stale, f"в списках есть поля, которых в схеме больше нет: {sorted(stale)}"
 
@@ -1006,8 +999,12 @@ def test_fields_declared_per_model_are_actually_read_by_the_funnels():
     # Пути к исходникам считаем от раскладки пакетов, а не от cwd: плоского
     # <repo>/src больше нет, а прогон возможен и из packages/core.
     core = package_dir("gc_core")
-    readers = [core / "utils" / "connect_backend.py", core / "utils" / "llm_chat_client.py",
-               core / "processing_responses.py", core / "model_router.py"]
+    readers = [
+        core / "utils" / "connect_backend.py",
+        core / "utils" / "llm_chat_client.py",
+        core / "processing_responses.py",
+        core / "model_router.py",
+    ]
     text = "\n".join(p.read_text(encoding="utf-8") for p in readers)
     missing = sorted(f for f in _HONORED_PER_MODEL if f'"{f}"' not in text)
     assert not missing, f"заявлены per-model, но не читаются ни одной воронкой: {missing}"
@@ -1035,37 +1032,30 @@ def _strip_prompt_cache(data: dict) -> dict:
 
 
 def _marked_indexes(data: dict) -> list[int]:
-    return [i for i, m in enumerate(data["messages"])
-            if isinstance(m.get("content"), list) and "cache_control" in m["content"][0]]
+    return [
+        i
+        for i, m in enumerate(data["messages"])
+        if isinstance(m.get("content"), list) and "cache_control" in m["content"][0]
+    ]
 
 
 def test_create_call_data_completions_marks_claude_model_system_and_tail():
-    data = create_call_data_completions(
-        _HISTORY, _state(), resolved=_resolved(model="anthropic/claude-opus-5")
-    )
+    data = create_call_data_completions(_HISTORY, _state(), resolved=_resolved(model="anthropic/claude-opus-5"))
     assert "cache_control" not in data
     assert _marked_indexes(data) == [0, 1]
-    assert data["messages"][1]["content"] == [
-        {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
-    ]
+    assert data["messages"][1]["content"] == [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}]
     assert data["tool_choice"] == "auto"
 
 
 def test_create_call_data_completions_leaves_non_claude_payload_untouched():
-    data = create_call_data_completions(
-        _HISTORY, _state(), resolved=_resolved(model="google/gemini-2.5-flash")
-    )
+    data = create_call_data_completions(_HISTORY, _state(), resolved=_resolved(model="google/gemini-2.5-flash"))
     assert "cache_control" not in json.dumps(data)
     assert all(isinstance(m["content"], str) for m in data["messages"])
 
 
 def test_create_call_data_completions_claude_payload_equals_plain_after_strip():
-    claude = create_call_data_completions(
-        _HISTORY, _state(), resolved=_resolved(model="anthropic/claude-opus-5")
-    )
-    gemini = create_call_data_completions(
-        _HISTORY, _state(), resolved=_resolved(model="google/gemini-2.5-flash")
-    )
+    claude = create_call_data_completions(_HISTORY, _state(), resolved=_resolved(model="anthropic/claude-opus-5"))
+    gemini = create_call_data_completions(_HISTORY, _state(), resolved=_resolved(model="google/gemini-2.5-flash"))
     stripped = _strip_prompt_cache(claude)
     stripped["model"] = "google/gemini-2.5-flash"
     assert stripped == gemini
@@ -1090,7 +1080,8 @@ def test_create_call_data_completions_marks_same_for_any_max_tokens():
 
 def test_prompt_cache_per_model_false_disables_marks_for_claude():
     data = create_call_data_completions(
-        _HISTORY, _state(),
+        _HISTORY,
+        _state(),
         resolved=_resolved(model="anthropic/claude-opus-5", backend_overrides={"claude_prompt_cache": False}),
     )
     assert _marked_indexes(data) == []
@@ -1098,7 +1089,8 @@ def test_prompt_cache_per_model_false_disables_marks_for_claude():
 
 def test_prompt_cache_per_model_true_enables_marks_for_renamed_model():
     data = create_call_data_completions(
-        _HISTORY, _state(),
+        _HISTORY,
+        _state(),
         resolved=_resolved(model="sonnet-prod", backend_overrides={"claude_prompt_cache": True}),
     )
     assert _marked_indexes(data) == [0, 1]
@@ -1106,12 +1098,16 @@ def test_prompt_cache_per_model_true_enables_marks_for_renamed_model():
 
 def test_prompt_cache_global_false_disables_and_per_model_true_overrides():
     off = create_call_data_completions(
-        _HISTORY, _state(), config_dict={"claude_prompt_cache": False},
+        _HISTORY,
+        _state(),
+        config_dict={"claude_prompt_cache": False},
         resolved=_resolved(model="anthropic/claude-opus-5"),
     )
     assert _marked_indexes(off) == []
     on = create_call_data_completions(
-        _HISTORY, _state(), config_dict={"claude_prompt_cache": False},
+        _HISTORY,
+        _state(),
+        config_dict={"claude_prompt_cache": False},
         resolved=_resolved(model="anthropic/claude-opus-5", backend_overrides={"claude_prompt_cache": True}),
     )
     assert _marked_indexes(on) == [0, 1]
@@ -1120,7 +1116,8 @@ def test_prompt_cache_global_false_disables_and_per_model_true_overrides():
 def test_chat_completion_kwargs_cannot_inject_top_level_cache_control(caplog):
     caplog.set_level(logging.DEBUG, logger="gc_core.utils.connect_backend")
     data = create_call_data_completions(
-        _HISTORY, _state(),
+        _HISTORY,
+        _state(),
         config_dict={"chat_completion_kwargs": {"cache_control": {"type": "ephemeral", "ttl": "1h"}}},
         resolved=_resolved(model="anthropic/claude-opus-5"),
     )
@@ -1138,7 +1135,9 @@ def test_chat_completion_kwargs_cache_control_passes_when_marks_are_off():
     assert gemini["cache_control"] == {"type": "ephemeral"}
     assert _marked_indexes(gemini) == []
     claude_off = create_call_data_completions(
-        _HISTORY, _state(), config_dict=kwargs,
+        _HISTORY,
+        _state(),
+        config_dict=kwargs,
         resolved=_resolved(model="anthropic/claude-opus-5", backend_overrides={"claude_prompt_cache": False}),
     )
     assert claude_off["cache_control"] == {"type": "ephemeral"}
@@ -1151,13 +1150,15 @@ def test_service_funnel_never_marks_prompt_cache(monkeypatch):
     captured = _patch_llm_transport(monkeypatch, "ok")
     ctx, router = _router_ctx()
     router.resolve = Mock(return_value=_resolved(model="anthropic/claude-opus-5"))
-    text = run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=_state(),
-        messages=[{"role": "system", "content": "judge"}, {"role": "user", "content": "x"}],
-        max_tokens=50,
-        consumer="finish_gate",
-    ))
+    text = run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=_state(),
+            messages=[{"role": "system", "content": "judge"}, {"role": "user", "content": "x"}],
+            max_tokens=50,
+            consumer="finish_gate",
+        )
+    )
     assert text == "ok"
     assert captured[0]["model"] == "anthropic/claude-opus-5"
     assert "cache_control" not in json.dumps(captured[0])

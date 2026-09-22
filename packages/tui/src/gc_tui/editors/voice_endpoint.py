@@ -10,6 +10,7 @@
 Поля «Язык» и «Модель» несут раскрывающиеся списки — язык (все языки whisper,
 константа) и `ModelListController` (модели самого сервера, загрузка в воркере);
 общая механика обоих — в `tui.editors.field_list.FieldListController`."""
+
 from __future__ import annotations
 
 import re
@@ -64,39 +65,105 @@ _URL_HINT_NO_MATCH = "свой адрес · Enter — сохранить как
 # поле — свой код можно вписать руками (напр. диалект, которого у модели нет), см.
 # normalized_language.
 VOICE_LANGUAGES = (
-    ("ru", "русский"), ("en", "английский"), ("uk", "украинский"),
-    ("de", "немецкий"), ("fr", "французский"), ("es", "испанский"),
-    ("it", "итальянский"), ("pt", "португальский"), ("zh", "китайский"),
-    ("ja", "японский"), ("tr", "турецкий"), ("kk", "казахский"),
-    ("af", "африкаанс"), ("am", "амхарский"), ("ar", "арабский"),
-    ("as", "ассамский"), ("az", "азербайджанский"), ("ba", "башкирский"),
-    ("be", "белорусский"), ("bg", "болгарский"), ("bn", "бенгальский"),
-    ("bo", "тибетский"), ("br", "бретонский"), ("bs", "боснийский"),
-    ("ca", "каталанский"), ("cs", "чешский"), ("cy", "валлийский"),
-    ("da", "датский"), ("el", "греческий"), ("et", "эстонский"),
-    ("eu", "баскский"), ("fa", "персидский"), ("fi", "финский"),
-    ("fo", "фарерский"), ("gl", "галисийский"), ("gu", "гуджарати"),
-    ("ha", "хауса"), ("haw", "гавайский"), ("he", "иврит"),
-    ("hi", "хинди"), ("hr", "хорватский"), ("ht", "гаитянский креольский"),
-    ("hu", "венгерский"), ("hy", "армянский"), ("id", "индонезийский"),
-    ("is", "исландский"), ("jw", "яванский"), ("ka", "грузинский"),
-    ("km", "кхмерский"), ("kn", "каннада"), ("ko", "корейский"),
-    ("la", "латынь"), ("lb", "люксембургский"), ("ln", "лингала"),
-    ("lo", "лаосский"), ("lt", "литовский"), ("lv", "латышский"),
-    ("mg", "малагасийский"), ("mi", "маори"), ("mk", "македонский"),
-    ("ml", "малаялам"), ("mn", "монгольский"), ("mr", "маратхи"),
-    ("ms", "малайский"), ("mt", "мальтийский"), ("my", "бирманский"),
-    ("ne", "непальский"), ("nl", "нидерландский"), ("nn", "нюнорск"),
-    ("no", "норвежский"), ("oc", "окситанский"), ("pa", "панджаби"),
-    ("pl", "польский"), ("ps", "пушту"), ("ro", "румынский"),
-    ("sa", "санскрит"), ("sd", "синдхи"), ("si", "сингальский"),
-    ("sk", "словацкий"), ("sl", "словенский"), ("sn", "шона"),
-    ("so", "сомалийский"), ("sq", "албанский"), ("sr", "сербский"),
-    ("su", "сунданский"), ("sv", "шведский"), ("sw", "суахили"),
-    ("ta", "тамильский"), ("te", "телугу"), ("tg", "таджикский"),
-    ("th", "тайский"), ("tk", "туркменский"), ("tl", "тагальский"),
-    ("tt", "татарский"), ("ur", "урду"), ("uz", "узбекский"),
-    ("vi", "вьетнамский"), ("yi", "идиш"), ("yo", "йоруба"),
+    ("ru", "русский"),
+    ("en", "английский"),
+    ("uk", "украинский"),
+    ("de", "немецкий"),
+    ("fr", "французский"),
+    ("es", "испанский"),
+    ("it", "итальянский"),
+    ("pt", "португальский"),
+    ("zh", "китайский"),
+    ("ja", "японский"),
+    ("tr", "турецкий"),
+    ("kk", "казахский"),
+    ("af", "африкаанс"),
+    ("am", "амхарский"),
+    ("ar", "арабский"),
+    ("as", "ассамский"),
+    ("az", "азербайджанский"),
+    ("ba", "башкирский"),
+    ("be", "белорусский"),
+    ("bg", "болгарский"),
+    ("bn", "бенгальский"),
+    ("bo", "тибетский"),
+    ("br", "бретонский"),
+    ("bs", "боснийский"),
+    ("ca", "каталанский"),
+    ("cs", "чешский"),
+    ("cy", "валлийский"),
+    ("da", "датский"),
+    ("el", "греческий"),
+    ("et", "эстонский"),
+    ("eu", "баскский"),
+    ("fa", "персидский"),
+    ("fi", "финский"),
+    ("fo", "фарерский"),
+    ("gl", "галисийский"),
+    ("gu", "гуджарати"),
+    ("ha", "хауса"),
+    ("haw", "гавайский"),
+    ("he", "иврит"),
+    ("hi", "хинди"),
+    ("hr", "хорватский"),
+    ("ht", "гаитянский креольский"),
+    ("hu", "венгерский"),
+    ("hy", "армянский"),
+    ("id", "индонезийский"),
+    ("is", "исландский"),
+    ("jw", "яванский"),
+    ("ka", "грузинский"),
+    ("km", "кхмерский"),
+    ("kn", "каннада"),
+    ("ko", "корейский"),
+    ("la", "латынь"),
+    ("lb", "люксембургский"),
+    ("ln", "лингала"),
+    ("lo", "лаосский"),
+    ("lt", "литовский"),
+    ("lv", "латышский"),
+    ("mg", "малагасийский"),
+    ("mi", "маори"),
+    ("mk", "македонский"),
+    ("ml", "малаялам"),
+    ("mn", "монгольский"),
+    ("mr", "маратхи"),
+    ("ms", "малайский"),
+    ("mt", "мальтийский"),
+    ("my", "бирманский"),
+    ("ne", "непальский"),
+    ("nl", "нидерландский"),
+    ("nn", "нюнорск"),
+    ("no", "норвежский"),
+    ("oc", "окситанский"),
+    ("pa", "панджаби"),
+    ("pl", "польский"),
+    ("ps", "пушту"),
+    ("ro", "румынский"),
+    ("sa", "санскрит"),
+    ("sd", "синдхи"),
+    ("si", "сингальский"),
+    ("sk", "словацкий"),
+    ("sl", "словенский"),
+    ("sn", "шона"),
+    ("so", "сомалийский"),
+    ("sq", "албанский"),
+    ("sr", "сербский"),
+    ("su", "сунданский"),
+    ("sv", "шведский"),
+    ("sw", "суахили"),
+    ("ta", "тамильский"),
+    ("te", "телугу"),
+    ("tg", "таджикский"),
+    ("th", "тайский"),
+    ("tk", "туркменский"),
+    ("tl", "тагальский"),
+    ("tt", "татарский"),
+    ("ur", "урду"),
+    ("uz", "узбекский"),
+    ("vi", "вьетнамский"),
+    ("yi", "идиш"),
+    ("yo", "йоруба"),
     ("yue", "кантонский"),
 )
 # Хинт списка — канон пресет-листа адресов (та же формула «что это · печать · Enter · Esc»).
@@ -110,7 +177,7 @@ _LANG_HINT_CLASS = "voice-lang-hint"
 # находит и сносит ИМЕННО свой контейнер — id нельзя: remove() у Textual отложенный, и
 # повторное раскрытие в том же такте упало бы DuplicateIds).
 _LANG_SCROLL_CLASS = "voice-lang-scroll"
-_LANG_CODE_W = 6          # колонка кода: 2-3 символа + воздух до названия
+_LANG_CODE_W = 6  # колонка кода: 2-3 символа + воздух до названия
 
 # Список моделей endpoint'а — та же формула хинта, что у языка (это один визуальный язык).
 # «Перечитать», а не «обновить»: словарь разведён (§5.4) — «обновить версию» закреплено
@@ -123,8 +190,7 @@ _LANG_CODE_W = 6          # колонка кода: 2-3 символа + воз
 # («показать список»), а раскрытый — этой строкой («перечитать список»), и клавиша на
 # одном поле звалась двумя глаголами в зависимости от состояния, хотя делает одно и то
 # же — идёт на сервер).
-_MODEL_HINT = ("модели · печать — фильтр/свой id · Enter — подставить · "
-               f"Esc — свернуть · {_MODEL_RELOAD_HINT}")
+_MODEL_HINT = f"модели · печать — фильтр/свой id · Enter — подставить · Esc — свернуть · {_MODEL_RELOAD_HINT}"
 _MODEL_HINT_NO_MATCH = "свой id · Enter — сохранить как есть · Esc — свернуть"
 # LIST_LOADING/LIST_FAILED/LIST_EMPTY — статусы сетевого списка, общие с `model`
 # (`field_list.LIST_*`, спека 2026-08-06): своих формулировок здесь больше нет.
@@ -192,8 +258,7 @@ def _lang_initial_index(items, value: str) -> int | None:
     return next((i for i, (code, _name) in enumerate(items) if code == value), None)
 
 
-def lang_list_controller(host, *, input_id: str, langs=VOICE_LANGUAGES,
-                         on_pick=None) -> FieldListController:
+def lang_list_controller(host, *, input_id: str, langs=VOICE_LANGUAGES, on_pick=None) -> FieldListController:
     """Раскрывающийся список кодов языка под полем «Язык» — общий контроллер со своими
     параметрами: строки-константа, две колонки (код и название), фильтр по обоим
     («нем» → de), подсветка действующего кода.
@@ -203,11 +268,16 @@ def lang_list_controller(host, *, input_id: str, langs=VOICE_LANGUAGES,
     заводить исключение «язык всегда раскрывается» нельзя: тогда одно и то же
     действие (вход курсора на поле) вело бы себя по-разному в соседних строках."""
     return FieldListController(
-        host, input_id=input_id, row_class=_LANG_ROW_CLASS,
-        hint_class=_LANG_HINT_CLASS, scroll_class=_LANG_SCROLL_CLASS,
-        rows_source=tuple(langs), render_row=_lang_row,
+        host,
+        input_id=input_id,
+        row_class=_LANG_ROW_CLASS,
+        hint_class=_LANG_HINT_CLASS,
+        scroll_class=_LANG_SCROLL_CLASS,
+        rows_source=tuple(langs),
+        render_row=_lang_row,
         matches=lambda item, q: q in item[0] or q in item[1],
-        value_of=lambda item: item[0], initial_index=_lang_initial_index,
+        value_of=lambda item: item[0],
+        initial_index=_lang_initial_index,
         hint=lambda ok: _LANG_HINT if ok else _LANG_HINT_NO_MATCH,
         can_open=lambda value: not value,
         on_pick=on_pick,
@@ -228,14 +298,19 @@ class ModelListController(FieldListController):
     вписать вручную», ↑/↓ возвращаются ленте (ходить нечем), Enter сохраняет набранное
     руками — ровно как «свой код» у языка."""
 
-    def __init__(self, host, *, input_id: str, fetch,
-                 config_proxy: str | None = None, on_pick=None) -> None:
+    def __init__(self, host, *, input_id: str, fetch, config_proxy: str | None = None, on_pick=None) -> None:
         super().__init__(
-            host, input_id=input_id, row_class=_MODEL_ROW_CLASS,
-            hint_class=_MODEL_HINT_CLASS, scroll_class=_MODEL_SCROLL_CLASS,
-            render_row=self._model_row, matches=lambda item, q: q in item.lower(),
-            initial_index=self._model_initial_index, hint=self._model_hint,
-            on_pick=on_pick, closed_hint=_MODEL_RELOAD_HINT,
+            host,
+            input_id=input_id,
+            row_class=_MODEL_ROW_CLASS,
+            hint_class=_MODEL_HINT_CLASS,
+            scroll_class=_MODEL_SCROLL_CLASS,
+            render_row=self._model_row,
+            matches=lambda item, q: q in item.lower(),
+            initial_index=self._model_initial_index,
+            hint=self._model_hint,
+            on_pick=on_pick,
+            closed_hint=_MODEL_RELOAD_HINT,
             # Сам раскрывается только на ПУСТОМ поле — то же правило, что у пресет-листа
             # адреса. Модель уже выбрана — раскрывать список поверх неё незачем, а цена
             # автораскрытия здесь выше, чем у локальных списков: каждый вход курсора на
@@ -253,8 +328,8 @@ class ModelListController(FieldListController):
         )
         self._fetch = fetch
         self._config_proxy = config_proxy
-        self._status = ""          # чем занят список, пока строк нет
-        self._gen = 0              # поколение загрузки: протухший ответ отбрасывается
+        self._status = ""  # чем занят список, пока строк нет
+        self._gen = 0  # поколение загрузки: протухший ответ отбрасывается
 
     def _begin_open(self, field: Input, filter_text: str = "", *, forced: bool = False) -> None:
         self._visible = []
@@ -281,7 +356,7 @@ class ModelListController(FieldListController):
         return True
 
     def _on_close(self) -> None:
-        self._gen += 1             # летящая загрузка этого раскрытия больше не наша
+        self._gen += 1  # летящая загрузка этого раскрытия больше не наша
         # `_items` НЕ обнуляем: это последний известный ответ сервера, и по нему база
         # решает, обещать ли что-нибудь под свёрнутым списком. Обещать надо — `Alt+↓`
         # у сетевого списка уходит в сеть, а не показывает уже добытое; обнулив строки,
@@ -308,7 +383,7 @@ class ModelListController(FieldListController):
         was_open = self.is_open
         current = self._current_value()
         filter_text = current if was_open and current != self._value0 else ""
-        self.close(restore=False)   # no-op, если и так свёрнут
+        self.close(restore=False)  # no-op, если и так свёрнут
         self.open(keep_baseline=was_open, filter_text=filter_text, forced=True)
         return True
 
@@ -335,14 +410,13 @@ class ModelListController(FieldListController):
 
         def _work() -> None:
             try:
-                models = self._fetch(url, token, verify,
-                                     config_proxy=self._config_proxy)
+                models = self._fetch(url, token, verify, config_proxy=self._config_proxy)
             except Exception:
-                models = None       # сбой загрузки секцию не роняет — см. док-строку
+                models = None  # сбой загрузки секцию не роняет — см. док-строку
             try:
                 self._host.app.call_from_thread(self._on_loaded, models, gen, filter_text)
             except Exception:
-                pass                # приложение уже закрылось, пока запрос летел
+                pass  # приложение уже закрылось, пока запрос летел
 
         self._host.run_worker(_work, thread=True, exclusive=True, name="voice-model-list")
 
@@ -376,8 +450,7 @@ class ModelListController(FieldListController):
         if not value:
             return 0 if items else None
         value = value.lower()
-        return next((i for i, model_id in enumerate(items)
-                     if model_id.lower() == value), None)
+        return next((i for i, model_id in enumerate(items) if model_id.lower() == value), None)
 
     def _model_hint(self, has_selection: bool) -> str:
         if self._status:
@@ -393,13 +466,21 @@ class ModelListController(FieldListController):
 
 
 class VoiceEndpointEditor(Vertical):
-    def __init__(self, *, values: dict, fields=("url", "token", "model"),
-                 gap: bool = False,
-                 autofocus: bool | str = True, placeholders: dict | None = None,
-                 readonly: tuple[str, ...] = (), fetch=None,
-                 saved_token: str = "", verify_ssl=True,
-                 config_proxy: str | None = None,
-                 url_presets: list | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        values: dict,
+        fields=("url", "token", "model"),
+        gap: bool = False,
+        autofocus: bool | str = True,
+        placeholders: dict | None = None,
+        readonly: tuple[str, ...] = (),
+        fetch=None,
+        saved_token: str = "",
+        verify_ssl=True,
+        config_proxy: str | None = None,
+        url_presets: list | None = None,
+    ) -> None:
         # gap — зазор группы над первой подписью: в мастере воздух дают строки опций
         # (set-spaced), в /settings редактор идёт вплотную к подсказке действия.
         # autofocus — забирать ли фокус при монтировании: True — первое поле (мастер:
@@ -427,7 +508,7 @@ class VoiceEndpointEditor(Vertical):
         self._readonly = tuple(readonly)
         self._saved_token = saved_token or ""
         self._verify_ssl = verify_ssl
-        self._inputs: dict = {}         # ключ → поле, заполняет compose (см. focus_field)
+        self._inputs: dict = {}  # ключ → поле, заполняет compose (см. focus_field)
         # Сохранённый токен помечен к удалению (Ctrl+U). Пустое поле само по себе значит
         # «оставить как было» — стереть секрет иначе нечем (канон ConnectionEditor).
         self._token_cleared = False
@@ -438,15 +519,20 @@ class VoiceEndpointEditor(Vertical):
         # Списки живут с редактором (их поля — его DOM), а раскрывает/сворачивает их
         # хозяин курсорной ленты: он один знает, где курсор.
         self.lang_list = lang_list_controller(
-            self, input_id=_FIELDS["language"][1],
-            on_pick=lambda value: self._write("language", value))
+            self, input_id=_FIELDS["language"][1], on_pick=lambda value: self._write("language", value)
+        )
         # Поле-факт списка не получает: в локальной панели модель задаёт установка сервиса.
         self.model_list = (
-            ModelListController(self, input_id=_FIELDS["model"][1], fetch=fetch,
-                                config_proxy=config_proxy,
-                                on_pick=lambda value: self._write("model", value))
-            if fetch is not None and "model" in self._fields
-            and "model" not in self._readonly else None)
+            ModelListController(
+                self,
+                input_id=_FIELDS["model"][1],
+                fetch=fetch,
+                config_proxy=config_proxy,
+                on_pick=lambda value: self._write("model", value),
+            )
+            if fetch is not None and "model" in self._fields and "model" not in self._readonly
+            else None
+        )
         # Пресеты СТТ-адресов (спека 2026-08-05 §3): тот же контроллер, что у адреса
         # подключения, — печать это и фильтр, и свой адрес (restore_on_close=False
         # внутри фабрики). Поле-факт (readonly) списка не получает — его пишет
@@ -454,12 +540,17 @@ class VoiceEndpointEditor(Vertical):
         presets = list(url_presets or [])
         self.url_list = (
             preset_list_controller(
-                self, presets=presets, row_class="voice-url-preset-row",
-                input_id=_FIELDS["url"][1], hint=PRESET_HINT,
+                self,
+                presets=presets,
+                row_class="voice-url-preset-row",
+                input_id=_FIELDS["url"][1],
+                hint=PRESET_HINT,
                 no_match_hint=_URL_HINT_NO_MATCH,
-                on_pick=self._apply_url_preset)
+                on_pick=self._apply_url_preset,
+            )
             if presets and "url" in self._fields and "url" not in self._readonly
-            else None)
+            else None
+        )
 
     def _write(self, key: str, value: str) -> None:
         """Подстановка выбранного в поле — действие Enter'а списков (`on_pick`)."""
@@ -525,10 +616,14 @@ class VoiceEndpointEditor(Vertical):
             # (его модель задаёт установка сервиса) — и группы тоже.
             grouped = self.list_for(key) is not None
             icls = "onb-dyn " + ("group-field" if grouped else "set-framed")
-            field = PasteInput(value=str(self._values.get(key) or ""), id=wid,
-                               placeholder=placeholder, password=password and not ro,
-                               disabled=ro,
-                               classes=icls + (" set-readonly" if ro else "") + saved)
+            field = PasteInput(
+                value=str(self._values.get(key) or ""),
+                id=wid,
+                placeholder=placeholder,
+                password=password and not ro,
+                disabled=ro,
+                classes=icls + (" set-readonly" if ro else "") + saved,
+            )
             # Ссылки на поля держим сами: поле в группе — ВНУК редактора, а внуки
             # монтируются отдельным проходом, и query_one на своём on_mount ещё
             # гоночный (канон ConnectionEditor).
@@ -585,13 +680,13 @@ class VoiceEndpointEditor(Vertical):
         Гейт держим внутри, а не у хозяев: клавишу зовут два экрана (мастер и
         /settings), и помнить условие каждой копии — верный способ разъехаться."""
         if field_key != "token" or not self.token_is_mask():
-            return False        # не то поле или стирать нечего — клавиша не наша
+            return False  # не то поле или стирать нечего — клавиша не наша
         self._token_cleared = True
         inp = self._inputs.get("token")
         if inp is None:
             return False
         inp.value = ""
-        inp.placeholder = ""        # маски сохранённого больше нет — стирать нечего
+        inp.placeholder = ""  # маски сохранённого больше нет — стирать нечего
         inp.set_class(False, "has-saved")
         return True
 
@@ -631,29 +726,28 @@ class VoiceEndpointEditor(Vertical):
         ctrl = self.list_for(key)
         if ctrl is None:
             return False
-        return ctrl.pick() is not None       # подстановку делает `on_pick` контроллера
+        return ctrl.pick() is not None  # подстановку делает `on_pick` контроллера
 
     def pick_language(self) -> bool:
         return self.pick_in("language")
 
     def values(self) -> dict:
         """Введённые значения по ключам полей (обрезанные), без сайд-эффектов."""
-        return {key: self.query_one(f"#{_FIELDS[key][1]}", Input).value.strip()
-                for key in self._fields}
+        return {key: self.query_one(f"#{_FIELDS[key][1]}", Input).value.strip() for key in self._fields}
 
     def submit(self) -> tuple[bool, dict | None]:
         """(ok, значения|None). Пустой/невалидный URL или пустая «Модель» →
         (False, None), ошибка показана внутри редактора (канон EndpointEditor);
         какое поле виновато — `last_error_field` (см. его комментарий)."""
         from gc_core.onboarding import _valid_endpoint_url
+
         values = self.values()
         url = values["url"]
         if not url or not _valid_endpoint_url(url):
             self.last_error_field = "url"
             self._show_error(_URL_EMPTY if not url else _URL_ERROR)
             return False, None
-        if "model" in self._fields and "model" not in self._readonly \
-                and not values.get("model"):
+        if "model" in self._fields and "model" not in self._readonly and not values.get("model"):
             self.last_error_field = "model"
             self._show_error(_MODEL_REQUIRED)
             return False, None

@@ -1,4 +1,5 @@
 """Unit-тесты tui.services.session_lock (SPEC session-lock)."""
+
 from __future__ import annotations
 
 import json

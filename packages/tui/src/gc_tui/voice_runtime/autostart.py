@@ -54,7 +54,7 @@ def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
         return False
     try:
         return urlsplit(url).port == port
-    except ValueError:          # мусор вместо номера порта — точно не наш адрес
+    except ValueError:  # мусор вместо номера порта — точно не наш адрес
         return False
 
 
@@ -62,9 +62,9 @@ def _preheat_bg(state) -> None:
     threading.Thread(target=preheat, args=(state,), daemon=True).start()
 
 
-def ensure_voice_service(config_dict: dict[str, Any], *,
-                         supervisor_factory=RunSupervisor,
-                         preheat_async: bool = True) -> bool:
+def ensure_voice_service(
+    config_dict: dict[str, Any], *, supervisor_factory=RunSupervisor, preheat_async: bool = True
+) -> bool:
     """Поднять локальный voice-сервис, если он установлен и сконфигурирован.
 
     True — сервис доступен (жил или поднят), lease взят, прогрев запущен.
@@ -120,7 +120,7 @@ def release_voice_service() -> None:
     pid = read_pid(SERVICE_NAME, voice_pids_dir())
     if pid is not None and is_pid_alive(pid):
         if live_leases():
-            return          # кто-то стартовал, пока мы шли гасить, — сервис ему нужен
+            return  # кто-то стартовал, пока мы шли гасить, — сервис ему нужен
         terminate_pid(pid)
         remove_pid(SERVICE_NAME, voice_pids_dir())
     clear_agent_owned(SERVICE_NAME)

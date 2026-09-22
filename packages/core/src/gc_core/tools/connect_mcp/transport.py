@@ -2,6 +2,7 @@
 Транспортный слой MCP: один запрос — один ответ (синхронно).
 Тип транспорта задаётся в конфиге сервера (transport: http | sse | stdio).
 """
+
 import asyncio
 import json
 import queue
@@ -87,7 +88,7 @@ def _first_json_rpc_from_sse_body(resp: "httpx.Response") -> Dict[str, Any]:
         line = line.strip()
         if not line.startswith(_SSE_DATA_PREFIX):
             continue
-        parsed = _try_parse_json_rpc(line[len(_SSE_DATA_PREFIX):].strip())
+        parsed = _try_parse_json_rpc(line[len(_SSE_DATA_PREFIX) :].strip())
         if parsed is not None:
             return parsed
     return {}
@@ -111,8 +112,10 @@ async def _arequest_http(
 
     client = get_async_client(verify=verify, cert=cert)
     resp = await client.post(
-        _normalize_url(url), json=json_payload,
-        headers=_http_headers_for(headers), timeout=timeout,
+        _normalize_url(url),
+        json=json_payload,
+        headers=_http_headers_for(headers),
+        timeout=timeout,
     )
     resp.raise_for_status()
     return _parse_http_response(resp)
@@ -157,7 +160,7 @@ class _SseFirstJson:
         if not stripped:
             return self._on_blank_line()
         if stripped.lower().startswith(_SSE_DATA_PREFIX):
-            return self._on_data_line(stripped[len(_SSE_DATA_PREFIX):].strip())
+            return self._on_data_line(stripped[len(_SSE_DATA_PREFIX) :].strip())
         if self._in_data and self._buffer:
             self._buffer.append(stripped)
             return self._parse_buffer()
@@ -235,8 +238,11 @@ async def _arequest_sse(
 
     client = get_async_client(verify=verify, cert=cert)
     async with client.stream(
-        "POST", _normalize_url(url), json=json_payload,
-        headers=_sse_headers_for(headers), timeout=timeout,
+        "POST",
+        _normalize_url(url),
+        json=json_payload,
+        headers=_sse_headers_for(headers),
+        timeout=timeout,
     ) as resp:
         resp.raise_for_status()
         _fix_sse_encoding(resp)
@@ -309,9 +315,7 @@ class _LineReader:
     def __init__(self, stream: "Any") -> None:
         self._stream = stream
         self._queue: queue.Queue[str | None] = queue.Queue()
-        self._thread = threading.Thread(
-            target=self._pump, daemon=True, name="mcp-stdio-reader"
-        )
+        self._thread = threading.Thread(target=self._pump, daemon=True, name="mcp-stdio-reader")
         self._thread.start()
 
     def _pump(self) -> None:
@@ -491,7 +495,7 @@ async def _aread_response(proc, timeout: float, want_id: Any) -> Dict[str, Any]:
         except TimeoutError:
             return {}
         if not raw:
-            return {}                     # EOF: процесс закрыл вывод
+            return {}  # EOF: процесс закрыл вывод
         line_in = raw.decode("utf-8", "replace").strip()
         message = _parse_rpc_response_line(line_in, want_id) if line_in else None
         if message is not None:
@@ -505,9 +509,9 @@ def _parse_rpc_response_line(line_in: str, want_id: Any) -> Dict[str, Any] | Non
     except json.JSONDecodeError:
         return None
     if not isinstance(message, dict) or message.get("method") is not None:
-        return None                       # встречный запрос или уведомление
+        return None  # встречный запрос или уведомление
     if want_id is not None and message.get("id") != want_id:
-        return None                       # ответ на чужой запрос
+        return None  # ответ на чужой запрос
     return message
 
 
@@ -533,9 +537,7 @@ async def _astdio_exchange(
             if not expect_response:
                 results.append({})
                 continue
-            results.append(
-                await _aread_response(proc, timeout, payload.get("id"))
-            )
+            results.append(await _aread_response(proc, timeout, payload.get("id")))
     finally:
         # Закрываем stdin ДО терминации: многие серверы по EOF корректно
         # завершают свой event loop сами, и тогда SIGTERM/SIGKILL не нужны
@@ -598,12 +600,11 @@ def _arequest_stdio(
             responses = await _astdio_exchange(cfg, timeout, [(json_payload, True)])
             return ({"mcp-session-id": "stdio"}, responses[0] if responses else {})
         if method == "notifications/initialized":
-            await _astdio_exchange(
-                cfg, timeout, [(_INIT_PAYLOAD, True), (json_payload, False)]
-            )
+            await _astdio_exchange(cfg, timeout, [(_INIT_PAYLOAD, True), (json_payload, False)])
             return ({}, {})
         responses = await _astdio_exchange(
-            cfg, timeout,
+            cfg,
+            timeout,
             [(_INIT_PAYLOAD, True), (_INITIALIZED_PAYLOAD, False), (json_payload, True)],
         )
         return ({}, responses[2] if len(responses) > 2 else {})
@@ -628,18 +629,16 @@ def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
     cert = get_client_cert(server_cfg)
 
     if transport == "http":
+
         async def arequest_http(url, headers, json_payload, timeout):
-            return await _arequest_http(
-                url, headers, json_payload, timeout, verify=verify, cert=cert
-            )
+            return await _arequest_http(url, headers, json_payload, timeout, verify=verify, cert=cert)
 
         return arequest_http
 
     if transport == "sse":
+
         async def arequest_sse(url, headers, json_payload, timeout):
-            return await _arequest_sse(
-                url, headers, json_payload, timeout, verify=verify, cert=cert
-            )
+            return await _arequest_sse(url, headers, json_payload, timeout, verify=verify, cert=cert)
 
         return arequest_sse
 
@@ -647,8 +646,7 @@ def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
         return _arequest_stdio(server_cfg)
 
     raise ValueError(
-        f"Invalid or missing 'transport' in MCP server config. "
-        f"Expected 'http', 'sse' or 'stdio', got: {transport!r}"
+        f"Invalid or missing 'transport' in MCP server config. Expected 'http', 'sse' or 'stdio', got: {transport!r}"
     )
 
 

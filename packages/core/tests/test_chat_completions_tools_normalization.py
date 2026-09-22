@@ -30,9 +30,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(normalized[0]["function"]["strict"], True)
 
     def test_keeps_already_nested_function_tool_spec(self):
-        tools = [
-            {"type": "function", "function": {"name": "x", "parameters": {"type": "object"}}}
-        ]
+        tools = [{"type": "function", "function": {"name": "x", "parameters": {"type": "object"}}}]
         normalized = normalize_chat_completions_tools(tools)
         self.assertEqual(normalized, tools)
 
@@ -123,11 +121,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             default_model="test-model",
         )
         data = create_call_data_completions([], state=state)
-        assistants_with_tools = [
-            m
-            for m in data["messages"]
-            if m.get("role") == "assistant" and m.get("tool_calls")
-        ]
+        assistants_with_tools = [m for m in data["messages"] if m.get("role") == "assistant" and m.get("tool_calls")]
         self.assertEqual(len(assistants_with_tools), 1)
         self.assertEqual(len(assistants_with_tools[0]["tool_calls"]), 2)
 
@@ -143,7 +137,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
                 "type": "function_call",
                 "call_id": "call_2",
                 "name": "fs_write_file",
-                "arguments": "{\"path\": \"/tmp/demo.md\", \"content\": \"x\"}",
+                "arguments": '{"path": "/tmp/demo.md", "content": "x"}',
                 "status": "completed",
             }
         ]
@@ -221,4 +215,3 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

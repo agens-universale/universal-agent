@@ -77,9 +77,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = AppConfig(
-                quality_gate=QualityGateConfig(max_dialogue_chars=0, max_message_chars=-1)
-            )
+            cfg = AppConfig(quality_gate=QualityGateConfig(max_dialogue_chars=0, max_message_chars=-1))
             resolve_paths(cfg, tmp)
             limits = digest_limits_from_params(cfg.quality_gate.model_dump())
             self.assertEqual(limits["max_dialogue_chars"], DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS)

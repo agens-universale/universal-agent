@@ -6,6 +6,7 @@
 
 Здесь же живёт депрекейт ``sse``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -56,7 +57,10 @@ def resolve_effective_transport(
                 "двухэндпойнтового рукопожатия) и не работает со "
                 "спек-совместимыми серверами. Запрос отправлен через %s; "
                 "поправьте transport в конфиге.",
-                server_name or "?", transport, replacement, replacement,
+                server_name or "?",
+                transport,
+                replacement,
+                replacement,
                 extra={
                     "event": "mcp_transport_deprecated",
                     "server": server_name,

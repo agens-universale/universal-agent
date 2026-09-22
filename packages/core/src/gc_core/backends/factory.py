@@ -1,4 +1,5 @@
 """Resolve ``FsBackend`` from config and runtime dependencies."""
+
 from __future__ import annotations
 
 import asyncio
@@ -50,9 +51,7 @@ def resolve_os_backend(
 
     if kind == "harbor":
         if environment is None or loop is None:
-            raise ValueError(
-                "os_backend=harbor requires environment and loop in create_run_context"
-            )
+            raise ValueError("os_backend=harbor requires environment and loop in create_run_context")
         return HarborBackend(
             environment,
             loop,

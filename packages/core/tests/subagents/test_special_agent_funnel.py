@@ -12,6 +12,7 @@ judges/memory_compaction), с заголовками из ``acreate_call_headers
 Заодно бюджет-хардкоды (special_agent role draft, project_memory compaction)
 вынесены в конфиг.
 """
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -134,9 +135,7 @@ def test_special_agent_role_generation_uses_subagent_usage_category(monkeypatch)
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     ctx = _ctx()
     state = _state()
@@ -154,9 +153,7 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
     ctx = _ctx(model_router=router)
@@ -176,9 +173,7 @@ def test_special_agent_role_generation_uses_configured_max_tokens_default(monkey
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     ctx = _ctx()
 
@@ -197,9 +192,7 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
     monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
-    monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
-    )
+    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     ctx = _ctx(
         config_dict={

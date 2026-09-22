@@ -94,10 +94,7 @@ def test_decide_command_execution_matrix():
     assert ask_no_judge.requires_confirmation is True
     assert ask_no_judge.reason_code == "judge_unavailable"
     assert decide_command_execution("ask", None, False, True).allowed is True
-    assert (
-        decide_command_execution("ask", None, False, False).error_type
-        == "unsafe_command_cancelled_by_user"
-    )
+    assert decide_command_execution("ask", None, False, False).error_type == "unsafe_command_cancelled_by_user"
     assert decide_command_execution("deny", safe, True, None).allowed is True
 
     denied = decide_command_execution("deny", dangerous, True, None)
@@ -199,12 +196,14 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     @moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
-        judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: {
-            "verdict": "potentially_dangerous",
-            "reasons": ["uses sudo"],
-            "risk_flags": ["privilege_escalation"],
-            "confidence": 0.8,
-        },
+        judge_client_extractor=lambda *_args, **_kwargs: (
+            lambda _payload: {
+                "verdict": "potentially_dangerous",
+                "reasons": ["uses sudo"],
+                "risk_flags": ["privilege_escalation"],
+                "confidence": 0.8,
+            }
+        ),
     )
     def run(command: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "command": command})
@@ -231,8 +230,10 @@ def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(t
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
-    assert "judge" in result["error"].get("reason", "").lower() \
+    assert (
+        "judge" in result["error"].get("reason", "").lower()
         or "fail-closed" in result["error"].get("reason", "").lower()
+    )
 
 
 def test_moderate_command_execution_logs_judge_failure(tmp_path):
@@ -248,12 +249,14 @@ def test_moderate_command_execution_logs_judge_failure(tmp_path):
     @moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
-        judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: {
-            "verdict": "safe",
-            "reasons": [],
-            "risk_flags": [],
-            "confidence": "not-a-number",
-        },
+        judge_client_extractor=lambda *_args, **_kwargs: (
+            lambda _payload: {
+                "verdict": "safe",
+                "reasons": [],
+                "risk_flags": [],
+                "confidence": "not-a-number",
+            }
+        ),
     )
     def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})
@@ -302,12 +305,14 @@ def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
     @moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
-        judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: {
-            "verdict": "potentially_dangerous",
-            "reasons": ["uses sudo"],
-            "risk_flags": ["privilege_escalation"],
-            "confidence": 0.8,
-        },
+        judge_client_extractor=lambda *_args, **_kwargs: (
+            lambda _payload: {
+                "verdict": "potentially_dangerous",
+                "reasons": ["uses sudo"],
+                "risk_flags": ["privilege_escalation"],
+                "confidence": 0.8,
+            }
+        ),
     )
     def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})
@@ -332,8 +337,7 @@ def test_parse_judge_json_accepts_valid_json():
 
 def test_parse_judge_json_strips_think_wrapper():
     parsed = command_moderation._parse_judge_json(
-        '<think>{"verdict":"dangerous"}</think>'
-        '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}'
+        '<think>{"verdict":"dangerous"}</think>{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}'
     )
 
     assert parsed["verdict"] == "safe"
@@ -341,10 +345,7 @@ def test_parse_judge_json_strips_think_wrapper():
 
 
 def test_parse_judge_json_regex_fallback_safe_on_malformed_json():
-    raw = (
-        "Sure! Here's the verdict:\n"
-        '{"verdict":"safe","reasons":["read-only"],"risk_flags":[],"confidence":"0.98"'
-    )
+    raw = 'Sure! Here\'s the verdict:\n{"verdict":"safe","reasons":["read-only"],"risk_flags":[],"confidence":"0.98"'
 
     parsed = command_moderation._parse_judge_json(raw)
 
@@ -353,10 +354,7 @@ def test_parse_judge_json_regex_fallback_safe_on_malformed_json():
 
 
 def test_parse_judge_json_regex_fallback_dangerous_on_malformed_json():
-    raw = (
-        "Analysis:\n"
-        '{"verdict":"potentially_dangerous","reasons":["bad"],"risk_flags":["x"]'
-    )
+    raw = 'Analysis:\n{"verdict":"potentially_dangerous","reasons":["bad"],"risk_flags":["x"]'
 
     parsed = command_moderation._parse_judge_json(raw)
 
@@ -365,10 +363,7 @@ def test_parse_judge_json_regex_fallback_dangerous_on_malformed_json():
 
 
 def test_parse_judge_json_regex_fallback_prefers_dangerous_when_both_present():
-    raw = (
-        '{"verdict":"safe","reasons":[]},'
-        '{"verdict":"potentially_dangerous","reasons":["bad"]'
-    )
+    raw = '{"verdict":"safe","reasons":[]},{"verdict":"potentially_dangerous","reasons":["bad"]'
 
     parsed = command_moderation._parse_judge_json(raw)
 
@@ -418,8 +413,8 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
     @moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
-        judge_client_extractor=lambda *_args, **_kwargs: lambda _payload: command_moderation._parse_judge_json(
-            "completely unparseable judge output"
+        judge_client_extractor=lambda *_args, **_kwargs: (
+            lambda _payload: command_moderation._parse_judge_json("completely unparseable judge output")
         ),
     )
     def run(command: str, config_dict: dict) -> str:
@@ -433,6 +428,7 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
 
 def test_build_judge_payload_includes_denied_examples():
     from gc_core.security.command_moderation import ModerationContext, build_judge_payload
+
     ctx = ModerationContext(
         tool_name="exec_command",
         launch_root="/work",
@@ -447,9 +443,18 @@ def test_build_judge_payload_includes_denied_examples():
 def test_load_config_maps_denied_examples(tmp_path):
     import yaml
     from gc_core.config import load_config
+
     p = tmp_path / "config.yml"
-    p.write_text(yaml.safe_dump({"security": {"command_moderation": {
-        "enabled": True, "mode": "deny", "denied_command_examples": ["rm -rf /"]}}}), encoding="utf-8")
+    p.write_text(
+        yaml.safe_dump(
+            {
+                "security": {
+                    "command_moderation": {"enabled": True, "mode": "deny", "denied_command_examples": ["rm -rf /"]}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     cfg = load_config(str(p))
     assert cfg["command_moderation"]["denied_command_examples"] == ["rm -rf /"]
 
@@ -458,6 +463,7 @@ def test_judge_prompt_documents_denied_examples_and_flag():
     from pathlib import Path
 
     from gc_core import config_modules
+
     src = Path(config_modules.__file__).resolve().parents[1]
     text = (ASSETS / "prompts" / "security" / "command_judge_system.md").read_text(encoding="utf-8")
     assert "How to use denied_command_examples" in text
@@ -489,9 +495,7 @@ def _dangerous():
         ("ask", None, False, False),
     ],
 )
-def test_every_refusal_carries_no_workaround_guidance(
-    mode, judge_result, judge_available, user_confirmation
-):
+def test_every_refusal_carries_no_workaround_guidance(mode, judge_result, judge_available, user_confirmation):
     """Любой отказ доезжает до модели с явным запретом эквивалентной команды."""
     decision = decide_command_execution(mode, judge_result, judge_available, user_confirmation)
     assert decision.allowed is False
@@ -519,4 +523,3 @@ def test_single_wording_shared_with_command_guard():
     from gc_core.security import command_guard
 
     assert command_guard.NO_WORKAROUND_NOTICE is NO_WORKAROUND_NOTICE
-

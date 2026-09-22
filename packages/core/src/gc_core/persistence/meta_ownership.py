@@ -2,6 +2,7 @@
 
 См. docs_md/tui/meta-ownership/SPEC.md.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, MutableMapping

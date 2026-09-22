@@ -1,4 +1,5 @@
 """render_payload: JSON → Syntax(monokai), plain → Static(моноцвет)."""
+
 import json
 
 import pytest
@@ -11,6 +12,7 @@ def _content_text(widget) -> str:
     Static (каждый рендерится в rich.Text — контракт селектируемости); для
     строк/прочего — одиночный Static(Text).
     """
+
     def _one(w) -> str:
         content = getattr(w, "content", "")
         if hasattr(content, "plain"):

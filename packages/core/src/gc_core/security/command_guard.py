@@ -2,6 +2,7 @@
 обращения к protected-путям (rm -rf .gc и т.п.). Это НЕ гарантия — обфускация
 не ловится; второй рубеж — LLM-судья (command_moderation), страховка — бэкап
 памяти (Спека B §7)."""
+
 from __future__ import annotations
 
 import functools
@@ -106,8 +107,7 @@ def scan_command_for_protected(command: str, *, cwd: str, extra=None) -> str:
     for tok in _tokens(command):
         cand = tok if os.path.isabs(tok) else os.path.join(cwd, tok)
         cls = classify_path(cand, ps)
-        decision = {"skills": "allow", "none": "allow",
-                    "instructions": "ask", "operational": "deny"}[cls]
+        decision = {"skills": "allow", "none": "allow", "instructions": "ask", "operational": "deny"}[cls]
         if rank[decision] > rank[worst]:
             worst = decision
     return worst
@@ -171,14 +171,18 @@ def _command_guard_flow(func: Callable[..., str], payload_arg: str, tool_name: s
 
     if decision == "ask":
         from gc_core.security.confirm_port import request_confirm
-        confirmed = (yield OffLoop(functools.partial(
-            request_confirm,
-            title="Защищённый путь",
-            question="Команда затрагивает защищённый путь. Выполнить?",
-            fields=[("command", payload)],
-            ctx=ctx_obj,
-            decision_key=f"command:{payload}",
-        ), on_interrupt=False))
+
+        confirmed = yield OffLoop(
+            functools.partial(
+                request_confirm,
+                title="Защищённый путь",
+                question="Команда затрагивает защищённый путь. Выполнить?",
+                fields=[("command", payload)],
+                ctx=ctx_obj,
+                decision_key=f"command:{payload}",
+            ),
+            on_interrupt=False,
+        )
         if confirmed:
             return (yield)
         # ask not confirmed → instructive blocked result
@@ -216,6 +220,7 @@ def enforce_command_guard(
 
     Activated only when protection_enabled(config_dict) is True.
     """
+
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         # Тело — ГЕНЕРАТОР, а не обычная функция: `dual_wrap` строит по нему и
         # синхронную, и асинхронную обёртку. Обычный декоратор здесь ломался

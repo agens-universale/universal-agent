@@ -2,6 +2,7 @@
 
 Requires the `harbor` framework (dependency-group `test`).
 """
+
 import asyncio
 import json
 import sys
@@ -13,8 +14,7 @@ from gc_testkit import as_coro
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
 # reorder sys.path so real site-packages wins, then evict cached shadows.
 _harbor_sp = next(
-    (p for p in sys.path
-     if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+    (p for p in sys.path if (Path(p) / "harbor" / "agents" / "base.py").exists()),
     None,
 )
 if _harbor_sp:
@@ -42,6 +42,7 @@ def _skill(root: Path, name: str) -> Path:
 
 def _as_async(fn):
     """Заглушка сборки контекста стала корутинной вместе со швом адаптера."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
 
@@ -237,9 +238,7 @@ async def test_skills_debug_artifact_records_loaded_ids_and_sources(tmp_path, mo
             list_skills=as_coro(lambda: [{"id": "threat-model"}, {"id": "mesh-analysis"}])
         ),
     )
-    ctx = SimpleNamespace(
-        config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None
-    )
+    ctx = SimpleNamespace(config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None)
 
     await agent._write_skills_debug(ctx, {"threat-model": "profile", "validation": "skipped"})
 
@@ -261,13 +260,9 @@ async def test_skills_debug_artifact_marks_collision_source_as_task(tmp_path, mo
     )
     monkeypatch.setattr(
         "gc_core.tools.skills.registry.get_skills_registry",
-        lambda cfg, backend=None: SimpleNamespace(
-            list_skills=as_coro(lambda: [{"id": "threat-model"}])
-        ),
+        lambda cfg, backend=None: SimpleNamespace(list_skills=as_coro(lambda: [{"id": "threat-model"}])),
     )
-    ctx = SimpleNamespace(
-        config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None
-    )
+    ctx = SimpleNamespace(config_dict={"skills_data_path": "/harbor/skills"}, os_backend=None)
 
     # "threat-model" collided: the task already provided a skill with this name, so
     # the profile's copy was skipped, but the registry still loads *a* skill under

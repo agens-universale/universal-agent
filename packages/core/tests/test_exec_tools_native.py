@@ -34,6 +34,7 @@
 ожидание человека — в потоке. Флаг остался для тел, у которых блокирующее
 неотделимо; его и стережёт тест ниже.
 """
+
 import asyncio
 import json
 import time
@@ -103,9 +104,7 @@ async def test_command_acall_runs_and_returns_output():
 
 async def test_command_does_not_hold_the_loop():
     """Пока команда идёт, loop продолжает тикать."""
-    _, gap = await _worst_gap(
-        lambda: _cmd().acall(command=f"python3 -c 'import time; time.sleep({NAP})'")
-    )
+    _, gap = await _worst_gap(lambda: _cmd().acall(command=f"python3 -c 'import time; time.sleep({NAP})'"))
 
     assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — запуск не асинхронный"
 
@@ -124,15 +123,11 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
     """
     hog_sec = 1.2
     cmd_sec = 1.0
-    hogs = [
-        asyncio.create_task(asyncio.to_thread(time.sleep, hog_sec)) for _ in range(24)
-    ]
+    hogs = [asyncio.create_task(asyncio.to_thread(time.sleep, hog_sec)) for _ in range(24)]
     await asyncio.sleep(0.05)
 
     started = time.perf_counter()
-    out = json.loads(
-        await _cmd().acall(command=f"python3 -c 'import time; time.sleep({cmd_sec})'")
-    )
+    out = json.loads(await _cmd().acall(command=f"python3 -c 'import time; time.sleep({cmd_sec})'"))
     spent = time.perf_counter() - started
 
     for h in hogs:
@@ -141,8 +136,7 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
 
     assert out["ok"] is True, out
     assert spent < hog_sec + cmd_sec * 0.5, (
-        f"команда заняла {spent:.2f}с при забитом пуле — похоже, она всё ещё "
-        f"ждёт слот и держит его на весь запуск"
+        f"команда заняла {spent:.2f}с при забитом пуле — похоже, она всё ещё ждёт слот и держит его на весь запуск"
     )
 
 
@@ -162,11 +156,7 @@ async def test_command_validation_rejects_bad_arguments():
 
 async def test_command_reports_a_timeout_the_same_way():
     """Таймаут — общий путь разбора результата, а не отдельная ветка."""
-    out = json.loads(
-        await _cmd().acall(
-            command="python3 -c 'import time; time.sleep(5)'", timeout=1
-        )
-    )
+    out = json.loads(await _cmd().acall(command="python3 -c 'import time; time.sleep(5)'", timeout=1))
 
     assert out["ok"] is False, out
     assert out["timed_out"] is True, out
@@ -193,9 +183,7 @@ async def test_python_acall_runs_and_returns_output():
 
 
 async def test_python_does_not_hold_the_loop():
-    _, gap = await _worst_gap(
-        lambda: _py().acall(code=f"import time; time.sleep({NAP})")
-    )
+    _, gap = await _worst_gap(lambda: _py().acall(code=f"import time; time.sleep({NAP})"))
 
     assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — запуск не асинхронный"
 
@@ -233,6 +221,4 @@ async def test_a_blocking_body_still_runs_off_the_loop():
     wrapped = dual_wrap(target, _flow, body_may_block=True)
 
     assert await wrapped() == "ok"
-    assert seen["thread"] != threading.get_ident(), (
-        "тело с body_may_block исполнилось на loop — флаг перестал работать"
-    )
+    assert seen["thread"] != threading.get_ident(), "тело с body_may_block исполнилось на loop — флаг перестал работать"

@@ -4,12 +4,14 @@ These tests reach the onboarding decision point WITHOUT launching Textual
 by monkeypatching the load_config + is_unconfigured path and driving main()
 up to the early-return onboarding exits (which happen before alt-screen).
 """
+
 import sys
 import types
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=True):
     """
@@ -21,19 +23,20 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
     import gc_tui as tui_mod
 
     # ensure_project_gc_dir — side-effectful, short-circuit it
-    monkeypatch.setattr(
-        "gc_core.config_modules.env_vars.ensure_project_gc_dir", lambda: None, raising=False
-    )
+    monkeypatch.setattr("gc_core.config_modules.env_vars.ensure_project_gc_dir", lambda: None, raising=False)
     # Patch tui's own reference to ensure_project_gc_dir (it imports lazily inside main)
     # We'll patch via the module that main() uses at runtime:
     from gc_core.config_modules import env_vars as env_mod
+
     monkeypatch.setattr(env_mod, "ensure_project_gc_dir", lambda: None)
 
     # Patch config functions used in main()
     from gc_core import config as cfg_mod
     from gc_core.config_modules.profiles import ProfileMeta
+
     monkeypatch.setattr(
-        cfg_mod, "load_config_ex",
+        cfg_mod,
+        "load_config_ex",
         lambda path=None, **kw: (dict(config_dict), ProfileMeta(active_name=None, ref=None, mtime_set={})),
     )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
@@ -41,9 +44,11 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)
 
     from gc_core import onboarding as ob_mod
+
     monkeypatch.setattr(ob_mod, "is_unconfigured", lambda cfg: unconfigured)
     monkeypatch.setattr(
-        ob_mod, "setup_guide",
+        ob_mod,
+        "setup_guide",
         lambda path, cfg, program="gc-ua", just_created=False: f"[gc] setup guide: edit {path}/config.yml",
     )
 
@@ -53,6 +58,7 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
 # ---------------------------------------------------------------------------
 # Test 1: Non-TTY passive path
 # ---------------------------------------------------------------------------
+
 
 def test_non_tty_onboarding_prints_guide_and_returns_0(monkeypatch, tmp_path, capsys):
     """
@@ -90,6 +96,7 @@ def test_non_tty_onboarding_prints_guide_and_returns_0(monkeypatch, tmp_path, ca
 # Test 2: Interactive + unconfigured → app._onboarding_mode="auto", app.run() called
 # ---------------------------------------------------------------------------
 
+
 def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
     """
     WIRING: when _interactive()→True and config is unconfigured,
@@ -107,10 +114,12 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
 
     # resolve_threads_dir requires threads_data_path — patch it
     from gc_core import thread_store as ts_mod
+
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
     # Also suppress daemon_autostart (imported in main)
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
+
     monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 

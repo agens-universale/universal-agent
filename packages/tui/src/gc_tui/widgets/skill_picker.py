@@ -4,6 +4,7 @@
 та же модель состояния (filter + selected index). Принимает готовый `list[dict]` —
 загрузку из реестра делает вызывающий код (TraceScreen).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -47,8 +48,7 @@ class SkillPicker(VerticalScroll):
         FLOW-ребёнок в старой раскладке упирался в max-height-клэмп длинного списка
         и прятался за скроллом (регрессия воздуха .palette-keys, коммит c0622c9a).
         Докнутый контейнер вне скролла держит hint видимым при открытии всегда."""
-        return Vertical(Static(_HINT, classes="palette-hint palette-keys", markup=False),
-                         classes="palette-footer")
+        return Vertical(Static(_HINT, classes="palette-hint palette-keys", markup=False), classes="palette-footer")
 
     def _format_row(self, skill: dict) -> str:
         return f" {skill.get('id', '?')}"

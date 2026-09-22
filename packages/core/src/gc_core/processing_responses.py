@@ -111,10 +111,6 @@ from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate
 _fallback_logger = logging.getLogger(__name__)
 
 
-
-
-
-
 async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
     """Позвать «тяжёлый» колбэк вызывающего, не занимая event loop.
 
@@ -243,14 +239,14 @@ def _without_tool_call_pairs(messages: List[Dict], tool_name: str) -> List[Dict]
 
 
 def _make_technical_feedback_user_message(
-    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL,
+    content: str,
+    *,
+    technical_type: str = TECHNICAL_TYPE_TECHNICAL,
     call_id: str | None = None,
 ) -> Dict[str, str]:
     msg = {
         "role": "user",
-        "content": wrap_technical_user_content(
-            content, technical_type=technical_type
-        ),
+        "content": wrap_technical_user_content(content, technical_type=technical_type),
         "id": generate_message_id_func("m"),
     }
     if call_id:
@@ -260,10 +256,9 @@ def _make_technical_feedback_user_message(
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
     text = str(exc).lower()
-    return (
-        "previous_response_id" in text
-        and ("not found" in text or "cache" in text)
-    ) or ("cache" in text and "not found" in text)
+    return ("previous_response_id" in text and ("not found" in text or "cache" in text)) or (
+        "cache" in text and "not found" in text
+    )
 
 
 def _get_backend_api_mode(ctx: Any) -> str:
@@ -278,9 +273,7 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
-def _raise_honest_main_unavailable(
-    ctx: Any, resolved: Any, reason: str, source_exc: BaseException
-) -> None:
+def _raise_honest_main_unavailable(ctx: Any, resolved: Any, reason: str, source_exc: BaseException) -> None:
     """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
     (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
     Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
@@ -401,23 +394,21 @@ async def _arequest_backend_canonical(
             messages, state, ctx, set_previous_response_id=set_previous_response_id
         )
     except Exception as exc:
-            if auth_connector is not None and is_auth_error(exc):
-                run_logger = getattr(ctx, "logger", None) or _fallback_logger
-                run_logger.warning(
-                    "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
+        if auth_connector is not None and is_auth_error(exc):
+            run_logger = getattr(ctx, "logger", None) or _fallback_logger
+            run_logger.warning("backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc)
+            # Пере-выпуск — тот же блокирующий поход в сеть, что и обычный
+            # `get_token`, только гарантированный: `force=True` мимо кэша.
+            await aresolve_auth_token(auth_connector, force=True)
+            try:
+                return await _arequest_backend_canonical_once(
+                    messages, state, ctx, set_previous_response_id=set_previous_response_id
                 )
-                # Пере-выпуск — тот же блокирующий поход в сеть, что и обычный
-                # `get_token`, только гарантированный: `force=True` мимо кэша.
-                await aresolve_auth_token(auth_connector, force=True)
-                try:
-                    return await _arequest_backend_canonical_once(
-                        messages, state, ctx, set_previous_response_id=set_previous_response_id
-                    )
-                except Exception as retry_exc:
-                    _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
-                    raise
-            _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
-            raise
+            except Exception as retry_exc:
+                _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
+                raise
+        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+        raise
 
 
 async def _arequest_responses_once(
@@ -462,18 +453,14 @@ def _chat_token_limits(cfg: Dict[str, Any], resolved_for_network: Any) -> Tuple[
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
     # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
     # воронке (`utils/llm_chat_client._send_chat_completion_text`).
-    _max_tokens_override = backend_override_value(
-        resolved_for_network, "chat_completions_max_tokens"
-    )
+    _max_tokens_override = backend_override_value(resolved_for_network, "chat_completions_max_tokens")
     completions_max_tokens = parse_chat_completions_max_tokens(
         cfg.get("chat_completions_max_tokens", 8096)
         if _max_tokens_override is NO_BACKEND_OVERRIDE
         else _max_tokens_override,
         default=8096,
     )
-    _min_tokens_override = backend_override_value(
-        resolved_for_network, "chat_completions_min_response_tokens"
-    )
+    _min_tokens_override = backend_override_value(resolved_for_network, "chat_completions_min_response_tokens")
     min_response_tokens = parse_chat_completions_max_tokens(
         cfg.get("chat_completions_min_response_tokens", 1024)
         if _min_tokens_override is NO_BACKEND_OVERRIDE
@@ -519,12 +506,18 @@ async def _arequest_backend_canonical_once(
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
     # из ResolvedModel действует только id модели, сетевые параметры — легаси cfg.
     resolved_for_network = resolved if backend_mode == "chat_completions" else None
-    (verify, cert, use_retry, request_timeout_sec, config_proxy,
-     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved_for_network)
+    (verify, cert, use_retry, request_timeout_sec, config_proxy, retry_embedded_choice_errors) = resolve_network_params(
+        cfg, resolved_for_network
+    )
 
     if backend_mode == "responses":
         return await _arequest_responses_once(
-            messages, state, ctx, resolved=resolved, call_headers=call_headers, cfg=cfg,
+            messages,
+            state,
+            ctx,
+            resolved=resolved,
+            call_headers=call_headers,
+            cfg=cfg,
             set_previous_response_id=set_previous_response_id,
             network=(verify, cert, use_retry, request_timeout_sec, config_proxy),
         )
@@ -618,22 +611,22 @@ async def _arequest_backend_canonical_once(
 
 def check_mode(messages, logger) -> Union[str, None]:
     if len(messages) == 0:
-        raise ValueError('Empty messages list')
-    if messages[-1].get('role', None) == 'user':
-        return 'user_ask'
+        raise ValueError("Empty messages list")
+    if messages[-1].get("role", None) == "user":
+        return "user_ask"
     for message in messages:
-        if message.get('type', None) == 'function_call':
-            return 'function_call'
+        if message.get("type", None) == "function_call":
+            return "function_call"
     for message in messages:
-        if message.get('type', None) == 'function_call_output':
-            return 'function_call_output'
-    if messages[-1].get('role', None) == 'assistant':
-        return 'text_response'
+        if message.get("type", None) == "function_call_output":
+            return "function_call_output"
+    if messages[-1].get("role", None) == "assistant":
+        return "text_response"
 
-    logger.debug('Got Undefined mode for messages:')
+    logger.debug("Got Undefined mode for messages:")
     logger.debug(str(messages))
 
-    raise ValueError('Undefined mode')
+    raise ValueError("Undefined mode")
 
 
 def _batch_has_pending_function_calls(messages: List[Dict]) -> bool:
@@ -650,21 +643,17 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     text_messages = []
     tool_outputs = []
     for m in messages:
-        m_type = m.get('type', 'message')
-        if m_type == 'function_call':
+        m_type = m.get("type", "message")
+        if m_type == "function_call":
             tool_calls.append(m)
-        elif m_type == 'message':
+        elif m_type == "message":
             text_messages.append(m)
-        elif m_type == 'function_call_output':
+        elif m_type == "function_call_output":
             tool_outputs.append(m)
         else:
-            raise ValueError(f'message type error with: {m}')
+            raise ValueError(f"message type error with: {m}")
 
-    return {
-        'tool_calls': tool_calls,
-        'text_messages': text_messages,
-        'tool_outputs': tool_outputs
-    }
+    return {"tool_calls": tool_calls, "text_messages": text_messages, "tool_outputs": tool_outputs}
 
 
 async def aprocess_user_ask(messages, state: State, ctx: Any):
@@ -708,10 +697,7 @@ def _first_finish_call(tool_calls: List[Dict]) -> Optional[Dict]:
 
 def _output_for_call(messages: List[Dict], call_id: Any) -> Any:
     for msg in messages:
-        if (
-            msg.get("type") == "function_call_output"
-            and msg.get("call_id") == call_id
-        ):
+        if msg.get("type") == "function_call_output" and msg.get("call_id") == call_id:
             return msg.get("output")
     return None
 
@@ -732,9 +718,7 @@ def _closing_finish_after_batch(
     finish = _first_finish_call(tool_calls)
     if finish is None:
         return None
-    finish_ok, _ = parse_tool_result_status(
-        _output_for_call(batch_outputs, finish.get("call_id"))
-    )
+    finish_ok, _ = parse_tool_result_status(_output_for_call(batch_outputs, finish.get("call_id")))
     if finish_ok is False:
         return None
     return finish
@@ -753,10 +737,7 @@ def _split_batch_new_around_finish(
     """
     finish_idx = None
     for i, msg in enumerate(batch_new):
-        if (
-            msg.get("type") == "function_call_output"
-            and msg.get("call_id") == finish_call_id
-        ):
+        if msg.get("type") == "function_call_output" and msg.get("call_id") == finish_call_id:
             finish_idx = i
             break
     if finish_idx is None:
@@ -772,7 +753,7 @@ def _split_batch_new_around_finish(
 # модели причину и советуем компактный вариант / разбиение на вызовы.
 _TRUNCATED_ARGUMENTS_HINT = (
     "⚠ Output was truncated: output token limit reached "
-    "(finish_reason == \"length\"). Shorten the response "
+    '(finish_reason == "length"). Shorten the response '
     "or split it into multiple calls with smaller payloads."
 )
 
@@ -812,7 +793,7 @@ def _after_ask_human_skip_output(call_id: Any) -> Dict[str, Any]:
         "output": (
             f'{{"ok": false, "skipped": true, "message": '
             f'"Skipped: {ASK_HUMAN_TOOL_NAME} already received the '
-            f'user reply. This call was generated before that reply; '
+            f"user reply. This call was generated before that reply; "
             f'reconsider it based on the reply in a new batch."}}'
         ),
     }
@@ -851,15 +832,10 @@ async def _aexecute_tool_call(
     # Sidecar persist параллельно (нужен thread identity; sink не требуется).
     # ask_human: только banner (ask_human/ask_human_done); nested tool-row
     # без sidecar → Ctrl+click молча no-op — не монтируем.
-    persist_tool_trace = (
-        not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
-    )
+    persist_tool_trace = not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
     emit_tool_row = persist_tool_trace
     if emit_tool_row:
-        _todo_items = (
-            todo_items_from_arguments(tool_arguments)
-            if tool_name == SESSION_TODO_TOOL_NAME else None
-        )
+        _todo_items = todo_items_from_arguments(tool_arguments) if tool_name == SESSION_TODO_TOOL_NAME else None
         emit_progress(
             ctx,
             state,
@@ -898,8 +874,17 @@ async def _aexecute_tool_call(
     elapsed_ms = int((time.monotonic() - started_at) * 1000)
     ok, error_brief = parse_tool_result_status(tool_res_raw)
     if is_intermediate:
-        await _aemit_intermediate_reply(ctx, state, tool_name, tool_arguments, tool_res_raw,
-                                        call_id_str=call_id_str, elapsed_ms=elapsed_ms, ok=ok, error_brief=error_brief)
+        await _aemit_intermediate_reply(
+            ctx,
+            state,
+            tool_name,
+            tool_arguments,
+            tool_res_raw,
+            call_id_str=call_id_str,
+            elapsed_ms=elapsed_ms,
+            ok=ok,
+            error_brief=error_brief,
+        )
         return tool_res_raw, was_invalid, ok
     if emit_tool_row:
         emit_progress(
@@ -913,11 +898,7 @@ async def _aexecute_tool_call(
             error_brief=error_brief,
         )
     if persist_tool_trace:
-        out_text = (
-            tool_res_raw
-            if isinstance(tool_res_raw, str)
-            else json.dumps(tool_res_raw, ensure_ascii=False)
-        )
+        out_text = tool_res_raw if isinstance(tool_res_raw, str) else json.dumps(tool_res_raw, ensure_ascii=False)
         await apersist_subagent_trace(
             ctx,
             kind="error" if ok is False else "result",
@@ -930,7 +911,9 @@ async def _aexecute_tool_call(
     return tool_res_raw, was_invalid, ok
 
 
-async def _aemit_intermediate_reply(ctx, state, tool_name, tool_arguments, tool_res_raw, *, call_id_str, elapsed_ms, ok, error_brief) -> None:
+async def _aemit_intermediate_reply(
+    ctx, state, tool_name, tool_arguments, tool_res_raw, *, call_id_str, elapsed_ms, ok, error_brief
+) -> None:
     prose = extract_intermediate_prose(tool_arguments, tool_res_raw)
     emit_progress(
         ctx,
@@ -946,9 +929,7 @@ async def _aemit_intermediate_reply(ctx, state, tool_name, tool_arguments, tool_
     ir_payload: Dict[str, Any] = {"prose": prose or ""}
     if call_id_str:
         ir_payload["call_id"] = call_id_str
-    await apersist_subagent_trace(
-        ctx, kind="intermediate_reply", payload=ir_payload
-    )
+    await apersist_subagent_trace(ctx, kind="intermediate_reply", payload=ir_payload)
 
 
 def _track_repeat_errors(state: State, tool_name: str, tool_res_raw: Any) -> bool:
@@ -956,9 +937,7 @@ def _track_repeat_errors(state: State, tool_name: str, tool_res_raw: Any) -> boo
     is_unknown = is_unknown_tool_output(tool_res_raw)
     if is_unknown:
         if tool_name == getattr(state, "last_unknown_tool_name", None):
-            state.unknown_tool_repeat_count = (
-                int(getattr(state, "unknown_tool_repeat_count", 0) or 0) + 1
-            )
+            state.unknown_tool_repeat_count = int(getattr(state, "unknown_tool_repeat_count", 0) or 0) + 1
         else:
             state.last_unknown_tool_name = tool_name
             state.unknown_tool_repeat_count = 1
@@ -968,9 +947,7 @@ def _track_repeat_errors(state: State, tool_name: str, tool_res_raw: Any) -> boo
 
     if is_internal_tool_error_output(tool_res_raw):
         if tool_name == getattr(state, "last_internal_error_tool_name", None):
-            state.internal_error_repeat_count = (
-                int(getattr(state, "internal_error_repeat_count", 0) or 0) + 1
-            )
+            state.internal_error_repeat_count = int(getattr(state, "internal_error_repeat_count", 0) or 0) + 1
         else:
             state.last_internal_error_tool_name = tool_name
             state.internal_error_repeat_count = 1
@@ -1044,7 +1021,9 @@ async def _afinalize_tool_batch(
     return tools_outputs
 
 
-async def _abefore_tool_call(i: int, tool_name: str, state: State, *, prior: List[Dict], persist_messages_callback) -> None:
+async def _abefore_tool_call(
+    i: int, tool_name: str, state: State, *, prior: List[Dict], persist_messages_callback
+) -> None:
     # smart-гейт (спека §3): считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
     if tool_name not in TURN_FINALIZING_TOOLS:
         state.turn_tool_calls += 1
@@ -1054,7 +1033,9 @@ async def _abefore_tool_call(i: int, tool_name: str, state: State, *, prior: Lis
         await _maybe_persist(persist_messages_callback, prior, state)
 
 
-async def _afinish_tool_call(m: Dict, tool_name: str, tool_arguments: str, tool_res_raw: Any, state: State, ctx: Any) -> Dict:
+async def _afinish_tool_call(
+    m: Dict, tool_name: str, tool_arguments: str, tool_res_raw: Any, state: State, ctx: Any
+) -> Dict:
     """Сжать output, обновить loop-детектор и intent-scope → function_call_output."""
     # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
     tool_res = maybe_store_and_wrap_tool_output(
@@ -1067,7 +1048,8 @@ async def _afinish_tool_call(m: Dict, tool_name: str, tool_arguments: str, tool_
     )
     if tool_name != FINISH_TOOL_NAME:
         observe_loop_detector(state, ctx, tool_name, tool_arguments)
-        await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
+        await _acall_blocking_hook(
+            amaybe_update_intent_scope_from_tool,
             tool_name=tool_name,
             tool_output_raw=tool_res_raw,
             tool_arguments=tool_arguments,
@@ -1115,8 +1097,8 @@ async def aprocess_tool_calls(
     очереди, но сам parent тулы туда не пишет.
     """
     grouped_messages = group_messages(messages)
-    if len(grouped_messages['tool_outputs']) > 0:
-        raise ValueError('Messages has tool_outputs')
+    if len(grouped_messages["tool_outputs"]) > 0:
+        raise ValueError("Messages has tool_outputs")
 
     # Снимок batch до исполнения: если сработает session_compact, из него
     # соберём «что оставить» вместо сырого списка output'ов.
@@ -1155,7 +1137,10 @@ async def aprocess_tool_calls(
         # smart-гейт: считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
         # До try — упавший вызов (неверные аргументы) тоже считается.
         await _abefore_tool_call(
-            i, tool_name, state, prior=list(tools_outputs) + skip_outputs,
+            i,
+            tool_name,
+            state,
+            prior=list(tools_outputs) + skip_outputs,
             persist_messages_callback=persist_messages_callback,
         )
         tool_arguments = str(m.get("arguments", ""))
@@ -1168,9 +1153,7 @@ async def aprocess_tool_calls(
         unknown_in_batch += int(_track_repeat_errors(state, tool_name, tool_res_raw))
 
         # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
-        tools_outputs.append(
-            await _afinish_tool_call(m, tool_name, tool_arguments, tool_res_raw, state, ctx)
-        )
+        tools_outputs.append(await _afinish_tool_call(m, tool_name, tool_arguments, tool_res_raw, state, ctx))
 
         # После apply: если стопнули mid-tool (envelope A от runner) — хвост batch → B.
         if getattr(state, "stop_requested", False):
@@ -1185,7 +1168,10 @@ async def aprocess_tool_calls(
     tools_outputs.extend(skip_outputs)
 
     return await _afinalize_tool_batch(
-        state, ctx, tools_outputs, batch_snapshot,
+        state,
+        ctx,
+        tools_outputs,
+        batch_snapshot,
         aborted_by_user_stop=aborted_by_user_stop,
         persist_messages_callback=persist_messages_callback,
     )
@@ -1229,7 +1215,8 @@ def _pickup_pending_as_new_turn(
         logger = getattr(ctx, "logger", None) or _fallback_logger
         logger.warning(
             "фиксация модели нового хода не удалась (%s) — подхваченное сообщение "
-            "не теряем, ход продолжается на прежней модели", exc,
+            "не теряем, ход продолжается на прежней модели",
+            exc,
         )
     return pending
 
@@ -1376,9 +1363,7 @@ class _AgentLoop:
         """No-tool-call bounce с учётом finish_reason последнего ответа
         (blocked → просьба переформулировать, length → короче, иначе общий)."""
         return self._technical_bounce(
-            format_no_tool_call_bounce(
-                finish_reason=getattr(self.state, "last_finish_reason", None)
-            )
+            format_no_tool_call_bounce(finish_reason=getattr(self.state, "last_finish_reason", None))
         )
 
     def _bounce_empty_messages(self) -> List[Dict]:
@@ -1432,12 +1417,8 @@ class _AgentLoop:
         # bounce / pre-mode error). user_ask и function_call_output — half-turn
         # к LLM, step не тратят. skip_initial: resume `-t` не считает первый ask.
         state = self.state
-        skip_initial_step = bool(
-            getattr(state, "skip_initial_user_ask_step_when_history", False)
-        )
-        skip_this_step = (
-            skip_initial_step and state.steps == 0 and mode_for_step_count == "user_ask"
-        )
+        skip_initial_step = bool(getattr(state, "skip_initial_user_ask_step_when_history", False))
+        skip_this_step = skip_initial_step and state.steps == 0 and mode_for_step_count == "user_ask"
         if count_completed_step and not skip_this_step:
             state.steps += 1
 
@@ -1465,16 +1446,12 @@ class _AgentLoop:
         # technical user message). Сырой вывод бэкенда логируется выше; если
         # санитайз изменил батч — логируем то, что реально закоммичено (иначе
         # в agent_log не видно подставленного фидбека, хотя он есть в threads jsonl).
-        _pre_sanitize_digest = json.dumps(
-            messages, ensure_ascii=False, sort_keys=True, default=str
-        )
+        _pre_sanitize_digest = json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str)
         messages = sanitize_messages_for_chat_completions(
             messages,
             invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
         )
-        _post_sanitize_digest = json.dumps(
-            messages, ensure_ascii=False, sort_keys=True, default=str
-        )
+        _post_sanitize_digest = json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str)
         if _post_sanitize_digest != _pre_sanitize_digest:
             self.run_logger.info(
                 "\n<message_batch_committed>\n"
@@ -1501,16 +1478,11 @@ class _AgentLoop:
         if state.steps >= state.max_steps:
             state.terminal_outcome = "step_limit"
             return await _acall_blocking_hook(abuild_limit_envelope, state, "step_limit", ctx)
-        if (
-            self.max_tool_calls_limit is not None
-            and state.tool_calls >= self.max_tool_calls_limit
-        ):
+        if self.max_tool_calls_limit is not None and state.tool_calls >= self.max_tool_calls_limit:
             state.terminal_outcome = "tool_call_limit"
             return await _acall_blocking_hook(abuild_limit_envelope, state, "tool_call_limit", ctx)
         if self.session_token_limit is not None:
-            _baseline = UsageAccount.from_meta(
-                getattr(state, "run_start_usage_meta", None)
-            )
+            _baseline = UsageAccount.from_meta(getattr(state, "run_start_usage_meta", None))
             _spent = state.usage.delta_from(_baseline).totals()["total"]
             if _spent >= self.session_token_limit:
                 state.terminal_outcome = "token_limit"
@@ -1539,7 +1511,7 @@ class _AgentLoop:
             return messages, None, envelope
         if self.tool_error_cnt > self.max_tool_errors:
             state.terminal_outcome = "tool_errors"
-            return messages, None, 'Agent tools call errors.'
+            return messages, None, "Agent tools call errors."
 
         mode = check_mode(messages, self.run_logger)
         if backend_mode == "chat_completions" and _mode_requires_backend_call(mode):
@@ -1659,7 +1631,10 @@ class _AgentLoop:
         state = self.state
         pending_tool_calls = group_messages(messages).get("tool_calls", [])
         messages = await aprocess_tool_calls(
-            messages, state, self.ctx, run_agent_func=arun_agent,
+            messages,
+            state,
+            self.ctx,
+            run_agent_func=arun_agent,
             persist_messages_callback=self.persist_messages_callback,
         )
         closing_finish = _closing_finish_after_batch(
@@ -1742,10 +1717,9 @@ class _AgentLoop:
             logger=self.run_logger,
             persist_messages_callback=self.persist_messages_callback,
         )
-        final_submit_output = get_function_call_output_text(
-            state.messages, finish_call_id
-        )
-        await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
+        final_submit_output = get_function_call_output_text(state.messages, finish_call_id)
+        await _acall_blocking_hook(
+            amaybe_update_intent_scope_from_tool,
             tool_name=FINISH_TOOL_NAME,
             tool_output_raw=final_submit_output or "",
             tool_arguments=finish_arguments or "",
@@ -1760,9 +1734,7 @@ class _AgentLoop:
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
         # теряем: продолжаем новым ходом на уже сжатом контексте.
-        new_turn_messages = _pickup_pending_as_new_turn(
-            self.get_pending_messages, self.state, self.ctx
-        )
+        new_turn_messages = _pickup_pending_as_new_turn(self.get_pending_messages, self.state, self.ctx)
         if new_turn_messages is not None:
             return _Outcome(new_turn_messages, restart=True)
         return _Outcome(result=result)
@@ -1778,30 +1750,21 @@ class _AgentLoop:
             self.tool_error_cnt += 1
         else:
             self.tool_error_cnt = 0
-        if (
-            int(getattr(state, "unknown_tool_repeat_count", 0) or 0)
-            >= self.max_unknown_tool_repeats
-        ):
+        if int(getattr(state, "unknown_tool_repeat_count", 0) or 0) >= self.max_unknown_tool_repeats:
             unknown_name = getattr(state, "last_unknown_tool_name", None) or "unknown"
             state.terminal_outcome = "tool_errors"
             return _Outcome(result=f"Agent stopped: repeated unknown tool '{unknown_name}'.")
-        if (
-            int(getattr(state, "internal_error_repeat_count", 0) or 0)
-            >= self.max_unknown_tool_repeats
-        ):
+        if int(getattr(state, "internal_error_repeat_count", 0) or 0) >= self.max_unknown_tool_repeats:
             broken_name = getattr(state, "last_internal_error_tool_name", None) or "unknown"
             state.terminal_outcome = "tool_errors"
-            return _Outcome(result=(
-                f"Agent stopped: tool '{broken_name}' keeps failing "
-                "with the same client-side error."
-            ))
+            return _Outcome(
+                result=(f"Agent stopped: tool '{broken_name}' keeps failing with the same client-side error.")
+            )
         # Полный ход: LLM уже вернул tools, batch исполнен.
         # Невалидный finish сюда же: отказной output в трейсе, ход открыт.
         return _Outcome(messages, completed_step=True)
 
-    async def _atext_decision(
-        self, assistant_text: str, last_finish: Any
-    ) -> Tuple[bool, Optional[str]]:
+    async def _atext_decision(self, assistant_text: str, last_finish: Any) -> Tuple[bool, Optional[str]]:
         """→ (accept, reject_feedback) для прозы без вызова тула."""
         # blocked / length — не финал даже в allow: отказ провайдера
         # или усечение (обрезок тулы/ответа). Иначе allow принимает
@@ -1812,41 +1775,29 @@ class _AgentLoop:
         decision = await ashould_return_text_answer(self.ctx, self.state, assistant_text)
         return decision.accept, decision.reject_feedback
 
-    def _text_reject_bounce_msg(
-        self, reject_feedback: Optional[str], last_finish: Any, default_msg: str
-    ) -> str:
+    def _text_reject_bounce_msg(self, reject_feedback: Optional[str], last_finish: Any, default_msg: str) -> str:
         """Текст bounce при отклонённой прозе; ``default_msg`` — по finish_reason."""
-        if reject_feedback is not None:      # judge-reject c причиной
+        if reject_feedback is not None:  # judge-reject c причиной
             return reject_feedback
         if finish_blocks_final(last_finish):
             self.run_logger.warning(
-                "Provider blocked the completion (%s); "
-                "requesting a rephrased attempt",
+                "Provider blocked the completion (%s); requesting a rephrased attempt",
                 last_finish,
             )
             return default_msg
         if classify_finish_kind(last_finish) == FINISH_KIND_LENGTH:
-            self.run_logger.warning(
-                "Agent response truncated (finish_reason=length); "
-                "requesting a shorter tool call"
-            )
+            self.run_logger.warning("Agent response truncated (finish_reason=length); requesting a shorter tool call")
             return default_msg
         # deny / пусто / нет гейта / ошибка
-        self.run_logger.warning(
-            "Agent returned text response without tool call, requesting tool call"
-        )
+        self.run_logger.warning("Agent returned text response without tool call, requesting tool call")
         return NO_TOOL_CALL_BOUNCE_MESSAGE
 
     async def _atext_response(self, messages) -> _Outcome:
         state, ctx = self.state, self.ctx
-        assistant_text = extract_last_assistant_text(
-            messages, tags=self.proj_tags, strip_think=True
-        )
+        assistant_text = extract_last_assistant_text(messages, tags=self.proj_tags, strip_think=True)
         last_finish = getattr(state, "last_finish_reason", None)
         bounce_msg = format_no_tool_call_bounce(finish_reason=last_finish)
-        decision_accept, decision_reject_feedback = await self._atext_decision(
-            assistant_text, last_finish
-        )
+        decision_accept, decision_reject_feedback = await self._atext_decision(assistant_text, last_finish)
 
         if decision_accept:
             # Финальная проза принята → TUI-индикатор «✓ завершаю…»
@@ -1860,8 +1811,7 @@ class _AgentLoop:
                 # хуки: синхронное имя fail-open внутри проглотил
                 # бы, и сводка молча подменилась бы сырым текстом.
                 await _acall_blocking_hook(
-                    amaybe_record_final_answer_intent,
-                    assistant_text=assistant_text, state=state, ctx=ctx
+                    amaybe_record_final_answer_intent, assistant_text=assistant_text, state=state, ctx=ctx
                 )
                 state.flush_current_user_intent()
                 clear_loop_detector(state)
@@ -1871,9 +1821,7 @@ class _AgentLoop:
             return await self._aclose_turn(assistant_text)
         # === reject ===
         self.tool_error_cnt += 1
-        bounce_msg = self._text_reject_bounce_msg(
-            decision_reject_feedback, last_finish, bounce_msg
-        )
+        bounce_msg = self._text_reject_bounce_msg(decision_reject_feedback, last_finish, bounce_msg)
         return _Outcome(self._technical_bounce(bounce_msg), completed_step=True)
 
 

@@ -1,4 +1,5 @@
 """Edit tools match anchors across CRLF/LF and write replacements in the file's style."""
+
 import json
 
 import pytest
@@ -17,6 +18,7 @@ CRLF_REPLACE = LF_REPLACE.replace("\n", "\r\n")
 
 
 # --- policy: resolve_edit_line_endings ----------------------------------------
+
 
 def test_literal_match_is_kept_as_is():
     res = resolve_edit_line_endings(CRLF_TEXT, CRLF_ANCHOR, CRLF_REPLACE)
@@ -72,18 +74,15 @@ def test_mixed_file_literal_lf_island_keeps_lf_replace():
 
 # --- both tools ---------------------------------------------------------------
 
+
 def _apply_edits(path, search, replace, **kwargs):
     return json.loads(
-        with_local_ctx(ApplyFileEdits)(
-            path=str(path), edits=[{"search": search, "replace": replace}], **kwargs
-        )
+        with_local_ctx(ApplyFileEdits)(path=str(path), edits=[{"search": search, "replace": replace}], **kwargs)
     )
 
 
 def _search_replace(path, search, replace, **kwargs):
-    return json.loads(
-        with_local_ctx(SearchAndReplace)(path=str(path), search=search, replace=replace, **kwargs)
-    )
+    return json.loads(with_local_ctx(SearchAndReplace)(path=str(path), search=search, replace=replace, **kwargs))
 
 
 TOOLS = [
@@ -164,8 +163,8 @@ def test_search_and_replace_dry_run_diff_uses_file_style(tmp_path):
 # --- ревью F1: цель замены — EOL найденной строки; оба стиля на смешанном файле;
 # --- стиль строки матча; честный отказ при смене концов строк; флаг на каждом edit_result ---
 
-ISLAND_TEXT = "x\r\ny\r\nISLAND\nz\r\n"          # CRLF-доминантный файл с LF-островом
-MINOR_REGION_TEXT = "x\r\ny\r\nA\nB\nz\r\n"      # целевой регион целиком в минорном стиле
+ISLAND_TEXT = "x\r\ny\r\nISLAND\nz\r\n"  # CRLF-доминантный файл с LF-островом
+MINOR_REGION_TEXT = "x\r\ny\r\nA\nB\nz\r\n"  # целевой регион целиком в минорном стиле
 
 
 def test_single_line_anchor_replace_follows_the_matched_line_eol():

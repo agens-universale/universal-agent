@@ -1,4 +1,5 @@
 """DiffService: cache approve/undo + git semantics + mode switch (T3–T5, T10–T13)."""
+
 from __future__ import annotations
 
 import subprocess
@@ -318,7 +319,6 @@ def test_t13_cache_to_git_keeps_ignored_cache(tmp_path, monkeypatch):
     assert "src/foo.py" in store.load_index()
 
 
-
 # --- spec §5 step 3: git_show_index + visual_diff baseline↔disk ---
 
 
@@ -364,8 +364,7 @@ def test_git_modified_visual_diff_short_shows_whole_file(git_repo):
     _git(root, "add", "a.txt")
     (root / "a.txt").write_text(content + "EXTRA\n", encoding="utf-8")
     _touch(threads, "a.txt")
-    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300,
-               preview_context_lines=50)
+    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300, preview_context_lines=50)
     body = svc.visual_diff("a.txt")
     # вся база видна: line-9 в контексте
     assert "line-9" in body
@@ -381,8 +380,7 @@ def test_git_modified_visual_diff_long_uses_preview_context(git_repo):
     new_lines = ["line-0\n", "CHANGED\n"] + base_lines[2:]
     (root / "a.txt").write_text("".join(new_lines), encoding="utf-8")
     _touch(threads, "a.txt")
-    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300,
-               preview_context_lines=2)
+    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300, preview_context_lines=2)
     body = svc.visual_diff("a.txt")
     assert "+CHANGED" in body
     assert "line-399" not in body  # far от изменения
@@ -397,8 +395,7 @@ def test_visual_diff_accepts_mode_full(git_repo):
     new_lines = ["line-0\n", "CHANGED\n"] + base_lines[2:]
     (root / "a.txt").write_text("".join(new_lines), encoding="utf-8")
     _touch(threads, "a.txt")
-    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300,
-               preview_context_lines=50)
+    svc = _svc(root, threads, emit_notices=False, full_file_max_lines=300, preview_context_lines=50)
     body = svc.visual_diff("a.txt", mode="full")
     assert "line-399" in body
     assert "+CHANGED" in body

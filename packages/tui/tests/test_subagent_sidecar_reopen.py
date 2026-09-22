@@ -123,10 +123,7 @@ def _sum_msg(text: str) -> dict:
     return {
         "role": "user",
         "id": "m_s",
-        "content": (
-            '<technical type="dialog_summary">Summarized context.\n'
-            f"<summary>{text}</summary></technical>"
-        ),
+        "content": (f'<technical type="dialog_summary">Summarized context.\n<summary>{text}</summary></technical>'),
     }
 
 
@@ -274,9 +271,7 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
         assert nested._result is not None
 
         widgets = scr._nested_widgets_by_parent.get("call_sub_1", [])
-        prose_texts = [
-            getattr(w, "_content", "") for w in widgets if isinstance(w, TraceRow)
-        ]
+        prose_texts = [getattr(w, "_content", "") for w in widgets if isinstance(w, TraceRow)]
         assert CHILD_SUMMARY_LABEL in prose_texts
         assert "проверю дальше" in prose_texts
         assert any(isinstance(w, ToolCallRow) and w._nested for w in widgets)

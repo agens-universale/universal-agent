@@ -3,6 +3,7 @@
 Презентационный слой: константы + чистые функции рендера (без бизнес-логики).
 Все экраны импортируют строки отсюда, чтобы имя/строки не дублировались.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -81,8 +82,8 @@ def tagline_display() -> str:
 # Разрядка тэглайна (как `.logo-sub` в gc-ua-install.html: airy letter-spacing,
 # заметный gap между словами). Межсловный зазор — двойной от межбуквенного.
 # Оба меняются одним числом.
-_TAGLINE_LETTER_GAP = "  "   # 2 пробела — между буквами
-_TAGLINE_WORD_GAP = "    "    # 4 пробела — между словами (двойной от letter-gap)
+_TAGLINE_LETTER_GAP = "  "  # 2 пробела — между буквами
+_TAGLINE_WORD_GAP = "    "  # 4 пробела — между словами (двойной от letter-gap)
 
 
 def version_under_logo() -> str:
@@ -91,7 +92,8 @@ def version_under_logo() -> str:
     и align центрировал бы по ней). Воздух над строкой даёт CSS (`.brand-version`).
     Из исходников показывается «dev», см. app_version.display_version."""
     from gc_core import app_version
-    text = app_version.display_version(long=True)   # в карточке есть место на пояснение
+
+    text = app_version.display_version(long=True)  # в карточке есть место на пояснение
     logo_w = max((len(line) for line in LOGO.splitlines()), default=0)
     return " " * max(0, (logo_w - len(text)) // 2) + text
 
@@ -101,9 +103,7 @@ def tagline_under_logo() -> str:
     зазор (`_TAGLINE_WORD_GAP`, двойной), центрирование по ширине лого (ведущие
     пробелы). Стиль — как `.logo-sub` в docs/gc-ua-install.html. Сам
     отступ-строка над тэглайном — CSS (`.brand-tagline { margin-top: 1 }`)."""
-    tag = _TAGLINE_WORD_GAP.join(
-        _TAGLINE_LETTER_GAP.join(word) for word in TAGLINE.upper().split()
-    )
+    tag = _TAGLINE_WORD_GAP.join(_TAGLINE_LETTER_GAP.join(word) for word in TAGLINE.upper().split())
     logo_w = max((len(line) for line in LOGO.split("\n")), default=0)
     pad = max(0, (logo_w - len(tag)) // 2)
     return " " * pad + tag

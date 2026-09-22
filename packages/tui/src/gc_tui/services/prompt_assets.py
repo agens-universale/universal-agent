@@ -1,4 +1,5 @@
 """Резолв путей к фиксированным prompts-ассетам TUI через единый bundled_root()."""
+
 import os
 
 from gc_core.bundled_assets import bundled_root

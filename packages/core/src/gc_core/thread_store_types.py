@@ -18,6 +18,7 @@
 нужен тип, наследуйте ``ThreadStoreBase``. Стережёт это
 ``test_thread_store_one_contract.py``.
 """
+
 from __future__ import annotations
 
 from typing import (
@@ -43,7 +44,12 @@ MessageKey = str
 #: Вид записи в трассе субагента. Множество замкнутое — эти шесть значений
 #: приходят из ``processing_responses`` и ``tools/subagents/runner``.
 TraceKind = Literal[
-    "call", "user", "intermediate_reply", "child_summary", "error", "finished",
+    "call",
+    "user",
+    "intermediate_reply",
+    "child_summary",
+    "error",
+    "finished",
 ]
 
 

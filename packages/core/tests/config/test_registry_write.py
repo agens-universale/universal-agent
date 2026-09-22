@@ -9,6 +9,7 @@
 Плюс профильная сторона слоя записи: `PROFILE_SKELETON` (бланк нового файла) и
 `validate_profile_text` (pre-write валидатор текста профиля).
 """
+
 from pathlib import Path
 
 import pytest
@@ -30,11 +31,7 @@ from gc_core.config_modules.registry_write import (
 )
 
 _BASE = (
-    "# основной конфиг\n"
-    'profile: ""\n'
-    "level: default\n"
-    "backend:\n"
-    '  completions_url: "http://real/v1/chat/completions"\n'
+    '# основной конфиг\nprofile: ""\nlevel: default\nbackend:\n  completions_url: "http://real/v1/chat/completions"\n'
 )
 
 _REGISTRY = (
@@ -93,8 +90,8 @@ def test_upsert_model_merge_preserves_pricing_and_backend(tmp_path, template):
     upsert_model(path, "flash", {"url": "https://other/v1"}, template)
 
     entry = _models(path)["flash"]
-    assert entry["url"] == "https://other/v1"          # ключ со значением — установлен
-    assert entry["pricing"] == {"input": 0.3, "output": 1.2}   # отсутствующий — как был
+    assert entry["url"] == "https://other/v1"  # ключ со значением — установлен
+    assert entry["pricing"] == {"input": 0.3, "output": 1.2}  # отсутствующий — как был
     assert entry["backend"] == {"request_timeout_sec": 120}
     assert entry["model"] == "google/gemini-2.5-flash"
     assert entry["token"] == "sk-secret"
@@ -106,8 +103,8 @@ def test_upsert_model_merge_removes_key_passed_as_none(tmp_path, template):
     upsert_model(path, "flash", {"model": None}, template)
 
     entry = _models(path)["flash"]
-    assert "model" not in entry                        # ключ со значением None — удалён
-    assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"   # сосед как был
+    assert "model" not in entry  # ключ со значением None — удалён
+    assert entry["url"] == "https://openrouter.ai/api/v1/chat/completions"  # сосед как был
 
 
 # --- M3 (ревью MR #80): пересборка блока не теряет комментарии и не рвёт якоря --
@@ -141,10 +138,9 @@ def test_upsert_model_carries_comments_of_untouched_lines(tmp_path, template):
 
     text = path.read_text(encoding="utf-8")
     assert "# прод-эндпоинт, не трогать без согласования" in text
-    assert "# инлайновый на url" in text            # сосед не тронут — комментарий цел
-    assert "# выбран на бенче" not in text          # правимая строка — комментарий ушёл
-    assert _models(path)["flash"] == {
-        "model": "new-model", "url": "https://prod/v1", "token": "sk-secret"}
+    assert "# инлайновый на url" in text  # сосед не тронут — комментарий цел
+    assert "# выбран на бенче" not in text  # правимая строка — комментарий ушёл
+    assert _models(path)["flash"] == {"model": "new-model", "url": "https://prod/v1", "token": "sk-secret"}
 
 
 _ANCHORED_REGISTRY = (
@@ -254,12 +250,7 @@ def test_write_slot_keeps_the_attached_comment_of_the_slot_line(tmp_path, templa
 
 
 def test_write_assign_keeps_the_attached_comment_of_the_binding(tmp_path, template):
-    body = (
-        'models:\n  a:\n    model: "x"\n'
-        "assign:\n"
-        "  # гейт слабой моделью не судим\n"
-        '  finish_gate: "a"\n'
-    )
+    body = 'models:\n  a:\n    model: "x"\nassign:\n  # гейт слабой моделью не судим\n  finish_gate: "a"\n'
     path = _cfg(tmp_path, body)
 
     write_assign(path, "finish_gate", "light", template)
@@ -339,7 +330,7 @@ def test_upsert_model_schema_conflict_does_not_leak_the_token(tmp_path, template
     message = str(excinfo.value)
     assert "sk-MY-OWN-SECRET" not in message
     assert "input_value" not in message
-    assert "Value error" not in message   # служебная обёртка pydantic — не причина
+    assert "Value error" not in message  # служебная обёртка pydantic — не причина
     assert "models.flash" in message
     assert "token и backend.chat_completion_headers.Authorization заданы одновременно" in message
 
@@ -358,11 +349,11 @@ def test_profile_upsert_schema_conflict_does_not_leak_the_token(tmp_path):
         "    backend:\n"
         "      chat_completion_headers:\n"
         '        Authorization: "Bearer OLD-VALUE"\n',
-        encoding="utf-8")
+        encoding="utf-8",
+    )
 
     with pytest.raises(RegistryWriteError) as excinfo:
-        upsert_model(path, "flash", {"token": "sk-MY-OWN-SECRET"}, "",
-                     is_profile=True)
+        upsert_model(path, "flash", {"token": "sk-MY-OWN-SECRET"}, "", is_profile=True)
 
     message = str(excinfo.value)
     assert "sk-MY-OWN-SECRET" not in message
@@ -374,12 +365,11 @@ def test_upsert_model_into_file_without_trailing_newline(tmp_path):
     """Файл после ручной правки часто остаётся без завершающего перевода строки, а
     реестр — последней секцией: вторая запись не должна упираться в этот шов."""
     path = tmp_path / "work.yml"
-    path.write_text('models:\n  glm:\n    model: "zhipu/glm"', encoding="utf-8")   # без \n
+    path.write_text('models:\n  glm:\n    model: "zhipu/glm"', encoding="utf-8")  # без \n
 
     upsert_model(path, "flash", {"model": "google/flash"}, "", is_profile=True)
 
-    assert load_profile_document(path)["models"] == {
-        "glm": {"model": "zhipu/glm"}, "flash": {"model": "google/flash"}}
+    assert load_profile_document(path)["models"] == {"glm": {"model": "zhipu/glm"}, "flash": {"model": "google/flash"}}
 
 
 def test_upsert_model_alias_with_dot_replaces_not_duplicates(tmp_path, template):
@@ -390,8 +380,7 @@ def test_upsert_model_alias_with_dot_replaces_not_duplicates(tmp_path, template)
 
     models = _models(path)
     assert list(models) == ["opus-4.8"]
-    assert models["opus-4.8"] == {
-        "model": "anthropic/claude-opus-4.8", "url": "https://other/v1", "token": "sk-own"}
+    assert models["opus-4.8"] == {"model": "anthropic/claude-opus-4.8", "url": "https://other/v1", "token": "sk-own"}
 
 
 def test_upsert_model_quotes_yaml_scalar_alias(tmp_path, template):
@@ -448,7 +437,7 @@ def test_remove_model_without_references_writes(tmp_path):
 
 
 def test_remove_model_reports_assign_references(tmp_path):
-    body = _REGISTRY + "assign:\n  summary: \"glm\"\n  subagents:\n    subagent_critic: \"glm\"\n"
+    body = _REGISTRY + 'assign:\n  summary: "glm"\n  subagents:\n    subagent_critic: "glm"\n'
     path = _cfg(tmp_path, body)
 
     report = remove_model(path, "glm")
@@ -502,8 +491,7 @@ def test_write_slot_dangling_alias_leaves_file_untouched(tmp_path, template):
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_write_slot_normalizes_a_non_string_alias_from_a_bare_numeric_yaml_key(
-        tmp_path, template):
+def test_write_slot_normalizes_a_non_string_alias_from_a_bare_numeric_yaml_key(tmp_path, template):
     """[ревью #4] Алиас `4.1` в YAML (без кавычек) разбирается `yaml.safe_load`
     ФЛОУТОМ, не строкой — картина, с которой видит его любой код, читающий
     реестр из документа (пикер значений слота, например). Аргумент `alias`
@@ -511,8 +499,7 @@ def test_write_slot_normalizes_a_non_string_alias_from_a_bare_numeric_yaml_key(
     сбой: `write_slot` обязан привести его к строке на границе, а не падать
     `AttributeError` внутри `quote_scalar` (`'float' object has no attribute
     'replace'`), проглоченным общим перехватом `_apply_ops_to_text`."""
-    path = _cfg(tmp_path, _BASE.replace(
-        'level: default\n', 'level: default\nmodels:\n  "4.1":\n    model: "x"\n'))
+    path = _cfg(tmp_path, _BASE.replace("level: default\n", 'level: default\nmodels:\n  "4.1":\n    model: "x"\n'))
 
     write_slot(path, "default", 4.1, template)
 
@@ -556,7 +543,7 @@ def test_write_assign_wildcard_lands_under_subagents(tmp_path, template):
 
     assign = yaml.safe_load(path.read_text(encoding="utf-8"))["assign"]
     assert assign["subagents"] == {"*": "light"}
-    assert '"*"' in path.read_text(encoding="utf-8")   # ключ закавычен — иначе не YAML
+    assert '"*"' in path.read_text(encoding="utf-8")  # ключ закавычен — иначе не YAML
 
 
 def test_write_assign_clears_value(tmp_path, template):
@@ -612,17 +599,21 @@ def test_second_model_alone_is_rejected(tmp_path, template):
     with pytest.raises(RegistryWriteError) as exc:
         upsert_model(path, "opus", {"model": "anthropic/opus"}, template)
 
-    assert "slots" in str(exc.value)                   # сообщение называет причину
+    assert "slots" in str(exc.value)  # сообщение называет причину
     assert path.read_text(encoding="utf-8") == before
 
 
 def test_transaction_adds_second_model_with_slot(tmp_path, template):
     path = _cfg(tmp_path, _SINGLE_MODEL)
 
-    apply_registry_ops(path, [
-        ("upsert_model", "opus", {"model": "anthropic/opus"}),
-        ("write_slot", "default", "flash"),
-    ], template)
+    apply_registry_ops(
+        path,
+        [
+            ("upsert_model", "opus", {"model": "anthropic/opus"}),
+            ("write_slot", "default", "flash"),
+        ],
+        template,
+    )
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert sorted(raw["models"]) == ["flash", "opus"]
@@ -635,11 +626,15 @@ def test_transaction_failure_leaves_file_untouched(tmp_path, template):
     before = path.read_text(encoding="utf-8")
 
     with pytest.raises(RegistryWriteError) as exc:
-        apply_registry_ops(path, [
-            ("upsert_model", "opus", {"model": "anthropic/opus"}),
-            ("write_slot", "light", "нет-такого"),
-            ("write_assign", "summary", "flash"),
-        ], template)
+        apply_registry_ops(
+            path,
+            [
+                ("upsert_model", "opus", {"model": "anthropic/opus"}),
+                ("write_slot", "light", "нет-такого"),
+                ("write_assign", "summary", "flash"),
+            ],
+            template,
+        )
 
     assert "нет-такого" in str(exc.value)
     assert path.read_text(encoding="utf-8") == before
@@ -648,10 +643,14 @@ def test_transaction_failure_leaves_file_untouched(tmp_path, template):
 def test_transaction_applies_ops_in_order(tmp_path, template):
     path = _cfg(tmp_path, _REGISTRY)
 
-    apply_registry_ops(path, [
-        ("write_slot", "light", "flash"),
-        ("write_slot", "light", "glm"),
-    ], template)
+    apply_registry_ops(
+        path,
+        [
+            ("write_slot", "light", "flash"),
+            ("write_slot", "light", "glm"),
+        ],
+        template,
+    )
 
     assert yaml.safe_load(path.read_text(encoding="utf-8"))["slots"]["light"] == "glm"
 
@@ -660,23 +659,34 @@ def test_transaction_second_upsert_merges_onto_first(tmp_path, template):
     """Вторая операция видит результат первой (текст в памяти), а не диск."""
     path = _cfg(tmp_path, _SINGLE_MODEL)
 
-    apply_registry_ops(path, [
-        ("upsert_model", "opus", {"model": "anthropic/opus"}),
-        ("upsert_model", "opus", {"url": "https://other/v1", "token": "sk-own"}),
-        ("write_slot", "default", "flash"),
-    ], template)
+    apply_registry_ops(
+        path,
+        [
+            ("upsert_model", "opus", {"model": "anthropic/opus"}),
+            ("upsert_model", "opus", {"url": "https://other/v1", "token": "sk-own"}),
+            ("write_slot", "default", "flash"),
+        ],
+        template,
+    )
 
     assert yaml.safe_load(path.read_text(encoding="utf-8"))["models"]["opus"] == {
-        "model": "anthropic/opus", "url": "https://other/v1", "token": "sk-own"}
+        "model": "anthropic/opus",
+        "url": "https://other/v1",
+        "token": "sk-own",
+    }
 
 
 def test_transaction_can_remove_model_together_with_its_references(tmp_path, template):
     path = _cfg(tmp_path, _REGISTRY)
 
-    apply_registry_ops(path, [
-        ("write_slot", "default", "glm"),
-        ("remove_model", "flash"),
-    ], template)
+    apply_registry_ops(
+        path,
+        [
+            ("write_slot", "default", "glm"),
+            ("remove_model", "flash"),
+        ],
+        template,
+    )
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert list(raw["models"]) == ["glm"]
@@ -732,9 +742,7 @@ def _profile(tmp_path: Path, body: str) -> Path:
 
 # Рукописная flow-форма секции С ЗАПИСЯМИ: в документе запись есть, а СТРОКИ под
 # неё нет — писатель правит файл построчно, и снять её текстом нечем.
-_PROFILE_FLOW_ENTRIES = ('models: {flash: {model: "my/own"}}\n'
-                         "slots:\n"
-                         '  default: "flash"\n')
+_PROFILE_FLOW_ENTRIES = 'models: {flash: {model: "my/own"}}\nslots:\n  default: "flash"\n'
 
 
 def test_remove_model_refuses_the_same_way_instead_of_stripping_references(tmp_path):
@@ -754,23 +762,18 @@ def test_remove_model_refuses_the_same_way_instead_of_stripping_references(tmp_p
 # Зеркальная конфигурация: запись БЛОЧНАЯ (снимается штатно), а секция ссылок —
 # инлайновая. Каскад «снимал» ссылку, которой не касался, и оставлял её висеть на
 # удалённом алиасе — у профиля это никто не ловит (фаза 2 к нему не применяется).
-_PROFILE_INLINE_SLOTS = ("models:\n"
-                         "  flash:\n"
-                         '    model: "m"\n'
-                         'slots: {default: "flash"}\n')
-_PROFILE_INLINE_ASSIGN = ("models:\n"
-                          "  flash:\n"
-                          '    model: "m"\n'
-                          "assign:\n"
-                          '  subagents: {subagent_critic: "flash"}\n')
+_PROFILE_INLINE_SLOTS = 'models:\n  flash:\n    model: "m"\nslots: {default: "flash"}\n'
+_PROFILE_INLINE_ASSIGN = 'models:\n  flash:\n    model: "m"\nassign:\n  subagents: {subagent_critic: "flash"}\n'
 
 
-@pytest.mark.parametrize("body, reference", [
-    (_PROFILE_INLINE_SLOTS, "slots.default"),
-    (_PROFILE_INLINE_ASSIGN, "assign.subagents.subagent_critic"),
-])
-def test_remove_model_refuses_when_a_reference_cannot_be_stripped(tmp_path, body,
-                                                                  reference):
+@pytest.mark.parametrize(
+    "body, reference",
+    [
+        (_PROFILE_INLINE_SLOTS, "slots.default"),
+        (_PROFILE_INLINE_ASSIGN, "assign.subagents.subagent_critic"),
+    ],
+)
+def test_remove_model_refuses_when_a_reference_cannot_be_stripped(tmp_path, body, reference):
     """Каскад обязан снять КАЖДУЮ ссылку, которую пообещал, — иначе он оставляет
     файл ровно в том состоянии, ради недопущения которого и заведён.
 
@@ -803,16 +806,14 @@ def test_a_deliberate_refusal_reaches_the_user_without_the_operation_name(tmp_pa
     path = _profile(tmp_path, 'models: {flash: {model: "m"}}\n')
 
     with pytest.raises(RegistryWriteError) as exc:
-        apply_registry_ops(path, [("remove_model", "flash", True)], "",
-                           is_profile=True)
+        apply_registry_ops(path, [("remove_model", "flash", True)], "", is_profile=True)
 
     assert "remove_model" not in str(exc.value)
     assert str(exc.value).startswith("строки записи «flash»")
     assert "`" not in str(exc.value)
 
     with pytest.raises(RegistryWriteError, match="remove_model"):
-        apply_registry_ops(path, [("remove_model", "flash", {"opt": True})], "",
-                           is_profile=True)
+        apply_registry_ops(path, [("remove_model", "flash", {"opt": True})], "", is_profile=True)
 
 
 def test_removal_of_a_block_form_entry_is_untouched_by_that_check(tmp_path):
@@ -841,8 +842,7 @@ def test_option_dict_in_the_force_slot_is_refused_not_silently_obeyed(tmp_path):
     before = path.read_text(encoding="utf-8")
 
     with pytest.raises(RegistryWriteError, match="remove_model"):
-        apply_registry_ops(path, [("remove_model", "opus", {"keep_references": True})],
-                           "", is_profile=True)
+        apply_registry_ops(path, [("remove_model", "opus", {"keep_references": True})], "", is_profile=True)
 
     assert path.read_text(encoding="utf-8") == before
 
@@ -879,7 +879,7 @@ def test_profile_skeleton_is_blank_without_literal_token(tmp_path):
     path = tmp_path / "new_profile.yml"
     w.create_profile_file(path, PROFILE_SKELETON)
 
-    assert "sk-" not in PROFILE_SKELETON            # бланк, не учебный пример с токеном
+    assert "sk-" not in PROFILE_SKELETON  # бланк, не учебный пример с токеном
     # Ни одного КЛЮЧА (ревизия владельца): пустые `models: {}`/`slots: {}` делали
     # свежий профиль «переопределяющим» секции, которых он не трогал.
     assert load_profile_document(path) == {}
@@ -903,8 +903,7 @@ def test_validate_profile_text_rejects_profile_key_and_bad_types():
     with pytest.raises(ValueError):
         # пара §2 задана целиком — отказ остаётся именно про зарезервированный алиас
         validate_profile_text("models:\n  light:\n    url: http://x\n    token: sk\n")
-    validate_profile_text(
-        "models:\n  flash:\n    url: http://x\n    token: sk\nslots:\n  default: flash\n")
+    validate_profile_text("models:\n  flash:\n    url: http://x\n    token: sk\nslots:\n  default: flash\n")
 
 
 def test_validate_profile_text_rejects_broken_yaml():

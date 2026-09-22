@@ -5,9 +5,7 @@ def test_build_run_log_paths_include_agent_kind_and_run_id(tmp_path):
     cfg = {"logs_dump_dir": str(tmp_path)}
     run_id = "run123"
 
-    logging_path, summary_path = build_run_log_paths(
-        cfg, run_id=run_id, agent_kind="subagent_worker"
-    )
+    logging_path, summary_path = build_run_log_paths(cfg, run_id=run_id, agent_kind="subagent_worker")
 
     assert logging_path.endswith("agent_worker_run123.log")
     assert summary_path.endswith("summary_trace_worker_run123.jsonl")
@@ -25,4 +23,3 @@ def test_create_run_logger_uses_unique_logger_name_and_files(tmp_path):
     assert path_1 != path_2
     assert path_1.endswith(f"agent_main_{run_id_1}.log")
     assert path_2.endswith(f"agent_main_{run_id_2}.log")
-

@@ -12,6 +12,7 @@ merged-реестра, ключи `assign.subagents` → канонически�
 транспорт под общим токеном) — канал у предупреждений один, и второго заводить
 незачем: `load_config` мёржит их в `config_dict["compat_notices"]`.
 """
+
 from __future__ import annotations
 
 from gc_core.config_modules.model_registry import LEVELS
@@ -60,8 +61,7 @@ def _check_assign_value(models: dict, coordinate: str, value: str, prefix: str, 
     if value in LEVELS or value in models:
         return
     errors.append(
-        f'{prefix}{coordinate}: значение "{value}" — не уровень ({", ".join(LEVELS)}) '
-        "и не алиас merged-реестра models"
+        f'{prefix}{coordinate}: значение "{value}" — не уровень ({", ".join(LEVELS)}) и не алиас merged-реестра models'
     )
 
 
@@ -74,12 +74,7 @@ def default_slot_required(models, slots) -> bool:
     Написанное дважды от руки, это правило уже разъезжалось: одна копия считала по
     слитому стеку, другая по одному файлу, и вопрос «какая модель по умолчанию» не
     задавался там, где запись потом отвергал гейт."""
-    return (
-        len(models) >= 2
-        and slots.light is None
-        and slots.default is None
-        and slots.max is None
-    )
+    return len(models) >= 2 and slots.light is None and slots.default is None and slots.max is None
 
 
 def _slot_errors(cfg: AppConfig, prefix: str) -> list[str]:
@@ -111,7 +106,7 @@ def _assign_errors(cfg: AppConfig, prefix: str) -> tuple[list[str], bool]:
         assign_touched = True
         if subagent_name != "*" and subagent_name not in _SUBAGENT_NAMES:
             errors.append(
-                f'{prefix}assign.subagents.{subagent_name}: неизвестный субагент — '
+                f"{prefix}assign.subagents.{subagent_name}: неизвестный субагент — "
                 f'канонический реестр: {", ".join(sorted(_SUBAGENT_NAMES))}, или "*"'
             )
         _check_assign_value(models, f"assign.subagents.{subagent_name}", value, prefix, errors)
@@ -146,9 +141,9 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
     # (`ModelEntry.weakens_shared_transport`), здесь только СЛОВА предупреждения.
     notices = [
         f"{prefix}запись {alias} ослабляет защиту запроса, который идёт с общим токеном"
-        for alias, entry in models.items() if entry.weakens_shared_transport()
+        for alias, entry in models.items()
+        if entry.weakens_shared_transport()
     ]
     if not models and assign_touched:
-        notices.append(
-            f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)")
+        notices.append(f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)")
     return notices

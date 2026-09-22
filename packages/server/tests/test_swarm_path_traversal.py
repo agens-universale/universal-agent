@@ -19,6 +19,7 @@
 Чиним НА ВХОДЕ, а не в `_make_swarm_id`: read-эндпоинты собирают идентификатор
 инлайном, мимо него.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -77,7 +78,5 @@ def test_traversal_system_is_coerced_not_rejected():
     """
     assert sanitize_system_id(normalize_system("My System", default_system="generic")) == "my_system"
 
-    coerced = sanitize_system_id(
-        normalize_system("../../../../victim", default_system="generic")
-    )
+    coerced = sanitize_system_id(normalize_system("../../../../victim", default_system="generic"))
     assert "/" not in coerced and ".." not in coerced, coerced

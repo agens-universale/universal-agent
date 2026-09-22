@@ -1,4 +1,5 @@
 """MicRecorder на fake-стриме: без микрофона и без sounddevice."""
+
 import pytest
 from gc_tui.voice.errors import VoiceError
 from gc_tui.voice.recorder import MicRecorder
@@ -24,6 +25,7 @@ def _factory(box):
     def factory(cb):
         box["stream"] = FakeStream(cb)
         return box["stream"]
+
     return factory
 
 
@@ -88,8 +90,8 @@ def test_start_failure_in_stream_start_leaves_inactive():
     rec = MicRecorder(stream_factory=factory)
     with pytest.raises(VoiceError):
         rec.start()
-    assert not rec.is_active           # стрим очищен, не утёк
-    assert box["s"].closed             # закрыт best-effort
+    assert not rec.is_active  # стрим очищен, не утёк
+    assert box["s"].closed  # закрыт best-effort
 
 
 def test_level_rises_on_signal_and_decays_in_silence():
@@ -99,14 +101,14 @@ def test_level_rises_on_signal_and_decays_in_silence():
     rec = MicRecorder(stream_factory=_factory(box))
     rec.start()
     assert rec.level == 0.0
-    loud = array.array("h", [8192] * 160).tobytes()   # RMS = 0.25 от максимума
+    loud = array.array("h", [8192] * 160).tobytes()  # RMS = 0.25 от максимума
     box["stream"].callback(loud, 160, None, None)
     rec.analyse()
     first = rec.level
     assert first == pytest.approx(0.25, abs=0.01)
     box["stream"].callback(b"\x00\x00" * 160, 160, None, None)
     rec.analyse()
-    assert rec.level == 0.0        # тишина — метр падает сразу, придержки больше нет
+    assert rec.level == 0.0  # тишина — метр падает сразу, придержки больше нет
 
 
 def test_band_levels_follow_signal_frequency():
@@ -118,8 +120,7 @@ def test_band_levels_follow_signal_frequency():
     rec.start()
     assert rec.band_levels == (0.0,) * 7
     # чистый синус 1200 Гц — должен зажечь ровно «свою» полосу (индекс 3)
-    sine = array.array("h", [int(20000 * math.sin(2 * math.pi * 1200 * n / 16000))
-                             for n in range(512)]).tobytes()
+    sine = array.array("h", [int(20000 * math.sin(2 * math.pi * 1200 * n / 16000)) for n in range(512)]).tobytes()
     box["stream"].callback(sine, 512, None, None)
     rec.analyse()
     bands = rec.band_levels
@@ -127,7 +128,7 @@ def test_band_levels_follow_signal_frequency():
     assert bands[3] > 0.3
     box["stream"].callback(b"\x00\x00" * 512, 512, None, None)
     rec.analyse()
-    assert rec.band_levels[3] < bands[3]     # тишина — полоса затухает
+    assert rec.band_levels[3] < bands[3]  # тишина — полоса затухает
 
 
 def _harmonic_comb(f0: float, amp: int = 9000, n: int = 512) -> bytes:
@@ -151,7 +152,7 @@ def test_bands_hear_the_whole_band_not_one_frequency():
     гармоника или нет, зависело от основного тона говорящего и уплывало от интонации.
     Замер стендом (2026-08-06): на голосе 190 Гц середина ленты проваливалась ниже
     шумового гейта — эквалайзер стоял пустым, пока человек говорил."""
-    gate = 0.003        # шумовой гейт тракта (VoiceInputFlow._advance_bands)
+    gate = 0.003  # шумовой гейт тракта (VoiceInputFlow._advance_bands)
     per_pitch = {}
     for f0 in (110, 150, 190, 240):
         box = {}
@@ -159,17 +160,15 @@ def test_bands_hear_the_whole_band_not_one_frequency():
         rec.start()
         box["stream"].callback(_harmonic_comb(f0), 512, None, None)
         rec.analyse()
-        per_pitch[f0] = rec.band_levels[:5]     # 150…2000 Гц — тело голоса
+        per_pitch[f0] = rec.band_levels[:5]  # 150…2000 Гц — тело голоса
 
     for f0, bands in per_pitch.items():
-        assert all(b > gate for b in bands), \
-            f"основной тон {f0} Гц: полосы ниже гейта — {bands}"
+        assert all(b > gate for b in bands), f"основной тон {f0} Гц: полосы ниже гейта — {bands}"
     # Главное свойство: высота голоса на показания почти не влияет. Со старым
     # одночастотным зондом разброс тут был кратным — полоса то ловила гармонику, то нет.
     for i in range(5):
         values = [per_pitch[f0][i] for f0 in per_pitch]
-        assert max(values) < 3 * min(values), \
-            f"полоса {i} пляшет от основного тона: {values}"
+        assert max(values) < 3 * min(values), f"полоса {i} пляшет от основного тона: {values}"
 
 
 def test_band_mapping_follows_frequency():
@@ -181,8 +180,7 @@ def test_band_mapping_follows_frequency():
         box = {}
         rec = MicRecorder(stream_factory=_factory(box))
         rec.start()
-        tone = array.array("h", [int(15000 * math.sin(2 * math.pi * freq * n / 16000))
-                                 for n in range(512)]).tobytes()
+        tone = array.array("h", [int(15000 * math.sin(2 * math.pi * freq * n / 16000)) for n in range(512)]).tobytes()
         box["stream"].callback(tone, 512, None, None)
         rec.analyse()
         bands = rec.band_levels
@@ -200,11 +198,11 @@ def test_audio_callback_does_no_analysis():
     rec.start()
     loud = array.array("h", [8192] * 512).tobytes()
     box["stream"].callback(loud, 512, None, None)
-    assert rec.level == 0.0                  # колбэк не считал
+    assert rec.level == 0.0  # колбэк не считал
     assert rec.band_levels == (0.0,) * 7
     rec.analyse()
-    assert rec.level > 0.2                   # посчитал UI-тик
-    assert rec.stop() == loud                # звук при этом сохранён целиком
+    assert rec.level > 0.2  # посчитал UI-тик
+    assert rec.stop() == loud  # звук при этом сохранён целиком
 
 
 def test_bands_decay_without_new_audio():
@@ -217,7 +215,7 @@ def test_bands_decay_without_new_audio():
     box["stream"].callback(array.array("h", [8192] * 512).tobytes(), 512, None, None)
     rec.analyse()
     loud = rec.level
-    rec.analyse()                            # звука не пришло
+    rec.analyse()  # звука не пришло
     assert rec.level == pytest.approx(loud * 0.5)
 
 
@@ -232,7 +230,7 @@ def test_analyse_takes_loudest_block_of_the_frame():
     loud = array.array("h", [8192] * 512).tobytes()
     quiet = array.array("h", [80] * 512).tobytes()
     box["stream"].callback(quiet, 512, None, None)
-    box["stream"].callback(loud, 512, None, None)     # пик в середине кадра
+    box["stream"].callback(loud, 512, None, None)  # пик в середине кадра
     box["stream"].callback(quiet, 512, None, None)
     rec.analyse()
     assert rec.level == pytest.approx(0.25, abs=0.01)  # уровень громкого, не последнего
@@ -242,6 +240,7 @@ def test_stream_asks_for_small_blocks():
     """Порция задана явно: с дефолтной («high latency», ~180 мс) звук приходил реже,
     чем перерисовывается пилюля, и эквалайзер отставал на глаз."""
     from gc_tui.voice import recorder as rec_mod
+
     seen = {}
 
     class _FakeSD:
@@ -251,6 +250,7 @@ def test_stream_asks_for_small_blocks():
             return object()
 
     import sys
+
     saved = sys.modules.get("sounddevice")
     sys.modules["sounddevice"] = _FakeSD
     try:

@@ -28,19 +28,10 @@ def test_effective_names_union_extra_and_ignores_empty_config():
 
 def test_should_skip_reasons():
     names = effective_exclude_dir_names()
-    assert should_skip_nested_dir_name("venv", exclude_names=names) == (
-        "excluded_directory_name"
-    )
-    assert should_skip_nested_dir_name(".cache", exclude_names=names) == (
-        "hidden_dot_directory"
-    )
+    assert should_skip_nested_dir_name("venv", exclude_names=names) == ("excluded_directory_name")
+    assert should_skip_nested_dir_name(".cache", exclude_names=names) == ("hidden_dot_directory")
     assert should_skip_nested_dir_name("src", exclude_names=names) is None
-    assert (
-        should_skip_nested_dir_name(
-            ".cache", exclude_names=names, exclude_dot_dirs=False
-        )
-        is None
-    )
+    assert should_skip_nested_dir_name(".cache", exclude_names=names, exclude_dot_dirs=False) is None
 
 
 def test_prompt_list_sorted_and_stable():

@@ -66,6 +66,7 @@ grep по py/toml/md/yml/sh не нашёл ни одного потребите
 
 Код возврата: 0 — чисто, 1 — есть находки.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -83,8 +84,18 @@ from gc_testkit.sources import ensure_sources_on_path
 #: Каталоги, где ищем питон. Тот же принцип, что в module_literals: список
 #: исключений, а не включений, — новый каталог с кодом подхватывается сам.
 SKIP_DIRS = {
-    ".git", ".venv", ".idea", ".vscode", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", "__pycache__", "dist", "build", "node_modules", "docs",
+    ".git",
+    ".venv",
+    ".idea",
+    ".vscode",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "dist",
+    "build",
+    "node_modules",
+    "docs",
 }
 
 
@@ -92,7 +103,7 @@ SKIP_DIRS = {
 class Finding:
     file: str
     line: int
-    kind: str      # dotted_bind | missing_name | missing_module | legacy_toplevel
+    kind: str  # dotted_bind | missing_name | missing_module | legacy_toplevel
     detail: str
 
 
@@ -102,25 +113,70 @@ class Finding:
 #: и после того, как объект будет удалён сборщиком. `module_map.json` рядом
 #: держит те же имена, но отвечает на другой вопрос — куда имя переехало;
 #: расхождение между ними ловит `test_legacy_list_covers_module_map`.
-LEGACY_TOPLEVEL = frozenset({
-    # Приехал с develop 07.09.2026 вместе с loop-notice (PR #90).
-    "loop_detector",
-    "agent_executor", "app_version", "arg_parser", "backends",
-    "bundled_assets", "cli", "config", "config_modules", "config_origin",
-    "config_raw", "config_sync", "constants", "diff_tui",
-    "execution_workspace", "instructions", "intent_guard", "intent_log",
-    "intent_scope", "manual_compaction", "mcp_daemon_autostart",
-    "mcp_runtime", "message_format", "message_policy", "message_projection",
-    "model_picker", "model_router", "onboarding",
-    "onboarding_config_writer", "onboarding_fields", "onboarding_wizard",
-    "persistence", "processing_responses", "project_memory",
-    "request_backend_policy", "rest_api", "run_context",
-    "run_summary_coordinator", "runtime_notices", "security", "serve_entry",
-    "server", "server_cleanup_threads", "startup_notices", "states",
-    "summarize", "swarm", "thread_store", "tools", "trace_id", "tui",
-    "tui_entry", "turn_boundary", "updater", "upgrade_gate", "usage",
-    "utils", "voice", "voice_runtime",
-})
+LEGACY_TOPLEVEL = frozenset(
+    {
+        # Приехал с develop 07.09.2026 вместе с loop-notice (PR #90).
+        "loop_detector",
+        "agent_executor",
+        "app_version",
+        "arg_parser",
+        "backends",
+        "bundled_assets",
+        "cli",
+        "config",
+        "config_modules",
+        "config_origin",
+        "config_raw",
+        "config_sync",
+        "constants",
+        "diff_tui",
+        "execution_workspace",
+        "instructions",
+        "intent_guard",
+        "intent_log",
+        "intent_scope",
+        "manual_compaction",
+        "mcp_daemon_autostart",
+        "mcp_runtime",
+        "message_format",
+        "message_policy",
+        "message_projection",
+        "model_picker",
+        "model_router",
+        "onboarding",
+        "onboarding_config_writer",
+        "onboarding_fields",
+        "onboarding_wizard",
+        "persistence",
+        "processing_responses",
+        "project_memory",
+        "request_backend_policy",
+        "rest_api",
+        "run_context",
+        "run_summary_coordinator",
+        "runtime_notices",
+        "security",
+        "serve_entry",
+        "server",
+        "server_cleanup_threads",
+        "startup_notices",
+        "states",
+        "summarize",
+        "swarm",
+        "thread_store",
+        "tools",
+        "trace_id",
+        "tui",
+        "tui_entry",
+        "turn_boundary",
+        "updater",
+        "upgrade_gate",
+        "usage",
+        "utils",
+        "voice",
+        "voice_runtime",
+    }
+)
 
 #: Модули, которые проверить НЕ удалось: имя → причина. Копится за процесс, а
 #: не за один `scan()`: ответы кэшированы и от повторного прогона не меняются.
@@ -211,7 +267,7 @@ _VENDORED = ("external", "vendor")
 
 def _is_vendored(path: Path) -> bool:
     parts = path.parts
-    return any(parts[i:i + 2] == _VENDORED for i in range(len(parts) - 1))
+    return any(parts[i : i + 2] == _VENDORED for i in range(len(parts) - 1))
 
 
 def _python_files() -> list[Path]:
@@ -257,12 +313,16 @@ def check_dotted_binds(path: Path, tree: ast.AST) -> list[Finding]:
         if node.id in bound or node.id not in dotted:
             continue
         full, line = dotted.pop(node.id)
-        found.append(Finding(
-            str(path.relative_to(REPO)), line, "dotted_bind",
-            f"`import {full}` связывает `{full.split('.')[0]}`, "
-            f"а строка {node.lineno} зовёт голое `{node.id}` — нужно "
-            f"`from {full.rsplit('.', 1)[0]} import {node.id}`",
-        ))
+        found.append(
+            Finding(
+                str(path.relative_to(REPO)),
+                line,
+                "dotted_bind",
+                f"`import {full}` связывает `{full.split('.')[0]}`, "
+                f"а строка {node.lineno} зовёт голое `{node.id}` — нужно "
+                f"`from {full.rsplit('.', 1)[0]} import {node.id}`",
+            )
+        )
     return found
 
 
@@ -288,7 +348,7 @@ def _module_bindings(mod_name: str) -> frozenset[str] | None:
         spec = importlib.util.find_spec(mod_name)
     except Exception as exc:
         if not _missing_is_self(exc, mod_name):
-            _skip(mod_name, exc)      # чужая зависимость — пропуск, не находка
+            _skip(mod_name, exc)  # чужая зависимость — пропуск, не находка
         return None
     if spec is None or not spec.origin or not spec.origin.endswith(".py"):
         return None
@@ -301,7 +361,7 @@ def _module_bindings(mod_name: str) -> frozenset[str] | None:
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if node.name == "__getattr__":
-                return None          # модуль сам решает, что у него есть
+                return None  # модуль сам решает, что у него есть
             names.add(node.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
@@ -309,7 +369,7 @@ def _module_bindings(mod_name: str) -> frozenset[str] | None:
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name == "*":
-                    return None      # реэкспорт россыпью, состав неизвестен
+                    return None  # реэкспорт россыпью, состав неизвестен
                 names.add(alias.asname or alias.name)
         elif isinstance(node, ast.Assign):
             for t in node.targets:
@@ -359,10 +419,14 @@ def check_missing_names(path: Path, tree: ast.AST, ours: set[str]) -> list[Findi
             # отдельно. `False` — уверенный ответ «его нет»; `None` — не смогли
             # проверить, и тогда по-прежнему молчим.
             if _module_exists(node.module) is False:
-                found.append(Finding(
-                    str(path.relative_to(REPO)), node.lineno, "missing_module",
-                    f"модуля `{node.module}` не существует",
-                ))
+                found.append(
+                    Finding(
+                        str(path.relative_to(REPO)),
+                        node.lineno,
+                        "missing_module",
+                        f"модуля `{node.module}` не существует",
+                    )
+                )
             continue
         for alias in node.names:
             if alias.name == "*" or alias.name in bindings:
@@ -372,10 +436,14 @@ def check_missing_names(path: Path, tree: ast.AST, ours: set[str]) -> list[Findi
             # управление прямо сюда и объявлял существующий файл несуществующим)
             if _module_exists(f"{node.module}.{alias.name}") is not False:
                 continue
-            found.append(Finding(
-                str(path.relative_to(REPO)), node.lineno, "missing_name",
-                f"в `{node.module}` нет имени `{alias.name}`",
-            ))
+            found.append(
+                Finding(
+                    str(path.relative_to(REPO)),
+                    node.lineno,
+                    "missing_name",
+                    f"в `{node.module}` нет имени `{alias.name}`",
+                )
+            )
     return found
 
 
@@ -397,21 +465,29 @@ def check_legacy_toplevel(path: Path, tree: ast.AST) -> list[Finding]:
             for alias in node.names:
                 top = alias.name.split(".")[0]
                 if top in LEGACY_TOPLEVEL:
-                    found.append(Finding(
-                        str(path.relative_to(REPO)), node.lineno, "legacy_toplevel",
-                        f"`import {alias.name}` — дореформенное плоское имя "
-                        f"`{top}`; после разбиения на пакеты оно живёт внутри "
-                        f"дистрибутива (куда именно — module_map.json)",
-                    ))
+                    found.append(
+                        Finding(
+                            str(path.relative_to(REPO)),
+                            node.lineno,
+                            "legacy_toplevel",
+                            f"`import {alias.name}` — дореформенное плоское имя "
+                            f"`{top}`; после разбиения на пакеты оно живёт внутри "
+                            f"дистрибутива (куда именно — module_map.json)",
+                        )
+                    )
         elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
             top = node.module.split(".")[0]
             if top in LEGACY_TOPLEVEL:
-                found.append(Finding(
-                    str(path.relative_to(REPO)), node.lineno, "legacy_toplevel",
-                    f"`from {node.module} import …` — дореформенное плоское имя "
-                    f"`{top}`; после разбиения на пакеты оно живёт внутри "
-                    f"дистрибутива (куда именно — module_map.json)",
-                ))
+                found.append(
+                    Finding(
+                        str(path.relative_to(REPO)),
+                        node.lineno,
+                        "legacy_toplevel",
+                        f"`from {node.module} import …` — дореформенное плоское имя "
+                        f"`{top}`; после разбиения на пакеты оно живёт внутри "
+                        f"дистрибутива (куда именно — module_map.json)",
+                    )
+                )
     return found
 
 
@@ -463,9 +539,7 @@ def main() -> int:
     findings = scan()
     skips = skipped()
     if args.json:
-        print(json.dumps({"findings": [asdict(f) for f in findings],
-                          "skipped": skips},
-                         ensure_ascii=False, indent=1))
+        print(json.dumps({"findings": [asdict(f) for f in findings], "skipped": skips}, ensure_ascii=False, indent=1))
         return 1 if findings else 0
 
     # Хвост про пропуски — часть ОБОИХ вердиктов: «импорты здоровы» при

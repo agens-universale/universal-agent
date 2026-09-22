@@ -113,14 +113,14 @@ class SearchFiles(AbstractSimpleTool):
                     },
                 },
                 "required": ["path", "regex"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: fs_search_files  
+        description = """Tool name: fs_search_files  
 Tool description: Searches for a regex pattern in file contents (not for listing files by name). regex is required; does not list files by glob/name alone.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Required. Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Optional glob to narrow which files are content-searched (e.g., \'*.py\'). Always pair with regex — not a standalone name listing."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, \"limit\": {\"type\": \"integer\", \"description\": \"Max matches returned for this page.\"}, \"encoding\": {\"type\": \"string\", \"description\": \"Optional text encoding (e.g. cp1251, koi8-r, utf-16-le). Omit for UTF-8 default.\"}}, \"required\": [\"path\", \"regex\"], \"additionalProperties\": false}
 
@@ -177,7 +177,7 @@ Search for error logs in Rust source files:
   "regex": "log.*Error",
   "file_pattern": "**/*.rs"
 }
-'''
+"""
         return description
 
     def _extract_literals(self, pattern: str) -> Tuple[str, ...]:
@@ -216,11 +216,7 @@ Search for error logs in Rust source files:
         max_chars = self.max_match_content_chars
         if len(content) <= max_chars:
             return content
-        return (
-            content[:max_chars]
-            + f"...[match_truncated: showing first {max_chars} of "
-            f"{len(content)} chars]"
-        )
+        return content[:max_chars] + f"...[match_truncated: showing first {max_chars} of {len(content)} chars]"
 
     def _build_match_context(
         self,
@@ -251,9 +247,7 @@ Search for error logs in Rust source files:
         )
         return "".join(lines[head_lo:head_hi]) + marker + "".join(lines[tail_lo:tail_hi])
 
-    def _search_text(
-        self, file_path: str, text: str, regex: str, context_num: int = 5
-    ) -> List[Dict[str, Any]]:
+    def _search_text(self, file_path: str, text: str, regex: str, context_num: int = 5) -> List[Dict[str, Any]]:
         try:
             compiled_regex = re.compile(regex, re.DOTALL | re.MULTILINE)
         except re.error as e:
@@ -273,25 +267,20 @@ Search for error logs in Rust source files:
             start = match.start()
             end = match.end()
             start_line = self._offset_to_line(line_starts, start, text_len)
-            end_line = (
-                start_line
-                if end <= start
-                else self._offset_to_line(line_starts, end - 1, text_len)
-            )
+            end_line = start_line if end <= start else self._offset_to_line(line_starts, end - 1, text_len)
             results.append(
                 {
                     "file": report_path,
                     "line": start_line,
                     "end_line": end_line,
                     "line_content": self._clip_match_content(match.group(0)),
-                    "context": self._build_match_context(
-                        lines, start_line, end_line, context_num
-                    ),
+                    "context": self._build_match_context(lines, start_line, end_line, context_num),
                 }
             )
         return results
 
-    def _result(self,
+    def _result(
+        self,
         *,
         path: str,
         regex: str,
@@ -366,7 +355,6 @@ Search for error logs in Rust source files:
             start_0 = total
 
         return True, None, start_0, lim_eff, off_eff
-
 
     @enforce_read_guard(path_arg="path")
     async def acall(
@@ -478,8 +466,7 @@ Search for error logs in Rust source files:
             if err_type == "is_binary":
                 return None, {
                     "type": "is_binary",
-                    "message": err.get("message")
-                    or "File looks binary; not searchable as text.",
+                    "message": err.get("message") or "File looks binary; not searchable as text.",
                 }
 
             # Non-UTF8 text: best-effort decode for discovery (same idea as backend.read).
@@ -494,7 +481,9 @@ Search for error logs in Rust source files:
                 "message": err.get("message") or "Failed to decode file.",
             }
 
-        async def _search_file_contents(abs_path: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+        async def _search_file_contents(
+            abs_path: str,
+        ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
             text, err = await _load_search_text(abs_path)
             if err is not None:
                 return None, err
@@ -560,9 +549,7 @@ Search for error logs in Rust source files:
             return _result(ok=False, error={"type": "not_a_directory"})
 
         total_matches = len(results)
-        slice_ok, slice_err, start_0, lim_eff, off_eff = self._resolve_slice(
-            total_matches, offset, limit
-        )
+        slice_ok, slice_err, start_0, lim_eff, off_eff = self._resolve_slice(total_matches, offset, limit)
         if not slice_ok:
             return _result(ok=False, error=slice_err)
 
@@ -582,9 +569,7 @@ Search for error logs in Rust source files:
             next_offset=next_offset,
             skipped=skipped[: self.default_skipped_limit] if skipped else None,
             skipped_total=len(skipped) if skipped else None,
-            skipped_truncated=(
-                len(skipped) > self.default_skipped_limit if skipped else None
-            ),
+            skipped_truncated=(len(skipped) > self.default_skipped_limit if skipped else None),
         )
 
     def _create_file_matcher(self, file_pattern: Optional[str], base_path: str):
@@ -595,7 +580,7 @@ Search for error logs in Rust source files:
         glob_re = compile_glob(file_pattern)
 
         def matches(filepath: str, base_path: str) -> bool:
-            filepath = filepath.replace(os.sep, '/')
+            filepath = filepath.replace(os.sep, "/")
             relative_path = os.path.relpath(filepath, base_path)
             return bool(glob_re.match(relative_path))
 

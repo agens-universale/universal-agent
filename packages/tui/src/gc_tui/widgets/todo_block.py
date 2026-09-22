@@ -11,6 +11,7 @@
 «1 событие = 1 Tab-стоп». Ctrl+клик работает с любой строки — ``event_no``
 проставлен и строкам, и блоку.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Sequence
@@ -53,4 +54,5 @@ class TodoBlock(ClickModelMixin, Widget):
         if not self._event_no:
             return None
         from gc_tui.messages import OpenEventRequest
+
         return OpenEventRequest(self._event_no)

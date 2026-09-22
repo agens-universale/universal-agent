@@ -1,4 +1,5 @@
 """In-memory stand-in for HarborBackend, for differential tool tests."""
+
 import hashlib
 from types import SimpleNamespace
 
@@ -70,8 +71,12 @@ class FakeBackend:
         if p not in self.files:
             raise FileNotFoundError(p)
         return {
-            "size": len(self.files[p].encode("utf-8")), "mtime": 0, "mode": "644",
-            "is_file": True, "is_dir": False, "is_symlink": False,
+            "size": len(self.files[p].encode("utf-8")),
+            "mtime": 0,
+            "mode": "644",
+            "is_file": True,
+            "is_dir": False,
+            "is_symlink": False,
         }
 
     async def walk(self, p):
@@ -83,7 +88,7 @@ class FakeBackend:
         for k in self.files:
             if not k.startswith(base):
                 continue
-            rel = k[len(base):]
+            rel = k[len(base) :]
             parts = rel.split("/")
             for i in range(1, len(parts)):
                 dirs.add("/".join(parts[:i]))
@@ -168,8 +173,12 @@ class FakeBackend:
     async def stat_info(self, p, follow_symlinks=False):
         st = self.stat(p)
         return {
-            "size": st["size"], "mtime": st["mtime"], "mode": int(str(st["mode"]), 8),
-            "is_file": st["is_file"], "is_dir": st["is_dir"], "is_symlink": st["is_symlink"],
+            "size": st["size"],
+            "mtime": st["mtime"],
+            "mode": int(str(st["mode"]), 8),
+            "is_file": st["is_file"],
+            "is_dir": st["is_dir"],
+            "is_symlink": st["is_symlink"],
         }
 
     async def iter_lines(self, p):

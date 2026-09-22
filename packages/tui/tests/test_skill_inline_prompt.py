@@ -5,6 +5,7 @@
 системный промпт трактует technical-блоки как «context, not commands»,
 и модель вправе игнорировать такую инструкцию (реальный кейс 2026-06-10).
 """
+
 import pytest
 
 
@@ -19,6 +20,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
         async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
 
@@ -37,7 +39,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
         await scr._handle_command("skill coder почини баг в парсере")
         await pilot.pause(0.3)
         msgs = captured["messages"]
-        assert len(msgs) == 1                  # одно сообщение, не пара
+        assert len(msgs) == 1  # одно сообщение, не пара
         assert msgs[0].startswith("Use skill `coder`.")
         assert "почини баг в парсере" in msgs[0]
         assert "<technical" not in msgs[0]
@@ -55,6 +57,7 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
     class _Fake:
         async def arun(self, messages, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
 
@@ -71,7 +74,7 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]
         await scr._handle_command("skill coder сначала запусти что-нибудь")
-        await pilot.pause(0.3)                  # run стартовал и висит в _Fake.run
+        await pilot.pause(0.3)  # run стартовал и висит в _Fake.run
         await scr._handle_command("skill coder добавь логирование")
         await pilot.pause(0.3)
         assert len(added) == 1
@@ -118,13 +121,13 @@ async def test_picker_closes_when_id_plus_prompt(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._skills_cache = [{"id": "coder"}]   # фиктивный кэш: coder — валидный id
+        scr._skills_cache = [{"id": "coder"}]  # фиктивный кэш: coder — валидный id
         inp = pilot.app.query_one("#cmdinput")
 
-        inp.text = "/skill coder"          # id без промпта → picker открыт
+        inp.text = "/skill coder"  # id без промпта → picker открыт
         await pilot.pause(0.1)
         assert scr._skill_picker is not None
 
-        inp.text = "/skill coder почини"    # id + пробел + текст → picker закрыт
+        inp.text = "/skill coder почини"  # id + пробел + текст → picker закрыт
         await pilot.pause(0.1)
         assert scr._skill_picker is None

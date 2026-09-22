@@ -1,4 +1,5 @@
 """Палитра команд: фильтрация, ↑↓, Tab/Enter/Esc."""
+
 import pytest
 
 
@@ -26,9 +27,7 @@ async def test_palette_opens_on_slash_and_filters():
         await pilot.press("/")
         await pilot.press("s")
         palette = pilot.app.query_one(".palette")
-        rows_text = "\n".join(
-            str(r.render()) for r in palette.query(".palette-row")
-        )
+        rows_text = "\n".join(str(r.render()) for r in palette.query(".palette-row"))
         assert "/skills" in rows_text
         assert "/stop" in rows_text
         assert "/quit" not in rows_text  # filtered out
@@ -48,9 +47,7 @@ async def test_palette_opens_on_dot_only_and_closes_on_more_typing(tmp_path):
         await pilot.pause(0.1)
         assert len(pilot.app.query(CommandPalette)) == 1
         palette = pilot.app.query_one(CommandPalette)
-        rows_text = "\n".join(
-            str(r.render()) for r in palette.query(".palette-row")
-        )
+        rows_text = "\n".join(str(r.render()) for r in palette.query(".palette-row"))
         assert "/help" in rows_text
         assert "/sessions" in rows_text
 
@@ -146,8 +143,11 @@ async def test_palette_enter_inserts_export_then_field_enter_runs(tmp_path, monk
     from gc_tui.widgets.command_palette import CommandPalette
 
     append_new_thread_messages(
-        str(tmp_path), "cli", "tid1",
-        [{"role": "user", "content": "вопрос", "id": "m1"}], set(),
+        str(tmp_path),
+        "cli",
+        "tid1",
+        [{"role": "user", "content": "вопрос", "id": "m1"}],
+        set(),
     )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -181,9 +181,9 @@ async def test_palette_enter_executes_selected():
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
-        await pilot.press("s")          # sessions, settings, skills, skill, status, stop
+        await pilot.press("s")  # sessions, settings, skills, skill, status, stop
         await pilot.press("down")
-        await pilot.press("down")       # index 2: skills
+        await pilot.press("down")  # index 2: skills
         await pilot.press("enter")
         # Palette closed
         assert not pilot.app.query(".palette")
@@ -191,6 +191,7 @@ async def test_palette_enter_executes_selected():
         assert pilot.app.query_one("#cmdinput").text == ""
         # The selected command (skills) ran — pushed SkillsScreen
         from gc_tui.screens.skills import SkillsScreen
+
         assert isinstance(pilot.app.screen, SkillsScreen)
         # Typed prefix did NOT run as a literal command
         assert not pilot.app.query(".palette")
@@ -279,7 +280,7 @@ def test_hotkeys_align_to_a_common_column():
 
     rows = {n: palette._format_row(reg.lookup(n)) for n in ("a", "b", "c")}
     assert rows["a"].index("F1") == rows["b"].index("Ctrl+T")
-    assert rows["c"] == rows["c"].rstrip()          # без хоткея — без пустого хвоста
+    assert rows["c"] == rows["c"].rstrip()  # без хоткея — без пустого хвоста
     # Ровно 3 пробела после самого длинного описания — столько же, сколько после самого
     # длинного имени. Было 2, и на одной строке рядом оказывались разные зазоры.
     assert rows["b"] == rows["b"].split("описание подлиннее")[0] + "описание подлиннее   Ctrl+T"
@@ -299,7 +300,7 @@ def test_hotkey_column_counts_rows_without_hotkeys_too():
 
     row_a = palette._format_row(reg.lookup("a"))
     row_b = palette._format_row(reg.lookup("b"))
-    assert row_a.index("F1") == len(row_b) + 3      # хоткей правее длинной строки, зазор 3
+    assert row_a.index("F1") == len(row_b) + 3  # хоткей правее длинной строки, зазор 3
 
 
 def test_palette_has_no_hotkey_column_when_nobody_has_one():
@@ -320,6 +321,7 @@ def test_palette_has_no_hotkey_column_when_nobody_has_one():
 def test_registry_does_not_contain_main():
     pytest.importorskip("textual")
     from gc_tui.commands import build_default_registry
+
     reg = build_default_registry()
     assert reg.lookup("main") is None
 
@@ -335,14 +337,14 @@ async def test_palette_hugs_content(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
         reg = build_default_registry()
-        pal = CommandPalette(reg, initial_filter="se")   # фильтр → 2 реальные команды (/sessions, /settings)
+        pal = CommandPalette(reg, initial_filter="se")  # фильтр → 2 реальные команды (/sessions, /settings)
         await app.screen.mount(pal)
         await pilot.pause()
         rows = pal._visible_rows()
         assert len(rows) >= 1  # непустой список — не вырожденный нулевой случай
         assert pal.styles.height is not None and pal.styles.height.is_auto  # height: auto
-        assert pal.region.height < 40                                      # не на весь экран
-        assert pal.region.height < 10                                      # рамка обнимает малый список, не растянута
+        assert pal.region.height < 40  # не на весь экран
+        assert pal.region.height < 10  # рамка обнимает малый список, не растянута
 
 
 @pytest.mark.asyncio
@@ -363,7 +365,7 @@ async def test_palette_keys_hint_has_air_above(tmp_path):
         keys = pal.query_one(".palette-keys")
         assert keys.styles.margin.top == 1
         rows = list(pal.query(".palette-row"))
-        assert rows and rows[-1].styles.margin.top == 0     # у команд воздуха нет
+        assert rows and rows[-1].styles.margin.top == 0  # у команд воздуха нет
 
 
 @pytest.mark.asyncio
@@ -382,9 +384,16 @@ async def test_long_description_row_stays_one_line(tmp_path):
 
     reg = CommandRegistry()
     reg.register(Command("short", (), "", "Короткое описание"))
-    reg.register(Command("long", (), "", "Очень длинное описание команды, которое "
-                                         "заведомо не влезает в ширину терминала и "
-                                         "раньше переносилось на вторую строку"))
+    reg.register(
+        Command(
+            "long",
+            (),
+            "",
+            "Очень длинное описание команды, которое "
+            "заведомо не влезает в ширину терминала и "
+            "раньше переносилось на вторую строку",
+        )
+    )
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:

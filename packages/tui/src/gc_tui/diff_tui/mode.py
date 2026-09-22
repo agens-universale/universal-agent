@@ -6,6 +6,7 @@
 В git-mode (v2 hybrid) полный wipe ``.gc/diffs/`` отключён — только
 точечный stale-cleanup git-visible ключей через ``evict_stale_cache``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,7 +52,5 @@ def evict_stale_cache(
             if store.drop_entry(key):
                 removed += 1
     if removed:
-        _logger.info(
-            "evicted %s stale cache key(s) superseded by git", removed
-        )
+        _logger.info("evicted %s stale cache key(s) superseded by git", removed)
     return removed

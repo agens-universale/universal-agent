@@ -6,6 +6,7 @@
 окружение поддельное: оно запоминает строку, которую ему отдали, и отвечает
 заготовленным выводом.
 """
+
 import asyncio
 import json
 import shlex
@@ -57,9 +58,12 @@ def test_the_tool_starts_a_background_command_in_harbor(loop_in_thread):
     """Через тул, как видит модель: `ok`, pid из контейнера, без отказа «не умею»."""
     env = _Env(stdout="4242\n")
 
-    res = json.loads(_tool(HarborBackend(env, loop_in_thread))(
-        command="npm run dev", run_in_background=True,
-    ))
+    res = json.loads(
+        _tool(HarborBackend(env, loop_in_thread))(
+            command="npm run dev",
+            run_in_background=True,
+        )
+    )
 
     assert res["ok"] is True, res
     assert res["background"] == {"pid": 4242, "output": "not captured"}, res

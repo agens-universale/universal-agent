@@ -10,7 +10,6 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
 class SaveBase64File(AbstractSimpleTool):
-
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
@@ -83,14 +82,17 @@ class SaveBase64File(AbstractSimpleTool):
     ) -> str:
         return self._result(ok=False, path=path, error=error)
 
-
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(self, path: str, data: str, **kwargs) -> str:
         if not isinstance(path, str) or not path.strip():
             return self._result(ok=False, path=str(path), error={"type": "invalid_argument", "field": "path"})
 
         if not os.path.isabs(path):
-            return self._result(ok=False, path=path, error={"type": "invalid_argument", "field": "path", "message": "path must be absolute"})
+            return self._result(
+                ok=False,
+                path=path,
+                error={"type": "invalid_argument", "field": "path", "message": "path must be absolute"},
+            )
 
         if not isinstance(data, str) or not data.strip():
             return self._result(ok=False, path=path, error={"type": "invalid_argument", "field": "data"})

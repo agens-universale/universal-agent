@@ -2,6 +2,7 @@
 
 Используется и живым счётчиком MassDeleteScreen, и оркестрацией SessionsScreen —
 поэтому `now` инъектируется (детерминируемые тесты)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

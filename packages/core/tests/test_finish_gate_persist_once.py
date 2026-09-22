@@ -1,4 +1,5 @@
 """I3/B: finish_gate в jsonl один раз, уже финальный; skipped → runtime_outcome."""
+
 from __future__ import annotations
 
 import json
@@ -31,18 +32,18 @@ def _finish_output() -> str:
     Через ``run_coro(...acall(...))``: у тулов форма ОДНА — корутинная,
     синхронного ``__call__`` у них нет.
     """
-    return run_coro(SubmitSolution().acall(
-        solution_type="direct_answer",
-        task_report="готово",
-        handoff="{}",
-    ))
+    return run_coro(
+        SubmitSolution().acall(
+            solution_type="direct_answer",
+            task_report="готово",
+            handoff="{}",
+        )
+    )
 
 
 def test_apply_finish_gate_skipped_sets_runtime_outcome():
     base = _finish_output()
-    patched = SubmitSolution.apply_finish_gate_decision(
-        base, FinishGateDecision(outcome="skipped")
-    )
+    patched = SubmitSolution.apply_finish_gate_decision(base, FinishGateDecision(outcome="skipped"))
     payload = json.loads(patched)
     assert payload["finish_gate"]["runtime_outcome"] == "skipped"
 
@@ -103,13 +104,15 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         coverage_score=1.0,
         feedback_for_agent="",
     )
-    ok = run_coro(apply_finish_gate_to_turn_finish_output_in_state(
-        state=state,
-        finish_call_id=call_id,
-        decision=FinishGateDecision(outcome="accept", validation=validation),
-        logger=None,
-        persist_messages_callback=persist,
-    ))
+    ok = run_coro(
+        apply_finish_gate_to_turn_finish_output_in_state(
+            state=state,
+            finish_call_id=call_id,
+            decision=FinishGateDecision(outcome="accept", validation=validation),
+            logger=None,
+            persist_messages_callback=persist,
+        )
+    )
     assert ok is True
     assert len(persisted) == 1
     payload = json.loads(persisted[0][0]["output"])

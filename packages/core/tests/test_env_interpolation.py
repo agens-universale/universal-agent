@@ -47,6 +47,7 @@ def test_missing_var_empty_and_warns(monkeypatch, caplog):
 
 # --- ${FILE:} ---
 
+
 def test_file_marker_reads_and_strips_trailing_newline(tmp_path):
     f = tmp_path / "tok"
     f.write_text("secret-value\n")
@@ -137,10 +138,7 @@ def test_file_marker_lax_permissions_warn(tmp_path, caplog):
     _os.chmod(f, 0o644)
     with caplog.at_level(logging.WARNING):
         assert resolve_env_placeholders(f"${{FILE:{f}}}") == "v"
-    assert any(
-        "accessible" in r.getMessage() and str(f) in r.getMessage()
-        for r in caplog.records
-    )
+    assert any("accessible" in r.getMessage() and str(f) in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.skipif(_os.name != "posix", reason="POSIX file modes only")
@@ -157,6 +155,7 @@ def test_file_marker_same_path_read_once(tmp_path, monkeypatch):
     f = tmp_path / "tok"
     f.write_text("v")
     import builtins
+
     real_open = builtins.open
     opens: list[str] = []
 
@@ -183,6 +182,7 @@ def test_file_path_can_come_from_env(tmp_path, monkeypatch):
 
 # --- resolve_env_only (только ${ENV:...}, для мест без права на файловый I/O) --
 
+
 def test_env_only_replaces_env_marker(monkeypatch):
     monkeypatch.setenv("MY_TOK2", "secret123")
     assert resolve_env_only("${ENV:MY_TOK2}") == "secret123"
@@ -202,8 +202,7 @@ def test_env_only_never_touches_the_filesystem(tmp_path, monkeypatch):
     from gc_core.config_modules import env_interpolation as env_interp
 
     calls: list = []
-    monkeypatch.setattr(env_interp, "_read_secret_file",
-                        lambda *a, **k: (calls.append(a), "")[1])
+    monkeypatch.setattr(env_interp, "_read_secret_file", lambda *a, **k: (calls.append(a), "")[1])
     f = tmp_path / "tok"
     f.write_text("v")
     resolve_env_only(f"${{FILE:{f}}}")

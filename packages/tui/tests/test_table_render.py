@@ -1,4 +1,5 @@
 """table_render — markdown-таблица как rich.Text, пригодный для выделения мышью."""
+
 from __future__ import annotations
 
 from gc_tui.services.table_render import table_to_text

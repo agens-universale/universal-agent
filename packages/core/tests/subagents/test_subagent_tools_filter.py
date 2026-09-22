@@ -1,4 +1,5 @@
 """Фильтр набора тулов дочернего рана (allow/stop из определения сабагента)."""
+
 import logging
 
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, apply_subagent_tools_filter
@@ -16,8 +17,13 @@ def _tools_data(*names):
 
 
 BASE = _tools_data(
-    "fs_read_file", "fs_write_file", "exec_command", "exec_python",
-    "mcp_jira_search_issues", "mcp_jira_create_issue", *REQUIRED,
+    "fs_read_file",
+    "fs_write_file",
+    "exec_command",
+    "exec_python",
+    "mcp_jira_search_issues",
+    "mcp_jira_create_issue",
+    *REQUIRED,
 )
 
 

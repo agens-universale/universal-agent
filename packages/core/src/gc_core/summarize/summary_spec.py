@@ -53,7 +53,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
         memory_patch_hint="usually stays in summary only; do not copy into registers",
         description=(
             "- Approaches, edits, commands, configs, or fixes already tried and rejected, failed, or superseded.\n"
-            "- User corrections that ruled something out (\"don't use X\", \"revert Y\", \"that path failed\").\n"
+            '- User corrections that ruled something out ("don\'t use X", "revert Y", "that path failed").\n'
             "- Dead ends from tool errors or verification failures when they should not be retried blindly.\n"
             "- Use `n/a` only if nothing was explicitly ruled out or abandoned.\n"
             "- Do not invent rejected attempts; every item must be traceable to dialogue, tool output, or user message."
@@ -94,6 +94,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     ),
 )
 
+
 def section_tags() -> tuple[str, ...]:
     return tuple(s.tag for s in SUMMARY_SECTIONS)
 
@@ -126,9 +127,7 @@ _SECTION_BODY_PATTERNS = _build_section_body_patterns()
 
 
 def render_sections_for_prompt() -> str:
-    return "\n\n".join(
-        f"<{s.tag}>\n{s.description.strip()}\n</{s.tag}>" for s in SUMMARY_SECTIONS
-    )
+    return "\n\n".join(f"<{s.tag}>\n{s.description.strip()}\n</{s.tag}>" for s in SUMMARY_SECTIONS)
 
 
 def render_output_shape_for_prompt() -> str:
@@ -140,16 +139,11 @@ def render_output_shape_for_prompt() -> str:
 
 
 def render_summary_tags_for_memory_patch_prompt() -> str:
-    return "\n".join(
-        f"- `{s.tag}` — {s.memory_patch_hint}" for s in SUMMARY_SECTIONS
-    )
+    return "\n".join(f"- `{s.tag}` — {s.memory_patch_hint}" for s in SUMMARY_SECTIONS)
 
 
 def render_tag_roles_for_prompt() -> str:
-    return "\n".join(
-        f"- {s.tag}: {s.description.strip().splitlines()[0].lstrip('- ')}"
-        for s in SUMMARY_SECTIONS
-    )
+    return "\n".join(f"- {s.tag}: {s.description.strip().splitlines()[0].lstrip('- ')}" for s in SUMMARY_SECTIONS)
 
 
 def format_section_tags_for_repair() -> str:

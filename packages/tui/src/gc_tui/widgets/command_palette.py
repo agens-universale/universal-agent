@@ -5,6 +5,7 @@ Toggle-подвал (/gate, /answers — спека 2026-07-16-palette-toggles-g
 Состояние тоггла палитра не знает сама — получает инъекцией через `toggle_state`
 (провайдер `name -> str`, отсутствует — если тоггл не инъецирован); запись/reload — вне палитры (tui/toggles.py).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
@@ -113,9 +114,7 @@ class CommandPalette(VerticalScroll):
         по конкретному имени. Сегодня в TOGGLES ровно одна preset-группа
         (`/rigor`) → 0; механизм рассчитан на будущие независимые группы.
         Общий источник для `_footer_reserved_height` и `_build_footer`."""
-        return sum(
-            1 for j, c in enumerate(toggles) if j > 0 and TOGGLES[c.name].preset_keys
-        )
+        return sum(1 for j, c in enumerate(toggles) if j > 0 and TOGGLES[c.name].preset_keys)
 
     def _footer_reserved_height(self) -> int:
         """Высота докнутого `.palette-footer` (в строках): разделитель(1) + N
@@ -183,8 +182,11 @@ class CommandPalette(VerticalScroll):
                 if j > 0 and TOGGLES[cmd.name].preset_keys:
                     children.append(Rule(classes="palette-group-sep"))
                 idx = offset + j
-                classes = "palette-row palette-toggle-row selected" if idx == self._selected \
+                classes = (
+                    "palette-row palette-toggle-row selected"
+                    if idx == self._selected
                     else "palette-row palette-toggle-row"
+                )
                 row = Static(self._format_toggle_row(cmd), classes=classes, markup=False)
                 if idx == self._selected:
                     selected_row = row
@@ -242,7 +244,7 @@ class CommandPalette(VerticalScroll):
         elif current in spec.names:
             hint = spec.values[spec.names.index(current)].hint
         elif self._toggle_custom_hint is not None:
-            hint = self._toggle_custom_hint(cmd.name)     # /rigor custom, отображаемый (спека §5)
+            hint = self._toggle_custom_hint(cmd.name)  # /rigor custom, отображаемый (спека §5)
         else:
             hint = spec.values[0].hint if spec.values else ""
         return _fit_hint(current, hint, _HINT_KEYS_TOGGLE, width)
@@ -286,7 +288,7 @@ class CommandPalette(VerticalScroll):
         head = self._row_head(cmd)
         col = self._hotkey_col_w()
         if not col or not cmd.hotkey:
-            return head              # колонку держит паддинг соседей, пустой хвост не нужен
+            return head  # колонку держит паддинг соседей, пустой хвост не нужен
         return head + " " * (col - len(cmd.description)) + cmd.hotkey
 
     def _my_base_w(self, name: str) -> int:
@@ -445,8 +447,7 @@ class CommandPalette(VerticalScroll):
         # регистрации — он всё равно будет вставлен инъекцией под настоящим
         # родителем. Ребёнок, чей родитель фильтром НЕ пойман (отсутствует в
         # базе), в `owned` не попадает — остаётся обычной строкой на своём месте.
-        base = [c for c in cmds if _matches(c, f)] if f else \
-            [c for c in cmds if TOGGLES[c.name].palette_default]
+        base = [c for c in cmds if _matches(c, f)] if f else [c for c in cmds if TOGGLES[c.name].palette_default]
         owned: set[str] = set()
         for c in base:
             if TOGGLES[c.name].preset_keys:

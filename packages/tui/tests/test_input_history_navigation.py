@@ -1,4 +1,5 @@
 """TraceScreen integration с InputHistory: ↑/↓, draft, reset."""
+
 import pytest
 
 
@@ -45,8 +46,7 @@ async def test_history_available_in_empty_state(tmp_path):
     threads_dir = project_dir / "threads"
     threads_dir.mkdir()
     (project_dir / "input_history.jsonl").write_text(
-        json.dumps({"ts": "2026-06-10T00:00:00+00:00", "text": "прошлая реплика"},
-                   ensure_ascii=False) + "\n",
+        json.dumps({"ts": "2026-06-10T00:00:00+00:00", "text": "прошлая реплика"}, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
 
@@ -176,7 +176,7 @@ async def test_cursor_visual_line_helpers_with_soft_wrap():
         ta = pilot.app.query_one(CommandTextArea)
         ta.text = "aaaa bbbb cccc dddd eeee ffff gggg"
         await pilot.pause()
-        assert ta.wrapped_document.height > 1   # предусловие: реально перенеслось
+        assert ta.wrapped_document.height > 1  # предусловие: реально перенеслось
 
         ta.move_cursor((0, 0))
         assert ta.cursor_on_first_visual_line() is True
@@ -206,12 +206,12 @@ async def test_up_on_wrapped_lower_visual_line_does_not_trigger_history(tmp_path
         long_line = "aaaa bbbb cccc dddd eeee ffff gggg hhhh"
         inp.text = long_line
         await pilot.pause()
-        assert inp.wrapped_document.height > 1          # перенос случился
+        assert inp.wrapped_document.height > 1  # перенос случился
         inp.move_cursor((0, len(long_line)))
-        assert not inp.cursor_on_first_visual_line()    # есть куда вверх
+        assert not inp.cursor_on_first_visual_line()  # есть куда вверх
         await pilot.press("up")
         await pilot.pause()
-        assert inp.text == long_line                    # история НЕ подменила текст
+        assert inp.text == long_line  # история НЕ подменила текст
 
 
 @pytest.mark.asyncio
@@ -234,12 +234,12 @@ async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(tmp_pa
         await pilot.pause()
         assert inp.wrapped_document.height > 1
         inp.move_cursor((0, 0))
-        assert not inp.cursor_on_last_visual_line()     # есть куда вниз
+        assert not inp.cursor_on_last_visual_line()  # есть куда вниз
         before_y = inp.wrapped_document.location_to_offset(inp.cursor_location).y
         await pilot.press("down")
         await pilot.pause()
         after_y = inp.wrapped_document.location_to_offset(inp.cursor_location).y
-        assert after_y > before_y                       # курсор спустился визуально
+        assert after_y > before_y  # курсор спустился визуально
 
 
 @pytest.mark.asyncio

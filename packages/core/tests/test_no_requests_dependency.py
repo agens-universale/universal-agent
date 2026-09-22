@@ -20,6 +20,7 @@
 requests всё равно стоит транзитивно (его тянут соседние пакеты), и
 динамическая проверка там ничего не поймала бы.
 """
+
 import ast
 import tomllib
 
@@ -46,8 +47,7 @@ def test_manifest_declares_requests_only_while_the_list_is_not_empty():
     declared = [d for d in deps if d.split("[")[0].strip().lower() == "requests"]
     if _REQUESTS_ALLOWED:
         assert declared, (
-            "модули из _REQUESTS_ALLOWED импортируют requests, а в зависимостях "
-            "его нет — установка развалится"
+            "модули из _REQUESTS_ALLOWED импортируют requests, а в зависимостях его нет — установка развалится"
         )
     else:
         assert not declared, f"переводить нечего, а requests остался: {declared}"
@@ -88,9 +88,7 @@ def test_no_new_module_imports_requests():
     extra = sorted(offenders - _REQUESTS_ALLOWED)
     stale = sorted(_REQUESTS_ALLOWED - offenders)
     assert not extra, f"requests импортируется в новых модулях: {extra}"
-    assert not stale, (
-        f"модули уже без requests, снимите их со списка _REQUESTS_ALLOWED: {stale}"
-    )
+    assert not stale, f"модули уже без requests, снимите их со списка _REQUESTS_ALLOWED: {stale}"
 
 
 @pytest.mark.parametrize(

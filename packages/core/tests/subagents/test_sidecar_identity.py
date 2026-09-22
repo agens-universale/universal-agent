@@ -1,4 +1,5 @@
 """Шаг 2: thread identity на child ctx + gate sidecar без sink."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -108,9 +109,7 @@ class TestResolveSidecarIdentityGate:
 class TestBindClearThreadIdentity:
     def test_bind_and_clear(self):
         ctx = SimpleNamespace()
-        bind_thread_identity(
-            ctx, threads_dir="/threads", system_id="cli", thread_id="abc"
-        )
+        bind_thread_identity(ctx, threads_dir="/threads", system_id="cli", thread_id="abc")
         assert ctx.threads_dir == "/threads"
         assert ctx.system_id == "cli"
         assert ctx.thread_id == "abc"
@@ -233,9 +232,7 @@ async def _child_ctx_of_parent_with(tmp_path, *, threads_dir: str):
     parent.tools_spec = []
     parent.tools_description = []
     parent.subagent_progress_sink = None
-    bind_thread_identity(
-        parent, threads_dir=threads_dir, system_id="cli", thread_id="task-9"
-    )
+    bind_thread_identity(parent, threads_dir=threads_dir, system_id="cli", thread_id="task-9")
     runner = SubagentRunner(parent, state, cfg)
     runner._parent_call_id = "call_sub"
     return await runner._build_child_ctx(tool_name="subagent_worker")
@@ -252,12 +249,9 @@ async def test_child_keeps_the_thread_address_without_a_directory(tmp_path):
     child = await _child_ctx_of_parent_with(tmp_path, threads_dir="")
 
     assert (child.system_id, child.thread_id) == ("cli", "task-9"), (
-        f"адрес треда стёрт из-за пустого каталога: "
-        f"{(child.system_id, child.thread_id)}"
+        f"адрес треда стёрт из-за пустого каталога: {(child.system_id, child.thread_id)}"
     )
-    assert resolve_sidecar_identity(child) is not None, (
-        "identity не собралась — трасса субагента не будет записана"
-    )
+    assert resolve_sidecar_identity(child) is not None, "identity не собралась — трасса субагента не будет записана"
 
 
 async def test_child_still_loses_the_address_without_a_thread(tmp_path):
@@ -289,9 +283,7 @@ async def test_no_store_and_no_directory_writes_nowhere(tmp_path, monkeypatch):
     written = await apersist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
 
     assert written is None, "запись состоялась, хотя писать некуда"
-    assert list(tmp_path.iterdir()) == [], (
-        f"трасса ушла в текущий каталог процесса: {list(tmp_path.iterdir())}"
-    )
+    assert list(tmp_path.iterdir()) == [], f"трасса ушла в текущий каталог процесса: {list(tmp_path.iterdir())}"
 
 
 # --- H7: трасса доезжает до нефайлового хранилища --------------------------
@@ -319,7 +311,7 @@ async def test_trace_reaches_a_store_without_files():
         system_id="cli",
         thread_id="t1",
         thread_store=store,
-        threads_dir=None,          # хранилище без файлов
+        threads_dir=None,  # хранилище без файлов
     )
 
     written = await apersist_subagent_trace(ctx, kind="child_start", payload={"x": 1})

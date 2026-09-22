@@ -22,6 +22,7 @@
 неверными токенами и мёртвыми индикаторами. Здесь каждое из этих мест
 проверяется на живом асинхронном хранилище.
 """
+
 import asyncio
 
 import pytest
@@ -74,6 +75,7 @@ def _msg(mid: str, text: str = "текст") -> dict:
 
 # --- контракт --------------------------------------------------------------
 
+
 def test_async_store_passes_the_conformance_suite():
     """Те же двенадцать свойств, что и у синхронной реализации.
 
@@ -113,6 +115,7 @@ def test_half_async_under_sync_names_is_rejected():
     Самый неприятный случай: часть записей уходит в базу, часть теряется
     молча, и тред расщепляется без единого признака ошибки.
     """
+
     class Half(MemoryThreadStore):
         async def load_meta(self, system_id, thread_id):  # type: ignore[override]
             return {}
@@ -125,12 +128,15 @@ def test_half_async_under_sync_names_is_rejected():
 
 def test_incomplete_async_contract_is_rejected():
     """Половина ``a``-методов — отказ с перечислением недостающих."""
+
     class Partial:
         pass
 
     for name in list(ASYNC_CONTRACT_METHODS)[:5]:
+
         async def method(self, *args, **kwargs):
             return None
+
         setattr(Partial, name, method)
 
     with pytest.raises(ThreadStoreContractError) as err:
@@ -141,10 +147,14 @@ def test_incomplete_async_contract_is_rejected():
 
 # --- сквозь сессию ---------------------------------------------------------
 
+
 async def test_session_reads_and_writes_through_the_async_store():
     store = RedisLikeStore()
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        config_dict={},
+        system_id=SYS,
+        thread_id=TID,
+        store=store,
     )
     assert session.port is store, "порт завернул нативное хранилище в адаптер"
 
@@ -177,35 +187,31 @@ async def test_adapter_and_native_port_agree(tmp_path):
         "user_intent_log": ["хочу"],
     }
     messages = [_msg(f"m{i}", f"сообщение {i}") for i in range(1, 5)]
-    volatile = {"created_at", "updated_at", "last_summarized_at",
-                "last_summary_archive_suffix"}
+    volatile = {"created_at", "updated_at", "last_summarized_at", "last_summary_archive_suffix"}
 
     async def _run(store):
         session = await ThreadSession.afrom_config(
-            config_dict={}, system_id=SYS, thread_id=TID, store=store,
+            config_dict={},
+            system_id=SYS,
+            thread_id=TID,
+            store=store,
         )
         await session.apersist_batch(messages[:2], previous_response_id="r1")
         await session.apersist_batch(messages[2:], previous_response_id="r2")
         return await session.aarchive_and_compact_summary_payload(payload)
 
-    sync_store = MemoryThreadStore()                 # ядро видит через адаптер
-    native_store = RedisLikeStore()                  # ядро видит своим портом
+    sync_store = MemoryThreadStore()  # ядро видит через адаптер
+    native_store = RedisLikeStore()  # ядро видит своим портом
     sync_result = await _run(sync_store)
     native_result = await _run(native_store)
 
-    assert native_store.awaited > 0, (
-        "проверка пустая: асинхронное хранилище ни разу не позвали нативно"
-    )
+    assert native_store.awaited > 0, "проверка пустая: асинхронное хранилище ни разу не позвали нативно"
     assert sync_result["new_messages_count"] == native_result["new_messages_count"]
-    assert (
-        [m["content"] for m in sync_store.load_messages(SYS, TID)]
-        == [m["content"] for m in native_store._inner.load_messages(SYS, TID)]
-    )
+    assert [m["content"] for m in sync_store.load_messages(SYS, TID)] == [
+        m["content"] for m in native_store._inner.load_messages(SYS, TID)
+    ]
     sync_meta = {k: v for k, v in sync_store.load_meta(SYS, TID).items() if k not in volatile}
-    native_meta = {
-        k: v for k, v in native_store._inner.load_meta(SYS, TID).items()
-        if k not in volatile
-    }
+    native_meta = {k: v for k, v in native_store._inner.load_meta(SYS, TID).items() if k not in volatile}
     assert sync_meta == native_meta
 
 
@@ -220,12 +226,13 @@ async def test_compaction_without_files_does_not_write_to_disk(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     store = MemoryThreadStore()
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        config_dict={},
+        system_id=SYS,
+        thread_id=TID,
+        store=store,
     )
     await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
-    await session.aarchive_and_compact_summary_payload(
-        {"summary_message_content": "сводка"}
-    )
+    await session.aarchive_and_compact_summary_payload({"summary_message_content": "сводка"})
 
     created = [p for p in tmp_path.rglob("*") if p.is_file()]
     assert created == [], f"компакция создала файлы мимо хранилища: {created}"
@@ -237,17 +244,19 @@ async def test_file_store_still_archives(tmp_path):
     store = FileThreadStore(str(tmp_path))
     store.ensure_ready()
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        config_dict={},
+        system_id=SYS,
+        thread_id=TID,
+        store=store,
     )
     await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
-    result = await session.aarchive_and_compact_summary_payload(
-        {"summary_message_content": "сводка"}
-    )
+    result = await session.aarchive_and_compact_summary_payload({"summary_message_content": "сводка"})
     assert result["archive_data_path"], "архив не создан"
     assert "__pre_summary__" in result["archive_data_path"]
 
 
 # --- то, что раньше ломалось молча -----------------------------------------
+
 
 async def test_runtime_flags_reach_the_async_store():
     """Индикаторы TUI доезжают до асинхронного хранилища.
@@ -265,7 +274,10 @@ async def test_runtime_flags_reach_the_async_store():
 
     store = RedisLikeStore()
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        config_dict={},
+        system_id=SYS,
+        thread_id=TID,
+        store=store,
     )
 
     seen = {}
@@ -288,15 +300,16 @@ async def test_trace_ids_reach_the_async_store():
 
     store = RedisLikeStore()
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        config_dict={},
+        system_id=SYS,
+        thread_id=TID,
+        store=store,
     )
     await _aappend_trace_id_to_meta(session, "trace-abc", None)
     assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == ["trace-abc"]
 
     await _aappend_trace_id_to_meta(session, "trace-abc", None)
-    assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == ["trace-abc"], (
-        "повтор задвоил trace_id"
-    )
+    assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == ["trace-abc"], "повтор задвоил trace_id"
 
 
 async def test_subagent_trace_reaches_the_async_store(tmp_path):
@@ -311,8 +324,12 @@ async def test_subagent_trace_reaches_the_async_store(tmp_path):
 
     store = RedisLikeStore()
     ctx = SimpleNamespace(
-        parent_call_id="call-1", threads_dir=str(tmp_path),
-        system_id=SYS, thread_id=TID, run_id="run-1", thread_store=store,
+        parent_call_id="call-1",
+        threads_dir=str(tmp_path),
+        system_id=SYS,
+        thread_id=TID,
+        run_id="run-1",
+        thread_store=store,
     )
     record = await apersist_subagent_trace(ctx, kind="call", payload={"name": "fs_read"})
     assert record is not None and record["kind"] == "call"
@@ -334,22 +351,25 @@ async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(ca
     store = RedisLikeStore()
     assert not hasattr(store, "areplace_messages"), "двойник перестал быть утиным"
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id=SYS, thread_id=TID, store=store,
+        config_dict={},
+        system_id=SYS,
+        thread_id=TID,
+        store=store,
     )
     await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
     await store.aappend_subagent_trace(
-        SYS, TID, parent_call_id="c1", child_run_id="r1",
-        kind="call", payload={"task": "проверить"},
+        SYS,
+        TID,
+        parent_call_id="c1",
+        child_run_id="r1",
+        kind="call",
+        payload={"task": "проверить"},
     )
 
     with caplog.at_level(logging.WARNING):
-        await session.aarchive_and_compact_summary_payload(
-            {"summary_message_content": "сводка"}
-        )
+        await session.aarchive_and_compact_summary_payload({"summary_message_content": "сводка"})
 
     trace = await store.aread_subagent_trace(SYS, TID)
     assert [r["child_run_id"] for r in trace] == ["r1"], f"трасса потеряна: {trace}"
     assert [r["payload"] for r in trace] == [{"task": "проверить"}]
-    assert "areplace_messages" in caplog.text, (
-        "потеря штампов трассы прошла молча — хранилищу не сказали, что делать"
-    )
+    assert "areplace_messages" in caplog.text, "потеря штампов трассы прошла молча — хранилищу не сказали, что делать"

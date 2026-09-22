@@ -1,4 +1,5 @@
 """launch_root snapshot на старте TUI — cwd на момент входа, не live Path.cwd()."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,10 +23,10 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
             self._config_path = None
             self._config_project_local = None
 
-        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *args, **kwargs):   # заглушка §3.5-нотиса
+        def _maybe_notice_profile_activation(self, *args, **kwargs):  # заглушка §3.5-нотиса
             return None
 
         def run(self):
@@ -70,7 +71,8 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     # (`dateutil` зовёт `import_module(".parser", __name__)` — с package),
     # иначе однопозиционная лямбда роняет их TypeError'ом.
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module",
+        tui_pkg.importlib,
+        "import_module",
         lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock(),
     )
 
@@ -99,10 +101,10 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
             self._config_path = None
             self._config_project_local = None
 
-        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *args, **kwargs):   # заглушка §3.5-нотиса
+        def _maybe_notice_profile_activation(self, *args, **kwargs):  # заглушка §3.5-нотиса
             return None
 
         def run(self):
@@ -147,7 +149,8 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     # (`dateutil` зовёт `import_module(".parser", __name__)` — с package),
     # иначе однопозиционная лямбда роняет их TypeError'ом.
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module",
+        tui_pkg.importlib,
+        "import_module",
         lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock(),
     )
 

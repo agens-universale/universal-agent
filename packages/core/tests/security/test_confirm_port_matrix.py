@@ -5,6 +5,7 @@ Record matrix: (allow, session) per choice.
 Backward-compat: old ids once/session/deny mapped to new ids.
 Invalid → deny_remember. allow = choice in (allow_remember, allow_once).
 """
+
 import types
 
 from gc_core.security import confirm_port as cp
@@ -26,11 +27,15 @@ def _ctx(choice, store=None):
         return choice
 
     return types.SimpleNamespace(
-        is_tui=True, tui_confirm=tui_confirm, config_dict={}, permission_store=store,
+        is_tui=True,
+        tui_confirm=tui_confirm,
+        config_dict={},
+        permission_store=store,
     ), calls
 
 
 # ── constants exist ──────────────────────────────────────────────────────
+
 
 def test_four_choice_constants_exist():
     assert CONFIRM_ALLOW_REMEMBER == "allow_remember"
@@ -56,6 +61,7 @@ def test_normalize_confirm_key_matches_tui_sets():
 
 
 # ── record matrix ────────────────────────────────────────────────────────
+
 
 def test_y_allows_and_records_session_true():
     store = PermissionStore()
@@ -93,6 +99,7 @@ def test_t_denies_and_records_run_only():
 
 # ── invalid choice → deny_remember ──────────────────────────────────────
 
+
 def test_invalid_choice_maps_to_deny_remember():
     store = PermissionStore()
     for bad in ("yes", None, "", "ok", 1, "session_old"):
@@ -104,6 +111,7 @@ def test_invalid_choice_maps_to_deny_remember():
 
 
 # ── backward-compat aliases (old tui_confirm returns once/session/deny) ──
+
 
 def test_alias_once_maps_to_allow_once():
     store = PermissionStore()
@@ -131,11 +139,21 @@ def test_unavailable_confirm_is_deny_once_not_session(monkeypatch):
     store = PermissionStore()
     monkeypatch.setattr(cp, "confirm_available", lambda ctx: False)
     ctx = types.SimpleNamespace(
-        is_tui=False, config_dict={}, permission_store=store, tui_confirm=None,
+        is_tui=False,
+        config_dict={},
+        permission_store=store,
+        tui_confirm=None,
     )
-    assert request_confirm(
-        title="t", question="q", fields=[], ctx=ctx, decision_key="command:curl x",
-    ) is False
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:curl x",
+        )
+        is False
+    )
     assert store.session_rules() == {}
     assert store.decision_for("command:curl x") is False
     assert store.insession_examples() == {"allowed": [], "denied": []}

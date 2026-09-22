@@ -5,6 +5,7 @@ replace-семантика — субагент затирал план орке
 маршрутизируется по ``parent_state_id``: у оркестратора — общий ``shared``
 (персистится), у субагента — собственное поле (живёт только его прогон).
 """
+
 import json
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
@@ -48,6 +49,7 @@ def _child_of(parent: State) -> State:
 
 # --- маршрутизация хранилища -------------------------------------------------
 
+
 def test_orchestrator_checklist_lives_in_shared():
     state = _state()
     state.session_todo = list(PARENT_ITEMS)
@@ -75,6 +77,7 @@ def test_subagent_starts_with_empty_checklist():
 
 # --- тул ---------------------------------------------------------------------
 
+
 def test_tool_call_from_subagent_preserves_parent_checklist():
     parent = _state()
     CallableTool(SessionTodo(state=parent))(todos=list(PARENT_ITEMS))
@@ -101,6 +104,7 @@ def test_tool_error_from_subagent_reports_own_counts():
 
 
 # --- читатели чек-листа ------------------------------------------------------
+
 
 def test_persistent_state_reads_own_checklist():
     parent = _state()

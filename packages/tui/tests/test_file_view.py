@@ -1,4 +1,5 @@
 """Юнит-тесты tui.services.file_view: resolve, probe, window, store, limits."""
+
 from pathlib import Path
 
 from gc_tui.services.file_view import (
@@ -148,15 +149,25 @@ def test_position_store_roundtrip(tmp_path):
 def test_format_range_label():
     assert format_range_label(start_line=1, end_line=10, total_lines=100) == "1–10 / 100"
     assert format_range_label(start_line=1, end_line=10, total_lines=None) == "1–10 / ?"
-    assert format_range_label(
-        start_line=1, end_line=0, total_lines=0, empty=True,
-    ) == "— / 0"
+    assert (
+        format_range_label(
+            start_line=1,
+            end_line=0,
+            total_lines=0,
+            empty=True,
+        )
+        == "— / 0"
+    )
 
 
 def test_settings_from_mapping():
-    s = FileViewSettings.from_mapping({
-        "enabled": False, "max_file_bytes": 1024, "page_lines": 40,
-    })
+    s = FileViewSettings.from_mapping(
+        {
+            "enabled": False,
+            "max_file_bytes": 1024,
+            "page_lines": 40,
+        }
+    )
     assert s.enabled is False
     assert s.max_file_bytes == 1024
     assert s.page_lines == 40
@@ -165,9 +176,7 @@ def test_settings_from_mapping():
 
 
 def test_settings_bad_max_bytes_falls_back():
-    assert FileViewSettings.from_mapping({"max_file_bytes": "nope"}).max_file_bytes == (
-        DEFAULT_MAX_FILE_BYTES
-    )
+    assert FileViewSettings.from_mapping({"max_file_bytes": "nope"}).max_file_bytes == (DEFAULT_MAX_FILE_BYTES)
 
 
 def test_settings_page_lines_auto_and_clamp():

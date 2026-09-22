@@ -84,11 +84,7 @@ def active_tool_usage_notice_rules(
     config_dict: dict[str, Any] | None,
 ) -> list[ToolUsageNoticeRule]:
     stopped = _stopped_tools(config_dict)
-    return [
-        rule
-        for rule in tool_usage_notice_rules_from_config_dict(config_dict)
-        if rule.tool_name not in stopped
-    ]
+    return [rule for rule in tool_usage_notice_rules_from_config_dict(config_dict) if rule.tool_name not in stopped]
 
 
 def tool_usage_notice_policy_enabled(config_dict: dict[str, Any] | None) -> bool:

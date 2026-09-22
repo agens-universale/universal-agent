@@ -13,6 +13,7 @@
 файла-тёзки по ДВУМ корням) остаётся застрахована
 `tests/config/test_stacked_validation.py` (не трогается).
 """
+
 from pathlib import Path
 
 import pytest
@@ -52,9 +53,11 @@ def test_merge_layers_substitutes_the_candidate_for_the_project_layer(stack):
     project_config.write_text('profile: "нет-такого"\n', encoding="utf-8")
 
     layers = _merge_layers(
-        {"models": {"a": {"model": "x"}, "b": {"model": "y"}}}, str(stack[0]),
+        {"models": {"a": {"model": "x"}, "b": {"model": "y"}}},
+        str(stack[0]),
         candidates={project_config: _raw_from_text('profile: "work"\n')},
-        project_path=str(project_config))
+        project_path=str(project_config),
+    )
 
     assert layers.active_name == "work"
     assert sorted(layers.config["models"]) == ["a", "b"]
@@ -70,9 +73,11 @@ def test_merge_layers_substitutes_the_candidate_for_the_managed_layer(stack):
     (stack[1] / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
 
     layers = _merge_layers(
-        {"models": {"a": {"model": "x"}, "b": {"model": "y"}}}, str(stack[0]),
+        {"models": {"a": {"model": "x"}, "b": {"model": "y"}}},
+        str(stack[0]),
         candidates={managed_path: _raw_from_text('profile: "work"\n')},
-        project_path=None)
+        project_path=None,
+    )
 
     assert layers.active_name == "work"
     assert layers.config["slots"]["default"] == "a"
@@ -87,11 +92,13 @@ def test_merge_layers_reads_the_project_file_from_disk_for_other_paths(stack):
     (stack[1] / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
 
     layers = _merge_layers(
-        {"models": {"a": {"model": "x"}}}, str(stack[0]),
+        {"models": {"a": {"model": "x"}}},
+        str(stack[0]),
         candidates={other: _raw_from_text('profile: "не-должен-примениться"\n')},
-        project_path=str(project_config))
+        project_path=str(project_config),
+    )
 
-    assert layers.active_name == "work"     # указатель — реальный диск, не кандидат
+    assert layers.active_name == "work"  # указатель — реальный диск, не кандидат
 
 
 # --- обобщение 2: НЕСКОЛЬКО кандидатов + резолв указателя на кандидат-профиль ---
@@ -109,7 +116,8 @@ def test_merge_layers_resolves_the_pointer_into_a_not_yet_existing_profile_candi
     layers = _merge_layers(
         {"profile": "job", "models": {"a": {"model": "x"}, "b": {"model": "y"}}},
         str(base),
-        candidates={new_profile_path: _raw_from_text('slots:\n  default: "a"\n')})
+        candidates={new_profile_path: _raw_from_text('slots:\n  default: "a"\n')},
+    )
 
     assert layers.active_name == "job"
     assert layers.ref is not None and Path(layers.ref.path) == new_profile_path
@@ -121,18 +129,19 @@ def test_multiple_candidates_apply_together(stack):
     указатель на новое имя — один кандидат, сам будущий профиль — второй, оба
     сразу, ни один не существует на диске."""
     base, profiles, project_config = stack
-    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-                    encoding="utf-8")
+    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
     new_profile_path = profiles / "job.yml"
     assert not project_config.exists() and not new_profile_path.exists()
 
     layers = _merge_layers(
-        _raw_from_text(base.read_text(encoding="utf-8")), str(base),
+        _raw_from_text(base.read_text(encoding="utf-8")),
+        str(base),
         candidates={
             project_config: _raw_from_text('profile: "job"\n'),
             new_profile_path: _raw_from_text('slots:\n  default: "a"\n'),
         },
-        project_path=str(project_config))
+        project_path=str(project_config),
+    )
 
     assert layers.active_name == "job"
     assert layers.config["slots"]["default"] == "a"
@@ -144,9 +153,7 @@ def test_candidate_profile_fallback_respects_the_reserved_word_guard(stack):
     base, profiles, _project_config = stack
 
     with pytest.raises(ValueError, match="зарезервировано"):
-        _merge_layers(
-            {"profile": "light"}, str(base),
-            candidates={profiles / "light.yml": {"slots": {"default": "a"}}})
+        _merge_layers({"profile": "light"}, str(base), candidates={profiles / "light.yml": {"slots": {"default": "a"}}})
 
 
 def test_a_real_file_on_disk_still_wins_over_a_namesake_candidate(stack):
@@ -167,13 +174,14 @@ def test_a_real_file_on_disk_still_wins_over_a_namesake_candidate(stack):
     project_profiles = Path.cwd() / ".gc" / "profiles"
     project_profiles.mkdir(parents=True)
     (project_profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
-    losing_candidate = profiles / "work.yml"   # базовый корень — проигрывает проектному
+    losing_candidate = profiles / "work.yml"  # базовый корень — проигрывает проектному
     assert not losing_candidate.exists()
 
     layers = _merge_layers(
         {"profile": "work", "models": {"a": {"model": "x"}, "b": {"model": "y"}}},
         str(base),
-        candidates={losing_candidate: {"slots": {"default": "b"}}})
+        candidates={losing_candidate: {"slots": {"default": "b"}}},
+    )
 
     assert Path(layers.ref.path) == project_profiles / "work.yml"
     assert layers.config["slots"]["default"] == "a"
@@ -186,13 +194,11 @@ def test_the_project_candidate_is_visible_through_validate_config_text_with_sect
     """Активация через проектный `.gc/config.yml`, которого ещё нет на диске:
     видит РЕАЛЬНЫЕ модели базы (кандидат не подменяет базу собой)."""
     base, profiles, project_config = stack
-    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-                    encoding="utf-8")
+    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
     assert not project_config.exists()
 
-    validate_config_text_with_sections(
-        'profile: "work"\n', base_path=base, target=project_config)
+    validate_config_text_with_sections('profile: "work"\n', base_path=base, target=project_config)
 
 
 def test_a_candidate_outside_the_profile_roots_is_not_mistaken_for_a_profile(stack):
@@ -205,11 +211,10 @@ def test_a_candidate_outside_the_profile_roots_is_not_mistaken_for_a_profile(sta
     же своим собственным профилем, и следующий старт не поднялся бы."""
     base, _profiles, project_config = stack
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
-    assert project_config.name == "config.yml"   # stem "config" совпадёт с указателем
+    assert project_config.name == "config.yml"  # stem "config" совпадёт с указателем
 
     with pytest.raises(ValueError, match='"config" не найден'):
-        validate_config_text_with_sections(
-            'profile: "config"\n', base_path=base, target=project_config)
+        validate_config_text_with_sections('profile: "config"\n', base_path=base, target=project_config)
 
 
 def test_clearing_the_project_pointer_is_refused_when_it_breaks_the_stack(stack):
@@ -217,15 +222,13 @@ def test_clearing_the_project_pointer_is_refused_when_it_breaks_the_stack(stack)
     раскладка). Снятие указателя рвёт единственный слот (моделей ≥2 в базе) —
     фаза 2 обязана поймать это ДО записи."""
     base, profiles, project_config = stack
-    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-                    encoding="utf-8")
+    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
     project_config.parent.mkdir(parents=True, exist_ok=True)
     project_config.write_text('profile: "work"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"slots\.default.*≥2"):
-        validate_config_text_with_sections(
-            'profile: ""\n', base_path=base, target=project_config)
+        validate_config_text_with_sections('profile: ""\n', base_path=base, target=project_config)
     # синтаксис-то валиден — фаза 1 одного файла эту раскладку пропустила бы не глядя
     validate_config_text_with_sections('profile: ""\n')
 
@@ -240,8 +243,7 @@ def test_an_unresolvable_pointer_written_into_the_project_layer_is_refused(stack
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="нет-такого"):
-        validate_config_text_with_sections(
-            'profile: "нет-такого"\n', base_path=base, target=project_config)
+        validate_config_text_with_sections('profile: "нет-такого"\n', base_path=base, target=project_config)
 
 
 def test_an_already_dangling_pointer_still_falls_back_to_the_single_file(stack):
@@ -256,8 +258,8 @@ def test_an_already_dangling_pointer_still_falls_back_to_the_single_file(stack):
     project_config.write_text('profile: "нет-такого"\n', encoding="utf-8")
 
     validate_config_text_with_sections(
-        'profile: "нет-такого"\nlevel: default\n',
-        base_path=base, target=project_config, lenient_prebroken=True)
+        'profile: "нет-такого"\nlevel: default\n', base_path=base, target=project_config, lenient_prebroken=True
+    )
 
 
 # --- куда ложится сам указатель: `profile_pointer_write_target` -----------------
@@ -271,6 +273,7 @@ def test_an_already_dangling_pointer_still_falls_back_to_the_single_file(stack):
 def test_pointer_write_target_is_the_base_when_the_project_layer_is_silent(stack):
     """Проектного слоя нет вовсе — писать некуда, кроме базы запуска."""
     from gc_core.config_modules.layers import profile_pointer_write_target
+
     base, _profiles, _project_config = stack
 
     assert profile_pointer_write_target(base) == Path(base)
@@ -281,6 +284,7 @@ def test_pointer_write_target_is_the_project_file_that_carries_the_pointer(stack
     Запись в базу тут не меняет ничего: мерж отдаёт победу оверлею, и следующий
     старт поднимает прежнее имя."""
     from gc_core.config_modules.layers import profile_pointer_write_target
+
     base, _profiles, project_config = stack
     project_config.parent.mkdir(parents=True, exist_ok=True)
     project_config.write_text('profile: "work"\n', encoding="utf-8")
@@ -293,6 +297,7 @@ def test_pointer_write_target_follows_an_empty_project_pointer_too(stack):
     такая же победа оверлея по merge-контракту, и активация, записанная в базу,
     не подействовала бы."""
     from gc_core.config_modules.layers import profile_pointer_write_target
+
     base, _profiles, project_config = stack
     project_config.parent.mkdir(parents=True, exist_ok=True)
     project_config.write_text('profile: ""\n', encoding="utf-8")
@@ -305,6 +310,7 @@ def test_pointer_write_target_ignores_the_managed_layer(stack):
     пользовательская настройка, и писать в чужой файл ради победы над ним мы не
     станем. Раскладка редкая, а исход честен: запись отвергнет гейт стека."""
     from gc_core.config_modules.layers import profile_pointer_write_target
+
     base, _profiles, _project_config = stack
     managed = mcp_paths.managed_config_path()
     managed.parent.mkdir(parents=True, exist_ok=True)
@@ -318,6 +324,7 @@ def test_pointer_write_target_trusts_the_document_it_was_given(stack):
     «Профили»): диск тогда не перечитывается вовсе, иначе футер ходил бы в файл
     на каждый кадр."""
     from gc_core.config_modules.layers import profile_pointer_write_target
+
     base, _profiles, project_config = stack
     project_config.parent.mkdir(parents=True, exist_ok=True)
     project_config.write_text('profile: "work"\n', encoding="utf-8")
@@ -333,9 +340,7 @@ def _pointerless_project_stand(stack):
     и СУЩЕСТВУЮЩИЙ проектный `.gc/config.yml` БЕЗ ключа `profile` — ровно цель,
     которую отдаёт `_profile_activation_target` для профиля из проектного корня."""
     base, profiles, project_config = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-        encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
     (profiles / "job.yml").write_text('slots:\n  default: "b"\n', encoding="utf-8")
     (profiles / "ghost.yml").write_text('slots:\n  default: "призрак"\n', encoding="utf-8")
@@ -353,6 +358,7 @@ def test_a_refused_activation_leaves_the_pointerless_project_file_byte_identical
     активный профиль — прежним."""
     from gc_core import onboarding_config_writer as ocw
     from gc_core.config import load_config_ex
+
     base, _profiles, project_config = _pointerless_project_stand(stack)
     before = project_config.read_bytes()
 
@@ -371,6 +377,7 @@ def test_a_successful_activation_still_appends_the_anchor_and_the_value(stack):
     доказывает, что запись состоялась, а не совпала с прежним ответом базы."""
     from gc_core import onboarding_config_writer as ocw
     from gc_core.config import load_config_ex
+
     base, _profiles, project_config = _pointerless_project_stand(stack)
 
     ocw.write_profile_pointer(project_config, "job", base_path=base)
@@ -389,6 +396,7 @@ def test_dropping_the_pointer_is_lenient_to_a_stack_broken_by_a_foreign_layer(st
     что и активации, — хотя снятие указателя хуже не делает никогда, это дверь
     наружу. Поблажка теперь достаётся именно снятию (`name == ""`)."""
     from gc_core import onboarding_config_writer as ocw
+
     base, _profiles, project_config = stack
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
     project_config.parent.mkdir(parents=True, exist_ok=True)

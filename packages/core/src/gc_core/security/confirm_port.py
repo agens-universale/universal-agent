@@ -6,10 +6,10 @@ from typing import Any
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 
-CONFIRM_ALLOW_REMEMBER = "allow_remember"   # Y — exec + session True + few-shot allowed
-CONFIRM_ALLOW_ONCE = "allow_once"       # O — exec + run only
+CONFIRM_ALLOW_REMEMBER = "allow_remember"  # Y — exec + session True + few-shot allowed
+CONFIRM_ALLOW_ONCE = "allow_once"  # O — exec + run only
 CONFIRM_DENY_REMEMBER = "deny_remember"  # N — block + session False + few-shot denied
-CONFIRM_DENY_ONCE = "deny_once"        # T — block + run only
+CONFIRM_DENY_ONCE = "deny_once"  # T — block + run only
 _VALID_CHOICES = {
     CONFIRM_ALLOW_REMEMBER,
     CONFIRM_ALLOW_ONCE,
@@ -25,10 +25,7 @@ CONFIRM_KEY_N = frozenset({"n", "N", "т", "Т"})  # deny_remember
 CONFIRM_KEY_T = frozenset({"t", "T", "е", "Е"})  # deny_once
 
 # Human-facing one-liner (CLI prompt / docs); mirrors banner Y/O/N/T labels.
-CONFIRM_CHOICE_HINT = (
-    "[Y/Н] и подобные в сессии  [O/Щ] разово  "
-    "[N/Т] запрет+ в сессии  [T/Е] запрет разово"
-)
+CONFIRM_CHOICE_HINT = "[Y/Н] и подобные в сессии  [O/Щ] разово  [N/Т] запрет+ в сессии  [T/Е] запрет разово"
 
 # Backward-compat aliases (optional one release): old tui_confirm returns
 # once|session|deny — маппим в новые 4-choice ids. CLI input() aliases removed.
@@ -129,7 +126,10 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
                 return CONFIRM_DENY_ONCE
             try:
                 choice = tui_confirm(
-                    title=title, question=question, fields=fields, via=via,
+                    title=title,
+                    question=question,
+                    fields=fields,
+                    via=via,
                 )
             except TypeError:
                 choice = tui_confirm(title=title, question=question, fields=fields)
@@ -140,7 +140,9 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
             # but if confirm is reached, key matrix matches TUI.
             result = coerce_confirm_choice(
                 prompt_user_confirmation_choice(
-                    title=title, fields=fields, question=question,
+                    title=title,
+                    fields=fields,
+                    question=question,
                 )
             )
     finally:
@@ -155,7 +157,11 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
 
 
 def request_confirm(
-    *, title: str, question: str, fields: list[tuple[str, object]], ctx: Any,
+    *,
+    title: str,
+    question: str,
+    fields: list[tuple[str, object]],
+    ctx: Any,
     decision_key: str | None = None,
 ) -> bool:
     # Lazy: security → tools на module load ломает import graph.

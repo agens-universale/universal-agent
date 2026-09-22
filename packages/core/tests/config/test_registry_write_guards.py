@@ -4,6 +4,7 @@
 (`_drop_mapping_entry`: «текст не изменился — это отказ»), но не довёл до
 остальных путей: снятие слота/привязки и секция, оказавшаяся не словарём.
 """
+
 from pathlib import Path
 
 import pytest
@@ -55,15 +56,11 @@ def test_unsetting_an_assign_quoted_differently_still_finds_it(tmp_path):
     """Ключ wildcard написан одинарными кавычками, писатель пишет свои двойные —
     и всё же строка обязана найтись: ключи сравниваются как YAML-скаляры, а не
     побайтово. Иначе снятие «удавалось» бы на нетронутом файле."""
-    text = (
-        'models:\n  gc:\n    model: "x"\n'
-        "assign:\n  subagents:\n    '*': gc\n"
-    )
+    text = "models:\n  gc:\n    model: \"x\"\nassign:\n  subagents:\n    '*': gc\n"
     target = _target(tmp_path, text)
 
     rw.write_assign(target, "*", None, "")
-    assert (yaml.safe_load(target.read_text(encoding="utf-8"))["assign"]
-            .get("subagents") or {}) == {}
+    assert (yaml.safe_load(target.read_text(encoding="utf-8"))["assign"].get("subagents") or {}) == {}
 
 
 def test_unsetting_an_assign_in_an_inline_mapping_is_refused(tmp_path):
@@ -82,9 +79,7 @@ def test_unsetting_an_assign_absent_from_the_file_is_a_no_op(tmp_path):
     target = _target(tmp_path, text)
 
     rw.write_assign(target, "summary", None, "")
-    assert yaml.safe_load(target.read_text(encoding="utf-8"))["assign"] == {
-        "finish_gate": "gc"
-    }
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["assign"] == {"finish_gate": "gc"}
 
 
 # --- Многострочные значения соседних полей переживают точечную правку ---
@@ -96,11 +91,7 @@ def test_editing_one_field_keeps_a_multiline_value_of_a_sibling_field_intact(tmp
     «непустых» строк принимал их за мусор и склеивал соседние переносы:
     `token: "\\n\\nUser:"` → `" User:"`. Правка ЧУЖОГО поля (`model`) не должна
     портить значение, которого вообще не касалась."""
-    text = ('models:\n'
-            '  gc:\n'
-            '    model: "old-model"\n'
-            '    url: "http://host/v1"\n'
-            '    token: "\\n\\nUser:"\n')
+    text = 'models:\n  gc:\n    model: "old-model"\n    url: "http://host/v1"\n    token: "\\n\\nUser:"\n'
     target = _target(tmp_path, text)
 
     rw.upsert_model(target, "gc", {"model": "new-model"}, "")
@@ -111,15 +102,11 @@ def test_editing_one_field_keeps_a_multiline_value_of_a_sibling_field_intact(tmp
 
 
 def test_unsetting_a_nested_assign_written_as_a_line_still_works(tmp_path):
-    text = (
-        'models:\n  gc:\n    model: "x"\n'
-        'assign:\n  subagents:\n    "*": "gc"\n'
-    )
+    text = 'models:\n  gc:\n    model: "x"\nassign:\n  subagents:\n    "*": "gc"\n'
     target = _target(tmp_path, text)
 
     rw.write_assign(target, "*", None, "")
-    assert (yaml.safe_load(target.read_text(encoding="utf-8"))["assign"]
-            .get("subagents") or {}) == {}
+    assert (yaml.safe_load(target.read_text(encoding="utf-8"))["assign"].get("subagents") or {}) == {}
 
 
 # --- Секция не-словарь: отказ, который UI уже умеет показать, вместо AttributeError ---
@@ -143,10 +130,7 @@ def test_a_section_shaped_as_a_list_is_refused_not_crashed(tmp_path, section):
 
 
 def test_nested_subagents_shaped_as_a_list_is_refused(tmp_path):
-    text = (
-        'models:\n  gc:\n    model: "x"\n'
-        "assign:\n  subagents: [x]\n"
-    )
+    text = 'models:\n  gc:\n    model: "x"\nassign:\n  subagents: [x]\n'
     target = _target(tmp_path, text, "work.yml")
 
     with pytest.raises(RegistryWriteError, match="subagents"):
@@ -192,7 +176,7 @@ def test_removing_a_model_the_active_profile_points_at_is_refused(tmp_path, stac
     base.write_text(text, encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
 
-    with pytest.raises(RegistryWriteError, match=r'gc'):
+    with pytest.raises(RegistryWriteError, match=r"gc"):
         rw.remove_model(base, "gc", force=True)
     assert base.read_text(encoding="utf-8") == text
 
@@ -201,9 +185,7 @@ def test_a_base_resolvable_only_through_the_profile_still_accepts_writes(tmp_pat
     """Обратная сторона: сам по себе основной файл нерезолвим (2 модели, ни одного
     слота), а стек валиден — правка записи обязана проходить."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-        encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
 
     rw.upsert_model(base, "a", {"model": "x2"}, "")
@@ -215,9 +197,7 @@ def test_an_active_profile_write_is_judged_on_the_stack(tmp_path, stack):
     нерезолвимым — отказ. Без `stack_base` (неактивный профиль) — фаза 1, запись
     проходит."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-        encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
     target = profiles / "work.yml"
     text = 'slots:\n  default: "a"\n'
     target.write_text(text, encoding="utf-8")
@@ -243,8 +223,7 @@ def test_needs_default_slot_sees_the_active_profile_from_the_base(stack):
 
     assert rw.needs_default_slot(base, [("upsert_model", "gc", {"model": "y"})], "") is True
     # и ответ на него разрешает запись одной транзакцией — тупика нет
-    rw.apply_registry_ops(base, [("upsert_model", "gc", {"model": "y"}),
-                                 ("write_slot", "default", "gc")], "")
+    rw.apply_registry_ops(base, [("upsert_model", "gc", {"model": "y"}), ("write_slot", "default", "gc")], "")
 
 
 def test_needs_default_slot_is_quiet_when_the_profile_sets_the_slot(stack):
@@ -263,16 +242,17 @@ def test_needs_default_slot_for_a_profile_counts_the_base_under_it(stack):
     target = profiles / "work.yml"
     target.write_text("models: {}\n", encoding="utf-8")
 
-    assert rw.needs_default_slot(
-        target, [("upsert_model", "b", {"model": "y"})], "",
-        is_profile=True, stack_base=base) is True
+    assert (
+        rw.needs_default_slot(target, [("upsert_model", "b", {"model": "y"})], "", is_profile=True, stack_base=base)
+        is True
+    )
 
 
 def test_needs_default_slot_does_not_raise_on_ops_that_cannot_apply(stack):
     """Справка не имеет права ронять форму: не наложилось — вопроса нет, а
     невозможность записи всё равно поймает гейт своим отказом."""
     base, _profiles = stack
-    base.write_text('models: {a: {model: "x"}}\n', encoding="utf-8")   # инлайновый мэппинг
+    base.write_text('models: {a: {model: "x"}}\n', encoding="utf-8")  # инлайновый мэппинг
 
     assert rw.needs_default_slot(base, [("upsert_model", "b", {"model": "y"})], "") is False
 
@@ -294,9 +274,7 @@ def test_broken_references_ignore_the_targets_own_file(stack):
     """Свой файл сюда не попадает — его по-прежнему отдаёт `references_to`, и
     удалению своей ссылки каскадом ничего не мешает."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  gc:\n    model: "x"\nslots:\n  default: "gc"\n',
-        encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\nslots:\n  default: "gc"\n', encoding="utf-8")
     (profiles / "work.yml").write_text("slots: {}\n", encoding="utf-8")
 
     assert rw.references_broken_by_removal(base, "gc") == []
@@ -308,8 +286,7 @@ def test_broken_references_of_a_profile_see_the_base(stack):
     target = profiles / "work.yml"
     target.write_text('models:\n  p1:\n    model: "x"\n', encoding="utf-8")
 
-    assert rw.references_broken_by_removal(target, "p1", stack_base=base) == [
-        ("config.yml", "slots.default")]
+    assert rw.references_broken_by_removal(target, "p1", stack_base=base) == [("config.yml", "slots.default")]
 
 
 def test_a_shadowed_alias_survives_its_own_removal_and_breaks_nothing(stack):
@@ -318,9 +295,7 @@ def test_a_shadowed_alias_survives_its_own_removal_and_breaks_nothing(stack):
     профильную можно, запись базы остаётся на её месте, и слот базы резолвится.
     Отказать здесь значило бы запретить возможное."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\nslots:\n  default: "gc"\n',
-        encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "base-x"\nslots:\n  default: "gc"\n', encoding="utf-8")
     target = profiles / "work.yml"
     target.write_text('models:\n  gc:\n    model: "profile-y"\n', encoding="utf-8")
 
@@ -360,10 +335,8 @@ def test_an_alias_surviving_via_a_project_pointed_profile_is_not_refused(stack):
     base.write_text('models:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text(
-        'profile: "work"\nslots:\n  default: "gc"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('models:\n  gc:\n    model: "profile-y"\n',
-                                       encoding="utf-8")
+    (gc_dir / "config.yml").write_text('profile: "work"\nslots:\n  default: "gc"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('models:\n  gc:\n    model: "profile-y"\n', encoding="utf-8")
 
     assert rw.references_broken_by_removal(base, "gc") == []
     rw.remove_model(base, "gc", force=True)
@@ -375,15 +348,12 @@ def test_a_pointer_conflict_between_base_and_project_is_resolved_like_the_loader
     `resolve_profile_pointer` (общий резолв `stack_documents`) обязан называть ТО ЖЕ
     победившее имя, а не то, что лежит в самой базе."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
     (gc_dir / "config.yml").write_text('profile: "corp"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('models:\n  ghost:\n    model: "z"\n',
-                                       encoding="utf-8")
-    (profiles / "corp.yml").write_text('models:\n  gc:\n    model: "corp-y"\n',
-                                       encoding="utf-8")
+    (profiles / "work.yml").write_text('models:\n  ghost:\n    model: "z"\n', encoding="utf-8")
+    (profiles / "corp.yml").write_text('models:\n  gc:\n    model: "corp-y"\n', encoding="utf-8")
 
     # "gc" переживёт удаление ТОЛЬКО если резолвится "corp" (он её объявляет);
     # "work" её не знает вовсе.
@@ -404,14 +374,11 @@ def test_resolve_profile_pointer_interpolates_env_placeholders(stack, monkeypatc
 
     base, profiles = stack
     monkeypatch.setenv("GC_TEST_PROFILE_PTR", "work")
-    base.write_text(
-        'profile: "${ENV:GC_TEST_PROFILE_PTR}"\nmodels:\n  gc:\n    model: "x"\n',
-        encoding="utf-8")
+    base.write_text('profile: "${ENV:GC_TEST_PROFILE_PTR}"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
 
     assert resolve_profile_pointer(base) == "work"
-    assert any(Path(p).resolve() == (profiles / "work.yml").resolve()
-               for p, _doc in stack_documents(base))
+    assert any(Path(p).resolve() == (profiles / "work.yml").resolve() for p, _doc in stack_documents(base))
 
 
 def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog):
@@ -423,10 +390,8 @@ def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog)
     from gc_core.config_modules.layers import resolve_profile_pointer
 
     base, _profiles = stack
-    marker = tmp_path / "no-such-pointer.txt"          # файла нет
-    base.write_text(
-        'profile: "${{FILE:{}}}"\n'.format(str(marker).replace("\\", "/")),
-        encoding="utf-8")
+    marker = tmp_path / "no-such-pointer.txt"  # файла нет
+    base.write_text('profile: "${{FILE:{}}}"\n'.format(str(marker).replace("\\", "/")), encoding="utf-8")
 
     with caplog.at_level("WARNING"):
         resolve_profile_pointer(base)
@@ -436,9 +401,9 @@ def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog)
 
     assert len(caplog.records) == first, "повторные вызовы шумят в лог"
 
-    marker.write_text("work", encoding="utf-8")        # файл появился
-    (_profiles / "work.yml").write_text('slots: {}\n', encoding="utf-8")
-    assert resolve_profile_pointer(base) == "work"     # кэш не залип на пустоте
+    marker.write_text("work", encoding="utf-8")  # файл появился
+    (_profiles / "work.yml").write_text("slots: {}\n", encoding="utf-8")
+    assert resolve_profile_pointer(base) == "work"  # кэш не залип на пустоте
 
 
 def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(stack, tmp_path):
@@ -455,7 +420,8 @@ def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(stack, tm
     marker.write_text("work", encoding="utf-8")
     base.write_text(
         'profile: "${{FILE:{}}}"\nmodels:\n  gc:\n    model: "x"\n'.format(str(marker).replace("\\", "/")),
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
 
     assert resolve_profile_pointer(base) == "work"
@@ -495,6 +461,7 @@ def test_resolve_profile_pointer_is_lenient_to_a_broken_base(stack):
     (gc_dir / "config.yml").write_text('profile: "corp"\n', encoding="utf-8")
 
     from gc_core.config_modules.layers import resolve_profile_pointer
+
     assert resolve_profile_pointer(base) == "corp"
 
 
@@ -537,11 +504,9 @@ def test_a_broken_section_does_not_hide_the_sound_one_beside_it(stack):
     оставив привязку висеть."""
     base, profiles = stack
     base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text(
-        'slots: [x]\nassign:\n  summarizer: "gc"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text('slots: [x]\nassign:\n  summarizer: "gc"\n', encoding="utf-8")
 
-    assert rw.references_broken_by_removal(base, "gc") == [
-        ("work.yml", "assign.summarizer")]
+    assert rw.references_broken_by_removal(base, "gc") == [("work.yml", "assign.summarizer")]
 
 
 def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
@@ -555,19 +520,16 @@ def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
     Соседний страж ставит ту же конфигурацию, но кладёт слот в базу и проходит
     мимо дефекта: снести каскадом можно лишь то, что лежит в правимом файле."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
     target = profiles / "work.yml"
-    target.write_text(
-        'models:\n  gc:\n    model: "profile-y"\nslots:\n  default: "gc"\n',
-        encoding="utf-8")
+    target.write_text('models:\n  gc:\n    model: "profile-y"\nslots:\n  default: "gc"\n', encoding="utf-8")
 
     assert rw.references_broken_by_removal(target, "gc", stack_base=base) == []
     rw.remove_model(target, "gc", force=True, is_profile=True, stack_base=base)
 
     doc = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert (doc.get("models") or {}) == {}
-    assert (doc.get("slots") or {}) == {"default": "gc"}   # ссылка осталась валидной
+    assert (doc.get("slots") or {}) == {"default": "gc"}  # ссылка осталась валидной
 
 
 # --- Удаление из НЕАКТИВНОГО профиля судится стеком «база + этот профиль» ---
@@ -587,8 +549,7 @@ def _two_profiles(stack, *, active: str = "a"):
     base.write_text(f'profile: "{active}"\n', encoding="utf-8")
     (profiles / "a.yml").write_text('models:\n  x:\n    model: "a-x"\n', encoding="utf-8")
     other = profiles / "b.yml"
-    other.write_text(
-        'models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
+    other.write_text('models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
     return base, other
 
 
@@ -623,8 +584,7 @@ def test_removal_from_an_inactive_profile_protects_a_base_reference_it_alone_res
     other = profiles / "b.yml"
     other.write_text('models:\n  p:\n    model: "b-p"\n', encoding="utf-8")
 
-    assert rw.references_broken_by_removal(other, "p", stack_base=base) == [
-        ("config.yml", "slots.default")]
+    assert rw.references_broken_by_removal(other, "p", stack_base=base) == [("config.yml", "slots.default")]
 
 
 def test_a_base_namesake_survives_removal_from_an_inactive_profile(stack):
@@ -635,8 +595,7 @@ def test_a_base_namesake_survives_removal_from_an_inactive_profile(stack):
     base.write_text('profile: "a"\nmodels:\n  x:\n    model: "base-x"\n', encoding="utf-8")
     (profiles / "a.yml").write_text("slots: {}\n", encoding="utf-8")
     other = profiles / "b.yml"
-    other.write_text(
-        'models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
+    other.write_text('models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
 
     assert rw.alias_survives_removal(other, "x", stack_base=base) is True
     assert rw.references_broken_by_removal(other, "x", stack_base=base) == []
@@ -656,11 +615,10 @@ def test_needs_default_slot_for_an_inactive_profile_counts_its_own_cascade(stack
     (profiles / "a.yml").write_text('models:\n  x:\n    model: "a-x"\n', encoding="utf-8")
     other = profiles / "b.yml"
     other.write_text(
-        'models:\n  x:\n    model: "b-x"\n  y:\n    model: "b-y"\nslots:\n  default: "x"\n',
-        encoding="utf-8")
+        'models:\n  x:\n    model: "b-x"\n  y:\n    model: "b-y"\nslots:\n  default: "x"\n', encoding="utf-8"
+    )
 
-    assert rw.needs_default_slot(other, [("remove_model", "x", True)], "",
-                                 is_profile=True, stack_base=base) is True
+    assert rw.needs_default_slot(other, [("remove_model", "x", True)], "", is_profile=True, stack_base=base) is True
 
 
 # --- Отказ валидации называет файл, где лежит ключ ---
@@ -683,10 +641,12 @@ def test_a_refusal_caused_by_the_profile_names_the_profile_and_its_file(stack):
     гейта и ДО записи, правку своего файла больше не запирает — прежний стенд с
     уже висячей ссылкой профиля до отказа теперь не доходит."""
     base, profiles = stack
-    text = ('profile: "work"\n'
-            'models:\n  fast:\n    model: "qwen/qwen3-8b"\n'
-            '  strong:\n    model: "m-strong"\n'
-            'slots:\n  default: "fast"\n')
+    text = (
+        'profile: "work"\n'
+        'models:\n  fast:\n    model: "qwen/qwen3-8b"\n'
+        '  strong:\n    model: "m-strong"\n'
+        'slots:\n  default: "fast"\n'
+    )
     base.write_text(text, encoding="utf-8")
     profile = profiles / "work.yml"
     profile.write_text('slots:\n  max: "strong"\n', encoding="utf-8")
@@ -695,8 +655,7 @@ def test_a_refusal_caused_by_the_profile_names_the_profile_and_its_file(stack):
         rw.apply_registry_ops(base, [("remove_model", "strong", True)], "")
 
     message = str(exc.value)
-    assert message.startswith(
-        'slots.max: алиас "strong" не найден в merged-реестре models')
+    assert message.startswith('slots.max: алиас "strong" не найден в merged-реестре models')
     assert f'поправьте slots.max в профиле "work": {profile}' in message
     assert base.read_text(encoding="utf-8") == text
 
@@ -708,8 +667,7 @@ def test_a_refusal_caused_by_the_base_names_the_base_file(stack):
     профильная модель, которую резолвит только слот базы (прежний стенд с уже
     висячим слотом базы с починки L19 до отказа не доходит)."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8")
+    base.write_text('profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8")
     profile = profiles / "work.yml"
     text = 'models:\n  p1:\n    model: "x"\n'
     profile.write_text(text, encoding="utf-8")
@@ -738,7 +696,8 @@ def test_a_validation_refusal_carries_no_operation_names(stack):
         'models:\n  fast:\n    model: "qwen/qwen3-8b"\n'
         '  strong:\n    model: "m-strong"\n'
         'slots:\n  default: "fast"\n',
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     (profiles / "work.yml").write_text('slots:\n  max: "strong"\n', encoding="utf-8")
 
     with pytest.raises(RegistryWriteError) as exc:
@@ -758,9 +717,9 @@ def test_the_culprit_is_judged_on_the_stack_the_validator_saw_not_on_the_disk(st
     текстом, — тому же, что судил валидатор."""
     base, profiles = stack
     base.write_text(
-        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n'
-        'slots:\n  default: "a"\n',
-        encoding="utf-8")
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\nslots:\n  default: "a"\n',
+        encoding="utf-8",
+    )
     profile = profiles / "work.yml"
     profile.write_text('slots:\n  default: "a"\n', encoding="utf-8")
 
@@ -770,6 +729,8 @@ def test_the_culprit_is_judged_on_the_stack_the_validator_saw_not_on_the_disk(st
     message = str(exc.value)
     assert f'поправьте slots.default в профиле "work": {profile}' in message
     assert str(base) not in message
+
+
 def test_an_unreadable_target_is_a_write_error(tmp_path):
     """Цель операции не читается — это отказ ЗАПИСИ, а не сюрприз вызывающему.
 
@@ -797,8 +758,7 @@ def test_the_default_slot_question_does_not_crash_on_an_unreadable_target(tmp_pa
     target = tmp_path / "profile.yml"
     target.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-16")
 
-    assert rw.needs_default_slot(
-        target, [("upsert_model", "b", {"model": "y"})], "", is_profile=True) is False
+    assert rw.needs_default_slot(target, [("upsert_model", "b", {"model": "y"})], "", is_profile=True) is False
 
 
 def test_a_readable_target_still_writes(tmp_path):

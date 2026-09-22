@@ -4,6 +4,7 @@
 скопированного вне приложения) — на Windows/терминалах без bracketed-paste вставка не
 работает. Зеркалит логику CommandTextArea (`_paste_from_os_clipboard`), но для Input:
 многострочный текст сводится в одну строку (Input однострочный)."""
+
 from __future__ import annotations
 
 from textual import events
@@ -37,12 +38,13 @@ class PasteInput(Input):
     def _paste_from_os_clipboard(self) -> bool:
         """Вставить текст системного буфера в позицию курсора. True — если что-то вставили."""
         from gc_tui.services.os_ops import read_clipboard
+
         text = read_clipboard()
         if not text:
             return False
         # Input однострочный: переводы строк сводим (bracketed шлёт \r).
         text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
-        if not self.selection.is_empty:      # выделение → заменить, а не дописать (нативное поведение поля)
+        if not self.selection.is_empty:  # выделение → заменить, а не дописать (нативное поведение поля)
             self.delete_selection()
         self.insert_text_at_cursor(text)
         return True

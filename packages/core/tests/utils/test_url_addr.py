@@ -7,30 +7,37 @@
 заслуживает прямых сторожей: сверка зовётся из `load_config` на КАЖДОМ старте,
 когда прописана локальная батарейка.
 """
+
 import pytest
 from gc_core.utils.url_addr import is_loopback, same_service
 
 
-@pytest.mark.parametrize("url", [
-    "http://localhost:8735/v1",
-    "http://127.0.0.1:8735/v1",
-    "http://127.13.0.9:80/x",       # весь блок 127.* — петля, не только .0.1
-    "http://[::1]:8735/v1",
-    "http://0.0.0.0:8735/v1",
-    "HTTP://LocalHost:8735/v1",     # регистр хоста не имеет значения
-    "  http://localhost:8735/v1  ",  # пробелы по краям пришли из config.yml
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8735/v1",
+        "http://127.0.0.1:8735/v1",
+        "http://127.13.0.9:80/x",  # весь блок 127.* — петля, не только .0.1
+        "http://[::1]:8735/v1",
+        "http://0.0.0.0:8735/v1",
+        "HTTP://LocalHost:8735/v1",  # регистр хоста не имеет значения
+        "  http://localhost:8735/v1  ",  # пробелы по краям пришли из config.yml
+    ],
+)
 def test_loopback_forms_people_actually_write(url):
     assert is_loopback(url) is True
 
 
-@pytest.mark.parametrize("url", [
-    "https://api.groq.com/openai/v1/audio/transcriptions",
-    "http://localhost.чужой-домен.com:8735/v1",   # начинается на localhost, но чужой
-    "http://127.0.0.1.evil.com:8735/v1",
-    "",
-    "не-адрес-вовсе",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        "http://localhost.чужой-домен.com:8735/v1",  # начинается на localhost, но чужой
+        "http://127.0.0.1.evil.com:8735/v1",
+        "",
+        "не-адрес-вовсе",
+    ],
+)
 def test_not_loopback(url):
     assert is_loopback(url) is False
 

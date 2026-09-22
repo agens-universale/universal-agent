@@ -107,7 +107,8 @@ def cleanup_threads(
         if ts is None:
             try:
                 ts = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path), tz=UTC,
+                    os.path.getmtime(entry_path),
+                    tz=UTC,
                 )
             except OSError:
                 stats["errors"] += 1
@@ -138,7 +139,8 @@ def cleanup_threads(
             # Чистим ВСЕ песочницы старше TTL по их mtime (не только orphan'ы).
             try:
                 mtime = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path), tz=UTC,
+                    os.path.getmtime(entry_path),
+                    tz=UTC,
                 )
             except OSError:
                 stats["errors"] += 1
@@ -161,17 +163,22 @@ def main() -> int:
     parser.add_argument("--threads-dir", required=True, help="каталог swarm_threads/")
     parser.add_argument("--sandbox-root-dir", required=True, help=".swarm_sandboxes/")
     parser.add_argument(
-        "--ttl-hours", type=float, default=24.0,
+        "--ttl-hours",
+        type=float,
+        default=24.0,
         help="срок хранения в часах (default: 24)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="только посчитать, ничего не удалять",
     )
     args = parser.parse_args()
 
     stats = cleanup_threads(
-        args.threads_dir, args.sandbox_root_dir, args.ttl_hours,
+        args.threads_dir,
+        args.sandbox_root_dir,
+        args.ttl_hours,
         dry_run=args.dry_run,
     )
 

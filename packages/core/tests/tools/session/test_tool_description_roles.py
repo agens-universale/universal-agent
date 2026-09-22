@@ -79,9 +79,7 @@ def test_read_file_pagination_lines_only():
 
 
 def test_read_stored_tool_output_pagination_chars():
-    flat = " ".join(
-        ReadStoredToolOutput.tool_description()["description"].lower().split()
-    )
+    flat = " ".join(ReadStoredToolOutput.tool_description()["description"].lower().split())
     assert "character" in flat
     assert "eof" in flat
     prompt = ReadStoredToolOutput.prompt_description().lower()

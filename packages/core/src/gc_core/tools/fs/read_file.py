@@ -158,7 +158,7 @@ class ReadFile(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The path of the file to read. Must be a valid file path and not a directory."
+                        "description": "The path of the file to read. Must be a valid file path and not a directory.",
                     },
                     "offset": {
                         "type": "integer",
@@ -166,10 +166,7 @@ class ReadFile(AbstractSimpleTool):
                     },
                     "limit": {
                         "type": "integer",
-                        "description": (
-                            "Max lines to read starting from offset. "
-                            "Default: to end of file."
-                        ),
+                        "description": ("Max lines to read starting from offset. Default: to end of file."),
                     },
                     "encoding": {
                         "type": "string",
@@ -181,15 +178,15 @@ class ReadFile(AbstractSimpleTool):
                     },
                 },
                 "required": ["path"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: fs_read_file
+        description = """Tool name: fs_read_file
 Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256.
 Input schema: {
   "type": "object",
@@ -227,9 +224,8 @@ Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
 - Line range defaults to offset=1 through end of file; narrow with offset/limit when needed.
 - On file_too_large: file_size_bytes is set; error.max_bytes has the limit; follow error.message.
-'''
+"""
         return description
-
 
     @enforce_read_guard(path_arg="path")
     async def acall(
@@ -287,9 +283,7 @@ Usage:
                 file_size_bytes=None,
             )
         if file_size_bytes is not None:
-            size_err = check_file_size(
-                file_size_bytes, max_bytes, operation="fs_read_file"
-            )
+            size_err = check_file_size(file_size_bytes, max_bytes, operation="fs_read_file")
             if size_err is not None:
                 return self._error_result(
                     path=path,
@@ -321,9 +315,7 @@ Usage:
                 path=path,
                 error_type=err["type"],
                 message=err.get("message"),
-                error_details={
-                    k: v for k, v in err.items() if k not in ("type", "message")
-                } or None,
+                error_details={k: v for k, v in err.items() if k not in ("type", "message")} or None,
                 file_size_bytes=file_size_bytes,
                 extra_fields=extra,
             )

@@ -47,6 +47,7 @@
 подряд (11, 11 и 3) без возврата в цикл. Отсюда порог предупреждения: при
 2 мс на вызов выходит ≈ 51 мс, треть бюджета.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -100,13 +101,9 @@ class AsyncThreadStore(Protocol):
     ``gc_testkit.thread_store_conformance.assert_conforms_async``.
     """
 
-    async def aload_messages(
-        self, system_id: str, thread_id: str
-    ) -> List[Dict[str, Any]]: ...
+    async def aload_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]: ...
 
-    async def aload_thread_state(
-        self, system_id: str, thread_id: str
-    ) -> ThreadState: ...
+    async def aload_thread_state(self, system_id: str, thread_id: str) -> ThreadState: ...
 
     async def aload_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]: ...
 
@@ -120,9 +117,7 @@ class AsyncThreadStore(Protocol):
         start_seq: int = 0,
     ) -> int: ...
 
-    async def asave_meta(
-        self, system_id: str, thread_id: str, meta: Dict[str, Any]
-    ) -> None: ...
+    async def asave_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None: ...
 
     async def apatch_runtime_flag(
         self,
@@ -134,13 +129,9 @@ class AsyncThreadStore(Protocol):
         session_meta: Optional[Dict[str, Any]] = None,
     ) -> None: ...
 
-    async def aupdate_runtime_meta(
-        self, system_id: str, thread_id: str, patch: Dict[str, Any]
-    ) -> None: ...
+    async def aupdate_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None: ...
 
-    async def adiscard_message(
-        self, system_id: str, thread_id: str, message_id: str
-    ) -> bool: ...
+    async def adiscard_message(self, system_id: str, thread_id: str, message_id: str) -> bool: ...
 
     async def areset(self, system_id: str, thread_id: str) -> List[str]: ...
 
@@ -155,9 +146,7 @@ class AsyncThreadStore(Protocol):
         payload: Dict[str, Any],
     ) -> SubagentTraceRecord: ...
 
-    async def aread_subagent_trace(
-        self, system_id: str, thread_id: str
-    ) -> List[SubagentTraceRecord]: ...
+    async def aread_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]: ...
 
 
 class SyncThreadStoreAdapter:
@@ -260,14 +249,10 @@ class SyncThreadStoreAdapter:
 
         return _areplace
 
-    async def aload_messages(
-        self, system_id: str, thread_id: str
-    ) -> List[Dict[str, Any]]:
+    async def aload_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
         return self._call("load_messages", system_id, thread_id)
 
-    async def aload_thread_state(
-        self, system_id: str, thread_id: str
-    ) -> ThreadState:
+    async def aload_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
         return self._call("load_thread_state", system_id, thread_id)
 
     async def aload_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
@@ -285,13 +270,15 @@ class SyncThreadStoreAdapter:
         start_seq: int = 0,
     ) -> int:
         return self._call(
-            "append_messages", system_id, thread_id, messages,
-            known_keys=known_keys, start_seq=start_seq,
+            "append_messages",
+            system_id,
+            thread_id,
+            messages,
+            known_keys=known_keys,
+            start_seq=start_seq,
         )
 
-    async def asave_meta(
-        self, system_id: str, thread_id: str, meta: Dict[str, Any]
-    ) -> None:
+    async def asave_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
         self._call("save_meta", system_id, thread_id, meta)
 
     async def apatch_runtime_flag(
@@ -304,18 +291,18 @@ class SyncThreadStoreAdapter:
         session_meta: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._call(
-            "patch_runtime_flag", system_id, thread_id, flag,
-            active=active, session_meta=session_meta,
+            "patch_runtime_flag",
+            system_id,
+            thread_id,
+            flag,
+            active=active,
+            session_meta=session_meta,
         )
 
-    async def aupdate_runtime_meta(
-        self, system_id: str, thread_id: str, patch: Dict[str, Any]
-    ) -> None:
+    async def aupdate_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
         self._call("update_runtime_meta", system_id, thread_id, patch)
 
-    async def adiscard_message(
-        self, system_id: str, thread_id: str, message_id: str
-    ) -> bool:
+    async def adiscard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
         return self._call("discard_message", system_id, thread_id, message_id)
 
     async def areset(self, system_id: str, thread_id: str) -> List[str]:
@@ -334,14 +321,16 @@ class SyncThreadStoreAdapter:
         payload: Dict[str, Any],
     ) -> SubagentTraceRecord:
         return self._call(
-            "append_subagent_trace", system_id, thread_id,
-            parent_call_id=parent_call_id, child_run_id=child_run_id,
-            kind=kind, payload=payload,
+            "append_subagent_trace",
+            system_id,
+            thread_id,
+            parent_call_id=parent_call_id,
+            child_run_id=child_run_id,
+            kind=kind,
+            payload=payload,
         )
 
-    async def aread_subagent_trace(
-        self, system_id: str, thread_id: str
-    ) -> List[SubagentTraceRecord]:
+    async def aread_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
         return self._call("read_subagent_trace", system_id, thread_id)
 
 
@@ -352,10 +341,7 @@ def is_async_thread_store(store: Any) -> bool:
     самый неприятный случай: часть записей уходит в базу, часть теряется молча,
     и тред расщепляется без единого признака ошибки.
     """
-    return all(
-        inspect.iscoroutinefunction(getattr(store, name, None))
-        for name in ASYNC_CONTRACT_METHODS
-    )
+    return all(inspect.iscoroutinefunction(getattr(store, name, None)) for name in ASYNC_CONTRACT_METHODS)
 
 
 #: Адаптеры, уже выданные на конкретное хранилище.
@@ -378,10 +364,7 @@ _ADAPTER_ATTR = "_gc_thread_store_async_adapter"
 
 def _adapt_sync_store(store: Any, warn: Optional[Any]) -> AsyncThreadStore:
     """Обернуть полностью синхронное хранилище; смешанное — отказ."""
-    half_async = [
-        name for name in CONTRACT_METHODS
-        if inspect.iscoroutinefunction(getattr(store, name, None))
-    ]
+    half_async = [name for name in CONTRACT_METHODS if inspect.iscoroutinefunction(getattr(store, name, None))]
     if half_async:
         raise ThreadStoreContractError(
             f"{type(store).__name__}: часть методов объявлена async def "
@@ -394,15 +377,14 @@ def _adapt_sync_store(store: Any, warn: Optional[Any]) -> AsyncThreadStore:
     adapter = SyncThreadStoreAdapter(store, warn=warn)
     try:
         setattr(store, _ADAPTER_ATTR, adapter)
-    except Exception:                 # __slots__ / frozen — просто без кэша
+    except Exception:  # __slots__ / frozen — просто без кэша
         pass
     return adapter
 
 
 def _contract_error(store: Any, missing: list[str]) -> ThreadStoreContractError:
     half_async_named = [
-        name for name in ASYNC_CONTRACT_METHODS
-        if inspect.iscoroutinefunction(getattr(store, name, None))
+        name for name in ASYNC_CONTRACT_METHODS if inspect.iscoroutinefunction(getattr(store, name, None))
     ]
     if half_async_named:
         detail = (
@@ -437,7 +419,7 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
 
     try:
         cached = getattr(store, _ADAPTER_ATTR, None)
-    except Exception:                     # экзотический __getattr__: без кэша
+    except Exception:  # экзотический __getattr__: без кэша
         cached = None
     if not isinstance(cached, SyncThreadStoreAdapter):
         cached = None
@@ -452,10 +434,7 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
 
     from gc_core.thread_store_base import CONTRACT_METHODS
 
-    missing = [
-        name for name in CONTRACT_METHODS
-        if not callable(getattr(store, name, None))
-    ]
+    missing = [name for name in CONTRACT_METHODS if not callable(getattr(store, name, None))]
     if not missing:
         return _adapt_sync_store(store, warn)
 

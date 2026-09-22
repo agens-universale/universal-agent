@@ -1,4 +1,5 @@
 """Тесты run.py: docker-compose up, skip для MCP без run-блока."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -8,6 +8,7 @@ Payload рекурсивно разворачивается (unfold_payload): JS
 pretty-print + rich.syntax(solarized-dark). Markdown не интерпретируем:
 отладочный экран показывает сырые данные.
 """
+
 from __future__ import annotations
 
 import json
@@ -70,9 +71,9 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
 
 # Хвостовые обрезки оборванного JSON (все три — только НЕ-скобочные символы,
 # так что стек закрывашек после стрижки не меняется).
-_BARE_TAIL = re.compile(r'[^\s,:{}\[\]"]+$')            # голый литерал: 12 / tru / nul
-_KEY_TAIL = re.compile(r'"(?:[^"\\]|\\.)*"\s*:?\s*$')   # висящий ключ: "trunca" / "count":
-_SEP_TAIL = re.compile(r'[,:]\s*$')                     # висящий разделитель
+_BARE_TAIL = re.compile(r'[^\s,:{}\[\]"]+$')  # голый литерал: 12 / tru / nul
+_KEY_TAIL = re.compile(r'"(?:[^"\\]|\\.)*"\s*:?\s*$')  # висящий ключ: "trunca" / "count":
+_SEP_TAIL = re.compile(r"[,:]\s*$")  # висящий разделитель
 
 
 def _parse_truncated_json(s: str) -> Optional[Any]:
@@ -100,10 +101,10 @@ def _parse_truncated_json(s: str) -> Optional[Any]:
             stack.append("}" if ch == "{" else "]")
         elif ch in "}]":
             if not stack or stack[-1] != ch:
-                return None     # дисбаланс — это не обрыв, чинить нечего
+                return None  # дисбаланс — это не обрыв, чинить нечего
             stack.pop()
     if not stack and not in_str:
-        return None             # сбалансирован, но не парсится — не наш случай
+        return None  # сбалансирован, но не парсится — не наш случай
     base = s[:-1] if esc else s  # оборванная escape-последовательность
     if in_str:
         # обрыв посреди строки: закрытая строка — валидное значение, текст до

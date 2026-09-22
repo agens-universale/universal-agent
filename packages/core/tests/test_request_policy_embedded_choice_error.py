@@ -2,6 +2,7 @@
 choices[0].error) должна ретраиться адаптивным циклом политики, а не улетать
 фатальным ValueError позже в конвертации. Регрессия: прогон H2, триал
 ZtjA5Bf — 504 "Upstream idle timeout exceeded" убил агента на 15-м шаге."""
+
 import pytest
 from gc_core import request_backend_policy as policy
 from gc_core.utils.backend_errors import EmbeddedChoiceError
@@ -33,14 +34,16 @@ def _patch_transport(monkeypatch, responder):
     асинхронна, синхронный вход — шим через портал), поэтому и фейк
     корутинный, и пауза между попытками — asyncio.sleep.
     """
+
     async def _no_sleep(*_a, **_k):
         return None
 
     monkeypatch.setattr(policy.asyncio, "sleep", _no_sleep)  # без задержек
     calls = {"n": 0}
 
-    async def _fake_request(payload, headers, url, verify, use_retry, logger,
-                            on_delta, cert=None, timeout=600, config_proxy=None):
+    async def _fake_request(
+        payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600, config_proxy=None
+    ):
         calls["n"] += 1
         return responder(calls["n"])
 
@@ -63,9 +66,7 @@ def _run_policy(**overrides):
 
 
 def test_embedded_504_retried_then_succeeds(monkeypatch):
-    calls = _patch_transport(
-        monkeypatch, lambda n: _embedded_504_response() if n == 1 else _ok_response()
-    )
+    calls = _patch_transport(monkeypatch, lambda n: _embedded_504_response() if n == 1 else _ok_response())
     res, _payload = _run_policy()
     assert res["choices"][0]["message"]["content"] == "ok"
     assert calls["n"] == 2  # 504-в-200 → адаптивный ретрай → успех
@@ -117,11 +118,7 @@ def test_finish_reason_error_with_content_accepted(monkeypatch):
     # принимает его (с warning). Ретрай не нужен, исключения нет.
     calls = _patch_transport(
         monkeypatch,
-        lambda _n: {
-            "choices": [
-                {"finish_reason": "error", "message": {"content": "partial"}}
-            ]
-        },
+        lambda _n: {"choices": [{"finish_reason": "error", "message": {"content": "partial"}}]},
     )
     res, _payload = _run_policy()
     assert calls["n"] == 1
@@ -132,11 +129,7 @@ def test_finish_reason_error_with_whitespace_content_accepted(monkeypatch):
     # «\n» — payload: не embedded-empty, не ретрай.
     calls = _patch_transport(
         monkeypatch,
-        lambda _n: {
-            "choices": [
-                {"finish_reason": "error", "message": {"content": "\n"}}
-            ]
-        },
+        lambda _n: {"choices": [{"finish_reason": "error", "message": {"content": "\n"}}]},
     )
     res, _payload = _run_policy()
     assert calls["n"] == 1
@@ -176,11 +169,7 @@ def test_embedded_nonnumeric_code_not_retried(monkeypatch):
     finish_reason='error' (raw_code=None) — тот ретраится (см. тест ниже)."""
     calls = _patch_transport(
         monkeypatch,
-        lambda _n: {
-            "choices": [
-                {"error": {"code": "insufficient_quota", "message": "no funds"}}
-            ]
-        },
+        lambda _n: {"choices": [{"error": {"code": "insufficient_quota", "message": "no funds"}}]},
     )
     with pytest.raises(EmbeddedChoiceError):
         _run_policy()
@@ -192,11 +181,7 @@ def test_embedded_top_level_error_form(monkeypatch):
     поднимается как EmbeddedChoiceError, а не падает KeyError в конвертации."""
     calls = _patch_transport(
         monkeypatch,
-        lambda n: (
-            {"error": {"code": 504, "message": "Upstream idle timeout exceeded"}}
-            if n == 1
-            else _ok_response()
-        ),
+        lambda n: {"error": {"code": 504, "message": "Upstream idle timeout exceeded"}} if n == 1 else _ok_response(),
     )
     res, _payload = _run_policy()
     assert res["choices"][0]["message"]["content"] == "ok"
@@ -206,9 +191,7 @@ def test_embedded_top_level_error_form(monkeypatch):
 def test_embedded_504_retried_when_max_equals_min(monkeypatch):
     """max_tokens == min_response_tokens (напр. 1024/1024): понижать некуда, но
     504 всё равно ретраится — счётчик попыток независим от бюджета токенов."""
-    calls = _patch_transport(
-        monkeypatch, lambda n: _embedded_504_response() if n == 1 else _ok_response()
-    )
+    calls = _patch_transport(monkeypatch, lambda n: _embedded_504_response() if n == 1 else _ok_response())
     res, _payload = _run_policy(initial_max_tokens=1024, min_response_tokens=1024)
     assert res["choices"][0]["message"]["content"] == "ok"
     assert calls["n"] == 2

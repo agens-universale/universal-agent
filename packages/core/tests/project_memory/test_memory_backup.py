@@ -6,6 +6,7 @@ from gc_core.tools.project.project_memory import backup_path
 
 def test_write_mirrors_to_backup(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
     monkeypatch.chdir(tmp_path)
     main = tmp_path / ".gc" / "GIGACODE_memory.md"
@@ -15,6 +16,7 @@ def test_write_mirrors_to_backup(tmp_path, monkeypatch):
 
 def test_read_restores_from_backup_when_main_deleted(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
     monkeypatch.chdir(tmp_path)
     main = tmp_path / ".gc" / "GIGACODE_memory.md"
@@ -28,6 +30,7 @@ def test_read_restores_from_backup_when_main_deleted(tmp_path, monkeypatch):
 
 def test_append_mirrors_to_backup(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
     monkeypatch.chdir(tmp_path)
     main = tmp_path / ".gc" / "GIGACODE_memory.md"
@@ -49,6 +52,7 @@ def test_no_backup_arg_leaves_existing_callers_unaffected(tmp_path):
 
 def test_backup_path_shape(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
+
     monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
     monkeypatch.chdir(tmp_path)
     bkp = backup_path(cwd=str(tmp_path))

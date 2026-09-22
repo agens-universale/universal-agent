@@ -7,6 +7,7 @@ C1 Часть 2: при недоступности судьи и mode != allow �
 Protected paths injection: build_judge_payload добавляет поле never_touch_paths
 с объединённым списком instruction + operational защищённых путей.
 """
+
 import json
 
 from gc_core.security import command_moderation as cm
@@ -60,6 +61,7 @@ def test_judge_unavailable_deny_mode_blocks_when_confirm_rejected(monkeypatch):
 
 def test_decision_never_asks_the_human_itself(monkeypatch):
     """Решение чистое: ожидание человека уходит в поток через драйвер гарда."""
+
     def _boom(**_k):
         raise AssertionError("decide_command_execution сама спросила человека — на loop'е")
 
@@ -122,6 +124,7 @@ def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
 
 def test_build_judge_payload_never_touch_paths_empty_on_error(monkeypatch, tmp_path):
     """При ошибке protected_paths → never_touch_paths пустой список (не падаем)."""
+
     def bad_ps(cwd):
         raise RuntimeError("cannot load")
 
@@ -159,6 +162,7 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cm, "confirm_available", fake_confirm_available)
     monkeypatch.setattr(cm, "request_confirm", lambda **k: True)
+
     # Судья всегда недоступен — кидаем исключение.
     #
     # Подменять надо ШОВ, через который ходит ТЕЛО гварда. Здесь стояла

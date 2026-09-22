@@ -9,6 +9,7 @@ Ctrl+C, но принесла свой дефект: отменить поток
 копится»: на POSIX их нет вовсе, и набранное после прерывания достаётся
 следующему вопросу, а не осиротевшему читателю.
 """
+
 import ast
 import asyncio
 import os
@@ -165,7 +166,8 @@ async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdi
 @pytest.mark.asyncio
 @pytest.mark.parametrize("how", ["ctrl_c", "cancel"])
 async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
-    pipe_stdin, how,
+    pipe_stdin,
+    how,
 ):
     """Недописанный ответ к снятому вопросу не приклеивается к следующему.
 
@@ -185,8 +187,9 @@ async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
     signal.signal(signal.SIGINT, lambda *_: caught.append(True))
     try:
         if how == "ctrl_c":
+
             async def _ctrl_c() -> None:
-                await asyncio.sleep(0.2)           # черновик уже в буфере
+                await asyncio.sleep(0.2)  # черновик уже в буфере
                 os.kill(os.getpid(), signal.SIGINT)
 
             # Вопрос ждём прямо в тесте, а не отдельной задачей: из задачи
@@ -198,7 +201,7 @@ async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
             await fire
         else:
             first = asyncio.ensure_future(port("первый вопрос?"))
-            await asyncio.sleep(0.2)               # черновик уже в буфере
+            await asyncio.sleep(0.2)  # черновик уже в буфере
             first.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await first
@@ -249,7 +252,7 @@ async def test_ctrl_d_ends_only_the_current_answer(pty_stdin):
     конец ввода навсегда, и разовость на ней не увидеть.
     """
     port = make_cli_ask_human_port()
-    pty_stdin.type("l1\n\x04")                 # строка и Ctrl+D в начале следующей
+    pty_stdin.type("l1\n\x04")  # строка и Ctrl+D в начале следующей
     assert await asyncio.wait_for(port("первый?"), 5) == "l1"
 
     second = asyncio.ensure_future(port("второй?"))
@@ -324,9 +327,9 @@ def test_cli_installs_the_port():
     origin = importlib.util.find_spec("gc_cli.cli").origin
     tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
     installs = [
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.Assign)
-        and any(getattr(t, "attr", None) == "ask_human" for t in n.targets)
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Assign) and any(getattr(t, "attr", None) == "ask_human" for t in n.targets)
     ]
     assert len(installs) >= 2, (
         "ctx.ask_human ставится не на всех входах CLI — в `--init` вопрос агента "

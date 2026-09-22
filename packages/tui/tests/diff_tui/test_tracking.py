@@ -2,6 +2,7 @@
 
 Тулы не импортируют diff_tui; только TUI + thread identity.
 """
+
 from __future__ import annotations
 
 import json
@@ -152,9 +153,7 @@ def test_search_and_replace_snapshots_orig(launch_root):
     target.write_text("foo = 1\n", encoding="utf-8")
     tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
-    res = json.loads(
-        tool(path=str(target), search="foo = 1", replace="foo = 2")
-    )
+    res = json.loads(tool(path=str(target), search="foo = 1", replace="foo = 2"))
     assert res["ok"] is True
     assert _orig(root, "src/b.py").read_text(encoding="utf-8") == "foo = 1\n"
 
@@ -165,9 +164,7 @@ def test_search_and_replace_dry_run_does_not_track(launch_root):
     target.write_text("foo = 1\n", encoding="utf-8")
     tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
-    res = json.loads(
-        tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True)
-    )
+    res = json.loads(tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True))
     assert res["ok"] is True
     assert DiffStore(str(root)).load_index() == {}
     assert TouchedJournal(str(threads), "tui", "t1").paths() == set()
@@ -316,8 +313,7 @@ def test_tracking_fs_backend_mirrors_fsbackend_public_surface():
     # снятой синхронной операции обёртка обязана проксировать корутинную.
     for name in TRACKING_NOT_FORWARDED:
         assert hasattr(type(wrapper), f"a{name}"), (
-            f"обёртка не проксирует a{name} — операция потеряна целиком, "
-            "а не переведена в корутинную форму"
+            f"обёртка не проксирует a{name} — операция потеряна целиком, а не переведена в корутинную форму"
         )
 
 

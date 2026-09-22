@@ -26,10 +26,11 @@ def _async_noop(fn):
     Синхронную подмену цикл получил бы как готовый результат вместо awaitable
     и упал бы на ``await`` — или, хуже, тихо не исполнил бы её вовсе.
     """
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _state(**extra):
@@ -86,9 +87,7 @@ def _patch_apply(monkeypatch, calls, *, results=None, fail_names=None):
         name = kw["tool_name"]
         calls.append(name)
         if name in fail_names:
-            raise pr.WrongFunctionArgumentsException(
-                "bad args", received_args=kw["arguments"], tool_name=name
-            )
+            raise pr.WrongFunctionArgumentsException("bad args", received_args=kw["arguments"], tool_name=name)
         if name in results:
             return results[name]
         if name == "turn_finish":
@@ -117,11 +116,7 @@ def _patch_apply(monkeypatch, calls, *, results=None, fail_names=None):
 
 
 def _outputs_by_call(messages):
-    return {
-        m["call_id"]: m
-        for m in messages
-        if m.get("type") == "function_call_output"
-    }
+    return {m["call_id"]: m for m in messages if m.get("type") == "function_call_output"}
 
 
 def _is_cycle_stop_stub(output: str) -> bool:
@@ -136,9 +131,7 @@ def test_split_batch_new_keeps_notice_and_compact_after_finish():
     finish = {"type": "function_call_output", "call_id": "c_fin", "output": "{}"}
     notice = {"role": "user", "content": "Loop detector: repeated"}
     resume = {"role": "user", "content": "session_compact finished."}
-    prefix, fin, tail = _split_batch_new_around_finish(
-        [work, finish, notice, resume], "c_fin"
-    )
+    prefix, fin, tail = _split_batch_new_around_finish([work, finish, notice, resume], "c_fin")
     assert prefix == [work]
     assert fin == [finish]
     assert tail == [notice, resume]
@@ -264,7 +257,7 @@ def test_process_tool_calls_ask_human_is_work_and_blocks_finish(monkeypatch):
     _patch_apply(monkeypatch, calls)
     batch = [
         _fc("session_memory", "c_mem", '{"action":"write"}'),
-        _fc("turn_ask_human", "c_ask", '{"question":"which?"}' ),
+        _fc("turn_ask_human", "c_ask", '{"question":"which?"}'),
         _fc("fs_read_file", "c_read", '{"path":"a.py"}'),
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
@@ -417,32 +410,28 @@ def test_run_agent_accepted_finish_drops_loop_notice(monkeypatch):
 
     args = '{"path":"a.py"}'
     finish = _fc("turn_finish", "call_finish", _finish_args())
-    result = run_coro(arun_agent(
-        [
-            _fc("fs_read_file", "c1", args),
-            _fc("fs_read_file", "c2", args),
-            finish,
-        ],
-        state,
-        ctx,
-        persist_messages_callback=persist,
-    ))
+    result = run_coro(
+        arun_agent(
+            [
+                _fc("fs_read_file", "c1", args),
+                _fc("fs_read_file", "c2", args),
+                finish,
+            ],
+            state,
+            ctx,
+            persist_messages_callback=persist,
+        )
+    )
     assert result == finish["arguments"]
 
-    notices = [
-        m
-        for m in state.messages
-        if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
-    ]
+    notices = [m for m in state.messages if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))]
     assert notices == []
     by_call = _outputs_by_call(state.messages)
     assert by_call["c1"]["call_id"] == "c1"
     assert "call_finish" in by_call
 
     persisted_notices = [
-        m
-        for m in persisted
-        if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
+        m for m in persisted if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
     ]
     assert persisted_notices == []
 
@@ -476,12 +465,14 @@ def test_run_agent_accepted_finish_drops_compact_resume(monkeypatch):
     state = _agent_state()
     persisted: list[dict] = []
 
-    result = run_coro(arun_agent(
-        [finish],
-        state,
-        _agent_ctx(),
-        persist_messages_callback=lambda msgs: persisted.extend(msgs),
-    ))
+    result = run_coro(
+        arun_agent(
+            [finish],
+            state,
+            _agent_ctx(),
+            persist_messages_callback=lambda msgs: persisted.extend(msgs),
+        )
+    )
 
     assert result == finish["arguments"]
     assert resume not in state.messages
@@ -553,9 +544,7 @@ def test_run_agent_invalid_finish_keeps_work_and_stays_open(monkeypatch):
 
 
 @pytest.mark.parametrize("backend", ["chat_completions", "responses"])
-def test_run_agent_rejected_finish_output_keeps_turn_open(
-    monkeypatch, backend
-):
+def test_run_agent_rejected_finish_output_keeps_turn_open(monkeypatch, backend):
     applied: list[str] = []
     rejected = json.dumps(
         {
@@ -623,11 +612,7 @@ def test_run_agent_gate_reject_keeps_work_in_trace(monkeypatch):
 
     async def _reject(**_kwargs):
         work_in_digest.append(
-            any(
-                m.get("type") == "function_call_output"
-                and m.get("call_id") == "call_mem"
-                for m in state.messages
-            )
+            any(m.get("type") == "function_call_output" and m.get("call_id") == "call_mem" for m in state.messages)
         )
         return ValidationResult(
             ok=False,
@@ -665,11 +650,13 @@ def test_run_agent_gate_reject_keeps_work_in_trace(monkeypatch):
     state = _agent_state(max_steps=0)
     finish = _fc("turn_finish", "call_finish", _finish_args())
     memory = _fc("session_memory", "call_mem", '{"action":"write"}')
-    result = run_coro(arun_agent(
-        [memory, finish],
-        state,
-        _agent_ctx(strict_turn_finish_validation=True),
-    ))
+    result = run_coro(
+        arun_agent(
+            [memory, finish],
+            state,
+            _agent_ctx(strict_turn_finish_validation=True),
+        )
+    )
     assert result != finish["arguments"]
     assert work_in_digest == [True]
     by_call = _outputs_by_call(state.messages)
@@ -764,11 +751,13 @@ def test_run_agent_same_order_on_responses_backend(monkeypatch):
     state = _agent_state()
     finish = _fc("turn_finish", "call_finish", _finish_args())
     memory = _fc("session_memory", "call_mem", '{"action":"write"}')
-    result = run_coro(arun_agent(
-        [finish, memory],
-        state,
-        _agent_ctx(backend_api_mode="responses"),
-    ))
+    result = run_coro(
+        arun_agent(
+            [finish, memory],
+            state,
+            _agent_ctx(backend_api_mode="responses"),
+        )
+    )
     assert result == finish["arguments"]
     by_call = _outputs_by_call(state.messages)
     assert json.loads(by_call["call_mem"]["output"])["ok"] is True
@@ -781,11 +770,7 @@ def test_run_agent_same_order_on_responses_backend(monkeypatch):
 
 def _persisted_calls(persisted: list) -> set:
     """call_id всех function_call_output, которые дошли до персиста."""
-    return {
-        m.get("call_id")
-        for m in persisted
-        if isinstance(m, dict) and m.get("type") == "function_call_output"
-    }
+    return {m.get("call_id") for m in persisted if isinstance(m, dict) and m.get("type") == "function_call_output"}
 
 
 def test_finish_output_reaches_the_thread_on_responses_backend(monkeypatch):
@@ -811,18 +796,18 @@ def test_finish_output_reaches_the_thread_on_responses_backend(monkeypatch):
     finish = _fc("turn_finish", "call_finish", _finish_args())
     memory = _fc("session_memory", "call_mem", '{"action":"write"}')
 
-    result = run_coro(arun_agent(
-        [finish, memory],
-        state,
-        _agent_ctx(backend_api_mode="responses"),
-        persist_messages_callback=persisted.extend,
-    ))
+    result = run_coro(
+        arun_agent(
+            [finish, memory],
+            state,
+            _agent_ctx(backend_api_mode="responses"),
+            persist_messages_callback=persisted.extend,
+        )
+    )
 
     assert result == finish["arguments"]
     got = _persisted_calls(persisted)
-    assert "call_finish" in got, (
-        f"вывод turn_finish не доехал до хранилища: {sorted(got)}"
-    )
+    assert "call_finish" in got, f"вывод turn_finish не доехал до хранилища: {sorted(got)}"
 
 
 def test_nothing_in_state_is_missing_from_the_thread(monkeypatch):
@@ -840,16 +825,17 @@ def test_nothing_in_state_is_missing_from_the_thread(monkeypatch):
         finish = _fc("turn_finish", "call_finish", _finish_args())
         memory = _fc("session_memory", "call_mem", '{"action":"write"}')
 
-        run_coro(arun_agent(
-            [memory, finish],
-            state,
-            _agent_ctx(**kw),
-            persist_messages_callback=persisted.extend,
-        ))
+        run_coro(
+            arun_agent(
+                [memory, finish],
+                state,
+                _agent_ctx(**kw),
+                persist_messages_callback=persisted.extend,
+            )
+        )
 
         in_state = _persisted_calls(state.messages)
         in_store = _persisted_calls(persisted)
         assert in_state <= in_store, (
-            f"{kw or 'chat_completions'}: в хранилище нет того, что уже в state: "
-            f"{sorted(in_state - in_store)}"
+            f"{kw or 'chat_completions'}: в хранилище нет того, что уже в state: {sorted(in_state - in_store)}"
         )

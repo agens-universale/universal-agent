@@ -36,16 +36,12 @@ class TestTraceHeader:
         assert headers["x_trace_id"] == "wf-42"
 
     def test_custom_name_is_used(self):
-        headers = build_call_headers(
-            _StateStub(), _ctx(trace_id="wf-42", trace_id_header_name="X-Trace-Id")
-        )
+        headers = build_call_headers(_StateStub(), _ctx(trace_id="wf-42", trace_id_header_name="X-Trace-Id"))
         assert headers["X-Trace-Id"] == "wf-42"
         assert "x_trace_id" not in headers
 
     def test_responses_mode_also_gets_the_header(self):
-        headers = build_call_headers(
-            _StateStub(), _ctx(trace_id="wf-42", backend_api_mode="responses")
-        )
+        headers = build_call_headers(_StateStub(), _ctx(trace_id="wf-42", backend_api_mode="responses"))
         assert headers["x_trace_id"] == "wf-42"
 
     def test_empty_trace_emits_nothing(self):
@@ -84,9 +80,7 @@ class TestModelHeaderGate:
         assert not [k for k in headers if "trace" in k.lower()]
 
     def test_flag_false_is_explicit_no(self):
-        headers = build_call_headers(
-            _StateStub(), _ctx(trace_id="wf-42", trace_header_enabled=False)
-        )
+        headers = build_call_headers(_StateStub(), _ctx(trace_id="wf-42", trace_header_enabled=False))
         assert "x_trace_id" not in headers
 
     def test_flag_alone_without_trace_adds_nothing(self):

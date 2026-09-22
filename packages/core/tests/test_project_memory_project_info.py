@@ -39,9 +39,7 @@ def test_attach_status_skipped_when_long_memory_in_stop_tools(tmp_path, monkeypa
     (tmp_path / ".gc" / "project_memory.md").write_text("body", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
-    attach_status_to_prompt_vars(
-        prompt_vars, config_dict={"stop_tools": ["project_memory"]}
-    )
+    attach_status_to_prompt_vars(prompt_vars, config_dict={"stop_tools": ["project_memory"]})
     assert "longMemoryStatus" not in prompt_vars
 
 
@@ -90,9 +88,7 @@ def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
 
-    template = (ASSETS / "prompts" / "chat_completions_system_prompt.md").read_text(
-        encoding="utf-8"
-    )
+    template = (ASSETS / "prompts" / "chat_completions_system_prompt.md").read_text(encoding="utf-8")
 
     rendered = render_system_prompt(
         system_prompt=template,
@@ -115,9 +111,7 @@ def test_subagent_prompt_template_renders_empty_status(tmp_path, monkeypatch):
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
 
-    template = (
-        ASSETS / "prompts" / "chat_completions_subagent_system_prompt.md"
-    ).read_text(encoding="utf-8")
+    template = (ASSETS / "prompts" / "chat_completions_subagent_system_prompt.md").read_text(encoding="utf-8")
 
     rendered = render_system_prompt(
         system_prompt=template,

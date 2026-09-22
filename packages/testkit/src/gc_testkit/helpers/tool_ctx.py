@@ -21,9 +21,7 @@ def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
     from gc_core.backends.local import LocalFsBackend
 
     cfg = dict(config_dict or {})
-    backend = LocalFsBackend(
-        exec_output_capture_max_chars=exec_output_capture_max_chars_from_config_dict(cfg)
-    )
+    backend = LocalFsBackend(exec_output_capture_max_chars=exec_output_capture_max_chars_from_config_dict(cfg))
     return SimpleNamespace(
         config_dict=cfg,
         os_backend=backend,

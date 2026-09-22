@@ -5,6 +5,7 @@
 одному файлу врёт в обе стороны: пропускает запись, после которой merged не
 загрузится, и отвергает рабочую раскладку «модели в базе, уровни в профиле».
 """
+
 from pathlib import Path
 
 import pytest
@@ -51,14 +52,12 @@ def test_dropping_a_model_the_active_profile_points_at_is_refused(stack):
     """Удаление записи базы, на которую смотрит слот активного профиля: по одному
     файлу это «чисто», а следующий старт падал бы на фазе 2 загрузки."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8"
-    )
+    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
     after_removal = 'profile: "work"\nmodels: {}\n'
 
     validate_config_text_with_sections(after_removal)
-    with pytest.raises(ValueError, match=r'slots\.default.*gc'):
+    with pytest.raises(ValueError, match=r"slots\.default.*gc"):
         validate_config_text_with_sections(after_removal, base_path=base)
 
 
@@ -69,8 +68,7 @@ def test_unresolvable_pointer_falls_back_to_the_single_file(stack):
     text = 'profile: "нет-такого"\nmodels:\n  a:\n    model: "x"\n'
     base.write_text(text, encoding="utf-8")
 
-    validate_config_text_with_sections(text, base_path=base,
-        lenient_prebroken=True)
+    validate_config_text_with_sections(text, base_path=base, lenient_prebroken=True)
 
 
 def _write_utf16(path: Path, text: str) -> Path:
@@ -88,12 +86,11 @@ def test_a_pointer_to_an_unreadable_profile_is_refused(stack):
     указатель уезжал на диск, и следующий старт не поднимался вовсе."""
     base, profiles = stack
     body = 'models:\n  a:\n    model: "x"\nslots:\n  default: "a"\n'
-    base.write_text('profile: ""\n' + body, encoding="utf-8")   # стек ЖИВ до записи
+    base.write_text('profile: ""\n' + body, encoding="utf-8")  # стек ЖИВ до записи
     _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
 
     with pytest.raises(ValueError, match=r"broken-enc\.yml.*не удалось прочитать"):
-        validate_config_text_with_sections('profile: "broken-enc"\n' + body,
-                                           base_path=base)
+        validate_config_text_with_sections('profile: "broken-enc"\n' + body, base_path=base)
 
 
 def test_editing_the_base_under_an_already_unreadable_profile_is_allowed(stack):
@@ -101,13 +98,12 @@ def test_editing_the_base_under_an_already_unreadable_profile_is_allowed(stack):
     профиль уже активен) — правку базы не запрещаем, иначе человека запирает
     внутри: чинить нечитаемый слой из /settings стало бы нечем."""
     base, profiles = stack
-    base.write_text(
-        'profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    base.write_text('profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
 
     validate_config_text_with_sections(
-        'profile: "broken-enc"\nmodels:\n  a:\n    model: "y"\n', base_path=base,
-        lenient_prebroken=True)
+        'profile: "broken-enc"\nmodels:\n  a:\n    model: "y"\n', base_path=base, lenient_prebroken=True
+    )
 
 
 def test_editing_the_base_under_a_foreign_dangling_reference_is_allowed(stack):
@@ -121,29 +117,24 @@ def test_editing_the_base_under_a_foreign_dangling_reference_is_allowed(stack):
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text(
-        'assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+    (gc_dir / "config.yml").write_text('assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
 
-    validate_config_text_with_sections(
-        'models:\n  a:\n    model: "y"\n', base_path=base,
-        lenient_prebroken=True)
+    validate_config_text_with_sections('models:\n  a:\n    model: "y"\n', base_path=base, lenient_prebroken=True)
 
 
 def test_editing_the_active_profile_under_a_foreign_dangling_reference_is_allowed(stack):
     """Тот же откат у второго входа гейта: правится активный профиль, а вопрос
     гейта заваливает висячая ссылка проектного слоя — профиль остаётся на фазе 1."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n',
-                    encoding="utf-8")
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text(
-        'assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+    (gc_dir / "config.yml").write_text('assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
 
     validate_profile_text_with_sections(
-        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base,
-        lenient_prebroken=True)
+        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base, lenient_prebroken=True
+    )
 
 
 def test_a_pointer_write_is_judged_strictly_even_on_a_prebroken_stack(stack):
@@ -156,14 +147,12 @@ def test_a_pointer_write_is_judged_strictly_even_on_a_prebroken_stack(stack):
     рисовала ✓ на стеке, сломанном профилем (регресс волны фиксов MR #80)."""
     base, _profiles = stack
     # сломан и без записи: 2 модели, ни одного слота
-    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
-                    encoding="utf-8")
+    base.write_text('models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="нет-такого"):
         validate_config_text_with_sections(
-            'profile: "нет-такого"\nmodels:\n  a:\n    model: "x"\n'
-            '  b:\n    model: "y"\n',
-            base_path=base)
+            'profile: "нет-такого"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', base_path=base
+        )
 
 
 def test_the_fallback_under_a_foreign_break_still_judges_the_file_itself(stack):
@@ -175,37 +164,32 @@ def test_the_fallback_under_a_foreign_break_still_judges_the_file_itself(stack):
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text(
-        'assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
+    (gc_dir / "config.yml").write_text('assign:\n  finish_gate: "ghost"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"slots\.default"):
         validate_config_text_with_sections(
-            'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', base_path=base,
-        lenient_prebroken=True)
+            'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', base_path=base, lenient_prebroken=True
+        )
 
 
 def test_dropping_the_pointer_to_an_unreadable_profile_is_allowed(stack):
     """Выход из ловушки: снятие указателя стек как раз ЧИНИТ — отказать здесь
     значило бы отобрать единственную кнопку, которой человек выбирается."""
     base, profiles = stack
-    base.write_text(
-        'profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    base.write_text('profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
 
-    validate_config_text_with_sections(
-        'profile: ""\nmodels:\n  a:\n    model: "x"\n', base_path=base)
+    validate_config_text_with_sections('profile: ""\nmodels:\n  a:\n    model: "x"\n', base_path=base)
 
 
 def test_writing_into_an_unreadable_active_profile_is_not_blocked(stack):
     """Второй вход гейта: правится САМ нечитаемый профиль — его текст в стеке
     подставляется кандидатом, читать файл незачем, отказывать не за что."""
     base, profiles = stack
-    base.write_text(
-        'profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    base.write_text('profile: "broken-enc"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     target = _write_utf16(profiles / "broken-enc.yml", 'slots:\n  default: "a"\n')
 
-    validate_profile_text_with_sections(
-        'slots:\n  default: "a"\n', target=target, base_path=base)
+    validate_profile_text_with_sections('slots:\n  default: "a"\n', target=target, base_path=base)
 
 
 def test_phase_one_stays_on_the_file_itself(stack):
@@ -215,8 +199,7 @@ def test_phase_one_stays_on_the_file_itself(stack):
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="схему"):
-        validate_config_text_with_sections("models:\n  a:\n    model: 5\n",
-                                           base_path=base)
+        validate_config_text_with_sections("models:\n  a:\n    model: 5\n", base_path=base)
 
 
 def test_unsetting_a_slot_in_the_active_profile_is_refused(stack):
@@ -232,8 +215,7 @@ def test_unsetting_a_slot_in_the_active_profile_is_refused(stack):
 
     validate_profile_text("slots: {}\n")
     with pytest.raises(ValueError, match="slots.default"):
-        validate_profile_text_with_sections(
-            "slots: {}\n", target=target, base_path=base)
+        validate_profile_text_with_sections("slots: {}\n", target=target, base_path=base)
 
 
 def test_an_inactive_profile_is_not_blocked_by_the_stack(stack):
@@ -246,7 +228,7 @@ def test_an_inactive_profile_is_not_blocked_by_the_stack(stack):
     )
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
     other = profiles / "other.yml"
-    other.write_text('slots: {}\n', encoding="utf-8")
+    other.write_text("slots: {}\n", encoding="utf-8")
 
     validate_profile_text_with_sections("slots: {}\n", target=other, base_path=base)
 
@@ -255,33 +237,26 @@ def test_the_profile_text_stands_in_its_own_place_in_the_stack(stack):
     """Ещё не записанный текст профиля подставляется на место СВОЕГО файла — а не
     вместо чужого тёзки из другого корня."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8"
-    )
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     target = profiles / "work.yml"
     target.write_text("slots: {}\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r'slots\.default.*ghost'):
-        validate_profile_text_with_sections(
-            'slots:\n  default: "ghost"\n', target=target, base_path=base)
-    validate_profile_text_with_sections(
-        'slots:\n  default: "a"\n', target=target, base_path=base)
+    with pytest.raises(ValueError, match=r"slots\.default.*ghost"):
+        validate_profile_text_with_sections('slots:\n  default: "ghost"\n', target=target, base_path=base)
+    validate_profile_text_with_sections('slots:\n  default: "a"\n', target=target, base_path=base)
 
 
 def test_the_merged_stack_reads_the_profile_from_disk_for_other_targets(stack):
     """Проверка `profile_doc_path`: подставляем текст ДРУГОГО файла — стек обязан
     читать активный профиль с диска, а не принимать чужой документ за него."""
     base, profiles = stack
-    base.write_text(
-        'profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8"
-    )
+    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
     other = profiles / "other.yml"
     other.write_text("slots: {}\n", encoding="utf-8")
 
     # текст «сломал бы» стек, будь он подставлен вместо work.yml, — но он для other.yml
-    validate_profile_text_with_sections(
-        'slots:\n  default: "ghost"\n', target=other, base_path=base)
+    validate_profile_text_with_sections('slots:\n  default: "ghost"\n', target=other, base_path=base)
 
 
 def test_base_path_accepts_a_string_path(stack):
@@ -312,8 +287,7 @@ def test_prospective_registry_counts_the_profile_even_when_it_is_not_active(stac
     base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
     (profiles / "work.yml").write_text("slots: {}\n", encoding="utf-8")
 
-    models, slots = prospective_registry(
-        'models:\n  b:\n    model: "y"\n', base_path=base, is_profile=True)
+    models, slots = prospective_registry('models:\n  b:\n    model: "y"\n', base_path=base, is_profile=True)
     assert sorted(models) == ["a", "b"]
     assert slots.default is None
 
@@ -325,8 +299,7 @@ def test_prospective_registry_of_the_base_sees_the_active_profile(stack):
     base.write_text('profile: "work"\n', encoding="utf-8")
     (profiles / "work.yml").write_text('models:\n  p1:\n    model: "x"\n', encoding="utf-8")
 
-    models, _slots = prospective_registry(
-        'profile: "work"\nmodels:\n  gc:\n    model: "y"\n', base_path=base)
+    models, _slots = prospective_registry('profile: "work"\nmodels:\n  gc:\n    model: "y"\n', base_path=base)
     assert sorted(models) == ["gc", "p1"]
 
 
@@ -401,8 +374,7 @@ def test_a_broken_layer_leaves_the_gate_on_the_file_itself(stack, layer, content
     text = _stack_with_profile(base, profiles)
     _break_layer(layer, profiles, content)
 
-    validate_config_text_with_sections(text, base_path=base,
-        lenient_prebroken=True)
+    validate_config_text_with_sections(text, base_path=base, lenient_prebroken=True)
 
 
 @pytest.mark.parametrize("content", BROKEN)
@@ -427,9 +399,7 @@ def test_a_broken_layer_does_not_disable_phase_one(stack, content):
     _break_layer("project", profiles, content)
 
     with pytest.raises(ValueError, match="схему"):
-        validate_config_text_with_sections('models:\n  a:\n    model: 5\n',
-                                           base_path=base,
-        lenient_prebroken=True)
+        validate_config_text_with_sections("models:\n  a:\n    model: 5\n", base_path=base, lenient_prebroken=True)
 
 
 @pytest.mark.parametrize("layer", ["managed", "project"])
@@ -441,8 +411,8 @@ def test_a_broken_layer_leaves_the_profile_gate_on_the_file_itself(stack, layer,
     _break_layer(layer, profiles, content)
 
     validate_profile_text_with_sections(
-        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base,
-        lenient_prebroken=True)
+        'slots:\n  default: "a"\n', target=profiles / "work.yml", base_path=base, lenient_prebroken=True
+    )
 
 
 @pytest.mark.parametrize("layer", ["managed", "project", "profile"])

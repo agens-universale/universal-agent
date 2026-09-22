@@ -1,4 +1,5 @@
 """UI-модели (без textual)."""
+
 from gc_tui.models import TailResult, TaskCursor
 
 

@@ -54,5 +54,7 @@ _CASES = [
 def test_identical_to_base(tmp_path, case):
     _id, content, kw = case
     b_env, b_content, h_env, h_content = _run_both(tmp_path, content, **kw)
-    assert strip_path_fields(h_env, "path", "backup_path", "diff") == strip_path_fields(b_env, "path", "backup_path", "diff"), _id
+    assert strip_path_fields(h_env, "path", "backup_path", "diff") == strip_path_fields(
+        b_env, "path", "backup_path", "diff"
+    ), _id
     assert h_content == b_content, _id

@@ -76,9 +76,7 @@ def for_model_pipeline(
     effective = effective_for_model_tags(tags, strip_think=strip_think)
     if not effective:
         return MessageProjectionPipeline([])
-    return MessageProjectionPipeline(
-        [lambda text, _tags=effective: strip_tagged_blocks(text, _tags)]
-    )
+    return MessageProjectionPipeline([lambda text, _tags=effective: strip_tagged_blocks(text, _tags)])
 
 
 def project_text_for_model(

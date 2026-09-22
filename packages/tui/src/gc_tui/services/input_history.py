@@ -11,6 +11,7 @@
 
 Навигация через prev/next (Task 2).
 """
+
 from __future__ import annotations
 
 import json
@@ -73,7 +74,7 @@ class InputHistory:
                 continue
             text = entry.get("text")
             if isinstance(text, str) and not _is_command(text):
-                self._entries.append(text)   # старые command-записи отсеиваем
+                self._entries.append(text)  # старые command-записи отсеиваем
 
     def append(self, text: str) -> None:
         if not text or _is_command(text):
@@ -90,14 +91,11 @@ class InputHistory:
             pass
 
         self._appends_since_rewrite += 1
-        if (
-            len(self._entries) > self.MAX_ENTRIES
-            and self._appends_since_rewrite >= self.REWRITE_EVERY
-        ):
+        if len(self._entries) > self.MAX_ENTRIES and self._appends_since_rewrite >= self.REWRITE_EVERY:
             self._rewrite_tail()
 
     def _rewrite_tail(self) -> None:
-        self._entries = self._entries[-self.MAX_ENTRIES:]
+        self._entries = self._entries[-self.MAX_ENTRIES :]
         try:
             self._project_dir.mkdir(parents=True, exist_ok=True)
             tmp = self._file.with_suffix(self._file.suffix + ".tmp")

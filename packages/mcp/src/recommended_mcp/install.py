@@ -176,6 +176,7 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
             print(f"[warn] {entry.name}: npm_package не задан — деинсталл пропущен")
             return
         from gc_core.config_modules.env_vars import gc_paths
+
         agent_dep_dir = gc_paths()["data"]
         npm = _node_install_paths(agent_dep_dir)["npm"]
         print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
@@ -193,10 +194,7 @@ def install_entry(
 ) -> None:
     """Установить один MCP. root — каталог, относительно которого резолвится entry.path."""
     if not _platform_supported(entry):
-        print(
-            f"[skip] {entry.name}: platform {sys.platform!r} not in "
-            f"{list(entry.install.platforms)}"
-        )
+        print(f"[skip] {entry.name}: platform {sys.platform!r} not in {list(entry.install.platforms)}")
         return
 
     pkg_path = (root / entry.path).resolve()
@@ -211,8 +209,7 @@ def install_entry(
         _install_npx(entry.name, entry.install.commands, agent_dep_dir)
 
     elif itype == "source":
-        _install_source(entry.name, entry.install.source, root, editable=False,
-                        repo_url=repo_url, repo_ref=repo_ref)
+        _install_source(entry.name, entry.install.source, root, editable=False, repo_url=repo_url, repo_ref=repo_ref)
     elif itype == "pypi":
         _install_pypi(entry.name, entry.install.package)
     else:
@@ -255,10 +252,7 @@ def _install_wheel(name: str, pkg_path: Path) -> None:
     if not wheels:
         raise InstallError(f"mcp {name!r}: no wheel found in {dist}")
     if len(wheels) > 1:
-        raise InstallError(
-            f"mcp {name!r}: multiple wheels in {dist}: {[w.name for w in wheels]}. "
-            f"Keep only one."
-        )
+        raise InstallError(f"mcp {name!r}: multiple wheels in {dist}: {[w.name for w in wheels]}. Keep only one.")
     wheel = wheels[0]
     print(f"[install] {name}: pip install {wheel.name}")
     subprocess.run(pip_install_argv(str(wheel)), check=True)
@@ -370,13 +364,9 @@ def _source_dir_name(source: object) -> str:
     raw = str(source).strip()
     name = PurePosixPath(raw.replace("\\", "/")).name
     if not name or name in (".", ".."):
-        raise InstallError(
-            f"install.source {source!r}: не удалось выделить имя каталога MCP"
-        )
+        raise InstallError(f"install.source {source!r}: не удалось выделить имя каталога MCP")
     normalized = raw.replace("\\", "/")
-    if name != normalized.strip("/") and not any(
-        normalized.startswith(pref) for pref in _LEGACY_SOURCE_PREFIXES
-    ):
+    if name != normalized.strip("/") and not any(normalized.startswith(pref) for pref in _LEGACY_SOURCE_PREFIXES):
         raise InstallError(
             f"install.source {source!r}: ожидается ИМЯ каталога MCP "
             f"(например {name!r}) или дореформенный путь вида "
@@ -449,15 +439,11 @@ def install_source_entry(entry: MCPEntry, root: Path, *, editable: bool) -> None
     при --editable и из тестов.
     """
     if entry.install.platforms and sys.platform not in entry.install.platforms:
-        print(
-            f"[skip] {entry.name}: platform {sys.platform!r} not in "
-            f"{list(entry.install.platforms)}"
-        )
+        print(f"[skip] {entry.name}: platform {sys.platform!r} not in {list(entry.install.platforms)}")
         return
     if entry.install.type != "source":
         raise InstallError(
-            f"install_source_entry called for non-source mcp {entry.name!r} "
-            f"(type={entry.install.type!r})"
+            f"install_source_entry called for non-source mcp {entry.name!r} (type={entry.install.type!r})"
         )
     _install_source(entry.name, entry.install.source, root, editable=editable)
 
@@ -468,11 +454,7 @@ def _node_archive_basename() -> Tuple[str, str]:
     Возвращает (filename, extension), где extension ∈ {tar.gz, tar.xz, zip}.
     Соответствует layout'у https://nodejs.org/dist/vX.Y.Z/.
     """
-    machine = (
-        os.uname().machine
-        if hasattr(os, "uname")
-        else os.environ.get("PROCESSOR_ARCHITECTURE", "")
-    ).lower()
+    machine = (os.uname().machine if hasattr(os, "uname") else os.environ.get("PROCESSOR_ARCHITECTURE", "")).lower()
     if sys.platform == "darwin":
         arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
         return f"node-v{NODE_VERSION}-darwin-{arch}.tar.gz", "tar.gz"
@@ -519,7 +501,9 @@ def npm_global_has(npm_package: str, agent_dep_dir: Path) -> bool | None:
     try:
         result = subprocess.run(
             [str(npm), "ls", "-g", npm_package, "--depth=0"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except OSError:
         return None
@@ -619,10 +603,7 @@ def _ensure_cached_node(agent_dep_dir: Path) -> dict[str, Path]:
 
         actual_sha = _sha256_of_file(archive_path)
         if actual_sha != expected_sha:
-            raise InstallError(
-                f"SHA256 mismatch for {archive_filename}: "
-                f"expected {expected_sha}, got {actual_sha}"
-            )
+            raise InstallError(f"SHA256 mismatch for {archive_filename}: expected {expected_sha}, got {actual_sha}")
         print("[npx] sha256 verified")
 
         extracted_top = _extract_archive(archive_path, ext, tmp)
@@ -705,8 +686,7 @@ def main() -> int:
         type=str,
         default=None,
         metavar="PATH",
-        help="Путь к кастомному конфигурационному файлу манифеста MCP "
-        "(по умолчанию recommended_mcp/config.yml).",
+        help="Путь к кастомному конфигурационному файлу манифеста MCP (по умолчанию recommended_mcp/config.yml).",
     )
     parser.add_argument(
         "-e",
@@ -731,8 +711,9 @@ def main() -> int:
         return 0
     repo_url, repo_ref = load_repo_url(manifest_path)
     with pip_install_target(mcp_py):
-        results = run_install_entries(manifest, root, agent_dep_dir, editable=args.editable,
-                                      repo_url=repo_url, repo_ref=repo_ref)
+        results = run_install_entries(
+            manifest, root, agent_dep_dir, editable=args.editable, repo_url=repo_url, repo_ref=repo_ref
+        )
     installed = [n for n, s, _ in results if s == "installed"]
     skipped = [(n, d) for n, s, d in results if s == "skipped"]
     failed = [(n, d) for n, s, d in results if s == "failed"]
@@ -742,8 +723,10 @@ def main() -> int:
     for n, d in failed:
         print(f"[summary] НЕ установлено: {n} — {d}")
     if failed:
-        print(f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
-              f"поставь вручную или используй совместимый Python")
+        print(
+            f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+            f"поставь вручную или используй совместимый Python"
+        )
     state = save_runtime_state(manifest_path=manifest_path)
     print(f"[state] {state.bin_dir}")
     paths = _node_install_paths(agent_dep_dir)

@@ -3,6 +3,7 @@
 Конфиг — единственный источник истины; палитра — витрина. Действующее значение
 ключа считает его владелец (tui/session_settings.py) — здесь только читаем, чтобы
 витрина и сравнение с умолчанием не разошлись правилами."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,9 +35,9 @@ RIGOR_KEYS = ("tui.finish_gate_mode", "tui.text_answer_mode")
 PRESET_CUSTOM = "custom"
 
 PRESETS: Dict[str, Dict[str, str]] = {
-    "low":    {"tui.finish_gate_mode": "off",   "tui.text_answer_mode": "allow"},
+    "low": {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"},
     "medium": {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"},
-    "high":   {"tui.finish_gate_mode": "on",    "tui.text_answer_mode": "deny"},
+    "high": {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"},
 }
 
 
@@ -138,6 +139,7 @@ def level_value_hint(app: Any, value: str) -> str:
     пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
     «light → default» вместо модели притворного light-слота."""
     from gc_core.model_router import AliasCircuitOpenError
+
     router = app.display_router()
     try:
         resolved = router.resolve_level(value)
@@ -151,16 +153,13 @@ def level_value_hint(app: Any, value: str) -> str:
         return f"{resolved.model} · легаси: уровни появятся с реестром моделей"
     role = LEVEL_ROLE_TEXT.get(value, "")
     if resolved.source.startswith("фоллбэк "):
-        chain = resolved.source[len("фоллбэк "):]
+        chain = resolved.source[len("фоллбэк ") :]
         return f"{resolved.alias} ({chain}) · {role}"
     return f"{resolved.alias} · {role}"
 
 
 # --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
-_PROFILE_EMPTY_HINT = (
-    "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · "
-    "пример — в /settings → Профили"
-)
+_PROFILE_EMPTY_HINT = "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · пример — в /settings → Профили"
 _LEVEL_ORDER = {"light": 0, "default": 1, "max": 2}
 
 
@@ -285,6 +284,7 @@ def _profile_verdict_key(app: Any, name: str) -> Optional[tuple]:
     решение то же, что у `_config_stack_texts`/`_models_verdict`
     (`settings.py`) для вердикта секции «Модели»."""
     from gc_core.config import profile_mtime_set
+
     try:
         mtimes = profile_mtime_set(getattr(app, "_config_path", None), name)
     except OSError:
@@ -350,7 +350,7 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
         if name == base_pointer:
             desc += " (как в конфиге)"
         if name == effective:
-            status = _PROFILE_ACTIVE_STATUS   # действующий уже собрался — пробы не надо
+            status = _PROFILE_ACTIVE_STATUS  # действующий уже собрался — пробы не надо
         else:
             status = _PROFILE_BROKEN_STATUS if _cached_assembly_error(app, name) else ""
         options.append((name, desc, status))
@@ -366,6 +366,7 @@ def _profile_file_doc(app: Any, name: str) -> Dict[str, Any]:
         return {}
     import yaml
     from gc_core.utils.user_text import read_user_text_or_none
+
     # Нечитаемый файл роняет палитру на одном наведении курсора (живой смок):
     # хинт строится на подсветке пункта, до всякого выбора.
     try:
@@ -395,8 +396,7 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     reason = _cached_assembly_error(app, name)
     if reason:
         parts.append(reason)
-    summary = _profile_slots_summary({"slots": doc.get("slots") or {},
-                                      "models": merged_models})
+    summary = _profile_slots_summary({"slots": doc.get("slots") or {}, "models": merged_models})
     if summary:
         parts.append(summary)
     if ref is not None:
@@ -559,12 +559,13 @@ def _fit_hint(value: str, hint: str, keys: str, width: int) -> str:
 
     Владелец канонического представления тоггла (рядом с render_track) —
     переиспользуется палитрой (command_palette.py)."""
+
     def build(h: str, k: str) -> str:
         return f"{value} — {h}  ·  {k}"
 
     if width <= 0 or len(build(hint, keys)) <= width:
         return build(hint, keys)
-    core = hint.rsplit(" · ", 1)[0]                       # 1) без «кому подходит»
+    core = hint.rsplit(" · ", 1)[0]  # 1) без «кому подходит»
     if len(build(core, keys)) <= width:
         return build(core, keys)
     if len(build(core, _HINT_KEYS_TOGGLE_MEDIUM)) <= width:  # 2) без области
@@ -584,6 +585,7 @@ def _fit_value_hint(value: str, hint: str, width: int) -> str:
     Для строки внутри рамки подэкрана Settings («Режимы работы») — клавиши там
     показывает статичный футер вне рамки (см. `_fit_hint` — та же механика,
     но с клавишами внутри самой строки, там, где своего футера-подсказки нет)."""
+
     def build(h: str) -> str:
         return f"{value} — {h}"
 
@@ -618,17 +620,15 @@ def render_track(spec: ToggleSpec, current: str, *, extra_lit: Any = None) -> Te
         if i < len(spec.values) - 1:
             t.append(" ")
     if extra_lit is not None:
-        t.append("  ")   # двойной пробел — отделяет вне-шкальную позицию custom
+        t.append("  ")  # двойной пробел — отделяет вне-шкальную позицию custom
         if extra_lit is True:
             t.append("●", style=f"bold {_pal.BRAND}")
         else:
-            t.append(" ")   # резерв: 4-я позиция пуста, без тусклой ○ (ревизия 4)
+            t.append(" ")  # резерв: 4-я позиция пуста, без тусклой ○ (ревизия 4)
     return t
 
 
-def padded_track(
-    spec: ToggleSpec, current: str, *, extra_lit: Any, base_w: int, extra_w: int
-) -> Text:
+def padded_track(spec: ToggleSpec, current: str, *, extra_lit: Any, base_w: int, extra_w: int) -> Text:
     """Трек тоггла, выровненный по ЛЕВОМУ краю общего поля (ревизия 5, спека §6:
     системный контракт, владелец здесь — переиспользуют палитра и Settings).
     `render_track` остаётся ядром без изменений — эта функция только паддит
@@ -711,18 +711,13 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     spec = TOGGLES[name]
     if spec.preset_keys:
         if value not in PRESETS:
-            raise ValueError(
-                f"invalid preset value {value!r} for toggle {name!r}, "
-                f"expected one of {tuple(PRESETS)}"
-            )
+            raise ValueError(f"invalid preset value {value!r} for toggle {name!r}, expected one of {tuple(PRESETS)}")
         app.apply_session_overrides(PRESETS[value])
         app.invalidate_runner()
         return toggle_state(app, name)
     names = effective_toggle_names(app, name)
     if value not in names:
-        raise ValueError(
-            f"invalid value {value!r} for toggle {name!r}, expected one of {names}"
-        )
+        raise ValueError(f"invalid value {value!r} for toggle {name!r}, expected one of {names}")
     if spec.session_switch_profile:
         app.switch_session_profile(value)
         return toggle_state(app, name)

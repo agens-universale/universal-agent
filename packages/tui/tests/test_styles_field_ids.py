@@ -8,10 +8,22 @@ from gc_testkit.paths import TUI_PKG
 _STYLES = TUI_PKG / "styles.tcss"
 
 # id полей, которые обязаны иметь и плоский, и framed-стиль
-_FRAMED_FIELD_IDS = ("conn-url", "conn-token", "conn-proxy", "onb-model",
-                     "onb-level-model", "mef-alias", "mef-model", "mef-url",
-                     "mef-token", "set-profile-name",
-                     "voice-url", "voice-token", "voice-model", "voice-lang")
+_FRAMED_FIELD_IDS = (
+    "conn-url",
+    "conn-token",
+    "conn-proxy",
+    "onb-model",
+    "onb-level-model",
+    "mef-alias",
+    "mef-model",
+    "mef-url",
+    "mef-token",
+    "set-profile-name",
+    "voice-url",
+    "voice-token",
+    "voice-model",
+    "voice-lang",
+)
 
 
 def _css() -> str:
@@ -21,8 +33,7 @@ def _css() -> str:
 def test_every_framed_field_has_flat_rule():
     """Плоское правило: без него Input несёт дефолтную tall-рамку."""
     css = _css()
-    flat = [ln for ln in css.splitlines()
-            if "border: none" in ln and "height: 1" in ln]
+    flat = [ln for ln in css.splitlines() if "border: none" in ln and "height: 1" in ln]
     joined = " ".join(flat)
     missing = [fid for fid in _FRAMED_FIELD_IDS if f"#{fid}" not in joined]
     assert missing == [], f"нет плоского правила у: {missing}"
@@ -46,8 +57,7 @@ def test_disabled_token_border_is_dimmed():
     распространяется на форму записи реестра — её пропажу прежний сторож не видел."""
     css = _css()
     for field in ("conn-token", "mef-token"):
-        line = next((ln for ln in css.splitlines()
-                     if f"#{field}.set-framed:disabled" in ln), None)
+        line = next((ln for ln in css.splitlines() if f"#{field}.set-framed:disabled" in ln), None)
         assert line is not None, f"нет правила для замороженного #{field}"
         assert "$deep-dim" in line, f"рамка #{field} не приглушена: {line}"
 

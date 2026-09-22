@@ -1,4 +1,3 @@
-
 from typing import Any, Dict, Optional
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -16,19 +15,19 @@ class UpdatePlan(AbstractSimpleTool):
                 "properties": {
                     "current_plan": {
                         "type": "string",
-                        "description": "Current plan as a numbered list of TODOs (e.g., '1. Do X\n2. Do Y') representing all remaining steps to complete the task. Must include every step, even minor ones, and reflect the latest understanding of the work needed."
+                        "description": "Current plan as a numbered list of TODOs (e.g., '1. Do X\n2. Do Y') representing all remaining steps to complete the task. Must include every step, even minor ones, and reflect the latest understanding of the work needed.",
                     }
                 },
                 "required": ["current_plan"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: update_plan
+        description = """Tool name: update_plan
 Tool description: Write current plan TODOs. What you should do for solving initial user task.
 Input schema: {"type": "object", "properties": {"current_plan": {"type": "string", "description": "Plan as list of TODOs. Steps for solving initial user task."}, "required": ["current_plan"], "additionalProperties": false}
 
@@ -67,11 +66,11 @@ The assistant used the `update_plan` with TODOs list because:
 3. The assistant inferred that tests and build need to pass by adding "Ensure tests and build succeed" as the final task.
 
 You also can run `update_plan` after finishing some steps and decomposing next steps. 
-'''
+"""
         return description
 
     async def acall(self, current_plan: str, **kwargs) -> str:
         if not isinstance(current_plan, str):
             raise ValueError(f"Argument 'current_plan' must be a string. Got: {type(current_plan)} ({current_plan})")
 
-        return 'A new plan has been generated. Use it for your next steps.'
+        return "A new plan has been generated. Use it for your next steps."

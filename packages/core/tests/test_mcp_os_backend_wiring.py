@@ -18,13 +18,10 @@ async def test_build_tools_data_hands_the_backend_to_mcp_discovery(monkeypatch):
         return {}, {}
 
     monkeypatch.setattr(at, "aget_mcp_tools_data_for_config", _fake)
-    monkeypatch.setitem(
-        tools_pkg.abuild_tools_data.__globals__, "aget_mcp_tools_data_for_config", _fake
-    )
+    monkeypatch.setitem(tools_pkg.abuild_tools_data.__globals__, "aget_mcp_tools_data_for_config", _fake)
     sandbox = object()
     await tools_pkg.abuild_tools_data(
-        {"mcp-servers": {"x": {"transport": "stdio", "command": "x",
-                               "execute_on": "os_backend"}}},
+        {"mcp-servers": {"x": {"transport": "stdio", "command": "x", "execute_on": "os_backend"}}},
         os_backend=sandbox,
     )
     assert "os_backend" in seen, "сборка MCP-тулов не вызывалась — проверяли не тот путь"

@@ -88,8 +88,12 @@ def record_usage(raw_usage: Any, endpoint_url: str | None = None) -> None:
         ctx.account.add_missing(ctx.category)
     else:
         ctx.account.add(
-            ctx.category, parsed.input, parsed.output, parsed.cached,
-            cost=parsed.cost, billed=parsed.billed,
+            ctx.category,
+            parsed.input,
+            parsed.output,
+            parsed.cached,
+            cost=parsed.cost,
+            billed=parsed.billed,
             currency=_currency_for(endpoint_url),
         )
 
@@ -106,8 +110,12 @@ class _OrphanAccount:
             self.account.add_missing(CATEGORY_UNCATEGORIZED)
         else:
             self.account.add(
-                CATEGORY_UNCATEGORIZED, parsed.input, parsed.output, parsed.cached,
-                cost=parsed.cost, billed=parsed.billed,
+                CATEGORY_UNCATEGORIZED,
+                parsed.input,
+                parsed.output,
+                parsed.cached,
+                cost=parsed.cost,
+                billed=parsed.billed,
                 currency=_currency_for(endpoint_url),
             )
 

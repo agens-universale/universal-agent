@@ -3,6 +3,7 @@
 tool-venv). На Windows — в ВИДИМОМ окне-установщике (прогресс + «готово»), агент
 не авто-стартует (юзер сам запускает, где удобно). Носитель — НЕ python
 обновляемого venv."""
+
 from __future__ import annotations
 
 import os
@@ -81,7 +82,7 @@ def install_location_phrase() -> str:
 
 def _wait_pid_dead_snippet(pid: int) -> str:
     """POSIX sh: ждём, пока процесс pid исчезнет (kill -0)."""
-    return f'while kill -0 {pid} 2>/dev/null; do sleep 0.5; done'
+    return f"while kill -0 {pid} 2>/dev/null; do sleep 0.5; done"
 
 
 def _write_script(command: list, parent_pid: int, restart_cmd: Optional[list]) -> str:
@@ -105,7 +106,7 @@ def _write_script(command: list, parent_pid: int, restart_cmd: Optional[list]) -
             "set RC=%ERRORLEVEL%\r\n"
             "echo.\r\n"
             'if "%RC%"=="0" (echo Готово. Запустите gc-ua заново, где вам удобно.)'
-            ' else (echo Ошибка установки — подробности выше.)\r\n'
+            " else (echo Ошибка установки — подробности выше.)\r\n"
             "echo.\r\n"
             "echo Можно закрыть это окно.\r\n"
             "pause >nul\r\n"
@@ -114,11 +115,8 @@ def _write_script(command: list, parent_pid: int, restart_cmd: Optional[list]) -
     else:
         cmd_str = shlex.join(command)
         restart_str = shlex.join(restart_cmd) if restart_cmd else ""
-        body = (
-            "#!/bin/sh\n"
-            f"{_wait_pid_dead_snippet(parent_pid)}\n"
-            f"{cmd_str}\n"
-            + (f"{restart_str}\n" if restart_str else "")
+        body = f"#!/bin/sh\n{_wait_pid_dead_snippet(parent_pid)}\n{cmd_str}\n" + (
+            f"{restart_str}\n" if restart_str else ""
         )
         fd, path = tempfile.mkstemp(suffix=f"-gc-update-pid{parent_pid}.sh")
     with os.fdopen(fd, "w", encoding="utf-8") as f:

@@ -13,8 +13,6 @@ _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
 
 
-
-
 def _append(state: Any, content: str, log: Any) -> None:
     if append_final_answer_to_current(state, content):
         log_intent_scope_delta_appended(log, tool_name=_LABEL, delta_chars=len(content))
@@ -50,9 +48,7 @@ async def amaybe_record_final_answer_intent(*, assistant_text: str, state: Any, 
         _append(state, text, log)
         return
 
-    summary = await asummarize_final_answer_line(
-        ctx=ctx, state=state, assistant_text=text, logger=log
-    )
+    summary = await asummarize_final_answer_line(ctx=ctx, state=state, assistant_text=text, logger=log)
     if summary:
         _append(state, summary, log)
         return
@@ -64,5 +60,3 @@ async def amaybe_record_final_answer_intent(*, assistant_text: str, state: Any, 
         return
 
     log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_summary")
-
-

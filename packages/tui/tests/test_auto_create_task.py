@@ -1,4 +1,5 @@
 """Свободный текст без активной задачи → автосоздание UUID-задачи + executor.run."""
+
 import pytest
 
 
@@ -14,19 +15,29 @@ async def test_first_message_creates_task(tmp_path):
             captured["run"] = {"messages": messages, "thread_id": thread_id}
             import json
             from pathlib import Path
+
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
-                json.dumps({"type": "message", "seq": 1,
-                            "ts_utc": "2026-05-21T12:00:00+00:00",
-                            "payload": {"id": "u1", "role": "user", "content": messages[0]}}) + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "seq": 1,
+                        "ts_utc": "2026-05-21T12:00:00+00:00",
+                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "updated_at": "2026-05-21T12:00:00+00:00",
-                            "messages_count": 1}),
+                json.dumps({"thread_id": thread_id, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
                 encoding="utf-8",
             )
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._executor_factory = lambda: _Fake()
@@ -55,14 +66,19 @@ async def test_message_while_running_calls_add_message(tmp_path):
     class _Fake:
         def __init__(self):
             self._evt = None
+
         async def arun(self, messages, *, thread_id, **kw):
             captured["runs"] += 1
             # симулируем долгий run
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
+
         def stop_run(self):
-            if self._evt: self._evt.set()
+            if self._evt:
+                self._evt.set()
+
         def add_message(self, m):
             captured["added"].append(m)
 
@@ -98,10 +114,18 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
         async def arun(self, messages, *, thread_id, **kw):
             import json
             from pathlib import Path
+
             captured["thread_ids"].append(thread_id)
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
-                json.dumps({"type": "message", "seq": 1, "ts_utc": "...",
-                            "payload": {"id": "u1", "role": "user", "content": messages[0]}}) + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "seq": 1,
+                        "ts_utc": "...",
+                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
@@ -109,8 +133,12 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
                 encoding="utf-8",
             )
             # Quick run — no blocking
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._executor_factory = lambda: _Fake()
@@ -145,21 +173,31 @@ async def test_no_duplicate_user_reply(tmp_path):
             import json
             import time
             from pathlib import Path
+
             # attach_active_task + pending mount на UI-потоке — до записи .jsonl.
             time.sleep(0.4)
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
-                json.dumps({"type": "message", "seq": 1,
-                            "ts_utc": "2026-05-21T12:00:00+00:00",
-                            "payload": {"id": "u1", "role": "user", "content": messages[0]}}) + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "seq": 1,
+                        "ts_utc": "2026-05-21T12:00:00+00:00",
+                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "updated_at": "2026-05-21T12:00:00+00:00",
-                            "messages_count": 1}),
+                json.dumps({"thread_id": thread_id, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
                 encoding="utf-8",
             )
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._executor_factory = lambda: _Fake()

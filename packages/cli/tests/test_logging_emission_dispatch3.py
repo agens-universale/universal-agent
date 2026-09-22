@@ -11,6 +11,7 @@ Each test drives real code with a jsonl-mode per-run logger from
 ``create_run_logger`` and asserts the event line + expected keys appear as a
 top-level "event" field (not embedded in "msg").
 """
+
 import json
 import sys
 import tempfile
@@ -193,35 +194,45 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
 
     fake_config_dict = {"console_trace": True}
 
-    with patch.object(cli_module, "_ensure_project_gc_dir"), \
-        patch.object(cli_module, "_ensure_user_skills_dir"), \
-        patch.object(cli_module.arg_parser, "run_args", SimpleNamespace(
-            init_config=False,
-            init=False,
-            config=None,
-            write_guard=False,
-            no_write_guard=False,
-            command_moderation=None,
-            read_guard=None,
-            no_read_guard=False,
-            read_guard_mode=None,
-            query="hi",
-            wrap_technical=False,
-            skill=None,
-            verbose=False,
-            thread_id=None,
-            new=False,
-            auto_mcp=False,
-        )), \
-        patch.object(cli_module, "load_config", return_value=fake_config_dict), \
-        patch.object(cli_module, "apply_cli_overrides"), \
-        patch.object(cli_module, "onboarding", SimpleNamespace(
-            is_unconfigured=lambda cfg: False,
-        )), \
-        patch.object(cli_module, "_resolve_forced_skill", return_value=None), \
-        patch.object(cli_module, "build_auth_connector", return_value=None), \
-        patch.object(cli_module, "acreate_run_context", new=AsyncMock(return_value=ctx)), \
-        patch.object(cli_module, "AgentExecutor") as mock_executor_cls:
+    with (
+        patch.object(cli_module, "_ensure_project_gc_dir"),
+        patch.object(cli_module, "_ensure_user_skills_dir"),
+        patch.object(
+            cli_module.arg_parser,
+            "run_args",
+            SimpleNamespace(
+                init_config=False,
+                init=False,
+                config=None,
+                write_guard=False,
+                no_write_guard=False,
+                command_moderation=None,
+                read_guard=None,
+                no_read_guard=False,
+                read_guard_mode=None,
+                query="hi",
+                wrap_technical=False,
+                skill=None,
+                verbose=False,
+                thread_id=None,
+                new=False,
+                auto_mcp=False,
+            ),
+        ),
+        patch.object(cli_module, "load_config", return_value=fake_config_dict),
+        patch.object(cli_module, "apply_cli_overrides"),
+        patch.object(
+            cli_module,
+            "onboarding",
+            SimpleNamespace(
+                is_unconfigured=lambda cfg: False,
+            ),
+        ),
+        patch.object(cli_module, "_resolve_forced_skill", return_value=None),
+        patch.object(cli_module, "build_auth_connector", return_value=None),
+        patch.object(cli_module, "acreate_run_context", new=AsyncMock(return_value=ctx)),
+        patch.object(cli_module, "AgentExecutor") as mock_executor_cls,
+    ):
         # Точка входа CLI асинхронная (Задача 23 async-переезда): прогон идёт
         # через arun, и заглушка обязана быть корутинной.
         async def _arun(*_a, **_kw):

@@ -114,7 +114,9 @@ class TestBuildChildCtxError:
 
         with patch.object(runner, "_build_child_ctx", side_effect=ImportError("no module")):
             result = await runner.arun(
-                "subagent_worker", {"task": "test"}, MagicMock(),
+                "subagent_worker",
+                {"task": "test"},
+                MagicMock(),
             )
 
         payload = json.loads(result)

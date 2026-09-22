@@ -17,6 +17,7 @@ A на первом сообщении роли ``system`` (вместе с ни
 конфига: слой утилит, тот же класс, что выбор ``max_tokens`` по
 ``use_max_tokens_param``. Спека: docs/specs/2026-09-07-prompt-cache-design.md.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,7 +39,7 @@ def prompt_cache_enabled(setting: Any, model_id: Any) -> bool:
     CLI-оверрайдов и agent_overrides сервера — мимо схемы, yaml: 0/1, false/true)
     решает само; всё остальное — ключ не задан или нераспознанная строка — автодетект
     по id модели: незнакомое слово никогда не включает разметку принудительно."""
-    if isinstance(setting, int):        # bool — подкласс int
+    if isinstance(setting, int):  # bool — подкласс int
         return bool(setting)
     return is_prompt_cache_model(model_id)
 
@@ -56,9 +57,7 @@ def _with_cache_control(message: dict) -> dict:
     """Копия сообщения, где строка контента стала одной текстовой частью с меткой.
     Остальные ключи (``name``, ``tool_call_id`` и будущие) сохраняются как есть."""
     marked = dict(message)
-    marked["content"] = [
-        {"type": "text", "text": message["content"], "cache_control": dict(CACHE_CONTROL)}
-    ]
+    marked["content"] = [{"type": "text", "text": message["content"], "cache_control": dict(CACHE_CONTROL)}]
     return marked
 
 

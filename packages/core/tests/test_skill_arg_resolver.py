@@ -5,14 +5,16 @@ def _catalog():
     # supercoder pack (bootstrap using-supercoder) + a flat skill;
     # 'dup' is an inner name present in two packs (ambiguous bare).
     return SkillCatalog(
-        canonical_ids=frozenset({
-            "supercoder:using-supercoder",
-            "supercoder:brainstorming",
-            "supercoder:dup",
-            "otherpack:dup",
-            "otherpack:using-otherpack",
-            "project-overview",
-        }),
+        canonical_ids=frozenset(
+            {
+                "supercoder:using-supercoder",
+                "supercoder:brainstorming",
+                "supercoder:dup",
+                "otherpack:dup",
+                "otherpack:using-otherpack",
+                "project-overview",
+            }
+        ),
         bare_to_canonical={
             "using-supercoder": ("supercoder:using-supercoder",),
             "brainstorming": ("supercoder:brainstorming",),
@@ -28,9 +30,7 @@ def _catalog():
 
 
 def test_exact_canonical():
-    assert resolve_skill_arg("supercoder:brainstorming", _catalog()) == Resolved(
-        "supercoder:brainstorming", None
-    )
+    assert resolve_skill_arg("supercoder:brainstorming", _catalog()) == Resolved("supercoder:brainstorming", None)
 
 
 def test_exact_pack_id_to_bootstrap():
@@ -41,15 +41,11 @@ def test_exact_pack_id_to_bootstrap():
 
 
 def test_bare_unique():
-    assert resolve_skill_arg("brainstorming", _catalog()) == Resolved(
-        "supercoder:brainstorming", None
-    )
+    assert resolve_skill_arg("brainstorming", _catalog()) == Resolved("supercoder:brainstorming", None)
 
 
 def test_flat_skill():
-    assert resolve_skill_arg("project-overview", _catalog()) == Resolved(
-        "project-overview", None
-    )
+    assert resolve_skill_arg("project-overview", _catalog()) == Resolved("project-overview", None)
 
 
 def test_bare_ambiguous():
@@ -62,9 +58,7 @@ def test_empty():
 
 
 def test_underscore_normalization_canonical():
-    assert resolve_skill_arg("supercoder:using_supercoder", _catalog()) == Resolved(
-        "supercoder:using-supercoder", None
-    )
+    assert resolve_skill_arg("supercoder:using_supercoder", _catalog()) == Resolved("supercoder:using-supercoder", None)
 
 
 def test_cutoff_constant():
@@ -97,9 +91,7 @@ def test_fuzzy_lands_on_ambiguous_bare():
     # not: a single edit there is only ~0.67 ratio).
     cat = SkillCatalog(
         canonical_ids=frozenset({"packa:brainstorming", "packb:brainstorming"}),
-        bare_to_canonical={
-            "brainstorming": ("packa:brainstorming", "packb:brainstorming")
-        },
+        bare_to_canonical={"brainstorming": ("packa:brainstorming", "packb:brainstorming")},
         pack_bootstrap={},
     )
     r = resolve_skill_arg("brainstrming", cat)

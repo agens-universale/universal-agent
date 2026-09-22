@@ -1,5 +1,6 @@
 """Единое правило ошибок (§3.3): одна строка одним Static; цветовые зоны — rich.Text spans
 ([!]+суть = red, путь = slate, подсказка = deep-dim)."""
+
 import pytest
 from gc_tui.palette import DEEP_DIM
 
@@ -21,6 +22,7 @@ def _error_text(trace):
 async def test_command_error_suggestion_is_meta():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/statuz"

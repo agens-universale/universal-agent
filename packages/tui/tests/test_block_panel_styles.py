@@ -1,4 +1,5 @@
 """CSS-контракт блоков трейса: отступы, отсутствие переноса, подсветка фокуса."""
+
 from __future__ import annotations
 
 import pytest
@@ -42,8 +43,7 @@ async def test_copy_button_not_glued_to_panel_edge(tui_app_factory):
 
 @pytest.mark.asyncio
 async def test_table_panel_keeps_both_margins_with_indent(tui_app_factory):
-    app = tui_app_factory(
-        BlockPanel.for_table(["a"], [["b"]], ["left"], event_no=1, indent=True))
+    app = tui_app_factory(BlockPanel.for_table(["a"], [["b"]], ["left"], event_no=1, indent=True))
     async with app.run_test(size=(80, 24)):
         margin = app.query_one(BlockPanel).styles.margin
         assert (margin.top, margin.bottom) == (1, 1)

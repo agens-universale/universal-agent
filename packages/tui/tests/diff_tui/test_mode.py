@@ -1,4 +1,5 @@
 """resolve_mode: git-mode только при git + launch_root/.git; nested не переключает."""
+
 from __future__ import annotations
 
 import subprocess

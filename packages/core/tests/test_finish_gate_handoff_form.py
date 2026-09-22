@@ -52,8 +52,7 @@ def _ctx_state_digest(*, digest_handoff: dict | None = None):
     )
     digest = FinishGateTraceDigest(
         trace_digest_text=(
-            '<message n="1">\n[user] done?\n</message>\n'
-            f'<message n="2">\n[tool turn_finish] {tool_out}\n</message>'
+            f'<message n="1">\n[user] done?\n</message>\n<message n="2">\n[tool turn_finish] {tool_out}\n</message>'
         ),
         digest_chars=200,
     )
@@ -163,17 +162,19 @@ class TestValidatorPayloadHandoffNormalized:
         """В payload к LLM `handoff` уже dict, а не JSON-строка — нет ложного string vs object."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Wrote report.md",
-                "handoff": '{"artifacts":["report.md"]}',
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Wrote report.md",
+                    "handoff": '{"artifacts":["report.md"]}',
+                },
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert isinstance(finish_args["handoff"], dict)
         assert finish_args["handoff"] == {"artifacts": ["report.md"]}
@@ -183,17 +184,19 @@ class TestValidatorPayloadHandoffNormalized:
         """Пустой handoff `"{}"` в аргументах доходит до LLM как пустой object `{}`."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "direct_answer",
-                "task_report": "Answered.",
-                "handoff": "{}",
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "direct_answer",
+                    "task_report": "Answered.",
+                    "handoff": "{}",
+                },
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {}
 
@@ -210,13 +213,15 @@ class TestValidatorPayloadHandoffNormalized:
             },
             ensure_ascii=False,
         )
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments=raw_args,
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments=raw_args,
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {"artifacts": ["out.txt"]}
 
@@ -225,17 +230,19 @@ class TestValidatorPayloadHandoffNormalized:
         """Если handoff уже пришёл object — в payload остаётся тот же object (идемпотентность)."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Done",
-                "handoff": {"artifacts": ["report.md"]},
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Done",
+                    "handoff": {"artifacts": ["report.md"]},
+                },
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {"artifacts": ["report.md"]}
 
@@ -245,17 +252,19 @@ class TestValidatorPayloadHandoffNormalized:
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
         broken = '{"artifacts":'
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Done",
-                "handoff": broken,
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Done",
+                    "handoff": broken,
+                },
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == broken
 
@@ -271,17 +280,19 @@ class TestStringVsObjectEquivalence:
         """В `finish_handoff_arguments` поле `handoff` — nested object, не JSON-строка."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Wrote report.md",
-                "handoff": '{"artifacts":["report.md"]}',
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Wrote report.md",
+                    "handoff": '{"artifacts":["report.md"]}',
+                },
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert isinstance(finish_args["handoff"], dict)
         assert finish_args["handoff"]["artifacts"] == ["report.md"]
@@ -291,30 +302,28 @@ class TestStringVsObjectEquivalence:
         assert '"handoff": "{' not in args_block
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_normalized_args_handoff_matches_digest_object_content(
-        self, mock_llm
-    ) -> None:
+    def test_normalized_args_handoff_matches_digest_object_content(self, mock_llm) -> None:
         """Цель 2: после нормализации args.handoff == содержимому object в digest (эквивалентность форм)."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest(digest_handoff=_DIGEST_HANDOFF)
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Wrote report.md",
-                "handoff": json.dumps(_DIGEST_HANDOFF, ensure_ascii=False),
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Wrote report.md",
+                    "handoff": json.dumps(_DIGEST_HANDOFF, ensure_ascii=False),
+                },
+                trace_digest=digest,
+            )
+        )
         payload = _full_payload(mock_llm)
         args_handoff = payload["finish_handoff_arguments"]["handoff"]
         assert isinstance(args_handoff, dict)
         assert args_handoff == _DIGEST_HANDOFF
-        digest_handoff_json = json.dumps(
-            _DIGEST_HANDOFF, ensure_ascii=False, separators=(",", ":")
-        )
+        digest_handoff_json = json.dumps(_DIGEST_HANDOFF, ensure_ascii=False, separators=(",", ":"))
         assert digest_handoff_json in payload["trace_digest_text"].replace(" ", "")
 
 
@@ -325,25 +334,23 @@ class TestContentMismatchStillRejected:
     """Фикс формы не должен ломать Axis B: content-mismatch всё ещё виден и reject'ится."""
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_content_divergence_preserved_in_normalized_payload(
-        self, mock_llm
-    ) -> None:
+    def test_content_divergence_preserved_in_normalized_payload(self, mock_llm) -> None:
         """A1 не подменяет содержимое: wrong.md в args остаётся в payload, digest держит report.md."""
         mock_llm.return_value = _validator_json()
-        ctx, state, digest = _ctx_state_digest(
-            digest_handoff={"artifacts": ["report.md"]}
+        ctx, state, digest = _ctx_state_digest(digest_handoff={"artifacts": ["report.md"]})
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Wrote wrong.md",
+                    "handoff": '{"artifacts":["wrong.md"]}',
+                },
+                trace_digest=digest,
+            )
         )
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Wrote wrong.md",
-                "handoff": '{"artifacts":["wrong.md"]}',
-            },
-            trace_digest=digest,
-        ))
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {"artifacts": ["wrong.md"]}
         payload = _full_payload(mock_llm)
@@ -357,47 +364,45 @@ class TestContentMismatchStillRejected:
             action="fix_report",
             trace_ok=True,
             report_ok=False,
-            report_mismatches=[
-                "handoff.artifacts claims wrong.md but digest shows report.md"
-            ],
+            report_mismatches=["handoff.artifacts claims wrong.md but digest shows report.md"],
         )
-        ctx, state, digest = _ctx_state_digest(
-            digest_handoff={"artifacts": ["report.md"]}
+        ctx, state, digest = _ctx_state_digest(digest_handoff={"artifacts": ["report.md"]})
+        result = run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Wrote wrong.md",
+                    "handoff": '{"artifacts":["wrong.md"]}',
+                },
+                trace_digest=digest,
+            )
         )
-        result = run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Wrote wrong.md",
-                "handoff": '{"artifacts":["wrong.md"]}',
-            },
-            trace_digest=digest,
-        ))
         assert result.ok is False
         assert result.action == "fix_report"
         assert result.report_ok is False
         assert any("wrong.md" in m or "artifacts" in m for m in result.report_mismatches)
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_form_only_mismatch_claim_is_not_forced_by_payload(
-        self, mock_llm
-    ) -> None:
+    def test_form_only_mismatch_claim_is_not_forced_by_payload(self, mock_llm) -> None:
         """Приёмка 1: при корректном string-handoff payload уже object — нет повода для form-only mismatch."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        run_coro(avalidate_final_report_vs_user_intent(
-            ctx=ctx,
-            state=state,
-            current_user_requests=["done?"],
-            finish_handoff_arguments={
-                "solution_type": "full_solution",
-                "task_report": "Wrote report.md",
-                "handoff": '{"artifacts":["report.md"]}',
-            },
-            trace_digest=digest,
-        ))
+        run_coro(
+            avalidate_final_report_vs_user_intent(
+                ctx=ctx,
+                state=state,
+                current_user_requests=["done?"],
+                finish_handoff_arguments={
+                    "solution_type": "full_solution",
+                    "task_report": "Wrote report.md",
+                    "handoff": '{"artifacts":["report.md"]}',
+                },
+                trace_digest=digest,
+            )
+        )
         finish_args = _finish_args_payload(mock_llm)
         assert not isinstance(finish_args["handoff"], str)
         assert finish_args["handoff"] == _DIGEST_HANDOFF

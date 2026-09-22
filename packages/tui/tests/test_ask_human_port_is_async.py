@@ -18,6 +18,7 @@ TUI ставил синхронный ``queue.get()``, то есть весь lo
 не доходил до своего ``finally`` — а там закрытие MCP-сессий и пула httpx.
 То есть Chromium переживал агента, а сокеты жили до конца процесса.
 """
+
 import asyncio
 import inspect
 import threading
@@ -42,8 +43,7 @@ def test_port_is_a_coroutine_function():
     runner = AgentRunner(executor=_Ex())
 
     assert inspect.iscoroutinefunction(runner._read_stdin_answer), (
-        "порт снова синхронный: ядро позовёт его инлайн и заморозит loop "
-        "на всё время, пока человек думает"
+        "порт снова синхронный: ядро позовёт его инлайн и заморозит loop на всё время, пока человек думает"
     )
 
 
@@ -79,7 +79,7 @@ async def test_loop_keeps_ticking_while_the_human_thinks():
         async with LoopPulse() as pulse:
             asker = asyncio.create_task(runner._read_stdin_answer("как дела?"))
 
-            await asyncio.sleep(0.3)                   # человек «думает»
+            await asyncio.sleep(0.3)  # человек «думает»
             runner._stdin_queue.put("хорошо\n")
             runner._stdin_queue.put("\n")
 
@@ -88,8 +88,7 @@ async def test_loop_keeps_ticking_while_the_human_thinks():
     assert answer == "хорошо", answer
     assert len(pulse.gaps) > 10, f"пульс почти не тикал: {len(pulse.gaps)}"
     assert pulse.worst() < 0.1, (
-        f"loop залипал на {pulse.worst() * 1000:.0f} мс — порт снова блокирующий "
-        f"({pulse.report()})"
+        f"loop залипал на {pulse.worst() * 1000:.0f} мс — порт снова блокирующий ({pulse.report()})"
     )
 
 
@@ -107,12 +106,11 @@ def test_stop_unblocks_a_pending_ask_human():
 
     waiter = threading.Thread(target=_wait, daemon=True)
     waiter.start()
-    time.sleep(0.05)                           # дать потоку встать в очередь
+    time.sleep(0.05)  # дать потоку встать в очередь
 
     runner.stop()
 
     assert done.wait(3), (
-        "поток остался в queue.get() после stop() — `arun` никогда не дойдёт "
-        "до закрытия MCP-сессий и пула httpx"
+        "поток остался в queue.get() после stop() — `arun` никогда не дойдёт до закрытия MCP-сессий и пула httpx"
     )
     assert ex.stopped is True

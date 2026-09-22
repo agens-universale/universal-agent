@@ -31,9 +31,7 @@ class TestApplyCliOverridesTraceId:
 
     def test_flag_wins_over_generic_override(self):
         cfg = {}
-        apply_cli_overrides(
-            cfg, extra_overrides={"trace_id": "from-generic"}, trace_id="from-flag"
-        )
+        apply_cli_overrides(cfg, extra_overrides={"trace_id": "from-generic"}, trace_id="from-flag")
         assert cfg["trace_id"] == "from-flag"
 
     def test_empty_generic_override_is_dropped(self):

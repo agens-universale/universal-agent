@@ -166,9 +166,7 @@ def test_explicit_config_dir_beats_config_path(isolated_env, tmp_path):
     conf_dir.mkdir()
     explicit = tmp_path / "elsewhere"
     cfg = build_swarm_config(
-        _server_cfg_with_config_at(
-            conf_dir / "config_server.yml", {"skills_dir": "./swarm_skills"}
-        ),
+        _server_cfg_with_config_at(conf_dir / "config_server.yml", {"skills_dir": "./swarm_skills"}),
         config_dir=str(explicit),
     )
     assert Path(cfg["skills_dir"]) == explicit / "swarm_skills"
@@ -200,7 +198,8 @@ def test_config_path_of_load_server_config_feeds_the_anchor(monkeypatch, tmp_pat
     conf_dir = tmp_path / "etc"
     conf_dir.mkdir()
     (conf_dir / "config_server.yml").write_text(
-        "swarm:\n  enabled: true\n  swarm_logs_dir: ./agent_logs\n", encoding="utf-8",
+        "swarm:\n  enabled: true\n  swarm_logs_dir: ./agent_logs\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=conf_dir / "config_server.yml"))
 
@@ -269,9 +268,7 @@ def test_swarm_agent_overrides_is_a_copy_not_reference(isolated_env):
     assert "max_steps" not in original
 
 
-def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(
-    isolated_env, tmp_path, caplog
-):
+def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(isolated_env, tmp_path, caplog):
     """Прежнее штатное значение develop не роняет sworm, а даёт обёртку из пакета.
 
     `demo_config_server.yml` на develop раскладывал `wrapper_path:
@@ -287,8 +284,7 @@ def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(
         cfg = build_swarm_config(
             {
                 "config_path": str(tmp_path / "config_server.yml"),
-                "swarm": {"enabled": True,
-                          "wrapper_path": "scripts/run-cli-in-sandbox.sh"},
+                "swarm": {"enabled": True, "wrapper_path": "scripts/run-cli-in-sandbox.sh"},
             }
         )
 

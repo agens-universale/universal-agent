@@ -7,23 +7,24 @@ Task 17 переставил механику: правая колонка (#foo
 `_compose_footer_right` заявляет ровно столько, чтобы левой хватило её рядов.
 Поэтому сторожим не промежуточный «бюджет», а ИТОГ этого решения: фактическую
 композицию правой рядом с фактической левой."""
+
 import pytest
 from rich.cells import cell_len
 
-_CHROME = 5   # хром футера: padding'и + зазор между колонками (main.py)
+_CHROME = 5  # хром футера: padding'и + зазор между колонками (main.py)
 
 
 def _need(scr) -> int:
     """Ширина, которую правая колонка заявляет по факту композиции."""
-    return max(cell_len(line)
-               for line in scr._compose_footer_right().plain.split("\n"))
+    return max(cell_len(line) for line in scr._compose_footer_right().plain.split("\n"))
 
 
 def _left_rows(scr, total: int, need: int) -> int:
     from gc_tui.services.notices_ui import footer_left_rows, format_notices_badge
-    return footer_left_rows(scr._footer_left_commands(),
-                            format_notices_badge(scr._collect_footer_notices()),
-                            width=total - need - _CHROME)
+
+    return footer_left_rows(
+        scr._footer_left_commands(), format_notices_badge(scr._collect_footer_notices()), width=total - need - _CHROME
+    )
 
 
 @pytest.mark.asyncio
@@ -40,17 +41,14 @@ async def test_right_column_leaves_room_for_notices_suffix():
         scr = app.screen_stack[0]
         assert isinstance(scr, TraceScreen)
         # три предупреждения — суффикс «  ·  ⚠3 · F4/notices»
-        app.collect_footer_notices = lambda: [
-            Notice("warning", f"c{i}", f"msg{i}") for i in range(3)
-        ]
+        app.collect_footer_notices = lambda: [Notice("warning", f"c{i}", f"msg{i}") for i in range(3)]
         await pilot.pause()
         need = _need(scr)
         left = cell_len(scr._footer_left_text())
         assert need + left + _CHROME <= 120, (
-            f"правая часть {need} + левая {left} > ширины окна 120: "
-            "правая часть налезет на счётчик уведомлений")
-        assert _left_rows(scr, 120, need) == 1, (
-            "левую загнали в два ряда там, где места хватало на один")
+            f"правая часть {need} + левая {left} > ширины окна 120: правая часть налезет на счётчик уведомлений"
+        )
+        assert _left_rows(scr, 120, need) == 1, "левую загнали в два ряда там, где места хватало на один"
         # Односторонние assert'ы выше не ловят излишне зажатую правую часть —
         # она тогда режется без нужды; имя модели на этой ширине обязано быть целым.
         assert "anthropic/claude-opus-5" in scr._compose_footer_right().plain
@@ -73,8 +71,7 @@ async def test_right_column_without_notices_is_unchanged():
 
 # --- Лесенка жертв: жертва обязана что-то давать, а стоп-клавиша неприкосновенна ---
 
-_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
-            "per_tokens": 1_000_000}
+_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
 
 
 class _RunningRunner:
@@ -97,6 +94,7 @@ def _billed(inp, out, cost):
     боевой ширины (51 колонка против 37 у одновалютной): именно она после правок
     develop стала диктовать ширину правой колонки."""
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, inp, out, 0, cost=cost, billed=True, currency="$")
     acc.add("summary", inp // 2, out, 0)
@@ -104,12 +102,14 @@ def _billed(inp, out, cost):
 
 
 def _with_prices(app, scr, *, running=False):
-    app._config = {"model": "some-long-model-name", "pricing": _PRICING,
-                   "completions_url": "https://routerai.ru/api/v1/chat/completions"}
+    app._config = {
+        "model": "some-long-model-name",
+        "pricing": _PRICING,
+        "completions_url": "https://routerai.ru/api/v1/chat/completions",
+    }
     app.tui_state.active_task_id = "t1"
     scr._active_task_id = "t1"
-    app.active_runner = _RunningRunner(
-        (_billed(2_000_000, 0, 20.0), _billed(1_000_000, 0, 10.0)), running=running)
+    app.active_runner = _RunningRunner((_billed(2_000_000, 0, 20.0), _billed(1_000_000, 0, 10.0)), running=running)
 
 
 @pytest.mark.asyncio
@@ -131,14 +131,14 @@ async def test_profile_name_survives_when_dropping_it_frees_nothing(tmp_path, mo
     async with app.run_test(size=(60, 30)) as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(
-            app, "active_profile_ref",
-            lambda: ProfileRef(name="work", path=_P("x"), root_kind="project"))
+            app, "active_profile_ref", lambda: ProfileRef(name="work", path=_P("x"), root_kind="project")
+        )
         _with_prices(app, scr)
         await pilot.pause()
 
         right = scr._compose_footer_right().plain
         assert "work" in right, f"имя профиля снято даром: {right!r}"
-        assert "some-long-model-name" in right   # модель не трогаем никогда
+        assert "some-long-model-name" in right  # модель не трогаем никогда
 
 
 @pytest.mark.asyncio
@@ -164,4 +164,5 @@ async def test_stop_key_keeps_its_room_on_narrow_window(tmp_path, monkeypatch, w
         left_width = scr._footer_total_width() - _need(scr) - _CHROME
         assert left_width >= cell_len(_FOOTER_RUNNING_LEFT), (
             f"ширина {width}: левой осталось {left_width} колонок, "
-            f"а «{_FOOTER_RUNNING_LEFT}» требует {cell_len(_FOOTER_RUNNING_LEFT)}")
+            f"а «{_FOOTER_RUNNING_LEFT}» требует {cell_len(_FOOTER_RUNNING_LEFT)}"
+        )

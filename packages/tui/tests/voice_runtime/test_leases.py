@@ -1,4 +1,5 @@
 """Light-switch: первый включает, последний выключает; мёртвые lease прибираются."""
+
 import os
 from pathlib import Path
 
@@ -28,17 +29,17 @@ def test_acquire_release_last_one_off(monkeypatch, tmp_path):
     leases.acquire(100)
     leases.acquire(200)
     assert sorted(leases.live_leases(alive=alive)) == [100, 200]
-    assert leases.release(100, alive=alive) is False   # 200 ещё жив
-    assert leases.release(200, alive=alive) is True    # последний — гасит
+    assert leases.release(100, alive=alive) is False  # 200 ещё жив
+    assert leases.release(200, alive=alive) is True  # последний — гасит
 
 
 def test_dead_leases_cleaned(monkeypatch, tmp_path):
     _patch_dir(monkeypatch, tmp_path)
-    leases.acquire(100)   # «убитый» TUI: lease остался, процесса нет
+    leases.acquire(100)  # «убитый» TUI: lease остался, процесса нет
     leases.acquire(200)
     alive = lambda pid: pid == 200
     assert leases.live_leases(alive=alive) == [200]
-    assert not (tmp_path / "100.lease").exists()       # мёртвый прибран
+    assert not (tmp_path / "100.lease").exists()  # мёртвый прибран
     assert leases.release(200, alive=alive) is True
 
 
@@ -57,7 +58,7 @@ def test_garbage_files_ignored(monkeypatch, tmp_path):
     not _HAS_START_KEY,
     strict=True,
     reason="дыра: на macOS process_start_key возвращает None, и lease пишется "
-           "без отпечатка процесса — _lease_is_ours верит любому тёзке по PID",
+    "без отпечатка процесса — _lease_is_ours верит любому тёзке по PID",
 )
 def test_start_key_is_taken_from_a_real_process():
     """Отпечаток снимается с ЖИВОГО процесса и повторяется между вызовами.
@@ -67,7 +68,7 @@ def test_start_key_is_taken_from_a_real_process():
     lease писался бы без отпечатка, а `_lease_is_ours` верил бы каждому тёзке."""
     key = leases.process_start_key(os.getpid())
     assert key and key == leases.process_start_key(os.getpid())
-    assert leases.process_start_key(0) is None      # заведомо не наш процесс
+    assert leases.process_start_key(0) is None  # заведомо не наш процесс
 
 
 def test_reused_pid_does_not_keep_the_light_on(monkeypatch, tmp_path):
@@ -80,12 +81,12 @@ def test_reused_pid_does_not_keep_the_light_on(monkeypatch, tmp_path):
     не гас даже при всех закрытых окнах агента, держа в памяти whisper-модель."""
     _patch_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-A")
-    leases.acquire(100)                                  # lease нашего TUI
-    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-B")   # чужой процесс
+    leases.acquire(100)  # lease нашего TUI
+    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-B")  # чужой процесс
 
     assert leases.live_leases(alive=lambda pid: True) == []
-    assert not (tmp_path / "100.lease").exists()          # прибран как мёртвый
-    assert leases.release(999, alive=lambda pid: True) is True   # свет можно гасить
+    assert not (tmp_path / "100.lease").exists()  # прибран как мёртвый
+    assert leases.release(999, alive=lambda pid: True) is True  # свет можно гасить
 
 
 def test_same_process_keeps_its_lease(monkeypatch, tmp_path):
@@ -128,7 +129,7 @@ def test_mark_and_clear_agent_owned(monkeypatch, tmp_path):
 
 def test_clear_without_marker_is_safe(monkeypatch, tmp_path):
     _patch_pids(monkeypatch, tmp_path)
-    leases.clear_agent_owned("speaches")          # нечего снимать — не падаем
+    leases.clear_agent_owned("speaches")  # нечего снимать — не падаем
     assert leases.is_agent_owned("speaches") is False
 
 

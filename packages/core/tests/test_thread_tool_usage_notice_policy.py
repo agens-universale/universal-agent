@@ -36,9 +36,7 @@ def _rule(step_count: int = 10, message: str = "unused tool notice") -> ToolUsag
 def test_tool_usage_notice_increments_without_tool_call():
     state = _state()
     rules = [_rule(10)]
-    update_tool_usage_notice_after_persist(
-        state, [{"role": "assistant", "content": "ok"}], rules
-    )
+    update_tool_usage_notice_after_persist(state, [{"role": "assistant", "content": "ok"}], rules)
     assert state.tool_usage_notice_cnt["session_memory"] == 1
     update_tool_usage_notice_after_persist(state, [], rules)
     assert state.tool_usage_notice_cnt["session_memory"] == 2
@@ -60,9 +58,7 @@ def test_tool_usage_notice_resets_after_explicit_reset():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 10}
     rules = [_rule(10)]
-    update_tool_usage_notice_after_persist(
-        state, [], rules, reset_tool_names={"session_memory"}
-    )
+    update_tool_usage_notice_after_persist(state, [], rules, reset_tool_names={"session_memory"})
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 0
 
 

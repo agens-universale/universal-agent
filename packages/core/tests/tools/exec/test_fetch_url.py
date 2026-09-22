@@ -4,6 +4,7 @@
 транспортом httpx, а не заглушкой requests: подмена на уровне транспорта
 проверяет и путь редиректов, который у этих тулов свой.
 """
+
 import json
 from types import SimpleNamespace
 
@@ -30,6 +31,7 @@ def _install(monkeypatch, handler, seen: dict | None = None):
     ``handler`` — либо ``httpx.Response``, либо функция ``request → Response``,
     либо исключение, которое надо поднять.
     """
+
     def _dispatch(request: httpx.Request) -> httpx.Response:
         if isinstance(handler, BaseException):
             raise handler
@@ -54,7 +56,7 @@ def _install(monkeypatch, handler, seen: dict | None = None):
 
     monkeypatch.setattr(async_http, "get_async_client", factory)
     for cls in (FetchUrl, SimpleFetchUrl):
-        target = inspect.unwrap(getattr(cls, 'acall', cls.__call__))
+        target = inspect.unwrap(getattr(cls, "acall", cls.__call__))
         globals_dict = getattr(target, "__globals__", None)
         if globals_dict is not None and "get_async_client" in globals_dict:
             monkeypatch.setitem(globals_dict, "get_async_client", factory)
@@ -99,10 +101,12 @@ def test_fetch_url_policy_blocks_before_request(monkeypatch):
 
     _install(monkeypatch, fail_if_called)
 
-    data = json.loads(_call(
-        with_local_ctx(FetchUrl, config_dict=_url_policy_config(url_blacklist=["blocked.example"])),
+    data = json.loads(
+        _call(
+            with_local_ctx(FetchUrl, config_dict=_url_policy_config(url_blacklist=["blocked.example"])),
             url="https://blocked.example/page",
-        ))
+        )
+    )
 
     assert data["ok"] is False
     assert data["result_type"] == "error"
@@ -116,10 +120,12 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monk
 
     _install(monkeypatch, fail_if_called)
 
-    data = json.loads(_call(
-        with_local_ctx(FetchUrl, config_dict=_url_policy_config(allowed_schemes=["https"])),
+    data = json.loads(
+        _call(
+            with_local_ctx(FetchUrl, config_dict=_url_policy_config(allowed_schemes=["https"])),
             url="http://example.com",
-        ))
+        )
+    )
 
     assert data["ok"] is False
     assert data["error"]["type"] == "url_validation_failed"
@@ -134,7 +140,11 @@ def test_fetch_url_binary(monkeypatch):
 def test_fetch_url_extraction_fallback(monkeypatch):
     _install(monkeypatch, _resp("<html><body><p>hello world</p></body></html>"))
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: None)
-    monkeypatch.setattr(fetch_url_module, "Document", lambda *a, **k: SimpleNamespace(summary=lambda html_partial=True: "<p>fallback</p>"))
+    monkeypatch.setattr(
+        fetch_url_module,
+        "Document",
+        lambda *a, **k: SimpleNamespace(summary=lambda html_partial=True: "<p>fallback</p>"),
+    )
     data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com"))
     assert data["ok"] is True
     assert data["is_binary"] is False
@@ -213,7 +223,9 @@ def test_fetch_url_does_not_cache_binary(monkeypatch):
 
 def test_fetch_url_marks_unknown_binary_bytes_as_binary(monkeypatch):
     binary_payload = b"\x00\x89\x10\x02\x00"
-    _install(monkeypatch, _resp(
+    _install(
+        monkeypatch,
+        _resp(
             "",
             content_type="",
             content=binary_payload,
@@ -226,10 +238,13 @@ def test_fetch_url_marks_unknown_binary_bytes_as_binary(monkeypatch):
 
 
 def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
-    _install(monkeypatch, _resp(
-                "<html><body><div>One <b>Two</b></div><p>Three</p></body></html>",
-                content_type="text/html",
-            ))
+    _install(
+        monkeypatch,
+        _resp(
+            "<html><body><div>One <b>Two</b></div><p>Three</p></body></html>",
+            content_type="text/html",
+        ),
+    )
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = CallableTool(SimpleFetchUrl(state=state))
     first = json.loads(_call(tool, url="https://example.com", offset=0, limit=7))
@@ -254,10 +269,12 @@ def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
 
     _install(monkeypatch, _fail_if_called)
 
-    data = json.loads(_call(
-        with_local_ctx(SimpleFetchUrl, config_dict=_url_policy_config(url_blacklist=["*.internal"])),
+    data = json.loads(
+        _call(
+            with_local_ctx(SimpleFetchUrl, config_dict=_url_policy_config(url_blacklist=["*.internal"])),
             url="https://api.internal/path",
-        ))
+        )
+    )
 
     assert data["ok"] is False
     assert data["result_type"] == "error"
@@ -274,7 +291,9 @@ def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
         "<table><tr><td>a</td><td>b</td></tr></table>"
         "</body></html>"
     )
-    _install(monkeypatch, _resp(html, content_type="text/html"),
+    _install(
+        monkeypatch,
+        _resp(html, content_type="text/html"),
     )
     data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com"))
     text = data["content"]
@@ -287,11 +306,14 @@ def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
 
 def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
     html = "<html><body><p>Привет, мир!</p></body></html>"
-    _install(monkeypatch, _resp(
-                html,
-                content_type="text/html; charset=utf-8",
-                content=html.encode("utf-8"),
-            ))
+    _install(
+        monkeypatch,
+        _resp(
+            html,
+            content_type="text/html; charset=utf-8",
+            content=html.encode("utf-8"),
+        ),
+    )
     data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com"))
     assert data["ok"] is True
     assert data["is_binary"] is False
@@ -310,9 +332,7 @@ def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
 def test_fetch_url_passes_proxy_to_client(monkeypatch):
     seen: dict = {}
     _install(monkeypatch, _resp("<html><body><p>hello via proxy</p></body></html>"), seen)
-    monkeypatch.setattr(
-        fetch_url_module.trafilatura, "extract", lambda *a, **k: "hello via proxy"
-    )
+    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "hello via proxy")
 
     proxy = "socks5h://127.0.0.1:1080"
     data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=proxy))
@@ -329,9 +349,7 @@ def test_fetch_url_empty_proxy_is_direct(monkeypatch):
     monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ok")
 
     for value in ("", "   "):
-        data = json.loads(
-            with_local_ctx(FetchUrl)(url="https://example.com", proxy=value)
-        )
+        data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=value))
         assert data["ok"] is True
     for call in seen.get("calls", []):
         assert not call.get("proxies"), call
@@ -345,9 +363,7 @@ def test_fetch_url_cache_keyed_by_proxy(monkeypatch):
         return _resp("<html></html>")
 
     _install(monkeypatch, _handler)
-    monkeypatch.setattr(
-        fetch_url_module.trafilatura, "extract", lambda *a, **k: f"body-{calls['n']}"
-    )
+    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: f"body-{calls['n']}")
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = with_local_ctx(FetchUrl, state=state)
@@ -387,9 +403,7 @@ def test_simple_fetch_url_proxy_validation(monkeypatch):
     seen: dict = {}
     _install(monkeypatch, _resp("<html>hi</html>"), seen)
 
-    data = json.loads(
-        _call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy="ftp://x")
-    )
+    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy="ftp://x"))
 
     assert data["ok"] is False, data
     assert data["error"]["field"] == "proxy", data
@@ -402,9 +416,7 @@ def test_simple_fetch_url_empty_proxy_is_direct(monkeypatch):
     _install(monkeypatch, _resp("<html>hi</html>"), seen)
 
     for value in ("", "   "):
-        data = json.loads(
-            _call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy=value)
-        )
+        data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy=value))
         assert data["ok"] is True, data
     for call in seen.get("calls", []):
         assert not call.get("proxies"), call

@@ -1,4 +1,5 @@
 """confirm banner — каноничный вид."""
+
 import pytest
 
 pytest.importorskip("textual")

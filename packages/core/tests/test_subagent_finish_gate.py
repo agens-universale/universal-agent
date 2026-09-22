@@ -1,4 +1,5 @@
 """Finish gate для subagent: assignment в scope, не CLI user оркестратора."""
+
 import logging
 from types import SimpleNamespace
 from unittest.mock import patch

@@ -44,6 +44,7 @@ async def test_read_group(be, tmp_path):
     assert [line async for line in be.iter_lines(p)] == ["l1\n", "l2\n"]
     assert await be.read_head_bytes(p, 2) == b"l1"
     import hashlib
+
     assert await be.sha256_bytes(p) == hashlib.sha256(b"l1\nl2\n").hexdigest()
 
 
@@ -51,7 +52,7 @@ async def test_write_group_atomic_and_append(be, tmp_path):
     p = str(tmp_path / "w.txt")
     await be.write(p, "v1")
     assert await be.read(p) == "v1"
-    assert not os.path.exists(p + ".tmp")          # atomic: no tmp residue
+    assert not os.path.exists(p + ".tmp")  # atomic: no tmp residue
     await be.append(p, "-v2")
     assert await be.read(p) == "v1-v2"
     bp = str(tmp_path / "raw.bin")
@@ -198,6 +199,7 @@ async def test_read_head_bytes_binary(be, tmp_path):
 
 # --- bounded exec runner (spec D1/D2/D9/D10) ---
 
+
 async def test_exec_result_has_capture_cap_flags(be):
     res = await be.aexec("echo hi", timeout=10)
     assert isinstance(res, ExecResult)
@@ -207,8 +209,6 @@ async def test_exec_result_has_capture_cap_flags(be):
 
 def test_exec_default_capture_cap_is_40k(be):
     assert be.exec_output_capture_max_chars == 40_000
-
-
 
 
 async def test_exec_spawns_no_helper_threads(be):
@@ -235,7 +235,7 @@ async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be)
     # sys.executable, а не голое `python`: имени `python` в PATH может не быть
     # (в окружениях uv/pyenv ставится только `python3`), и тест падал бы на
     # `command not found` — не на том свойстве, которое проверяет.
-    res = await be.aexec(f'{sys.executable} -c "print(\'z\' * 20000)"', timeout=15)
+    res = await be.aexec(f"{sys.executable} -c \"print('z' * 20000)\"", timeout=15)
 
     assert len(res.stdout) <= 40
     assert res.stdout_hit_capture_cap is True

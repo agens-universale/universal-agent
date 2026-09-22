@@ -1,5 +1,6 @@
 """C3: run_agent при WrongFunctionArgumentsException добавляет truncation-hint,
 если finish_reason последнего backend-ответа == "length", и не добавляет иначе."""
+
 from gc_core import processing_responses as pr
 from gc_testkit import run_coro
 
@@ -17,9 +18,13 @@ def _state():
 
 
 def _run_ctx():
-    cd = {"backend_api_mode": "chat_completions", "console_trace": False,
-          "no_tool_call_max_count": 3, "strict_turn_finish_validation": True,
-          "text_answer_mode": "allow"}
+    cd = {
+        "backend_api_mode": "chat_completions",
+        "console_trace": False,
+        "no_tool_call_max_count": 3,
+        "strict_turn_finish_validation": True,
+        "text_answer_mode": "allow",
+    }
     return type("C", (), {"config_dict": cd, "logger": None})()
 
 
@@ -35,20 +40,24 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
             # finish_reason первого ответа — тот, что тестируем для truncation-hint
             # на WrongFunctionArgumentsException.
             state.last_finish_reason = finish_reason
-            return [{
-                "role": "assistant",
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "fs_write_file",
-                "arguments": '{"path": "/tmp/x.md", "content": "hello"}',
-            }], "resp_1"
+            return [
+                {
+                    "role": "assistant",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "fs_write_file",
+                    "arguments": '{"path": "/tmp/x.md", "content": "hello"}',
+                }
+            ], "resp_1"
         # Recovery-текст: length/blocked не принимаются как финал (finish_prevents_text_final).
         state.last_finish_reason = "stop"
-        return [{
-            "role": "assistant",
-            "type": "message",
-            "content": "готово",
-        }], "resp_2"
+        return [
+            {
+                "role": "assistant",
+                "type": "message",
+                "content": "готово",
+            }
+        ], "resp_2"
 
     async def _fake_process_tool_calls(messages, state, ctx, **_kwargs):
         raise pr.WrongFunctionArgumentsException(
@@ -69,6 +78,7 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
     monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_process_tool_calls)
     monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+
     # Избегаем дёрганья LLM-summarizer для intent-log при финальном ответе.
     # Заглушка корутинная: цикл ждёт хук нативно, синхронное имя ушло вместе
     # с лишним прыжком через поток и портал.
@@ -79,11 +89,13 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
 
     state = _state()
     state.last_finish_reason = finish_reason
-    result = run_coro(pr.arun_agent(
-        [{"role": "user", "content": "сделай", "id": "u1"}],
-        state,
-        _run_ctx(),
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}],
+            state,
+            _run_ctx(),
+        )
+    )
     captured_feedback["result"] = result
     return captured_feedback
 

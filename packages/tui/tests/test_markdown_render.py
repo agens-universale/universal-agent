@@ -1,4 +1,5 @@
 """segment_answer: сегментация ответа на прозовые прогоны + code/table-блоки."""
+
 from gc_tui.services.markdown_render import (
     Block,
     build_markdown_table,
@@ -25,8 +26,7 @@ def test_edge_blank_lines_trimmed():
 
 
 def test_fenced_with_lang_is_code_block():
-    assert segment_answer("```python\nx = 1\ny = 2\n```") == [
-        Block("code-block", "x = 1\ny = 2", "python")]
+    assert segment_answer("```python\nx = 1\ny = 2\n```") == [Block("code-block", "x = 1\ny = 2", "python")]
 
 
 def test_fenced_no_lang():
@@ -89,17 +89,17 @@ def test_build_markdown_table_inline_code_cell():
     # The cell is a rich.Text; iterate spans to find code-styled segment.
     cell = t.columns[0]._cells[0]  # first row, first column
     styles = [span.style for span in cell._spans]
-    assert any("#afbdff" in str(s) for s in styles), (
-        f"Expected code style #afbdff in cell spans, got: {styles}"
-    )
+    assert any("#afbdff" in str(s) for s in styles), f"Expected code style #afbdff in cell spans, got: {styles}"
 
 
 # ---- table_block_to_markdown: обратная сборка (таблица → копируемый markdown) ----
 
+
 def test_table_block_to_markdown_basic():
     """3 колонки / 2 строки → валидный markdown с header + separator + rows."""
     md = table_block_to_markdown(
-        ["A", "B", "C"], [["1", "2", "3"], ["4", "5", "6"]],
+        ["A", "B", "C"],
+        [["1", "2", "3"], ["4", "5", "6"]],
         ["left", "left", "left"],
     )
     lines = md.split("\n")
@@ -113,7 +113,8 @@ def test_table_block_to_markdown_basic():
 def test_table_block_to_markdown_aligns():
     """left → ``---``, center → ``:---:``, right → ``---:``."""
     md = table_block_to_markdown(
-        ["L", "C", "R"], [["a", "b", "c"]],
+        ["L", "C", "R"],
+        [["a", "b", "c"]],
         ["left", "center", "right"],
     )
     sep = md.split("\n")[1]

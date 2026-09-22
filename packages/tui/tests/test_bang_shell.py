@@ -1,4 +1,5 @@
 """Юнит-тесты bang-shell: парсинг, preflight, truncate, reject, нормализация."""
+
 from __future__ import annotations
 
 import subprocess

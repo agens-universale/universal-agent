@@ -6,6 +6,7 @@
 логгера, тексты и уровни логов — повторено дословно: политика ретраев и её
 следы в логах не должны различаться от того, каким транспортом ушёл запрос.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,16 +45,23 @@ class _RetryPolicy:
                 if not self._retriable(attempt, exc):
                     logger.log(
                         self.no_more_retries_log_level,
-                        "%s failed (attempt %s/%s, no more retries). "
-                        "url=%s error=%r",
-                        self.operation_name, attempt, self.max_attempts, url, exc,
+                        "%s failed (attempt %s/%s, no more retries). url=%s error=%r",
+                        self.operation_name,
+                        attempt,
+                        self.max_attempts,
+                        url,
+                        exc,
                     )
                     raise
                 logger.log(
                     self.retry_log_level,
-                    "%s failed (attempt %s/%s). Retrying in %.1f sec "
-                    "url=%s error=%r",
-                    self.operation_name, attempt, self.max_attempts, delay, url, exc,
+                    "%s failed (attempt %s/%s). Retrying in %.1f sec url=%s error=%r",
+                    self.operation_name,
+                    attempt,
+                    self.max_attempts,
+                    delay,
+                    url,
+                    exc,
                 )
                 await asyncio.sleep(delay)
                 delay *= self.backoff_factor
@@ -99,9 +107,7 @@ def retry_with_backoff_async(
     def decorator(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
         sig = inspect.signature(func)
         params = sig.parameters
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-        )
+        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
         param_names = set(params.keys())
 
         @functools.wraps(func)

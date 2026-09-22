@@ -11,6 +11,7 @@ gc-tui продолжал его импортировать — чистая у�
 не по строке: наивная проверка дала бы ложные срабатывания и была бы выключена
 первой же правкой.
 """
+
 import ast
 import sys
 import tomllib
@@ -41,8 +42,7 @@ def _declared() -> set:
 
 
 def _module_to_distributions() -> dict:
-    return {mod: {_norm(d) for d in dists}
-            for mod, dists in packages_distributions().items()}
+    return {mod: {_norm(d) for d in dists} for mod, dists in packages_distributions().items()}
 
 
 def _third_party_imports() -> dict:
@@ -67,8 +67,7 @@ def _third_party_imports() -> dict:
 def test_urllib3_is_gone():
     """Точечно про urllib3: он и был находкой."""
     assert "urllib3" not in _third_party_imports(), (
-        "ядро снова импортирует urllib3: он не объявлен и приезжает транзитом, "
-        "а после переезда на httpx не нужен вовсе"
+        "ядро снова импортирует urllib3: он не объявлен и приезжает транзитом, а после переезда на httpx не нужен вовсе"
     )
 
 
@@ -82,7 +81,4 @@ def test_every_third_party_import_is_declared():
         if not (dists & declared):
             undeclared[module] = f"{path.relative_to(REPO)} (дистрибутив: {sorted(dists)})"
 
-    assert not undeclared, (
-        "ядро импортирует необъявленное — на чистой установке это падение на "
-        f"импорте: {undeclared}"
-    )
+    assert not undeclared, f"ядро импортирует необъявленное — на чистой установке это падение на импорте: {undeclared}"

@@ -9,9 +9,7 @@ from gc_core.utils.json_text import parse_json_from_text
 
 _logger = logging.getLogger(__name__)
 
-_FINISH_GATE_ACTIONS = frozenset(
-    {"accept", "fix_report", "continue_work", "fix_report_and_continue"}
-)
+_FINISH_GATE_ACTIONS = frozenset({"accept", "fix_report", "continue_work", "fix_report_and_continue"})
 
 
 @dataclass

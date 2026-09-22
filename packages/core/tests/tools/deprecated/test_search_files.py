@@ -81,9 +81,7 @@ def test_search_invalid_and_not_found(tmp_path):
 
 def test_search_alternation_literal_prefilter(tmp_path):
     (tmp_path / "t.txt").write_text(
-        "line1 ALPHA\n"
-        "line2 beta\n"
-        "line3 ALPHA beta\n",
+        "line1 ALPHA\nline2 beta\nline3 ALPHA beta\n",
         encoding="utf-8",
     )
     tool = with_local_ctx(SearchFiles)
@@ -96,9 +94,7 @@ def test_search_alternation_literal_prefilter(tmp_path):
 
 def test_search_alternation_cyrillic(tmp_path):
     (tmp_path / "t.md").write_text(
-        "строка 1: Аудит\n"
-        "строка 2: План проверки\n"
-        "строка 3: Аудит и План проверки\n",
+        "строка 1: Аудит\nстрока 2: План проверки\nстрока 3: Аудит и План проверки\n",
         encoding="utf-8",
     )
     data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="Аудит|План проверки"))
@@ -213,10 +209,7 @@ def test_search_skips_file_over_size_cap(tmp_path):
     skipped = data.get("skipped") or []
     assert data["skipped_total"] == 1
     assert data["skipped_truncated"] is False
-    assert any(
-        s.get("reason") == "file_too_large" and s["path"].endswith("big.txt")
-        for s in skipped
-    )
+    assert any(s.get("reason") == "file_too_large" and s["path"].endswith("big.txt") for s in skipped)
 
 
 def test_search_skipped_list_capped(tmp_path, monkeypatch):
@@ -303,10 +296,7 @@ def test_search_skips_binary_in_directory(tmp_path):
     assert data["matches"][0]["file"].endswith("ok.txt")
     skipped = data.get("skipped") or []
     assert data["skipped_total"] == 1
-    assert any(
-        s.get("reason") == "is_binary" and s["path"].endswith("blob.bin")
-        for s in skipped
-    )
+    assert any(s.get("reason") == "is_binary" and s["path"].endswith("blob.bin") for s in skipped)
 
 
 def test_search_single_file_binary_errors(tmp_path):
@@ -321,6 +311,7 @@ def test_search_single_file_binary_errors(tmp_path):
 # ---------------------------------------------------------------------------
 # encoding parameter — searching non-UTF-8 files
 # ---------------------------------------------------------------------------
+
 
 def test_search_single_file_cp1251_encoding(tmp_path):
     """Single-file search with explicit encoding=cp1251 finds Cyrillic text."""

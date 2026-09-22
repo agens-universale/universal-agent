@@ -43,9 +43,7 @@ def test_list_files_rejects_a_host_absolute_path_the_backend_calls_relative():
 
 async def test_find_in_files_rejects_a_host_absolute_path_the_backend_calls_relative():
     # У тула только асинхронный вход: синхронный `__call__` был шимом портала.
-    raw = await _tool(FindInFiles).acall(
-        path="C:/work", pattern="needle", query_mode="text"
-    )
+    raw = await _tool(FindInFiles).acall(path="C:/work", pattern="needle", query_mode="text")
 
     assert _error_type(raw) == "invalid_argument"
 

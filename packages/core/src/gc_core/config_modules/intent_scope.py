@@ -27,8 +27,7 @@ class IntentScopeToolConfig(BaseModel):
     def _validate_store_flags(self) -> IntentScopeToolConfig:
         if self.record == "raw" and not self.store_arguments and not self.store_output:
             raise ValueError(
-                "intent_scope.tools.* raw config requires at least one of "
-                "store_arguments/store_output to be true"
+                "intent_scope.tools.* raw config requires at least one of store_arguments/store_output to be true"
             )
         return self
 
@@ -89,18 +88,14 @@ def intent_scope_active(cfg: IntentScopeConfig) -> bool:
     return bool(cfg.tools)
 
 
-def intent_scope_tool_record(
-    cfg: IntentScopeConfig, tool_name: str
-) -> IntentScopeRecordMode | None:
+def intent_scope_tool_record(cfg: IntentScopeConfig, tool_name: str) -> IntentScopeRecordMode | None:
     tool_cfg = cfg.tools.get(tool_name)
     if tool_cfg is None:
         return None
     return tool_cfg.record
 
 
-def intent_scope_tool_store_flags(
-    cfg: IntentScopeConfig, tool_name: str
-) -> tuple[bool, bool]:
+def intent_scope_tool_store_flags(cfg: IntentScopeConfig, tool_name: str) -> tuple[bool, bool]:
     tool_cfg = cfg.tools.get(tool_name)
     if tool_cfg is None:
         return True, True

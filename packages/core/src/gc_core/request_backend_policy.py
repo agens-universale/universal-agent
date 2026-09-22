@@ -25,8 +25,7 @@ def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         status = None
     raise EmbeddedChoiceError(
-        "provider returned embedded choice error: "
-        f"code={code!r} message={err.get('message')!r}",
+        f"provider returned embedded choice error: code={code!r} message={err.get('message')!r}",
         status_code=status,
         metadata=err.get("metadata"),
         raw_code=code,
@@ -42,18 +41,12 @@ def _raise_on_first_choice_error(ch0: Dict[str, Any], *, salvage_reasoning: bool
     if not (isinstance(fr, str) and fr.lower() == "error"):
         return
     msg = ch0.get("message") or {}
-    usable = has_payload(msg) if salvage_reasoning else bool(
-        msg.get("content") or msg.get("tool_calls")
-    )
+    usable = has_payload(msg) if salvage_reasoning else bool(msg.get("content") or msg.get("tool_calls"))
     if not usable:
-        raise EmbeddedChoiceError(
-            "provider returned finish_reason='error' with empty choice"
-        )
+        raise EmbeddedChoiceError("provider returned finish_reason='error' with empty choice")
 
 
-def _raise_on_embedded_choice_error(
-    response: Dict[str, Any], *, salvage_reasoning: bool = False
-) -> None:
+def _raise_on_embedded_choice_error(response: Dict[str, Any], *, salvage_reasoning: bool = False) -> None:
     """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200:
     choices[0].error = {code, message, metadata} (стиль OpenRouter, напр. 504
     "Upstream idle timeout"), top-level {"error": {...}} без choices, или
@@ -118,9 +111,7 @@ async def arequest_chat_completions_with_policy(
     transport retries. Connection errors/timeouts are not retried here.
     """
 
-    async def _send_once(
-        max_tokens: int, *, transport_use_retry: bool
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    async def _send_once(max_tokens: int, *, transport_use_retry: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         payload = payload_factory(max_tokens)
         response = await arequest_backend_chat_completions(
             payload,
@@ -135,9 +126,7 @@ async def arequest_chat_completions_with_policy(
             config_proxy=config_proxy,
         )
         if retry_embedded_choice_errors:
-            _raise_on_embedded_choice_error(
-                response, salvage_reasoning=salvage_reasoning
-            )
+            _raise_on_embedded_choice_error(response, salvage_reasoning=salvage_reasoning)
         return response, payload
 
     try:
@@ -161,8 +150,7 @@ async def arequest_chat_completions_with_policy(
             )
 
             run_logger.warning(
-                "chat/completions backend error; adaptive retry %s/%s "
-                "(max_tokens %s -> %s)",
+                "chat/completions backend error; adaptive retry %s/%s (max_tokens %s -> %s)",
                 step,
                 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS,
                 current_max_tokens,
@@ -179,8 +167,7 @@ async def arequest_chat_completions_with_policy(
                     break
 
         run_logger.error(
-            "chat/completions adaptive max_tokens retries failed; "
-            "raising original backend error",
+            "chat/completions adaptive max_tokens retries failed; raising original backend error",
             exc_info=True,
         )
         maybe_push_llm_failure_notice(
@@ -190,5 +177,3 @@ async def arequest_chat_completions_with_policy(
             enabled=runtime_notices_enabled,
         )
         raise first_exc
-
-

@@ -27,16 +27,14 @@ CFG = {"todo_params": {"reminder_steps": 3}}
 
 
 def _tick(state, cfg=CFG, step_messages=None):
-    return apply_todo_reminder(
-        [], state, cfg, step_messages=step_messages or [{"role": "assistant", "id": "a1"}]
-    )
+    return apply_todo_reminder([], state, cfg, step_messages=step_messages or [{"role": "assistant", "id": "a1"}])
 
 
 def test_fires_after_n_steps_with_open_items():
     state = _state(OPEN_ITEMS)
-    assert _tick(state) == []          # 1
-    assert _tick(state) == []          # 2
-    out = _tick(state)                 # 3 — порог
+    assert _tick(state) == []  # 1
+    assert _tick(state) == []  # 2
+    out = _tick(state)  # 3 — порог
     assert len(out) == 1
     assert out[0]["role"] == "user"
     assert "Шаг 2" in out[0]["content"]
@@ -48,7 +46,7 @@ def test_cycle_repeats_after_fire():
     for _ in range(3):
         last = _tick(state)
     assert len(last) == 1
-    assert _tick(state) == []          # цикл пошёл заново
+    assert _tick(state) == []  # цикл пошёл заново
     assert state.todo_reminder_cnt == 1
 
 
@@ -70,7 +68,9 @@ def test_counter_resets_when_tool_used_in_batch():
     _tick(state)
     assert state.todo_reminder_cnt == 2
     out = apply_todo_reminder(
-        [], state, CFG,
+        [],
+        state,
+        CFG,
         step_messages=[{"type": "function_call", "name": "session_todo", "id": "c1"}],
     )
     assert out == []
@@ -101,6 +101,7 @@ def test_reminder_text_contains_snapshot_and_instruction():
 
 # --- счётчик переживает границу хода ----------------------------------------
 
+
 def test_reminder_counter_round_trips_through_meta():
     """Счётчик кладётся в meta и поднимается обратно — как соседи в той же паре.
 
@@ -114,13 +115,11 @@ def test_reminder_counter_round_trips_through_meta():
         persist_tool_usage_notice_state,
     )
 
-    state = SimpleNamespace(todo_reminder_cnt=7, tool_usage_notice_cnt={},
-                            project_memory_content_hash=None)
+    state = SimpleNamespace(todo_reminder_cnt=7, tool_usage_notice_cnt={}, project_memory_content_hash=None)
     meta: dict = {}
     persist_tool_usage_notice_state(state, meta)
 
-    restored = SimpleNamespace(todo_reminder_cnt=0, tool_usage_notice_cnt={},
-                               project_memory_content_hash=None)
+    restored = SimpleNamespace(todo_reminder_cnt=0, tool_usage_notice_cnt={}, project_memory_content_hash=None)
     hydrate_tool_usage_notice_state(restored, meta)
     assert restored.todo_reminder_cnt == 7
 
@@ -136,8 +135,7 @@ def test_reminder_counter_survives_meta_merge_to_base():
 
     session_meta: dict = {}
     persist_tool_usage_notice_state(
-        SimpleNamespace(todo_reminder_cnt=4, tool_usage_notice_cnt={},
-                        project_memory_content_hash=None),
+        SimpleNamespace(todo_reminder_cnt=4, tool_usage_notice_cnt={}, project_memory_content_hash=None),
         session_meta,
     )
     base: dict = {}
@@ -147,15 +145,25 @@ def test_reminder_counter_survives_meta_merge_to_base():
 
 # --- мягкая подсказка «заведи чек-лист» -------------------------------------
 
+
 def _cfg(steps: int = 1) -> dict:
     return {"todo_params": {"reminder_steps": steps}}
 
 
 def _state(todos=None, cnt: int = 0):
     from gc_core.states import SharedStateData, State
-    st = State(verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
-               max_steps=100, system_prompt_id="v1", use_server_subagents=False,
-               shared=SharedStateData())
+
+    st = State(
+        verbose=False,
+        model="m",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=100,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+        shared=SharedStateData(),
+    )
     st.session_todo = list(todos or [])
     st.todo_reminder_cnt = cnt
     return st
@@ -208,6 +216,5 @@ def test_counter_resets_even_when_nudge_suppressed():
     for _ in range(5):
         assert apply_todo_reminder([], state, _cfg(), step_messages=[]) == []
         assert state.todo_reminder_cnt < 1, (
-            f"счётчик разбух до {state.todo_reminder_cnt} — следующий ход "
-            "получит напоминание немедленно"
+            f"счётчик разбух до {state.todo_reminder_cnt} — следующий ход получит напоминание немедленно"
         )

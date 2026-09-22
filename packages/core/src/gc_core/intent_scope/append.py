@@ -42,9 +42,7 @@ def _current_has_raw(
 ) -> bool:
     name = str(tool_name or "").strip()
     expected_args = None if arguments is None else dict(arguments)
-    return any(
-        _raw_record_matches(record, name, expected_args, output) for record in current
-    )
+    return any(_raw_record_matches(record, name, expected_args, output) for record in current)
 
 
 def _raw_record_matches(record: Any, name: str, expected_args: dict | None, output: Any) -> bool:

@@ -4,6 +4,7 @@ Caps: last 12 allowed, 8 denied; 280 chars + …; strip "command:" prefix.
 Only session_rules contribute (run_rules never).
 T6: judge verdict=safe never writes store / few-shot.
 """
+
 import json
 from types import SimpleNamespace
 
@@ -68,9 +69,7 @@ def test_t6_judge_safe_does_not_write_store(tmp_path, monkeypatch):
         },
         permission_store=store,
         is_tui=True,
-        tui_confirm=lambda **_kw: (_ for _ in ()).throw(
-            AssertionError("confirm must not run on judge-safe")
-        ),
+        tui_confirm=lambda **_kw: (_ for _ in ()).throw(AssertionError("confirm must not run on judge-safe")),
     )
 
     def boom_confirm(*_a, **_k):
@@ -86,12 +85,14 @@ def test_t6_judge_safe_does_not_write_store(tmp_path, monkeypatch):
     @moderate_command_execution(
         payload_arg="command",
         tool_name="exec_command",
-        judge_client_extractor=lambda *_a, **_k: lambda _payload: {
-            "verdict": "safe",
-            "reasons": ["read-only pytest"],
-            "risk_flags": [],
-            "confidence": 0.95,
-        },
+        judge_client_extractor=lambda *_a, **_k: (
+            lambda _payload: {
+                "verdict": "safe",
+                "reasons": ["read-only pytest"],
+                "risk_flags": [],
+                "confidence": 0.95,
+            }
+        ),
     )
     def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})

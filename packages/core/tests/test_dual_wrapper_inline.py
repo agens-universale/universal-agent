@@ -26,6 +26,7 @@
 После правки ``awrapper`` отличается от ``wrapper`` одним словом ``await`` —
 той формой, которую обещает докстринг модуля.
 """
+
 import asyncio
 import threading
 
@@ -124,9 +125,7 @@ async def test_guard_does_not_queue_behind_a_busy_default_executor():
         h.cancel()
     await asyncio.gather(*hogs, return_exceptions=True)
 
-    assert spent < 0.1, (
-        f"гвард ждал {spent * 1000:.0f} мс при занятом пуле — он всё ещё ходит в него"
-    )
+    assert spent < 0.1, f"гвард ждал {spent * 1000:.0f} мс при занятом пуле — он всё ещё ходит в него"
 
 
 def _busy_wait(seconds: float) -> None:

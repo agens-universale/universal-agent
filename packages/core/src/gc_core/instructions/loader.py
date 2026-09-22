@@ -12,9 +12,7 @@ _PREAMBLE = (
     "more general ones; specificity increases down this list."
 )
 _L0_TITLE = "Launch role instructions"
-AGENTSMD_OVERRIDE_IGNORED_WARNING = (
-    "agentsmd_override не применён: задан agent_md_path (путь главнее флага)"
-)
+AGENTSMD_OVERRIDE_IGNORED_WARNING = "agentsmd_override не применён: задан agent_md_path (путь главнее флага)"
 
 
 @dataclass(frozen=True)
@@ -33,8 +31,9 @@ def _wrap(sections: list[str]) -> str:
     return _PREAMBLE + "\n\n" + "\n\n".join(sections)
 
 
-def _load_l0(agent_md_path: str, *, is_tui: bool, agentsmd_override: bool,
-             logger: Any | None, verbose: bool) -> LoadedInstructions:
+def _load_l0(
+    agent_md_path: str, *, is_tui: bool, agentsmd_override: bool, logger: Any | None, verbose: bool
+) -> LoadedInstructions:
     warnings: list[str] = []
     if is_tui and agentsmd_override:
         warnings.append(AGENTSMD_OVERRIDE_IGNORED_WARNING)
@@ -78,8 +77,9 @@ def build_instructions(
 ) -> LoadedInstructions:
     # 1. agent_md_path задан → ТОЛЬКО L0 (замена), в любом режиме. Путь > флаг.
     if agent_md_path:
-        return _load_l0(agent_md_path, is_tui=is_tui, agentsmd_override=agentsmd_override,
-                        logger=logger, verbose=verbose)
+        return _load_l0(
+            agent_md_path, is_tui=is_tui, agentsmd_override=agentsmd_override, logger=logger, verbose=verbose
+        )
 
     # 2. TUI без L0 → собрать L1–L3 (или только L3 при override).
     if is_tui:

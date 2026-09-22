@@ -6,6 +6,7 @@
 Изоляция от хостового config.yml — тем же приёмом, что tests/test_swarm_endpoints.py
 (сброс sys.modules['server'] + патч rest_api.server_config.* ДО импорта).
 """
+
 import sys
 from unittest.mock import patch
 
@@ -40,8 +41,13 @@ def _reset_server_module():
 
 def _minimal_server_config():
     return {
-        "server": {}, "defaults": {"system": "generic"}, "agent": {},
-        "agent_overrides": {}, "logging": {}, "swarm": {}, "threads_cleanup": {},
+        "server": {},
+        "defaults": {"system": "generic"},
+        "agent": {},
+        "agent_overrides": {},
+        "logging": {},
+        "swarm": {},
+        "threads_cleanup": {},
     }
 
 
@@ -51,12 +57,15 @@ def test_import_server_exits_cleanly_when_agent_config_broken():
     с текстом причины, а не поднять ValueError наружу."""
     _reset_server_module()
     try:
-        with patch(
-            "gc_server.rest_api.server_config.load_server_config",
-            return_value=_minimal_server_config(),
-        ), patch(
-            "gc_server.rest_api.server_config.build_agent_config_for_server",
-            side_effect=ValueError('C:\\gc\\config.yml: невалидный YAML: boom'),
+        with (
+            patch(
+                "gc_server.rest_api.server_config.load_server_config",
+                return_value=_minimal_server_config(),
+            ),
+            patch(
+                "gc_server.rest_api.server_config.build_agent_config_for_server",
+                side_effect=ValueError("C:\\gc\\config.yml: невалидный YAML: boom"),
+            ),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 pass

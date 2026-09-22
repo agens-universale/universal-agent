@@ -1,5 +1,6 @@
 """System-слой скиллов резолвится через bundled_root() — работает и в
 editable, и в wheel (где src/ схлопнут и ../../.. промахивается мимо skills/)."""
+
 from pathlib import Path
 
 from gc_core.bundled_assets import bundled_root

@@ -1,4 +1,5 @@
 """BlockPanel — блок трейса: шапка с кнопкой + селектируемое тело."""
+
 from __future__ import annotations
 
 import pytest
@@ -194,13 +195,12 @@ async def test_drag_through_block_excludes_header():
         await pilot.hover(".block-body", offset=(2, 0))
         await pilot.hover(bottom_prose, offset=(0, 0))
         await pilot.mouse_up(bottom_prose, offset=(0, 0))
-        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None,
-                          "drag selection landed")
+        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None, "drag selection landed")
 
         selected = app.screen.get_selected_text()
-        assert "return x + 1" in selected     # фрагмент кода из тела — есть
-        assert "python" not in selected        # метка языка — утекла бы из шапки
-        assert copy_glyph() not in selected      # глиф кнопки — утёк бы из шапки
+        assert "return x + 1" in selected  # фрагмент кода из тела — есть
+        assert "python" not in selected  # метка языка — утекла бы из шапки
+        assert copy_glyph() not in selected  # глиф кнопки — утёк бы из шапки
 
 
 @pytest.mark.asyncio
@@ -228,8 +228,16 @@ async def test_ctrl_click_on_copy_button_opens_event_not_copy():
         panel = pilot.app.query_one(BlockPanel)
         copy_btn = panel.query_one(".block-copy")
         click = events.Click(
-            widget=copy_btn, x=0, y=0, delta_x=0, delta_y=0,
-            button=1, shift=False, meta=False, ctrl=True, chain=1,
+            widget=copy_btn,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=True,
+            chain=1,
         )
         panel.on_click(click)
         await pilot.pause()
@@ -258,8 +266,16 @@ async def test_double_click_focuses_panel_when_focusable():
         assert not panel.has_focus
         body = app.query_one(".block-body", Static)
         click = events.Click(
-            widget=body, x=0, y=1, delta_x=0, delta_y=0,
-            button=1, shift=False, meta=False, ctrl=False, chain=2,
+            widget=body,
+            x=0,
+            y=1,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=False,
+            chain=2,
         )
         panel.on_click(click)
         await pilot.pause()
@@ -280,8 +296,7 @@ async def test_partial_drag_inside_code_body_yields_fragment():
         await pilot.mouse_down(body, offset=(4, 1))
         await pilot.hover(body, offset=(10, 1))
         await pilot.mouse_up(body, offset=(10, 1))
-        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None,
-                          "partial drag selection landed")
+        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None, "partial drag selection landed")
         selected = app.screen.get_selected_text()
         assert selected == "return "
         assert selected != CODE
@@ -293,18 +308,18 @@ async def test_partial_drag_on_clipped_line_yields_visible_part_only():
     часть, а кнопка и двойной клик — строку целиком, включая невидимый хвост."""
     from gc_testkit.tui_support import wait_until
 
-    long_line = ("result = calculate_comprehensive_statistical_significance("
-                 "alpha, beta, gamma, delta)")
+    long_line = "result = calculate_comprehensive_statistical_significance(alpha, beta, gamma, delta)"
     app = _Host(BlockPanel.for_code(long_line, "python", event_no=1))
     async with app.run_test(size=(40, 20)) as pilot:
         body = app.query_one(".block-body", Static)
-        assert body.size.width < len(long_line)   # строка реально обрезана
+        assert body.size.width < len(long_line)  # строка реально обрезана
 
         await pilot.mouse_down(body, offset=(0, 0))
         await pilot.hover(body, offset=(body.size.width - 1, 0))
         await pilot.mouse_up(body, offset=(body.size.width - 1, 0))
-        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None,
-                          "clipped-line drag selection landed")
+        await wait_until(
+            pilot, lambda: app.screen.get_selected_text() is not None, "clipped-line drag selection landed"
+        )
         partial = app.screen.get_selected_text()
         assert partial != long_line
         assert long_line.startswith(partial)
@@ -357,6 +372,6 @@ async def test_mount_then_immediate_remove_does_not_crash():
         trace = app.query_one("#t", VerticalScroll)
         panel = _code_panel()
         trace.mount(panel)
-        panel.remove()   # синхронно, до обработки очереди — воспроизводит гонку
+        panel.remove()  # синхронно, до обработки очереди — воспроизводит гонку
         await pilot.pause()
         assert list(app.query(BlockPanel)) == []

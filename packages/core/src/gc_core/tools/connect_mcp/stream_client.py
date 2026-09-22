@@ -30,6 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 # Кэш персистентных MCP-сессий
 # ---------------------------------------------------------------------------
 
+
 class _PersistentSessionManager:
     """Кэш живых ``ClientSession``, ключ — ``(id(loop), server_key)``.
 
@@ -150,9 +151,7 @@ class _PersistentSessionManager:
             owner_task = None
         cms = self._take(server_key)
         if cms is not None:
-            await self._aclose_stack(
-                cms, opened_in=owner_task() if owner_task is not None else None
-            )
+            await self._aclose_stack(cms, opened_in=owner_task() if owner_task is not None else None)
 
     async def _aclose_stack(self, cms: Any, *, opened_in: Any = None) -> None:
         """Закрыть стек в обратном порядке, глотая ошибку по каждому.
@@ -211,14 +210,11 @@ class _PersistentSessionManager:
                 # `shield` по той же причине, что и у stdio: teardown зовётся
                 # из `finally` цикла агента, и отмена посреди закрытия
                 # оставляет соединение и его anyio task group висеть.
-                await asyncio.shield(
-                    self._aclose_stack(
-                        cms, opened_in=owner_ref() if owner_ref is not None else None
-                    )
-                )
+                await asyncio.shield(self._aclose_stack(cms, opened_in=owner_ref() if owner_ref is not None else None))
 
 
 _SESSION_MANAGER = _PersistentSessionManager()
+
 
 def _is_loopback_url(url: str) -> bool:
     """True для локальных MCP-daemon'ов (127.0.0.1, localhost, ::1).
@@ -307,9 +303,7 @@ def _make_httpx_factory(
             # Тот же ssl-контекст, что и у основного клиента: прокси не повод
             # ослаблять проверку сертификата.
             kwargs["mounts"] = {
-                f"{scheme}://": httpx.AsyncHTTPTransport(
-                    proxy=proxy_url, verify=ssl_context, trust_env=False
-                )
+                f"{scheme}://": httpx.AsyncHTTPTransport(proxy=proxy_url, verify=ssl_context, trust_env=False)
                 for scheme, proxy_url in proxies.items()
                 if proxy_url
             }
@@ -341,11 +335,7 @@ def _make_stream_http_client(
     # (`trust_env=False`), прокси резолвим явно. Иначе `persistent_session`
     # молча менял бы поведение прокси и mTLS относительно одноразового
     # транспорта, у которого `trust_env=False` стоял всегда.
-    proxies = (
-        resolve_proxies(None, dict(os.environ), base_url)
-        if (base_url and _trust_env_for_url(base_url))
-        else None
-    )
+    proxies = resolve_proxies(None, dict(os.environ), base_url) if (base_url and _trust_env_for_url(base_url)) else None
 
     kwargs: Dict[str, Any] = dict(
         headers=headers or None,
@@ -357,9 +347,7 @@ def _make_stream_http_client(
         kwargs["cert"] = cert
     if proxies:
         kwargs["mounts"] = {
-            f"{scheme}://": httpx.AsyncHTTPTransport(
-                proxy=proxy_url, verify=ssl_context, trust_env=False
-            )
+            f"{scheme}://": httpx.AsyncHTTPTransport(proxy=proxy_url, verify=ssl_context, trust_env=False)
             for scheme, proxy_url in proxies.items()
             if proxy_url
         }
@@ -579,6 +567,7 @@ async def _exit_quietly(cm: Any) -> None:
         await cm.__aexit__(None, None, None)
     except Exception:
         pass
+
 
 async def _call_tool_stream_sse_persistent(
     server_key: str,
@@ -1191,5 +1180,3 @@ __all__ = [
     "alist_tools_stream_sse",
     "alist_tools_stream_stdio",
 ]
-
-

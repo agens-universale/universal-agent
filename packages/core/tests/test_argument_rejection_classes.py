@@ -5,9 +5,7 @@ from gc_core.tools import abuild_tools_data
 from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
 
 CONFIG = {
-    "inject_tool_fields": {
-        "reason": "One short, concrete sentence explaining the purpose of this tool call."
-    },
+    "inject_tool_fields": {"reason": "One short, concrete sentence explaining the purpose of this tool call."},
     "stop_tools": [],
 }
 

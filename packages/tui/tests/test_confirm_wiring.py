@@ -12,6 +12,7 @@
 
 Тест 4 (arrow nav): ↓ + Enter выбирает выделенный вариант (allow_once).
 """
+
 from __future__ import annotations
 
 import threading
@@ -20,6 +21,7 @@ import types
 import pytest
 
 # ── unit-тест ────────────────────────────────────────────────────────────────
+
 
 def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
     """_present_confirm на агент-потоке вызывает call_from_thread;
@@ -53,6 +55,7 @@ def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
 
 
 # ── integration-тест через run_test() ────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_confirm_full_chain_via_run_test():
@@ -117,6 +120,7 @@ async def test_confirm_full_chain_via_run_test():
 
 
 # ── re-entrancy: два последовательных confirm ─────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_confirm_reentrant_decline_then_approve():
@@ -194,6 +198,7 @@ async def test_confirm_reentrant_decline_then_approve():
 
 # ── arrow navigation: ↑/↓ + Enter ────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_confirm_arrow_down_then_enter_selects_allow_once():
     """↓ сдвигает выделение с Y ([Y]) на [O] (allow_once); Enter выбирает выделенный → "allow_once"."""
@@ -213,6 +218,7 @@ async def test_confirm_arrow_down_then_enter_selects_allow_once():
     result: list[bool | BaseException] = []
 
     async with app.run_test() as pilot:
+
         def _worker():
             try:
                 res = confirm_fn(title="Навигация", question="Выберите?", fields=[])
@@ -261,6 +267,7 @@ async def test_confirm_enter_default_selects_y():
     result: list[bool | BaseException] = []
 
     async with app.run_test() as pilot:
+
         def _worker():
             try:
                 res = confirm_fn(title="Навигация", question="Выберите?", fields=[])

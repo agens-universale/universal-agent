@@ -19,6 +19,7 @@
 настоящий виджет. Фейков нет намеренно — фейк на любом стыке и вернул бы ту же
 слепоту.
 """
+
 import json
 
 from gc_core.utils.chat_completions_stream import assemble_streamed_completion
@@ -34,11 +35,24 @@ def _tool_call_step(arguments: str):
     """Настоящая форма шага агента: ни content, ни reasoning — только tool_calls."""
     return [
         {"choices": [{"index": 0, "delta": {"role": "assistant"}}]},
-        {"choices": [{"index": 0, "delta": {"tool_calls": [
-            {"index": 0, "id": "t1", "type": "function",
-             "function": {"name": "turn_finish", "arguments": arguments}}]}}]},
-        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
-         "usage": {"completion_tokens": 952}},
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "t1",
+                                "type": "function",
+                                "function": {"name": "turn_finish", "arguments": arguments},
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}], "usage": {"completion_tokens": 952}},
     ]
 
 
@@ -65,8 +79,7 @@ def test_tool_arguments_never_reach_the_stream_block():
     sink = StreamSink()
     sink.push("reset", "")
 
-    assemble_streamed_completion(
-        _sse(_tool_call_step('{"task_report":"готово"}')), on_delta=sink.push)
+    assemble_streamed_completion(_sse(_tool_call_step('{"task_report":"готово"}')), on_delta=sink.push)
 
     assert sink.progress_units() > 0
     assert sink.has_content() is False
@@ -82,8 +95,7 @@ def test_tool_call_closes_the_reasoning_phase():
     sink = StreamSink()
     sink.push("reset", "")
     chunks = [
-        {"choices": [{"index": 0, "delta": {"role": "assistant",
-                                            "reasoning_content": "прикидываю"}}]},
+        {"choices": [{"index": 0, "delta": {"role": "assistant", "reasoning_content": "прикидываю"}}]},
     ] + _tool_call_step('{"task_report":"ок"}')[1:]
 
     assemble_streamed_completion(_sse(chunks), on_delta=sink.push)
@@ -102,11 +114,15 @@ def test_openrouter_reasoning_name_feeds_the_counter():
     sink = StreamSink()
     sink.push("reset", "")
 
-    assemble_streamed_completion(_sse([
-        {"choices": [{"index": 0, "delta": {"role": "assistant",
-                                            "reasoning": "р" * 200}}]},
-        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
-    ]), on_delta=sink.push)
+    assemble_streamed_completion(
+        _sse(
+            [
+                {"choices": [{"index": 0, "delta": {"role": "assistant", "reasoning": "р" * 200}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            ]
+        ),
+        on_delta=sink.push,
+    )
 
     assert sink.progress_units() > 0
     assert "токенов" in _indicator_text(sink)

@@ -25,15 +25,21 @@ def apply_swarm_env_overrides(config_dict: Dict[str, Any], config_dir: str) -> N
     if env_vars.env.swarm_agentmd_path is not None:
         maybe_override_and_resolve(
             str(env_vars.env.swarm_agentmd_path),
-            "agent_md_path", config_dict, config_dir,
+            "agent_md_path",
+            config_dict,
+            config_dir,
         )
     if env_vars.env.swarm_threads_dir is not None:
         maybe_override_and_resolve(
             str(env_vars.env.swarm_threads_dir),
-            "threads_data_path", config_dict, config_dir,
+            "threads_data_path",
+            config_dict,
+            config_dir,
         )
     if env_vars.env.swarm_skills_dir is not None:
         maybe_override_and_resolve(
             str(env_vars.env.swarm_skills_dir),
-            "skills_data_path", config_dict, config_dir,
+            "skills_data_path",
+            config_dict,
+            config_dir,
         )

@@ -1,4 +1,5 @@
 """Tests for SubagentRunner._build_initial_messages."""
+
 from types import SimpleNamespace
 
 import pytest
@@ -63,9 +64,7 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("Expert planner")
-        messages = runner._build_initial_messages(
-            child, "Expert planner", _user_msg("Do the task")
-        )
+        messages = runner._build_initial_messages(child, "Expert planner", _user_msg("Do the task"))
 
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -78,9 +77,7 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("Expert planner")
-        messages = runner._build_initial_messages(
-            child, "Expert planner", _user_msg("Do the task")
-        )
+        messages = runner._build_initial_messages(child, "Expert planner", _user_msg("Do the task"))
 
         assert "Expert planner" in messages[0]["content"]
 
@@ -91,9 +88,7 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("role")
-        messages = runner._build_initial_messages(
-            child, "role", _user_msg("Implement feature X")
-        )
+        messages = runner._build_initial_messages(child, "role", _user_msg("Implement feature X"))
 
         user_msg = [m for m in messages if m["role"] == "user"]
         assert len(user_msg) == 1

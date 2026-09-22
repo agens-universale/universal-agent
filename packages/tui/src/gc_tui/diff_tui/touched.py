@@ -3,6 +3,7 @@
 Файл: ``threads_dir/touched_<system>_<thread_id>.json``.
 Формат: ``{"paths": {key: {"ts": float}}}``. Контент файлов не хранит.
 """
+
 from __future__ import annotations
 
 import json

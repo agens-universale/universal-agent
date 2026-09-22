@@ -81,9 +81,7 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
         )
         headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("x-session-id"), "sympy__sympy-12419")
-        self.assertEqual(
-            [k for k in headers if k.lower() == "x-session-id"], ["x-session-id"]
-        )
+        self.assertEqual([k for k in headers if k.lower() == "x-session-id"], ["x-session-id"])
 
 
 if __name__ == "__main__":

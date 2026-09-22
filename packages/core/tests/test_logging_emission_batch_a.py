@@ -6,6 +6,7 @@
 Each test drives the real code path with a jsonl-mode per-run logger and
 asserts the expected event line was written.
 """
+
 import builtins
 import json
 
@@ -42,6 +43,7 @@ class _FakeCtx:
 # ---------------------------------------------------------------------------
 # ask_human.py
 # ---------------------------------------------------------------------------
+
 
 def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
     logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ah1", agent_kind="main")
@@ -100,6 +102,7 @@ def test_ask_human_error_event(tmp_path, monkeypatch):
 # intermediate_reply.py
 # ---------------------------------------------------------------------------
 
+
 def test_intermediate_reply_event(tmp_path):
     logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ir1", agent_kind="main")
 
@@ -119,17 +122,20 @@ def test_intermediate_reply_event(tmp_path):
 # run_context.py
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def minimal_config_dict(monkeypatch, tmp_path):
     monkeypatch.setattr(
         rc,
         "abuild_tools_data",
-        as_coro(lambda cfg, on_progress=None, **_kwargs: (
-            {"tool_a": {}, "tool_b": {}},
-            [],
-            [],
-            {},
-        )),
+        as_coro(
+            lambda cfg, on_progress=None, **_kwargs: (
+                {"tool_a": {}, "tool_b": {}},
+                [],
+                [],
+                {},
+            )
+        ),
     )
     return _jsonl_cfg(
         tmp_path,

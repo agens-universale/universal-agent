@@ -5,6 +5,7 @@ _on_user_text_submitted) + Шаг 3 (R5 — OSC = display_name(meta.tui)).
 порядок записи meta ДО обновления OSC, и что OSC читает display_name, а не
 _resumed_prompt. Чистая логика display_name/normalize — в test_session_title.py.
 """
+
 import json
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Шаг 3: _update_terminal_title = display_name(meta.tui) + статус (R5)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_osc_uses_display_name_not_resumed_prompt(tmp_path, monkeypatch):
@@ -104,6 +106,7 @@ async def test_osc_no_active_task_ignores_meta(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Шаг 2: _on_user_text_submitted — R6 (auto last_actual) + порядок meta→OSC
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_seed_first_send_short_writes_last_actual(tmp_path, monkeypatch):
@@ -274,6 +277,7 @@ async def test_meta_written_before_osc(tmp_path, monkeypatch):
 # helper: лёгкий fake store, имитирующий read-merge-write update_tui_meta
 # ---------------------------------------------------------------------------
 
+
 class _FakeStore:
     def __init__(self, meta: dict):
         self.base = meta
@@ -292,6 +296,7 @@ class _FakeStore:
 # ---------------------------------------------------------------------------
 # Шаг 4: _rename_active_session (R2) + _on_rename_result (R3)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_rename_active_session_opens_with_display_name(tmp_path, monkeypatch):
@@ -458,6 +463,7 @@ async def test_rename_result_none_noop(tmp_path, monkeypatch):
 # helper: лёгкий fake key event для on_key (ctrl+r алиасы — синтетика)
 # ---------------------------------------------------------------------------
 
+
 class _FakeKey:
     def __init__(self, key: str):
         self.key = key
@@ -474,6 +480,7 @@ class _FakeKey:
 # ---------------------------------------------------------------------------
 # Шаг 5: R1 — алиасы Ctrl+R в TraceScreen.on_key
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_r1_ctrl_r_renames_active_session(tmp_path, monkeypatch):
@@ -669,16 +676,17 @@ async def test_submit_task_is_saved_when_report_is_visual_duplicate(tmp_path, mo
 # TraceScreen и сбрасывается новым user-send.
 # ---------------------------------------------------------------------------
 
+
 def _submit_event(task: str, no: int = 1):
     from gc_tui.models import TraceEvent
+
     return TraceEvent(
         no=no,
         event_ts_utc_iso="t",
         kind="agent",
         title="",
         summary=f"report {no}",
-        full_payload={"arguments": json.dumps(
-            {"task": task, "task_report": f"report {no}"}, ensure_ascii=False)},
+        full_payload={"arguments": json.dumps({"task": task, "task_report": f"report {no}"}, ensure_ascii=False)},
         call_id=f"c{no}",
         tool_name="submit_solution",
     )
@@ -686,6 +694,7 @@ def _submit_event(task: str, no: int = 1):
 
 def _call_event(no: int = 1):
     from gc_tui.models import TraceEvent
+
     return TraceEvent(
         no=no,
         event_ts_utc_iso="t",
@@ -812,9 +821,14 @@ async def test_cognitive_tool_is_not_work(tmp_path, monkeypatch):
         monkeypatch.setattr(scr, "_update_terminal_title", lambda: None)
 
         think = TraceEvent(
-            no=1, event_ts_utc_iso="t", kind="call", title="",
-            summary="session_think(...)", full_payload={},
-            call_id="th1", tool_name="session_think",
+            no=1,
+            event_ts_utc_iso="t",
+            kind="call",
+            title="",
+            summary="session_think(...)",
+            full_payload={},
+            call_id="th1",
+            tool_name="session_think",
         )
         scr._render_event(think, live=True)
         assert scr._live_turn_tool_calls == 0
@@ -844,8 +858,13 @@ async def test_first_seed_works_for_idle_turn(tmp_path, monkeypatch):
 
 def _user_event(text: str, no: int = 1):
     from gc_tui.models import TraceEvent
+
     return TraceEvent(
-        no=no, event_ts_utc_iso="t", kind="user", title="", summary=text,
+        no=no,
+        event_ts_utc_iso="t",
+        kind="user",
+        title="",
+        summary=text,
         full_payload={"role": "user", "content": text},
     )
 

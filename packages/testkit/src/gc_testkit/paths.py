@@ -23,6 +23,7 @@
 не трогает файловую систему, а `RuntimeError` прилетает только тому, кто
 реально спросил путь.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,8 +44,7 @@ _GC_CORE_NAME = re.compile(r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', 
 def _declares_gc_core(candidate: Path) -> bool:
     """Лежит ли в `candidate` наш `packages/core/pyproject.toml`."""
     try:
-        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(
-            encoding="utf-8")
+        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
     return _GC_CORE_NAME.search(text) is not None
@@ -223,8 +223,5 @@ def module_dir(old_top_level_name: str) -> Path:
         return package_dir(_FLATTENED[old_top_level_name])
     pkg = module_map().get(old_top_level_name)
     if pkg is None:
-        raise KeyError(
-            f"неизвестный модуль {old_top_level_name!r}; "
-            f"проверьте {_MAP_PATH}"
-        )
+        raise KeyError(f"неизвестный модуль {old_top_level_name!r}; проверьте {_MAP_PATH}")
     return package_dir(pkg) / old_top_level_name

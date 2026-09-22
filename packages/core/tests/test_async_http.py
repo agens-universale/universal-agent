@@ -1,4 +1,5 @@
 """Пер-loop httpx-клиент (план async-переезда, Задача 8)."""
+
 import asyncio
 
 from gc_core.utils.async_http import aclose_clients, get_async_client, mounts_from_proxies
@@ -44,9 +45,10 @@ def test_client_is_not_shared_across_loops():
 
     httpx.AsyncClient.__init__ = _counting_init
     try:
+
         async def grab():
             get_async_client(verify=True)
-            get_async_client(verify=True)   # тот же loop → переиспользование
+            get_async_client(verify=True)  # тот же loop → переиспользование
             await aclose_clients()
 
         asyncio.run(grab())

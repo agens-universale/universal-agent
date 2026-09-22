@@ -28,15 +28,26 @@ def _state():
 
 
 def _run_ctx():
-    cd = {"backend_api_mode": "chat_completions", "console_trace": False,
-          "no_tool_call_max_count": 1, "strict_turn_finish_validation": True,
-          "text_answer_mode": "allow"}
+    cd = {
+        "backend_api_mode": "chat_completions",
+        "console_trace": False,
+        "no_tool_call_max_count": 1,
+        "strict_turn_finish_validation": True,
+        "text_answer_mode": "allow",
+    }
     return type("C", (), {"config_dict": cd, "logger": None})()
 
 
 def _bad_batch(call_id):
-    return [{"id": f"id_{call_id}", "type": "function_call", "call_id": call_id,
-             "name": "session_think", "arguments": '{"bogus": 1}'}]
+    return [
+        {
+            "id": f"id_{call_id}",
+            "type": "function_call",
+            "call_id": call_id,
+            "name": "session_think",
+            "arguments": '{"bogus": 1}',
+        }
+    ]
 
 
 def test_invalid_args_reach_the_model_as_tool_output_and_exhaust_the_budget(monkeypatch):
@@ -50,8 +61,9 @@ def test_invalid_args_reach_the_model_as_tool_output_and_exhaust_the_budget(monk
         return _bad_batch("c2"), "resp_2"
 
     def _apply_tool(**kw):
-        raise pr.WrongFunctionArgumentsException("Unexpected field 'bogus'", received_args=kw["arguments"],
-                                                 tool_name="session_think")
+        raise pr.WrongFunctionArgumentsException(
+            "Unexpected field 'bogus'", received_args=kw["arguments"], tool_name="session_think"
+        )
 
     monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_user_ask))
     monkeypatch.setattr(pr, "aprocess_tool_outputs", as_coro(_fake_tool_outputs))
@@ -72,22 +84,31 @@ def test_invalid_args_reach_the_model_as_tool_output_and_exhaust_the_budget(monk
 
 
 def _bad_batch_many(call_ids, name="session_think"):
-    return [{"id": f"id_{cid}", "type": "function_call", "call_id": cid,
-             "name": name, "arguments": '{"bogus": 1}'} for cid in call_ids]
+    return [
+        {"id": f"id_{cid}", "type": "function_call", "call_id": cid, "name": name, "arguments": '{"bogus": 1}'}
+        for cid in call_ids
+    ]
 
 
 def _unknown_tool_payload(name):
-    return json.dumps({
-        "ok": False,
-        "error": {"type": "unknown_tool", "message": f"No tool named '{name}' on client.",
-                  "requested": name, "suggestions": []},
-        "message": f"Unknown tool '{name}'. Use only tools from the provided tool list.",
-    })
+    return json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "type": "unknown_tool",
+                "message": f"No tool named '{name}' on client.",
+                "requested": name,
+                "suggestions": [],
+            },
+            "message": f"Unknown tool '{name}'. Use only tools from the provided tool list.",
+        }
+    )
 
 
 def _raise_invalid(**kw):
-    raise pr.WrongFunctionArgumentsException("Unexpected field 'bogus'", received_args=kw["arguments"],
-                                             tool_name=kw["tool_name"])
+    raise pr.WrongFunctionArgumentsException(
+        "Unexpected field 'bogus'", received_args=kw["arguments"], tool_name=kw["tool_name"]
+    )
 
 
 def _return_unknown(**kw):
@@ -118,10 +139,13 @@ def _run_two_bad_turns(monkeypatch, apply_tool, tool_name):
     return result, state, received_by_model
 
 
-@pytest.mark.parametrize("apply_tool, tool_name", [
-    pytest.param(_raise_invalid, "session_think", id="invalid_arguments"),
-    pytest.param(_return_unknown, "phase1", id="unknown_tool"),
-])
+@pytest.mark.parametrize(
+    "apply_tool, tool_name",
+    [
+        pytest.param(_raise_invalid, "session_think", id="invalid_arguments"),
+        pytest.param(_return_unknown, "phase1", id="unknown_tool"),
+    ],
+)
 def test_one_bad_batch_costs_one_unit_of_the_error_budget(monkeypatch, apply_tool, tool_name):
     result, state, received_by_model = _run_two_bad_turns(monkeypatch, apply_tool, tool_name)
 

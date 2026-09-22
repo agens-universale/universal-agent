@@ -6,6 +6,7 @@
 результата уже давали противоречащие друг другу тексты на одном экране.
 
 Слой презентации: чистые функции над результатом, без Textual-виджетов."""
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -121,7 +122,7 @@ def token_accepted(result, *, has_token: bool):
     if result.http_status == 401:
         return False
     if result.models is not None:
-        return None             # отвечал справочник моделей — он токен не судит
+        return None  # отвечал справочник моделей — он токен не судит
     if not has_token:
         return True if result.verdict == "ok" else None
     if result.verdict == "unknown":

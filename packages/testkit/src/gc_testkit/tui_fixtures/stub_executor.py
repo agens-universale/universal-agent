@@ -1,4 +1,5 @@
 """Детерминированный fake AgentExecutor для snapshot-тестов TUI."""
+
 from __future__ import annotations
 
 import json
@@ -55,9 +56,7 @@ class StubExecutor:
             "updated_at": "2026-05-21T12:00:00+00:00",
             "messages_count": len(records),
         }
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-        )
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
 
     def stop_run(self) -> None:
         self.stopped = True

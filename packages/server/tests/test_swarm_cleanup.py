@@ -41,8 +41,10 @@ def _setup_pair(tmp_path, sid: str, age_hours: float):
     threads.mkdir(exist_ok=True)
     sandbox.mkdir(exist_ok=True)
 
-    t_dir = threads / sid; t_dir.mkdir()
-    s_dir = sandbox / sid; s_dir.mkdir()
+    t_dir = threads / sid
+    t_dir.mkdir()
+    s_dir = sandbox / sid
+    s_dir.mkdir()
 
     updated_at = datetime.now(UTC) - timedelta(hours=age_hours)
     meta = _make_meta(updated_at)
@@ -76,7 +78,10 @@ def test_keeps_fresh_threads(tmp_path):
 def test_dry_run_does_not_delete(tmp_path):
     threads, sandbox = _setup_pair(tmp_path, "drytest", age_hours=48)
     stats = cleanup_mod.cleanup_threads(
-        threads, sandbox, ttl_hours=24, dry_run=True,
+        threads,
+        sandbox,
+        ttl_hours=24,
+        dry_run=True,
     )
     assert stats["threads_removed"] == 1  # counted as removed
     # Но физически НЕ удалено.
@@ -86,10 +91,13 @@ def test_dry_run_does_not_delete(tmp_path):
 
 def test_orphan_sandbox_removed(tmp_path):
     """Sandbox без соответствующих threads/<id>/ → удаляется."""
-    threads = tmp_path / "threads"; threads.mkdir()
-    sandbox = tmp_path / "sandboxes"; sandbox.mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    sandbox = tmp_path / "sandboxes"
+    sandbox.mkdir()
     # Только sandbox, без threads.
-    orphan = sandbox / "orphan_one"; orphan.mkdir()
+    orphan = sandbox / "orphan_one"
+    orphan.mkdir()
     (orphan / "stuff").write_text("x")
     # Сделать его «старым» — установить mtime.
     old_time = time.time() - 48 * 3600
@@ -101,9 +109,12 @@ def test_orphan_sandbox_removed(tmp_path):
 
 
 def test_orphan_sandbox_kept_when_fresh(tmp_path):
-    threads = tmp_path / "threads"; threads.mkdir()
-    sandbox = tmp_path / "sandboxes"; sandbox.mkdir()
-    fresh_orphan = sandbox / "fresh_orphan"; fresh_orphan.mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    sandbox = tmp_path / "sandboxes"
+    sandbox.mkdir()
+    fresh_orphan = sandbox / "fresh_orphan"
+    fresh_orphan.mkdir()
 
     stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
     assert stats["sandboxes_removed"] == 0
@@ -112,9 +123,12 @@ def test_orphan_sandbox_kept_when_fresh(tmp_path):
 
 def test_missing_meta_uses_mtime_fallback(tmp_path):
     """Если meta.json нет — используется mtime каталога."""
-    threads = tmp_path / "threads"; threads.mkdir()
-    sandbox = tmp_path / "sandboxes"; sandbox.mkdir()
-    no_meta = threads / "no_meta"; no_meta.mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    sandbox = tmp_path / "sandboxes"
+    sandbox.mkdir()
+    no_meta = threads / "no_meta"
+    no_meta.mkdir()
     old_time = time.time() - 48 * 3600
     os.utime(no_meta, (old_time, old_time))
 
@@ -123,9 +137,12 @@ def test_missing_meta_uses_mtime_fallback(tmp_path):
 
 
 def test_corrupted_meta_uses_mtime_fallback(tmp_path):
-    threads = tmp_path / "threads"; threads.mkdir()
-    sandbox = tmp_path / "sandboxes"; sandbox.mkdir()
-    corrupted = threads / "corrupt"; corrupted.mkdir()
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    sandbox = tmp_path / "sandboxes"
+    sandbox.mkdir()
+    corrupted = threads / "corrupt"
+    corrupted.mkdir()
     (corrupted / "meta.json").write_text("{not valid")
     old_time = time.time() - 48 * 3600
     os.utime(corrupted, (old_time, old_time))
@@ -136,7 +153,9 @@ def test_corrupted_meta_uses_mtime_fallback(tmp_path):
 
 def test_missing_threads_dir_returns_zero_stats(tmp_path):
     stats = cleanup_mod.cleanup_threads(
-        str(tmp_path / "nope"), str(tmp_path / "nope_sb"), ttl_hours=24,
+        str(tmp_path / "nope"),
+        str(tmp_path / "nope_sb"),
+        ttl_hours=24,
     )
     assert stats["threads_removed"] == 0
     assert stats["kept"] == 0
@@ -150,7 +169,8 @@ def test_parse_iso_datetime_invalid_returns_none():
 
 def test_meta_timestamp_uses_latest_field(tmp_path):
     """Берём самый поздний из updated_at/finished_at/created_at."""
-    t = tmp_path / "t"; t.mkdir()
+    t = tmp_path / "t"
+    t.mkdir()
     meta = {
         "updated_at": "2026-06-04T10:00:00Z",
         "swarm_meta": {

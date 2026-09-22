@@ -10,6 +10,7 @@
 - stored_tool_output envelope (gc-cli оборачивает большие outputs >20000 chars):
   inner JSON-string распаковываем; если truncated — generic partial-JSON parser.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,12 +27,7 @@ _CONTENT_RE = re.compile(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)')
 def _unescape_json_string(raw: str) -> str:
     """Минимальный JSON-unescape: \\n / \\t / \\" / \\\\ → реальные символы.
     Используется для regex-извлечённых значений (когда полный json.loads невозможен)."""
-    return (
-        raw.replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace('\\"', '"')
-        .replace("\\\\", "\\")
-    )
+    return raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
 
 
 def _try_parse_truncated_json(s: str) -> Any:

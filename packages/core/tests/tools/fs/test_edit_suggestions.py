@@ -84,12 +84,7 @@ def test_single_token_search_can_suggest():
 
 
 def test_picks_nearest_among_distractors():
-    content = (
-        "completely unrelated header\n"
-        "def compute_total(items):\n"
-        "    return sum(items)\n"
-        "another noise line here\n"
-    )
+    content = "completely unrelated header\ndef compute_total(items):\n    return sum(items)\nanother noise line here\n"
     suggestions, total = build_edit_miss_suggestions(
         "def compute_totl(items):",
         content,
@@ -113,14 +108,7 @@ def test_mid_score_near_miss_not_dropped():
 
 
 def test_multiline_picks_correct_window_among_blocks():
-    content = (
-        "aaa aaa\n"
-        "bbb bbb\n"
-        "foo bar\n"
-        "baz qux\n"
-        "ccc ccc\n"
-        "ddd ddd\n"
-    )
+    content = "aaa aaa\nbbb bbb\nfoo bar\nbaz qux\nccc ccc\nddd ddd\n"
     suggestions, total = build_edit_miss_suggestions(
         "foo baar\nbaz qxx",
         content,

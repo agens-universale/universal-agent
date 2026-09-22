@@ -4,6 +4,7 @@ sounddevice ставится вместе с агентом (PortAudio банд�
 Windows/macOS; Linux требует системный libportaudio2). Импорт ленивый:
 при недоступном аудио-стеке TUI живёт, available() — тихая проверка.
 """
+
 from __future__ import annotations
 
 import array
@@ -65,6 +66,7 @@ def available() -> bool:
     """Доступен ли аудио-стек (sounddevice импортируется без ошибок)."""
     try:
         import sounddevice  # noqa: F401  (ленивый импорт: стек может отсутствовать)
+
         return True
     except Exception:
         return False
@@ -72,22 +74,26 @@ def available() -> bool:
 
 def _default_stream_factory(callback):
     import sounddevice  # ленивый импорт: аудио-стек может отсутствовать (Linux без libportaudio2)
+
     # blocksize/latency заданы ЯВНО. По умолчанию sounddevice просит «high latency», и
     # PortAudio отдаёт звук порциями по ~180 мс — реже, чем перерисовывается пилюля:
     # эквалайзер отставал на глаз. Раньше мелкую порцию просить было нельзя (в колбэке
     # висел спектр, 32 мс он бы не уложился и драйвер терял бы сэмплы); теперь колбэк
     # только складывает байты, и мелкая порция ничего не стоит.
     return sounddevice.RawInputStream(
-        samplerate=SAMPLE_RATE, channels=1, dtype="int16", callback=callback,
-        blocksize=BLOCK_SAMPLES, latency="low",
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        dtype="int16",
+        callback=callback,
+        blocksize=BLOCK_SAMPLES,
+        latency="low",
     )
 
 
 class MicRecorder:
     """Один цикл записи: start → stop (PCM-байты) | cancel. Не переиспользуется."""
 
-    def __init__(self, stream_factory: Optional[Callable] = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, stream_factory: Optional[Callable] = None, clock: Callable[[], float] = time.monotonic) -> None:
         self._stream_factory = stream_factory or _default_stream_factory
         self._clock = clock
         self._chunks: list[bytes] = []
@@ -95,7 +101,7 @@ class MicRecorder:
         self._started_at: Optional[float] = None
         self._level = 0.0
         self._band_levels = [0.0] * len(BAND_FREQS)
-        self._pending: list[bytes] = []   # блоки, пришедшие с прошлого кадра
+        self._pending: list[bytes] = []  # блоки, пришедшие с прошлого кадра
         # Состояние полосовых фильтров (x1, x2, y1, y2 на полосу) живёт МЕЖДУ блоками:
         # сброс на каждом блоке дал бы переходный процесс на каждые 32 мс.
         self._band_state = [[0.0, 0.0, 0.0, 0.0] for _ in BAND_FREQS]
@@ -113,7 +119,7 @@ class MicRecorder:
         self._chunks.append(data)
         self._pending.append(data)
         if status:
-            self._overflows += 1     # драйвер сообщил о потере звука — больше не молчим
+            self._overflows += 1  # драйвер сообщил о потере звука — больше не молчим
 
     def analyse(self) -> None:
         """Пересчитать уровень и спектр по звуку, накопленному с прошлого кадра.
@@ -141,7 +147,7 @@ class MicRecorder:
         level = 0.0
         bands = [0.0] * len(BAND_FREQS)
         for samples in blocks:
-            step = max(1, len(samples) // 512)   # сэмплируем RMS для скорости
+            step = max(1, len(samples) // 512)  # сэмплируем RMS для скорости
             picked = samples[::step]
             rms = (sum(s * s for s in picked) / len(picked)) ** 0.5 / 32768.0
             if rms > level:
@@ -187,8 +193,7 @@ class MicRecorder:
         except ImportError as exc:
             self._close()
             raise VoiceError(
-                "голосовой ввод: аудио-стек sounddevice недоступен "
-                "(Linux: установите libportaudio2)"
+                "голосовой ввод: аудио-стек sounddevice недоступен (Linux: установите libportaudio2)"
             ) from exc
         except Exception as exc:
             self._close()

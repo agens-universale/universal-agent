@@ -4,7 +4,9 @@ from gc_core.processing_responses import _make_technical_feedback_user_message
 
 def test_call_id_attached_as_sibling_key():
     msg = _make_technical_feedback_user_message(
-        "boom", technical_type=TECHNICAL_TYPE_ERROR_MESSAGE, call_id="call_42",
+        "boom",
+        technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
+        call_id="call_42",
     )
     assert msg["role"] == "user"
     assert msg["call_id"] == "call_42"

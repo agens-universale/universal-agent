@@ -1,4 +1,5 @@
 """McpScreen — статус MCP-серверов (read-only, снимок сессии). Карточки."""
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -25,7 +26,7 @@ def _truncate(text: str, limit: int = 80) -> str:
     return (text[: limit - 1] + "…") if len(text) > limit else text
 
 
-_TOOL_DESC_LIMIT = 80   # описание тула в раскрытом списке — одна строка
+_TOOL_DESC_LIMIT = 80  # описание тула в раскрытом списке — одна строка
 
 
 class ServerCard(Static):
@@ -105,7 +106,7 @@ class ServerCard(Static):
             prefix = f"mcp_{self._name}_"
             shorts = [
                 (
-                    (tt.get("name") or "")[len(prefix):]
+                    (tt.get("name") or "")[len(prefix) :]
                     if (tt.get("name") or "").startswith(prefix)
                     else (tt.get("name") or ""),
                     (tt.get("description") or ""),
@@ -124,13 +125,10 @@ class ServerCard(Static):
 
 
 class McpScreen(Screen):
-    def __init__(self, *, config: dict | None = None,
-                 tools_snapshot: dict | None = None) -> None:
+    def __init__(self, *, config: dict | None = None, tools_snapshot: dict | None = None) -> None:
         super().__init__()
         self._snapshot = tools_snapshot  # {server: {status,reason,description,tools}} | None
-        self.cards: list[ServerCard] = [
-            ServerCard(name, info) for name, info in (tools_snapshot or {}).items()
-        ]
+        self.cards: list[ServerCard] = [ServerCard(name, info) for name, info in (tools_snapshot or {}).items()]
 
     def on_mount(self) -> None:
         if self.cards:

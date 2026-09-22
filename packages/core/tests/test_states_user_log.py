@@ -26,11 +26,7 @@ def _make_state() -> State:
 
 
 def _user_ask_contents(records) -> list[str]:
-    return [
-        str(record.content)
-        for record in records
-        if record.action == ACTION_USER_ASK
-    ]
+    return [str(record.content) for record in records if record.action == ACTION_USER_ASK]
 
 
 def test_new_state_has_empty_user_intent_log():
@@ -99,10 +95,7 @@ def test_append_user_asks_preserves_initial_across_step_batches():
 
 
 def test_init_subagent_open_turn_without_policy_filter():
-    assignment = (
-        'Assignment:\n{"task": "fix foo"}\n\n'
-        "<current_context>scope hint</current_context>"
-    )
+    assignment = 'Assignment:\n{"task": "fix foo"}\n\n<current_context>scope hint</current_context>'
     state = _make_state()
     init_subagent_open_turn(state, assignment)
 
@@ -112,9 +105,7 @@ def test_init_subagent_open_turn_without_policy_filter():
     assert state.finish_gate_rejection_count == 0
 
     state2 = _make_state()
-    text = extract_real_user_message_text(
-        {"role": "user", "content": assignment, "id": "m_sub"}
-    )
+    text = extract_real_user_message_text({"role": "user", "content": assignment, "id": "m_sub"})
     if text:
         state2.current_user_intent = append_user_ask_deduped(
             state2.current_user_intent, text, user_turn_seq=state2.user_turn_seq
@@ -126,9 +117,7 @@ def test_seed_user_ask_appends_only_to_current():
     from gc_core.intent_log import append_user_ask
 
     state = _make_state()
-    state.user_intent_log = append_user_ask(
-        [], "old intent 1", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
-    )
+    state.user_intent_log = append_user_ask([], "old intent 1", user_turn_seq=0, ts="2026-05-30T11:35:08Z")
     state.flush_current_user_intent()
     state.current_user_intent = append_user_ask(
         [], "active intent 1", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
@@ -175,9 +164,7 @@ def test_flush_moves_current_to_log_without_dedup():
     from gc_core.intent_log import append_user_ask
 
     state = _make_state()
-    state.user_intent_log = append_user_ask(
-        [], "closed turn", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
-    )
+    state.user_intent_log = append_user_ask([], "closed turn", user_turn_seq=0, ts="2026-05-30T11:35:08Z")
     state.flush_current_user_intent()
     state.current_user_intent = append_user_ask(
         [], "line a", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
@@ -316,9 +303,7 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     state.last_backend_response_id = "resp_last"
     state.steps = 42
     state.stop_requested = True
-    state.user_intent_log = append_user_ask(
-        [], "msg one", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
-    )
+    state.user_intent_log = append_user_ask([], "msg one", user_turn_seq=0, ts="2026-05-30T11:35:08Z")
     state.flush_current_user_intent()
     state.user_intent_log = append_user_ask(
         state.user_intent_log, "msg two", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
@@ -346,7 +331,7 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
             "content": [{"type": "text", "text": "готово"}, {"type": "tool_call", "name": "fs_read_file"}],
             "tokens": {"input": 120, "output": 55},
         },
-        {"id": "t1", "type": "function_call", "name": "memory_files", "arguments": "{\"action\":\"list\"}"},
+        {"id": "t1", "type": "function_call", "name": "memory_files", "arguments": '{"action":"list"}'},
     ]
 
     state.shared.working_memory.update(

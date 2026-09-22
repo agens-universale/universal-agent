@@ -26,12 +26,8 @@ def client(monkeypatch, tmp_path):
     # и синхронный вызов морозил бы loop uvicorn на всё это время.
     monkeypatch.setattr(server, "acreate_run_context", _fake_create_run_context)
     monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr(
-        server.agent_run_registry, "astart_if_absent", _fake_start_if_absent
-    )
-    monkeypatch.setattr(
-        server.agent_run_registry, "add_user_message", _fake_add_user_message
-    )
+    monkeypatch.setattr(server.agent_run_registry, "astart_if_absent", _fake_start_if_absent)
+    monkeypatch.setattr(server.agent_run_registry, "add_user_message", _fake_add_user_message)
     return TestClient(server.app), captured
 
 

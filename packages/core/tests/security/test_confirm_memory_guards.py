@@ -5,6 +5,7 @@ Covers Task 4: each guard passes decision_key to request_confirm so repeated
 denies within a run don't re-prompt, and declined messages tell the agent not
 to retry or silently substitute.
 """
+
 import json
 import types
 
@@ -31,6 +32,7 @@ def _tui_ctx(choice):
 # ---------------------------------------------------------------------------
 # write_guard (path_policy) — representative test per brief
 # ---------------------------------------------------------------------------
+
 
 def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
     """[deny] write vне периметра: повтор не переспрашивает; сообщение инструктивно."""
@@ -85,6 +87,7 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # url_policy — decline caches and instructs
 # ---------------------------------------------------------------------------
+
 
 def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
     """url_policy ask: declined URL не переспрашивает; сообщение инструктивно."""
@@ -142,6 +145,7 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
 # read_guard — decline caches and instructs
 # ---------------------------------------------------------------------------
 
+
 def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
     """read_guard ask: declined path не переспрашивает; сообщение инструктивно."""
     from gc_core.config_modules import env_vars
@@ -197,6 +201,7 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # command_moderation — ask + judge unavailable scenario
 # ---------------------------------------------------------------------------
+
 
 def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
     """command_moderation ask, judge unavailable: decline кэшируется; сообщение инструктивно."""
@@ -261,6 +266,7 @@ def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # command_guard (tripwire) — decline caches
 # ---------------------------------------------------------------------------
+
 
 def test_command_guard_decline_caches(monkeypatch, tmp_path):
     """command_guard tripwire ask: decline кэшируется при повторе."""

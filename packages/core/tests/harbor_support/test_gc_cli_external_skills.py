@@ -1,4 +1,5 @@
 """Native registration of harbor-injected task skills without host mirroring."""
+
 import sys
 
 from gc_testkit.paths import HARBOR, REPO

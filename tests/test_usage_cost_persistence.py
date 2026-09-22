@@ -1,4 +1,5 @@
 """Фактическая стоимость переживает сохранение и чтение meta треда."""
+
 import threading
 import types
 
@@ -40,10 +41,17 @@ class _UsageState:
         self.dialog_steps_offset = 0
         self.usage = UsageAccount()
 
-    def init_user_intent_log(self, v): pass
-    def init_current_user_intent(self, v): pass
-    def init_user_turn_seq(self, v): pass
-    def infer_user_turn_seq_if_missing(self): pass
+    def init_user_intent_log(self, v):
+        pass
+
+    def init_current_user_intent(self, v):
+        pass
+
+    def init_user_turn_seq(self, v):
+        pass
+
+    def infer_user_turn_seq_if_missing(self):
+        pass
 
 
 class _Coord:
@@ -77,7 +85,9 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     async def _afrom_config(**kw):
         return types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
-            meta={"token_usage": baseline.to_meta()}, thread_id="t1", system_id="cli",
+            meta={"token_usage": baseline.to_meta()},
+            thread_id="t1",
+            system_id="cli",
             threads_dir=str(tmp_path),
             # Ручная компакция пишет token_usage через хранилище сессии — и
             # ходит туда через асинхронный порт: тред может лежать в базе.
@@ -86,7 +96,9 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(
-        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom_config),
+        mc,
+        "ThreadSession",
+        types.SimpleNamespace(afrom_config=_afrom_config),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
@@ -95,9 +107,9 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
-        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x",
-                     "backend_api_mode": "chat_completions"},
-        tools_spec=[], tools_description=[],
+        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x", "backend_api_mode": "chat_completions"},
+        tools_spec=[],
+        tools_description=[],
     )
     ex._lock = threading.Lock()
     ex._state = None

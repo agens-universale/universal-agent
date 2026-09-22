@@ -3,6 +3,7 @@
 Pure functions — no state, no backend I/O. Callers wrap the returned text with
 ``wrap_technical_user_content`` and inject it as a synthetic user message.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
@@ -16,8 +17,7 @@ from gc_core.utils.backend_errors import (
 )
 
 NO_TOOL_CALL_BOUNCE_MESSAGE = (
-    "There is no tool call in your response. "
-    "Choose a tool call that brings you closer to solving the task."
+    "There is no tool call in your response. Choose a tool call that brings you closer to solving the task."
 )
 
 PROVIDER_BLOCKED_BOUNCE_MESSAGE = (
@@ -51,14 +51,8 @@ def extract_last_assistant_text(
     if not messages:
         return ""
     for message in reversed(messages):
-        if (
-            isinstance(message, dict)
-            and message.get("type") == "message"
-            and message.get("role") == "assistant"
-        ):
-            return project_assistant_text(
-                message.get("content"), tags=tags, strip_think=strip_think
-            ).strip()
+        if isinstance(message, dict) and message.get("type") == "message" and message.get("role") == "assistant":
+            return project_assistant_text(message.get("content"), tags=tags, strip_think=strip_think).strip()
     return ""
 
 

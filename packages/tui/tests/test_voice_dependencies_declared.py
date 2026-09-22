@@ -16,6 +16,7 @@ requests объявили в gc-tui, но это лечило симптом: PO
 считается — он и подвёл с requests. Импорты внутри функций сторож не судит:
 такой отказ приходит при вызове, а не на загрузке пакета.
 """
+
 import ast
 import pathlib
 import re
@@ -100,9 +101,7 @@ def test_voice_does_not_import_requests():
 
 
 def test_requests_is_not_declared_while_nobody_imports_it():
-    assert "requests" not in _declared(), (
-        "requests объявлен в gc-tui, но голос его не импортирует — лишняя зависимость"
-    )
+    assert "requests" not in _declared(), "requests объявлен в gc-tui, но голос его не импортирует — лишняя зависимость"
 
 
 def test_voice_speaks_httpx():
@@ -133,5 +132,5 @@ def test_what_voice_imports_at_module_level_is_declared():
         "голос импортирует на уровне модуля то, чего нет в зависимостях gc-tui: "
         + "; ".join(f"{name} — {', '.join(sorted(files))}" for name, files in sorted(missing.items()))
         + ". Объявите пакет в packages/tui/pyproject.toml — транзит из чужого "
-          "дистрибутива не гарантия"
+        "дистрибутива не гарантия"
     )

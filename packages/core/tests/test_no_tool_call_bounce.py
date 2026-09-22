@@ -31,20 +31,24 @@ def test_extract_returns_empty_for_whitespace_only():
 
 
 def test_extract_handles_list_content():
-    messages = [{
-        "type": "message",
-        "role": "assistant",
-        "content": [{"type": "output_text", "text": "first"}, {"text": "second"}],
-    }]
+    messages = [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "first"}, {"text": "second"}],
+        }
+    ]
     assert extract_last_assistant_text(messages) == "first\n\nsecond"
 
 
 def test_extract_skips_empty_list_parts():
-    messages = [{
-        "type": "message",
-        "role": "assistant",
-        "content": [{"text": ""}, {"text": "real"}, {"text": "   "}],
-    }]
+    messages = [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"text": ""}, {"text": "real"}, {"text": "   "}],
+        }
+    ]
     assert extract_last_assistant_text(messages) == "real"
 
 

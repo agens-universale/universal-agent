@@ -1,4 +1,5 @@
 """UserReplyContainer — реплика пользователя с band-фоном и 2px teal кромкой слева."""
+
 from __future__ import annotations
 
 from typing import Literal, Optional
@@ -86,4 +87,5 @@ class UserReplyContainer(ClickModelMixin, Widget):
         if not self._event_no:
             return None
         from gc_tui.messages import OpenEventRequest
+
         return OpenEventRequest(self._event_no)

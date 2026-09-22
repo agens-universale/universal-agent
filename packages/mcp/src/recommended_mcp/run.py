@@ -6,6 +6,7 @@
 
 MCP без run-блока пропускаются — они вызываются агентом по stdio on-demand.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -72,11 +73,7 @@ def _run_docker_compose(entry: MCPEntry, pkg_path: Path) -> None:
 
 
 def _command_daemon_names(manifest: list[MCPEntry]) -> list[str]:
-    return [
-        entry.name
-        for entry in manifest
-        if entry.run is not None and entry.run.type == "command"
-    ]
+    return [entry.name for entry in manifest if entry.run is not None and entry.run.type == "command"]
 
 
 def main() -> int:
@@ -90,8 +87,7 @@ def main() -> int:
         type=str,
         default=None,
         metavar="PATH",
-        help="Путь к кастомному конфигурационному файлу манифеста MCP "
-        "(по умолчанию recommended_mcp/config.yml).",
+        help="Путь к кастомному конфигурационному файлу манифеста MCP (по умолчанию recommended_mcp/config.yml).",
     )
     parser.add_argument(
         "--stop",

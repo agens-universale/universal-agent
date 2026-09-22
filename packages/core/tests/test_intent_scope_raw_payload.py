@@ -1,4 +1,3 @@
-
 from gc_core.config_modules.intent_scope import DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
 

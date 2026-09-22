@@ -1,4 +1,5 @@
 """SkillPicker integration в TraceScreen: триггер, фильтр, mutex с командной палитрой."""
+
 import pytest
 
 
@@ -14,6 +15,7 @@ class _FakeReg:
 
 def _patch_registry(monkeypatch):
     from gc_core.tools.skills import registry as reg_mod
+
     monkeypatch.setattr(reg_mod, "get_skills_registry", lambda cfg=None: _FakeReg())
 
 
@@ -167,6 +169,7 @@ async def test_skills_loaded_only_once_per_session(tmp_path, monkeypatch):
     def factory(cfg=None):
         calls["n"] += 1
         return _FakeReg()
+
     monkeypatch.setattr(reg_mod, "get_skills_registry", factory)
 
     from gc_tui.app import TuiApp
@@ -220,6 +223,7 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path, monkeypat
             return [{"id": f"pack:skill{i:03d}"} for i in range(45)]
 
     from gc_core.tools.skills import registry as reg_mod
+
     monkeypatch.setattr(reg_mod, "get_skills_registry", lambda cfg=None: _BigReg())
 
     from gc_tui.app import TuiApp
@@ -231,9 +235,9 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path, monkeypat
         inp.text = "/skill "
         await pilot.pause(0.1)
         picker = pilot.app.query_one(SkillPicker)
-        assert len(picker._visible_rows()) > 20                 # список длиннее клэмпа
-        assert picker.region.height < picker.desired_height     # клэмп реально сработал — скролл включён
+        assert len(picker._visible_rows()) > 20  # список длиннее клэмпа
+        assert picker.region.height < picker.desired_height  # клэмп реально сработал — скролл включён
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
-        assert hint[0].region.bottom <= 24                      # на экране
-        assert hint[0].region.bottom <= picker.region.bottom    # внутри рамки пикера, видна без скролла
+        assert hint[0].region.bottom <= 24  # на экране
+        assert hint[0].region.bottom <= picker.region.bottom  # внутри рамки пикера, видна без скролла

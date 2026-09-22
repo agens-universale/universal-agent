@@ -6,6 +6,7 @@ SPEC 2026-07-25 §3.1 B5/B10:
 - Повторный F7 на открытом буфере — no-op.
 - Нет активной сессии — короткое сообщение, экран не открываем.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -112,9 +113,6 @@ async def test_dispatch_command_buffer(tmp_path):
         assert isinstance(pilot.app.screen, CopyBufferScreen)
 
 
-
-
-
 @pytest.mark.asyncio
 async def test_push_session_buffer_from_diff_screen(tmp_path):
     """B2: Ctrl+C с выделением на DiffViewerScreen дописывает в буфер сессии.
@@ -143,13 +141,13 @@ async def test_push_session_buffer_from_diff_screen(tmp_path):
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         # сверху теперь diff-экран, у него нет _store/_active_task_id
-        assert not hasattr(pilot.app.screen, "_active_task_id") or getattr(
-            pilot.app.screen, "_active_task_id", None
-        ) is None
+        assert (
+            not hasattr(pilot.app.screen, "_active_task_id")
+            or getattr(pilot.app.screen, "_active_task_id", None) is None
+        )
         pilot.app._push_session_copy_buffer("фрагмент")
         await pilot.pause()
         assert store.writes == [("T1", {"copy_buffer": "фрагмент\n\nстарый"})]
-
 
 
 @pytest.mark.asyncio

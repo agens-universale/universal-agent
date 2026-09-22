@@ -57,13 +57,15 @@ def test_capture_cap_below_limit_stays_native_with_output_capped(tmp_path, monke
 
     def spy(*args, **kwargs):
         return NativeGrepResult(
-            matches=[{
-                "file": str(tmp_path / "app.py"),
-                "line": 1,
-                "end_line": 1,
-                "line_content": "KEY = 1",
-                "context": "KEY = 1\n",
-            }],
+            matches=[
+                {
+                    "file": str(tmp_path / "app.py"),
+                    "line": 1,
+                    "end_line": 1,
+                    "line_content": "KEY = 1",
+                    "context": "KEY = 1\n",
+                }
+            ],
             truncated=True,
             hit_capture_cap=True,
         )

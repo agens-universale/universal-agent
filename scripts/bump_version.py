@@ -13,6 +13,7 @@
 Коммит и тег — руками. Доки и тесты не трогает: упаковочный тест читает
 версию из манифеста.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -107,9 +108,7 @@ def _uv_lock() -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Bump all workspace versions and regenerate uv.lock."
-    )
+    ap = argparse.ArgumentParser(description="Bump all workspace versions and regenerate uv.lock.")
     ap.add_argument("version", help="New version, e.g. 0.3.1")
     ap.add_argument("--dry-run", action="store_true", help="Show changes without writing")
     args = ap.parse_args()

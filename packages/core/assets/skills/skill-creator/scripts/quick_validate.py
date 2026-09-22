@@ -11,7 +11,7 @@ import yaml
 
 
 def _check_name(frontmatter):
-    name = frontmatter.get('name', '')
+    name = frontmatter.get("name", "")
     if not isinstance(name, str):
         return f"Name must be a string, got {type(name).__name__}"
     name = name.strip()
@@ -23,27 +23,27 @@ def _check_name(frontmatter):
 
 def _check_id(frontmatter):
     # id (если присутствует) — должен быть kebab-case
-    skill_id = frontmatter.get('id', '')
+    skill_id = frontmatter.get("id", "")
     if not skill_id:
         return None
     if not isinstance(skill_id, str):
         return f"id must be a string, got {type(skill_id).__name__}"
-    if not re.match(r'^[a-z0-9-]+$', skill_id):
+    if not re.match(r"^[a-z0-9-]+$", skill_id):
         return f"id '{skill_id}' should be kebab-case (lowercase letters, digits, and hyphens only)"
-    if skill_id.startswith('-') or skill_id.endswith('-') or '--' in skill_id:
+    if skill_id.startswith("-") or skill_id.endswith("-") or "--" in skill_id:
         return f"id '{skill_id}' cannot start/end with hyphen or contain consecutive hyphens"
     return None
 
 
 def _check_description(frontmatter):
-    description = frontmatter.get('description', '')
+    description = frontmatter.get("description", "")
     if not isinstance(description, str):
         return f"Description must be a string, got {type(description).__name__}"
     description = description.strip()
     if not description:
         return None
     # Check for angle brackets
-    if '<' in description or '>' in description:
+    if "<" in description or ">" in description:
         return "Description cannot contain angle brackets (< or >)"
     # Check description length (max 1024 characters per spec)
     if len(description) > 1024:
@@ -53,7 +53,7 @@ def _check_description(frontmatter):
 
 def _check_compatibility(frontmatter):
     # Validate compatibility field if present (optional)
-    compatibility = frontmatter.get('compatibility', '')
+    compatibility = frontmatter.get("compatibility", "")
     if not compatibility:
         return None
     if not isinstance(compatibility, str):
@@ -68,17 +68,17 @@ def validate_skill(skill_path):
     skill_path = Path(skill_path)
 
     # Check SKILL.md exists
-    skill_md = skill_path / 'SKILL.md'
+    skill_md = skill_path / "SKILL.md"
     if not skill_md.exists():
         return False, "SKILL.md not found"
 
     # Read and validate frontmatter
-    content = skill_md.read_text(encoding='utf-8')
-    if not content.startswith('---'):
+    content = skill_md.read_text(encoding="utf-8")
+    if not content.startswith("---"):
         return False, "No YAML frontmatter found"
 
     # Extract frontmatter
-    match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+    match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
     if not match:
         return False, "Invalid frontmatter format"
 
@@ -93,7 +93,16 @@ def validate_skill(skill_path):
         return False, f"Invalid YAML in frontmatter: {e}"
 
     # Define allowed properties
-    ALLOWED_PROPERTIES = {'id', 'name', 'description', 'version', 'license', 'allowed-tools', 'metadata', 'compatibility'}
+    ALLOWED_PROPERTIES = {
+        "id",
+        "name",
+        "description",
+        "version",
+        "license",
+        "allowed-tools",
+        "metadata",
+        "compatibility",
+    }
 
     # Check for unexpected properties (excluding nested keys under metadata)
     unexpected_keys = set(frontmatter.keys()) - ALLOWED_PROPERTIES
@@ -104,9 +113,9 @@ def validate_skill(skill_path):
         )
 
     # Check required fields
-    if 'name' not in frontmatter:
+    if "name" not in frontmatter:
         return False, "Missing 'name' in frontmatter"
-    if 'description' not in frontmatter:
+    if "description" not in frontmatter:
         return False, "Missing 'description' in frontmatter"
 
     for check in (_check_name, _check_id, _check_description, _check_compatibility):
@@ -115,6 +124,7 @@ def validate_skill(skill_path):
             return False, error
 
     return True, "Skill is valid!"
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

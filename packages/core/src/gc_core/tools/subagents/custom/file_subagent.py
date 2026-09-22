@@ -9,6 +9,7 @@ API адаптера собран на классе + ``BoundFileSubagent``: sch
 policy, bind, create, instance methods. Registry только compose'ит через
 ``FileDefinedSubagent.bound(definition)``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -51,12 +52,14 @@ class FileDefinedSubagent(AbstractSubagent):
     # Все отказы выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
     # файла вовсе — это не запрет, а гарантия.
     # Канон здесь, не в file_definitions: это runtime policy сдачи/stored output/памяти.
-    REQUIRED_TOOL_NAMES = frozenset({
-        FINISH_TOOL_NAME,
-        READ_STORED_TOOL_OUTPUT_NAME,
-        SESSION_MEMORY_TOOL_NAME,
-        SESSION_TODO_TOOL_NAME,
-    })
+    REQUIRED_TOOL_NAMES = frozenset(
+        {
+            FINISH_TOOL_NAME,
+            READ_STORED_TOOL_OUTPUT_NAME,
+            SESSION_MEMORY_TOOL_NAME,
+            SESSION_TODO_TOOL_NAME,
+        }
+    )
 
     def __init__(self, definition: SubagentDefinition, task: str, reason: str = "") -> None:
         self.definition = definition
@@ -139,9 +142,7 @@ class FileDefinedSubagent(AbstractSubagent):
         # HANDOFF_CONTRACT_GUIDANCE — кастомная роль получает тот же контракт
         # сдачи, что встроенные. Отменить его из файла нельзя.
         role = self.with_handoff_contract(self.definition.role)
-        assignment = self.build_assignment_message(
-            {"task": self.task, "reason": self.reason}
-        )
+        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
         return role, assignment
 
     def get_agent_name(self) -> str:
@@ -153,8 +154,7 @@ class FileDefinedSubagent(AbstractSubagent):
         # BoundFileSubagent.get_agent_specification() через bound(). Classmethod
         # оставлен только ради контракта AbstractSubagent.
         raise NotImplementedError(
-            "FileDefinedSubagent is data-driven; use "
-            "FileDefinedSubagent.bound(definition).get_agent_specification()"
+            "FileDefinedSubagent is data-driven; use FileDefinedSubagent.bound(definition).get_agent_specification()"
         )
 
 
@@ -178,9 +178,7 @@ class BoundFileSubagent:
 
     async def create_instance(self, **kwargs: Any) -> FileDefinedSubagent:
         kwargs.pop("definition", None)  # definition только из bound
-        return await FileDefinedSubagent.create_instance(
-            definition=self.definition, **kwargs
-        )
+        return await FileDefinedSubagent.create_instance(definition=self.definition, **kwargs)
 
 
 # Module-level re-export для короткого импорта в tools/__init__.py (child filter).

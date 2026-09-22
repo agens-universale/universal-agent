@@ -6,6 +6,7 @@ Strategy:
 - Run the SAME tool class with the same kwargs against both.
 - Compare structured output, normalizing absolute path roots (base=real tmpdir, shim=/work).
 """
+
 import json
 
 import pytest
@@ -56,9 +57,9 @@ def _normalize_file(path: str, root: str) -> str:
     """Strip root prefix from a file path, returning a relpath."""
     root = root.rstrip("/")
     if path.startswith(root + "/"):
-        return path[len(root) + 1:]
+        return path[len(root) + 1 :]
     if path.startswith(root):
-        return path[len(root):]
+        return path[len(root) :]
     return path
 
 
@@ -89,9 +90,7 @@ def _run_both(tmp_path, **kwargs):
 
 def _compare(base_env, shim_env, real_root, *, check_pagination=True):
     """Assert structural equality after normalizing paths."""
-    assert base_env["ok"] == shim_env["ok"], (
-        f"ok mismatch: base={base_env['ok']} shim={shim_env['ok']}"
-    )
+    assert base_env["ok"] == shim_env["ok"], f"ok mismatch: base={base_env['ok']} shim={shim_env['ok']}"
     if not base_env["ok"]:
         # Error cases: compare error type
         b_err = base_env.get("error") or {}
@@ -109,9 +108,7 @@ def _compare(base_env, shim_env, real_root, *, check_pagination=True):
     assert base_env.get("total_matches") == shim_env.get("total_matches"), (
         f"total_matches: {base_env.get('total_matches')} vs {shim_env.get('total_matches')}"
     )
-    assert base_env.get("count") == shim_env.get("count"), (
-        f"count: {base_env.get('count')} vs {shim_env.get('count')}"
-    )
+    assert base_env.get("count") == shim_env.get("count"), f"count: {base_env.get('count')} vs {shim_env.get('count')}"
     assert base_env.get("truncated") == shim_env.get("truncated"), (
         f"truncated: {base_env.get('truncated')} vs {shim_env.get('truncated')}"
     )
@@ -125,14 +122,13 @@ def _compare(base_env, shim_env, real_root, *, check_pagination=True):
         # next_offset may differ since match order can vary across walks, but presence/absence must match
         b_next = base_env.get("next_offset")
         s_next = shim_env.get("next_offset")
-        assert (b_next is None) == (s_next is None), (
-            f"next_offset presence: base={b_next} shim={s_next}"
-        )
+        assert (b_next is None) == (s_next is None), f"next_offset presence: base={b_next} shim={s_next}"
 
 
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
+
 
 def test_basic_regex(tmp_path):
     """Matches 'hello' across multiple files."""
@@ -218,9 +214,7 @@ def test_long_line_truncation(tmp_path):
         # The line truncation key is the cutted indicator
         assert "FINDME" in s_content or "cutted" in s_content.lower()
         # Same truncation behavior: both use 500-char context window around match
-        assert b_content == s_content, (
-            f"line_content differs:\nbase={b_content!r}\nshim={s_content!r}"
-        )
+        assert b_content == s_content, f"line_content differs:\nbase={b_content!r}\nshim={s_content!r}"
 
 
 def _assert_invalid_regex_envelope(env: dict, pattern: str) -> None:
@@ -380,9 +374,7 @@ def test_truncated_page_ordering(tmp_path):
     shim_all_raw = shim(path=SHIM_ROOT, regex="MARKER")
     shim_all = json.loads(shim_all_raw)
     assert shim_all["ok"] is True, f"shim all-matches failed: {shim_all}"
-    assert shim_all["total_matches"] == 3, (
-        f"expected 3 total matches, got {shim_all['total_matches']}"
-    )
+    assert shim_all["total_matches"] == 3, f"expected 3 total matches, got {shim_all['total_matches']}"
 
     # All 3 matches should be in sorted DFS order when no pagination is applied
     full_page = _normalize_matches_ordered(shim_all["matches"], SHIM_ROOT)
@@ -424,8 +416,7 @@ def test_truncated_page_ordering(tmp_path):
 
     # next_offset: we fetched position 1, position 2 is next → next_offset = 3
     assert shim_page["next_offset"] == 3, (
-        f"next_offset should be 3 (there is 1 more match after position 1), "
-        f"got {shim_page['next_offset']}"
+        f"next_offset should be 3 (there is 1 more match after position 1), got {shim_page['next_offset']}"
     )
 
 
@@ -433,6 +424,7 @@ def test_truncated_page_ordering(tmp_path):
 # Read-guard regression: denied dirs must be pruned from recursion, not just
 # filtered from the emitted file list (Task 6 precedent for fs_list_files).
 # ---------------------------------------------------------------------------
+
 
 def test_walk_does_not_descend_into_denied_dir_via_nested_override():
     """A guard-DENIED directory must never be recursed into, even when a nested

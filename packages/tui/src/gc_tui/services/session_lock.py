@@ -2,6 +2,7 @@
 
 Канон: docs_md/tui/session-lock/SPEC.md. Meta/runtime не участвуют.
 """
+
 from __future__ import annotations
 
 import json

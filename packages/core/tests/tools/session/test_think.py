@@ -64,17 +64,13 @@ def test_think_invalid_argument_type():
 
 
 def test_prepare_args_before_strip_remaps_reason_to_thoughts():
-    args = Think.prepare_args_before_strip(
-        {"reason": "long reasoning about the next step"}
-    )
+    args = Think.prepare_args_before_strip({"reason": "long reasoning about the next step"})
     assert args["thoughts"] == "long reasoning about the next step"
     assert args["reason"] == "long reasoning about the next step"
 
 
 def test_prepare_args_before_strip_keeps_explicit_thoughts():
-    args = Think.prepare_args_before_strip(
-        {"reason": "injected why", "thoughts": "explicit thoughts"}
-    )
+    args = Think.prepare_args_before_strip({"reason": "injected why", "thoughts": "explicit thoughts"})
     assert args["thoughts"] == "explicit thoughts"
 
 
@@ -84,8 +80,6 @@ def test_prepare_args_before_strip_ignores_blank_reason():
 
 
 def test_prepare_args_before_strip_skips_when_any_think_field_set():
-    args = Think.prepare_args_before_strip(
-        {"reason": "injected why", "critics": "a critique"}
-    )
+    args = Think.prepare_args_before_strip({"reason": "injected why", "critics": "a critique"})
     assert "thoughts" not in args
     assert args["critics"] == "a critique"

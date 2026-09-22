@@ -1,4 +1,5 @@
 """'/status' дампит meta + runtime активной задачи в Viewer."""
+
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ def _viewer_body(screen) -> str:
     body теперь через render_payload → Static(Syntax(json)), и `str(render())`
     даёт `RichVisual(...)` вместо контента. Извлекаем `.content.code`/`.plain` напрямую."""
     from textual.widgets import Static
+
     parts = []
     for s in screen.query(Static):
         content = getattr(s, "content", None) or getattr(s, "renderable", None)
@@ -27,13 +29,23 @@ def _viewer_body(screen) -> str:
 
 def _write_task(tmp_path, tid):
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 1}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 1}
+        ),
+        encoding="utf-8",
+    )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps({"type": "message", "seq": 1, "ts_utc": "2026-05-22T12:00:00+00:00",
-                    "payload": {"id": "u1", "role": "user", "content": "x"}}) + "\n",
-        encoding="utf-8")
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "2026-05-22T12:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "x"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.asyncio

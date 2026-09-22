@@ -1,4 +1,5 @@
 """Конфиг секции ``diff_tui:`` — лимиты cache и visual diff в TUI."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

@@ -5,18 +5,23 @@ def _store_with_last_indicator(last):
     class _Store:
         def get_task_meta(self, tid):
             return {"tui": {"last_indicator": last}}
+
         def read_live_messages(self, tid):
             return []
+
     return _Store()
 
 
 def _store_with_tui_status(status):
     """Старая сессия: есть meta.tui.status, но НЕТ last_indicator."""
+
     class _Store:
         def get_task_meta(self, tid):
             return {"tui": {"status": status}}
+
         def read_live_messages(self, tid):
             return []
+
     return _Store()
 
 
@@ -67,7 +72,8 @@ async def test_resume_unrecorded_outcome_no_line(tmp_path):
 
     class _Store:
         def get_task_meta(self, tid):
-            return {"tui": {}}        # исход нигде не записан
+            return {"tui": {}}  # исход нигде не записан
+
         def read_live_messages(self, tid):
             return []
 
@@ -129,7 +135,9 @@ async def test_restore_noop_when_running(tmp_path):
         scr._store = _store_with_last_indicator({"kind": "done", "elapsed": 5})
 
         class _R:
-            def is_running(self): return True
+            def is_running(self):
+                return True
+
         scr.app.active_runner = _R()
         scr._thinking = None
 

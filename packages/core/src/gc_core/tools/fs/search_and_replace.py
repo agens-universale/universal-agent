@@ -30,7 +30,19 @@ class _LoadError:
         self.error = error
 
 
-def _replace_arg_error(path, search, replace, dry_run, expected_matches, occurrence, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256) -> "tuple[str, Dict[str, Any]] | None":
+def _replace_arg_error(
+    path,
+    search,
+    replace,
+    dry_run,
+    expected_matches,
+    occurrence,
+    backup,
+    return_diff,
+    diff_context_lines,
+    max_diff_chars,
+    expected_file_sha256,
+) -> "tuple[str, Dict[str, Any]] | None":
     """(message, error) для первого невалидного аргумента либо None."""
     return (
         _text_arg_error(path, search, replace, dry_run)
@@ -52,33 +64,48 @@ def _text_arg_error(path, search, replace, dry_run) -> "tuple[str, Dict[str, Any
 
 
 def _occurrence_arg_error(expected_matches, occurrence) -> "tuple[str, Dict[str, Any]] | None":
-    if expected_matches is not None and (
-        not isinstance(expected_matches, int) or expected_matches < 0
-    ):
-        return "Argument 'expected_matches' must be a non-negative integer.", {"type": "invalid_argument", "field": "expected_matches"}
-    if not (
-        occurrence in ("first", "last", "all")
-        or (isinstance(occurrence, int) and occurrence >= 1)
-    ):
-        return "Argument 'occurrence' must be 'first', 'last', 'all', or a 1-based integer.", {"type": "invalid_argument", "field": "occurrence"}
+    if expected_matches is not None and (not isinstance(expected_matches, int) or expected_matches < 0):
+        return "Argument 'expected_matches' must be a non-negative integer.", {
+            "type": "invalid_argument",
+            "field": "expected_matches",
+        }
+    if not (occurrence in ("first", "last", "all") or (isinstance(occurrence, int) and occurrence >= 1)):
+        return "Argument 'occurrence' must be 'first', 'last', 'all', or a 1-based integer.", {
+            "type": "invalid_argument",
+            "field": "occurrence",
+        }
     if occurrence == "all" and expected_matches is None:
-        return "Argument 'expected_matches' is required when occurrence='all'.", {"type": "invalid_argument", "field": "expected_matches"}
+        return "Argument 'expected_matches' is required when occurrence='all'.", {
+            "type": "invalid_argument",
+            "field": "expected_matches",
+        }
     return None
 
 
-def _diff_arg_error(backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256) -> "tuple[str, Dict[str, Any]] | None":
+def _diff_arg_error(
+    backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
+) -> "tuple[str, Dict[str, Any]] | None":
     if not isinstance(backup, bool):
         return "Argument 'backup' must be a boolean.", {"type": "invalid_argument", "field": "backup"}
     if not isinstance(return_diff, bool):
         return "Argument 'return_diff' must be a boolean.", {"type": "invalid_argument", "field": "return_diff"}
     if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
-        return "Argument 'diff_context_lines' must be a non-negative integer.", {"type": "invalid_argument", "field": "diff_context_lines"}
+        return "Argument 'diff_context_lines' must be a non-negative integer.", {
+            "type": "invalid_argument",
+            "field": "diff_context_lines",
+        }
     if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
-        return "Argument 'max_diff_chars' must be a positive integer.", {"type": "invalid_argument", "field": "max_diff_chars"}
+        return "Argument 'max_diff_chars' must be a positive integer.", {
+            "type": "invalid_argument",
+            "field": "max_diff_chars",
+        }
     if expected_file_sha256 is not None and (
         not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256)
     ):
-        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {"type": "invalid_argument", "field": "expected_file_sha256"}
+        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {
+            "type": "invalid_argument",
+            "field": "expected_file_sha256",
+        }
     return None
 
 
@@ -100,7 +127,9 @@ def _miss_payload(original_search: str, content: str) -> Dict[str, Any]:
     )
 
 
-def _match_error_payload(match_entries: list, original_search: str, content: str, expected_total_matches) -> "Dict[str, Any] | None":
+def _match_error_payload(
+    match_entries: list, original_search: str, content: str, expected_total_matches
+) -> "Dict[str, Any] | None":
     """Payload ошибки поиска (нет вхождений / не то число), либо None."""
     if not match_entries:
         return _miss_payload(original_search, content)
@@ -117,14 +146,8 @@ def _mismatch_payload(match_entries: list, expected_total_matches: int) -> Dict[
         replaced=0,
         match_count=match_count,
         line_numbers=sorted({entry[1] for entry in match_entries}),
-        match_ranges=[
-            {"start_line": entry[1], "end_line": entry[2]}
-            for entry in match_entries
-        ],
-        message=(
-            f"Match count mismatch: expected {expected_total_matches}, found {match_count}. "
-            "No changes made."
-        ),
+        match_ranges=[{"start_line": entry[1], "end_line": entry[2]} for entry in match_entries],
+        message=(f"Match count mismatch: expected {expected_total_matches}, found {match_count}. No changes made."),
         suggestions=[],
         suggestions_total=0,
         error={"type": "match_count_mismatch"},
@@ -169,6 +192,7 @@ class SearchAndReplace(AbstractSimpleTool):
     Performs a single search and replace operation in a file.
     Only the first occurrence is replaced.
     """
+
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
 
@@ -213,19 +237,19 @@ class SearchAndReplace(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The absolute path of the file to modify. Must be a valid file path; directories are not allowed."
+                        "description": "The absolute path of the file to modify. Must be a valid file path; directories are not allowed.",
                     },
                     "search": {
                         "type": "string",
-                        "description": "The exact content to find and replace. Match is case-sensitive and literal (not regex). May be multiline. Cannot be empty. Use a unique multi-line snippet to avoid accidental matches elsewhere in the file."
+                        "description": "The exact content to find and replace. Match is case-sensitive and literal (not regex). May be multiline. Cannot be empty. Use a unique multi-line snippet to avoid accidental matches elsewhere in the file.",
                     },
                     "replace": {
                         "type": "string",
-                        "description": "The new content to replace the found content with. May be multiline. Can be empty to remove the matched content."
+                        "description": "The new content to replace the found content with. May be multiline. Can be empty to remove the matched content.",
                     },
                     "dry_run": {
                         "type": "boolean",
-                        "description": "If true, do not modify the file; only report whether replacement would happen."
+                        "description": "If true, do not modify the file; only report whether replacement would happen.",
                     },
                     "expected_matches": {
                         "type": "integer",
@@ -243,26 +267,23 @@ class SearchAndReplace(AbstractSimpleTool):
                         ),
                         "anyOf": [
                             {"type": "string", "enum": ["first", "last", "all"]},
-                            {"type": "integer", "minimum": 1}
-                        ]
+                            {"type": "integer", "minimum": 1},
+                        ],
                     },
                     "backup": {
                         "type": "boolean",
-                        "description": "If true and file is modified, creates '<path>.bak' before writing."
+                        "description": "If true and file is modified, creates '<path>.bak' before writing.",
                     },
-                    "return_diff": {
-                        "type": "boolean",
-                        "description": "If true, include a unified diff in the result."
-                    },
+                    "return_diff": {"type": "boolean", "description": "If true, include a unified diff in the result."},
                     "diff_context_lines": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "Context lines for unified diff when return_diff=true. Default 3."
+                        "description": "Context lines for unified diff when return_diff=true. Default 3.",
                     },
                     "max_diff_chars": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Maximum number of characters returned in diff output. Default 12000."
+                        "description": "Maximum number of characters returned in diff output. Default 12000.",
                     },
                     "expected_file_sha256": {
                         "type": "string",
@@ -282,14 +303,14 @@ class SearchAndReplace(AbstractSimpleTool):
                     },
                 },
                 "required": ["path", "search", "replace"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        description = '''Tool name: fs_search_and_replace  
+        description = """Tool name: fs_search_and_replace  
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
 
@@ -353,10 +374,11 @@ Update version string:
   "search": "Version\\n1.0.0",
   "replace": "Version\\n1.0.1"
 }
-'''
+"""
         return description
 
-    def _result(self,
+    def _result(
+        self,
         *,
         path: str,
         ok: bool,
@@ -421,7 +443,6 @@ Update version string:
             suggestions_total=0,
             error=error,
         )
-
 
     async def _load_source(self, path: str, encoding: "str | None", expected_file_sha256: "str | None"):
         """(content, encoding_used) либо _LoadError с готовыми message/error."""
@@ -497,27 +518,48 @@ Update version string:
         encoding = coalesce_optional_string(encoding)
         _result = functools.partial(self._result, path=path, applied=False)
         fail = functools.partial(
-            _result, ok=False, matched=False, replaced=0, match_count=0,
-            line_numbers=[], suggestions=[], suggestions_total=0,
+            _result,
+            ok=False,
+            matched=False,
+            replaced=0,
+            match_count=0,
+            line_numbers=[],
+            suggestions=[],
+            suggestions_total=0,
         )
 
         # Input validation
         arg_error = _replace_arg_error(
-            path, search, replace, dry_run, expected_matches, occurrence,
-            backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256,
+            path,
+            search,
+            replace,
+            dry_run,
+            expected_matches,
+            occurrence,
+            backup,
+            return_diff,
+            diff_context_lines,
+            max_diff_chars,
+            expected_file_sha256,
         )
         if arg_error is not None:
             return fail(message=arg_error[0], error=arg_error[1])
         expected_total_matches = expected_matches
 
         if not path:
-            return fail(message="Argument 'path' cannot be an empty string.", error={"type": "invalid_argument", "field": "path"})
+            return fail(
+                message="Argument 'path' cannot be an empty string.",
+                error={"type": "invalid_argument", "field": "path"},
+            )
         if not await self._backend.exists(path):
             return fail(message="File not found.", error={"type": "not_found"})
         if not await self._backend.is_file(path):
             return fail(message="Path is not a file.", error={"type": "not_a_file"})
-        if search == '':
-            return fail(message="Argument 'search' cannot be an empty string.", error={"type": "invalid_argument", "field": "search"})
+        if search == "":
+            return fail(
+                message="Argument 'search' cannot be an empty string.",
+                error={"type": "invalid_argument", "field": "search"},
+            )
         loaded = await self._load_source(path, encoding, expected_file_sha256)
         if isinstance(loaded, _LoadError):
             return fail(message=loaded.message, error=loaded.error)
@@ -548,10 +590,7 @@ Update version string:
             )
 
         line_numbers = sorted({entry[1] for entry in selected_entries})
-        match_ranges = [
-            {"start_line": entry[1], "end_line": entry[2]}
-            for entry in selected_entries
-        ]
+        match_ranges = [{"start_line": entry[1], "end_line": entry[2]} for entry in selected_entries]
         replaced_count = len(selected_entries)
 
         new_content = _splice_replacements(content, selected_entries, search, replace)
@@ -576,11 +615,18 @@ Update version string:
 
         if dry_run:
             return _result(
-                ok=True, matched=True, replaced=0, match_count=match_count,
-                line_numbers=line_numbers, match_ranges=match_ranges,
+                ok=True,
+                matched=True,
+                replaced=0,
+                match_count=match_count,
+                line_numbers=line_numbers,
+                match_ranges=match_ranges,
                 message="Dry run: replacement preview generated. No changes made.",
-                diff=diff_text, diff_truncated=diff_truncated,
-                suggestions=[], suggestions_total=0, error=None,
+                diff=diff_text,
+                diff_truncated=diff_truncated,
+                suggestions=[],
+                suggestions_total=0,
+                error=None,
             )
 
         backup_path, backup_error = await self._maybe_backup(path, backup)

@@ -11,11 +11,9 @@ import copy
 from typing import Any
 
 # LLM-facing hints for semantically optional string fields (must match JSON required).
-OPTIONAL_OMIT_HINT = (
-    "When unused, omit this field. Empty string \"\" is also accepted and treated as unused."
-)
+OPTIONAL_OMIT_HINT = 'When unused, omit this field. Empty string "" is also accepted and treated as unused.'
 OPTIONAL_EMPTY_AS_OMIT_HINT = (
-    "When unused, pass empty string \"\" (field omit is unavailable under strict OpenAI tool schema)."
+    'When unused, pass empty string "" (field omit is unavailable under strict OpenAI tool schema).'
 )
 
 _OPTIONAL_HINTS = (OPTIONAL_OMIT_HINT, OPTIONAL_EMPTY_AS_OMIT_HINT)
@@ -128,11 +126,7 @@ def seed_optional_keys(schema: dict[str, Any]) -> list[str]:
     required_before = schema.get("required")
     if not isinstance(required_before, list):
         required_before = []
-    seeded = [
-        k
-        for k in props
-        if k not in required_before and not _property_preserves_empty_string(props[k])
-    ]
+    seeded = [k for k in props if k not in required_before and not _property_preserves_empty_string(props[k])]
     schema["x-optional-keys"] = seeded
     return seeded
 
@@ -180,9 +174,7 @@ def _rewrite_semantic_required(schema: Any) -> None:
         return
 
     is_object = schema.get("type") == "object" or isinstance(schema.get("properties"), dict)
-    if is_object and (
-        isinstance(schema.get("x-optional-keys"), list) or schema.get("x-openai-strict")
-    ):
+    if is_object and (isinstance(schema.get("x-optional-keys"), list) or schema.get("x-openai-strict")):
         props = schema.get("properties")
         if isinstance(props, dict):
             optional = set(resolve_optional_property_keys(schema))

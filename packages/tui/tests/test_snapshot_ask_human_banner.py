@@ -1,4 +1,5 @@
 """ask_human banner — каноничный вид (§3.4)."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -27,8 +28,9 @@ def test_ask_human_banner_snapshot(snap_compare, tmp_path, monkeypatch):
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
     fake.run(["используй скилл skill-creator"], thread_id=tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "CodeAgent", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+    )
     app._executor_factory = lambda: fake
     # Fix D: без живого runner-а recovery-блок снял бы banner. Здесь мы
     # фиксируем именно каноничный визуал banner-а → подсовываем live-stub.

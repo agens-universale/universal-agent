@@ -13,6 +13,7 @@ Router читает секции `models`/`slots`/`assign` из снимка `co
 Выбор фоллбэк-цели (активная модель / честная ошибка / рестарт субагента) — задача
 тех же потребителей, не Router'а.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -53,13 +54,13 @@ _SCALAR_ASSIGN_FIELDS = (
 class ResolvedModel:
     """Комплект «модель + куда слать + чем авторизоваться», отданный потребителю."""
 
-    alias: str | None        # None в легаси
-    model: str               # провайдерский id
+    alias: str | None  # None в легаси
+    model: str  # провайдерский id
     url: str
     authorization: str | None  # None=наследовать эффективный заголовок, ""=явно без, иначе значение
-    backend_overrides: dict    # плоские ключи backend поверх эффективных
+    backend_overrides: dict  # плоские ключи backend поверх эффективных
     tariff: object | None
-    source: str                # человекочитаемое «почему» — питает витрины/футер/notices
+    source: str  # человекочитаемое «почему» — питает витрины/футер/notices
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -203,12 +204,8 @@ class ModelRouter:
         if binding is not None:
             label, value = binding
             if value in LEVELS:
-                return self._resolve_level(
-                    value, source_prefix=f"привязка {label}→", check_breaker=check_breaker
-                )
-            return self._resolve_alias(
-                value, source=f"привязка {label}→{value}", check_breaker=check_breaker
-            )
+                return self._resolve_level(value, source_prefix=f"привязка {label}→", check_breaker=check_breaker)
+            return self._resolve_alias(value, source=f"привязка {label}→{value}", check_breaker=check_breaker)
 
         if self._unbound_override is not None:
             return self._unbound_override
@@ -240,7 +237,7 @@ class ModelRouter:
 
     def _lookup_binding(self, consumer: str) -> tuple[str, str] | None:
         if consumer.startswith(SUBAGENT_CONSUMER_PREFIX):
-            name = consumer[len(SUBAGENT_CONSUMER_PREFIX):]
+            name = consumer[len(SUBAGENT_CONSUMER_PREFIX) :]
             subagents = self._assign.get("subagents") or {}
             if subagents.get(name) is not None:
                 return name, subagents[name]
@@ -254,40 +251,27 @@ class ModelRouter:
             return consumer, value
         return None
 
-    def _resolve_level(
-        self, level: str, source_prefix: str, *, check_breaker: bool = True
-    ) -> ResolvedModel:
+    def _resolve_level(self, level: str, source_prefix: str, *, check_breaker: bool = True) -> ResolvedModel:
         for candidate_level in LEVEL_FALLBACK[level]:
             alias = self._slots.get(candidate_level)
             if alias:
                 phrase = _level_phrase(level, candidate_level)
-                return self._resolve_alias(
-                    alias, source=f"{source_prefix}{phrase}", check_breaker=check_breaker
-                )
+                return self._resolve_alias(alias, source=f"{source_prefix}{phrase}", check_breaker=check_breaker)
         if len(self._models) == 1:
             (only_alias,) = self._models.keys()
             phrase = f"уровень {level} (единственная модель реестра)"
-            return self._resolve_alias(
-                only_alias, source=f"{source_prefix}{phrase}", check_breaker=check_breaker
-            )
+            return self._resolve_alias(only_alias, source=f"{source_prefix}{phrase}", check_breaker=check_breaker)
         raise ValueError(
-            f"не удалось резолвить уровень '{level}': ни один слот не задан, "
-            "моделей в реестре не ровно одна"
+            f"не удалось резолвить уровень '{level}': ни один слот не задан, моделей в реестре не ровно одна"
         )
 
-    def _resolve_alias(
-        self, alias: str, source: str, *, check_breaker: bool = True
-    ) -> ResolvedModel:
+    def _resolve_alias(self, alias: str, source: str, *, check_breaker: bool = True) -> ResolvedModel:
         entry = self._models.get(alias)
         if entry is None:
             raise ValueError(f"алиас '{alias}' отсутствует в merged-реестре models")
         backend_overrides = entry.get("backend_overrides") or {}
         model_id = entry.get("model") or alias
-        url = (
-            entry.get("url")
-            or backend_overrides.get("completions_url")
-            or self._snapshot.get("completions_url")
-        )
+        url = entry.get("url") or backend_overrides.get("completions_url") or self._snapshot.get("completions_url")
         resolved = ResolvedModel(
             alias=alias,
             model=model_id,

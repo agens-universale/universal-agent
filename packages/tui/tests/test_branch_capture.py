@@ -1,4 +1,5 @@
 """При создании новой сессии в git-проекте ветка пишется в tui_meta.branch."""
+
 import pytest
 from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -8,8 +9,10 @@ async def test_branch_captured_on_new_session(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.screens import main as main_mod
+
     monkeypatch.setattr(main_mod, "current_branch", lambda cwd: "feat/captured")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     app._executor_factory = lambda: _NoopExecutor()
     async with app.run_test() as pilot:
@@ -26,7 +29,9 @@ async def test_branch_captured_on_new_session(tmp_path, monkeypatch):
 class _NoopExecutor:
     async def arun(self, *a, **k):
         return None
+
     def stop_run(self):
         pass
+
     def add_message(self, m):
         pass

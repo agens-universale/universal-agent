@@ -118,7 +118,6 @@ def test_compaction_puts_checklist_into_summary_message():
     import inspect
 
     from gc_core.summarize import compaction
+
     src = inspect.getsource(compaction)
-    assert "session_todo_block=" in src, (
-        "compaction обязана передавать чек-лист в build_dialog_summary_content"
-    )
+    assert "session_todo_block=" in src, "compaction обязана передавать чек-лист в build_dialog_summary_content"

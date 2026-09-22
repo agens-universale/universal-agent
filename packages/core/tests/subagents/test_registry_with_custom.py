@@ -1,4 +1,5 @@
 """Реестр как функция от конфига: встроенные + кастомные из папки."""
+
 import logging
 
 from gc_core.tools.subagents.registry import (

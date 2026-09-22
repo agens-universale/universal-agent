@@ -107,10 +107,7 @@ def is_within_any_root(
     *,
     case_insensitive: bool = False,
 ) -> bool:
-    return any(
-        is_within_root(candidate, root, case_insensitive=case_insensitive)
-        for root in roots
-    )
+    return any(is_within_root(candidate, root, case_insensitive=case_insensitive) for root in roots)
 
 
 def check_write_path_allowed(
@@ -125,10 +122,7 @@ def check_write_path_allowed(
     effective_base_dir = base_dir or launch_root
     target = normalize_path_for_policy(candidate_path, effective_base_dir)
     root = normalize_path_for_policy(launch_root, effective_base_dir)
-    extra_roots = [
-        normalize_path_for_policy(path, effective_base_dir)
-        for path in (extra_write_roots or [])
-    ]
+    extra_roots = [normalize_path_for_policy(path, effective_base_dir) for path in (extra_write_roots or [])]
     allowed_roots = [root, *extra_roots]
     if case_insensitive is None:
         case_insensitive = os.name == "nt"
@@ -190,6 +184,7 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
     """
     from gc_core.security.confirm_port import request_confirm
     from gc_core.security.protected_paths import protected_decision, protection_enabled
+
     _cfg = getattr(context.ctx, "config_dict", None) or {}
     if not protection_enabled(_cfg):
         return None
@@ -207,21 +202,27 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
             reason_code="protected_deny",
         )
         return _blocked_result(
-            func, _err, args, kwargs,
+            func,
+            _err,
+            args,
+            kwargs,
             blocked_result_factory=blocked_result_factory,
         )
     if _decision == "ask":
         # Ожидание человека уходит в поток: в TUI это до 600 с, и
         # на event loop вместе с ним встали бы субагенты и
         # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
-        _ok = (yield OffLoop(functools.partial(
-            request_confirm,
-            title="Защита записи",
-            question=f"Разрешить запись в {candidate_path}?",
-            fields=[("path", candidate_path)],
-            ctx=context.ctx,
-            decision_key=f"write:{candidate_path}",
-        ), on_interrupt=False))
+        _ok = yield OffLoop(
+            functools.partial(
+                request_confirm,
+                title="Защита записи",
+                question=f"Разрешить запись в {candidate_path}?",
+                fields=[("path", candidate_path)],
+                ctx=context.ctx,
+                decision_key=f"write:{candidate_path}",
+            ),
+            on_interrupt=False,
+        )
         if not _ok:
             _err = {
                 "type": "protected_path_denied",
@@ -229,7 +230,10 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
                 "message": "Write to instruction file not confirmed.",
             }
             return _blocked_result(
-                func, _err, args, kwargs,
+                func,
+                _err,
+                args,
+                kwargs,
                 blocked_result_factory=blocked_result_factory,
             )
         # confirmed → fall through
@@ -258,15 +262,18 @@ def _resolve_write_violation(exc, context, candidate_path, operation, func, args
     if wg_mode == "ask":
         # Тот же приём, что и у защищённых путей выше: подтверждение
         # ждётся в потоке, а не на event loop вызывающего.
-        confirmed = (yield OffLoop(functools.partial(
-            _ask_user_confirmation_for_write,
-            tool_name=tool_name,
-            path=candidate_path,
-            operation=operation,
-            error=exc.error,
-            ctx=context.ctx,
-            decision_key=f"write:{candidate_path}",
-        ), on_interrupt=False))
+        confirmed = yield OffLoop(
+            functools.partial(
+                _ask_user_confirmation_for_write,
+                tool_name=tool_name,
+                path=candidate_path,
+                operation=operation,
+                error=exc.error,
+                ctx=context.ctx,
+                decision_key=f"write:{candidate_path}",
+            ),
+            on_interrupt=False,
+        )
         if confirmed:
             audit_policy_decision(
                 context,
@@ -318,7 +325,12 @@ def _write_guard_flow(func, args, kwargs, path_arg, path_extractor, operation, b
         candidate_path = None
     if candidate_path is not None:
         blocked = yield from _protected_write_block(
-            candidate_path, context, func, args, kwargs, blocked_result_factory,
+            candidate_path,
+            context,
+            func,
+            args,
+            kwargs,
+            blocked_result_factory,
         )
         if blocked is not None:
             return blocked
@@ -352,7 +364,14 @@ def _write_guard_flow(func, args, kwargs, path_arg, path_extractor, operation, b
         )
     except WriteGuardViolation as exc:
         allowed, blocked = yield from _resolve_write_violation(
-            exc, context, candidate_path, operation, func, args, kwargs, blocked_result_factory,
+            exc,
+            context,
+            candidate_path,
+            operation,
+            func,
+            args,
+            kwargs,
+            blocked_result_factory,
         )
         if allowed:
             return (yield)
@@ -374,9 +393,17 @@ def enforce_write_guard(
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
         def _flow(*args: Any, **kwargs: Any):
-            return (yield from _write_guard_flow(
-                func, args, kwargs, path_arg, path_extractor, operation, blocked_result_factory,
-            ))
+            return (
+                yield from _write_guard_flow(
+                    func,
+                    args,
+                    kwargs,
+                    path_arg,
+                    path_extractor,
+                    operation,
+                    blocked_result_factory,
+                )
+            )
 
         return dual_wrap(func, _flow)
 
@@ -407,9 +434,7 @@ def audit_policy_decision(
     # Внутрь payload, а не в extra=: событие сериализуется в текст сообщения,
     # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
     # логгера дополнительно ставит trace_id верхним полем записи.
-    trace_id = trace_id_from_config(
-        getattr(getattr(context, "ctx", None), "config_dict", None)
-    )
+    trace_id = trace_id_from_config(getattr(getattr(context, "ctx", None), "config_dict", None))
     if trace_id:
         event["trace_id"] = trace_id
     try:
@@ -492,9 +517,17 @@ def prompt_user_confirmation_choice(
     if not sys.stdin or not sys.stdin.isatty():
         return CONFIRM_DENY_ONCE
     # Payload-first: primary labels (Команда/Код/…) before meta (SPEC §3.5b).
-    _primary = frozenset({
-        "команда", "код", "command", "code", "path", "url", "путь",
-    })
+    _primary = frozenset(
+        {
+            "команда",
+            "код",
+            "command",
+            "code",
+            "path",
+            "url",
+            "путь",
+        }
+    )
 
     def _is_primary(label: object) -> bool:
         return str(label).strip().casefold() in _primary
@@ -649,7 +682,9 @@ def prompt_user_confirmation(
     from gc_core.security.confirm_port import CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER
 
     choice = prompt_user_confirmation_choice(
-        title=title, fields=fields, question=question,
+        title=title,
+        fields=fields,
+        question=question,
     )
     return choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
 
@@ -664,6 +699,7 @@ def _ask_user_confirmation_for_write(
     decision_key: str | None = None,
 ) -> bool:
     from gc_core.security.confirm_port import request_confirm
+
     return request_confirm(
         title="Защита записи",
         question=f"Разрешить запись вне периметра проекта в {path}?",

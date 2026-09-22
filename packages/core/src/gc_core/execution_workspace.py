@@ -109,7 +109,6 @@ def discover_backend_cwd(backend: FsBackend) -> str:
     return "/"
 
 
-
 async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = None) -> None:
     """Узнать рабочий каталог окружения до сборки рабочей области.
 
@@ -159,8 +158,7 @@ async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = No
         # но и растворяться он не должен.
         if reasons:
             logging.getLogger(__name__).warning(
-                "backend_cwd_prime_failed: рабочий каталог окружения не узнан "
-                "(%s; бэкенд: %s)",
+                "backend_cwd_prime_failed: рабочий каталог окружения не узнан (%s; бэкенд: %s)",
                 "; ".join(reasons),
                 type(backend).__name__,
                 extra={"event": "backend_cwd_prime_failed"},
@@ -183,8 +181,7 @@ async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = No
         reasons.append(f"pwd: {type(exc).__name__}")
 
     logging.getLogger(__name__).warning(
-        "backend_cwd_prime_failed: рабочий каталог окружения не узнан "
-        "(%s; бэкенд: %s)",
+        "backend_cwd_prime_failed: рабочий каталог окружения не узнан (%s; бэкенд: %s)",
         "; ".join(reasons),
         type(backend).__name__,
         extra={"event": "backend_cwd_prime_failed"},

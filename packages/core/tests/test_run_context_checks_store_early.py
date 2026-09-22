@@ -5,6 +5,7 @@
 прогона с открытым файлом. `AsyncAgent.create` на исключении закрывает только
 пул httpx — всё остальное доживало до конца процесса.
 """
+
 import ast
 import pathlib
 
@@ -41,13 +42,14 @@ def test_check_precedes_the_build_in_source():
     краснеет на самой перестановке строк.
     """
     tree = ast.parse(pathlib.Path(run_context.__file__).read_text(encoding="utf-8"))
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
 
-    check_at = [n.lineno for n in ast.walk(fn)
-                if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "athread_store"]
-    build_at = [n.lineno for n in ast.walk(fn)
-                if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "abuild_tools_data"]
+    check_at = [
+        n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "athread_store"
+    ]
+    build_at = [
+        n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "abuild_tools_data"
+    ]
 
     assert check_at, "проверка хранилища исчезла из acreate_run_context"
     assert build_at, "проверка устарела: сборка тулов больше не здесь"

@@ -1,4 +1,5 @@
 """force_compact_once: один безусловный проход сжатия (без проверки порога)."""
+
 import importlib
 import types
 
@@ -14,10 +15,15 @@ def _coord(monkeypatch, calls, backend="chat_completions"):
     rsc = importlib.import_module("gc_core.run_summary_coordinator")
     state = types.SimpleNamespace(backend_api_mode=backend)
     coord = rsc.RunSummaryCoordinator(
-        ctx=types.SimpleNamespace(), state=state, thread_session=None,
-        summary_trigger_chars=10_000, is_cli_mode=True,
-        pre_backend_trigger_reason="pre_backend", logger=None,
+        ctx=types.SimpleNamespace(),
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10_000,
+        is_cli_mode=True,
+        pre_backend_trigger_reason="pre_backend",
+        logger=None,
     )
+
     async def _fake_compaction(**kw):
         calls.append(kw)
 

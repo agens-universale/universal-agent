@@ -1,4 +1,5 @@
 """Подсветка unified diff: + зелёный, − красный, заголовки приглушённые."""
+
 from __future__ import annotations
 
 import pytest
@@ -9,14 +10,7 @@ def test_style_unified_diff_colors_plus_minus_and_headers():
     pytest.importorskip("rich")
     from gc_tui.services.diff_render import style_unified_diff
 
-    raw = (
-        "--- a/foo\n"
-        "+++ b/foo\n"
-        "@@ -1,2 +1,2 @@\n"
-        " context\n"
-        "-old\n"
-        "+new\n"
-    )
+    raw = "--- a/foo\n+++ b/foo\n@@ -1,2 +1,2 @@\n context\n-old\n+new\n"
     styled = style_unified_diff(raw)
     assert styled.plain == raw
 

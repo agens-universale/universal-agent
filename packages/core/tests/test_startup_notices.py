@@ -31,7 +31,10 @@ def test_stop_tools_skills_names_known_only_from_registry():
     assert "skills_list" in bare_stop[0].message
 
     ns = collect_startup_notices(
-        cfg, _BUILTIN, None, is_tui=False,
+        cfg,
+        _BUILTIN,
+        None,
+        is_tui=False,
         known_tool_names={"skills_list", "skills_load"},
     )
     stop = [n for n in ns if n.code == "stop_tools_unknown"]
@@ -43,7 +46,10 @@ def test_stop_tools_skills_names_known_only_from_registry():
 def test_stop_tools_registered_mcp_name_is_not_a_typo():
     cfg = {"stop_tools": ["mcp_jira_search", "nope"]}
     ns = collect_startup_notices(
-        cfg, _BUILTIN, None, is_tui=False,
+        cfg,
+        _BUILTIN,
+        None,
+        is_tui=False,
         known_tool_names={"mcp_jira_search", "fs_read_file"},
     )
     stop = [n for n in ns if n.code == "stop_tools_unknown"]
@@ -63,8 +69,7 @@ def test_mcp_failed_from_status():
 
 def test_deprecated_key_info():
     cfg = {}
-    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False,
-                                 deprecated_keys_used=["backend.stream"])
+    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False, deprecated_keys_used=["backend.stream"])
     dep = [n for n in ns if n.code == "deprecated_key"]
     assert len(dep) == 1 and dep[0].level == "info"
     assert "backend.stream" in dep[0].message and "tui.stream" in dep[0].message
@@ -87,17 +92,21 @@ def test_agentsmd_override_cli_noop_when_not_tui():
 
 def test_warnings_before_infos():
     cfg = {"stop_tools": ["bogus"]}
-    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False,
-                                 deprecated_keys_used=["backend.stream"])
+    ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False, deprecated_keys_used=["backend.stream"])
     levels = [n.level for n in ns]
     assert levels == sorted(levels, key=lambda l: 0 if l == "warning" else 1)
 
 
 def test_pricing_no_rates_info_when_enabled():
-    notices = collect_startup_notices({
-        "pricing": {"enabled": True, "input": 0, "output": 0},
-        "model": "m",
-    }, _BUILTIN, None, is_tui=False)
+    notices = collect_startup_notices(
+        {
+            "pricing": {"enabled": True, "input": 0, "output": 0},
+            "model": "m",
+        },
+        _BUILTIN,
+        None,
+        is_tui=False,
+    )
     codes = [n.code for n in notices]
     assert "pricing_no_rates" in codes
     message = next(n.message for n in notices if n.code == "pricing_no_rates")

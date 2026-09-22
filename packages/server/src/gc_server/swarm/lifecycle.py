@@ -45,6 +45,7 @@ _KILL_GRACE_SECONDS = 3.0
 # Шаг 2.3+2.4 (AR-6): psutil — опциональная зависимость для memory/cpu monitoring.
 try:
     import psutil  # type: ignore[import-not-found]
+
     _PSUTIL_AVAILABLE = True
 except ImportError:
     psutil = None  # type: ignore[assignment]
@@ -190,7 +191,8 @@ def _persist_agent_artifacts(
     except OSError as e:
         logger.warning(
             "swarm %s: не удалось сохранить agent_logs из песочницы: %r",
-            swarm_id, e,
+            swarm_id,
+            e,
         )
 
 
@@ -242,13 +244,16 @@ def _finalize_with_resource_violation(
         "task_id": meta.get("task_id"),
     }
     _persist_agent_artifacts(
-        threads_dir, swarm_id,
+        threads_dir,
+        swarm_id,
         str((meta.get("swarm_meta") or {}).get("sandbox_path") or ""),
         swarm_logs_dir=swarm_logs_dir,
     )
     storage.save_swarm_meta(
-        threads_dir, swarm_id,
-        base_meta=base_meta, swarm_meta_patch=patch,
+        threads_dir,
+        swarm_id,
+        base_meta=base_meta,
+        swarm_meta_patch=patch,
     )
     return storage.load_swarm_meta(threads_dir, swarm_id)
 
@@ -285,16 +290,17 @@ def _enforce_resource_limits(
                 _kill_process_tree(pid)
             logger.warning(
                 "swarm %s killed by disk_limit (actual=%.1fMB, limit=%sMB)",
-                swarm_id, actual_mb, disk_limit_mb,
+                swarm_id,
+                actual_mb,
+                disk_limit_mb,
             )
             return _finalize_with_resource_violation(
-                threads_dir, swarm_id, meta,
+                threads_dir,
+                swarm_id,
+                meta,
                 swarm_logs_dir=swarm_logs_dir,
                 error_type="disk_limit",
-                error_message=(
-                    f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds "
-                    f"limit ({disk_limit_mb}MB)"
-                ),
+                error_message=(f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds limit ({disk_limit_mb}MB)"),
             )
 
     # --- Memory limit через psutil (шаг 2.3) ---
@@ -313,14 +319,16 @@ def _enforce_resource_limits(
                 _kill_process_tree(pid)
                 logger.warning(
                     "swarm %s killed by memory_limit (rss=%.1fMB, limit=%sMB)",
-                    swarm_id, rss_mb, mem_limit_mb,
+                    swarm_id,
+                    rss_mb,
+                    mem_limit_mb,
                 )
                 return _finalize_with_resource_violation(
-                    threads_dir, swarm_id, meta,
+                    threads_dir,
+                    swarm_id,
+                    meta,
                     error_type="memory_limit",
-                    error_message=(
-                        f"RSS ({rss_mb:.1f}MB) exceeds limit ({mem_limit_mb}MB)"
-                    ),
+                    error_message=(f"RSS ({rss_mb:.1f}MB) exceeds limit ({mem_limit_mb}MB)"),
                 )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
@@ -342,14 +350,16 @@ def _enforce_resource_limits(
                 _kill_process_tree(pid)
                 logger.warning(
                     "swarm %s killed by cpu_limit (cpu=%.0f%%, limit=%s%%)",
-                    swarm_id, cpu_pct, cpu_limit,
+                    swarm_id,
+                    cpu_pct,
+                    cpu_limit,
                 )
                 return _finalize_with_resource_violation(
-                    threads_dir, swarm_id, meta,
+                    threads_dir,
+                    swarm_id,
+                    meta,
                     error_type="cpu_limit",
-                    error_message=(
-                        f"CPU ({cpu_pct:.0f}%) exceeds limit ({cpu_limit}%)"
-                    ),
+                    error_message=(f"CPU ({cpu_pct:.0f}%) exceeds limit ({cpu_limit}%)"),
                 )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
@@ -411,10 +421,7 @@ def check_and_finalize(
                 "status": "timeout",
                 "finished_at": storage._utc_now_iso(),
                 "error_type": "timeout",
-                "error_message": (
-                    "Killed by Python-side timeout after deadline "
-                    f"{swarm_meta.get('deadline_at')}"
-                ),
+                "error_message": (f"Killed by Python-side timeout after deadline {swarm_meta.get('deadline_at')}"),
                 "sandbox_status": "completed",
             }
             base_meta = {
@@ -422,7 +429,8 @@ def check_and_finalize(
                 "task_id": meta.get("task_id"),
             }
             _persist_agent_artifacts(
-                threads_dir, swarm_id,
+                threads_dir,
+                swarm_id,
                 str(swarm_meta.get("sandbox_path") or ""),
                 swarm_logs_dir=swarm_logs_dir,
             )
@@ -438,7 +446,11 @@ def check_and_finalize(
     # 2.5. Resource limits (только для heavy_checks=True, шаги 2.2-2.4).
     if heavy_checks:
         violation = _enforce_resource_limits(
-            threads_dir, sandbox_root_dir, swarm_id, meta, swarm_meta,
+            threads_dir,
+            sandbox_root_dir,
+            swarm_id,
+            meta,
+            swarm_meta,
             swarm_logs_dir=swarm_logs_dir,
         )
         if violation is not None:
@@ -462,7 +474,8 @@ def check_and_finalize(
             "task_id": meta.get("task_id"),
         }
         _persist_agent_artifacts(
-            threads_dir, swarm_id,
+            threads_dir,
+            swarm_id,
             str(swarm_meta.get("sandbox_path") or ""),
             swarm_logs_dir=swarm_logs_dir,
         )
@@ -493,7 +506,8 @@ def check_and_finalize(
         "task_id": meta.get("task_id"),
     }
     _persist_agent_artifacts(
-        threads_dir, swarm_id,
+        threads_dir,
+        swarm_id,
         str(swarm_meta.get("sandbox_path") or ""),
         swarm_logs_dir=swarm_logs_dir,
     )

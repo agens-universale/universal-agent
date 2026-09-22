@@ -32,8 +32,8 @@ def test_injected_reason_is_marked_optional():
     apply_injected_fields_to_spec(spec, INJECT)
     params = spec["parameters"]
 
-    assert params["required"][0] == "reason"          # API schema still demands it
-    assert "reason" in resolve_optional_property_keys(params)   # local validation does not
+    assert params["required"][0] == "reason"  # API schema still demands it
+    assert "reason" in resolve_optional_property_keys(params)  # local validation does not
 
 
 def test_call_without_reason_validates():

@@ -1,4 +1,5 @@
 """Тесты process_supervisor: PID-файлы, идемпотентный старт, stop."""
+
 from __future__ import annotations
 
 import os

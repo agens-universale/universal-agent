@@ -4,13 +4,13 @@
 [skill]-маркер как для skill+prompt сообщений, так и для mid-run delivery
 (display_content="", ev=None). Тест намеренно пишется ДО реализации (TDD).
 """
+
 import pytest
 
 
 def _rec(payload, ts="2026-06-01T12:00:00Z"):
     """Envelope-запись вокруг payload."""
-    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1,
-            "ts": ts, "payload": payload}
+    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1, "ts": ts, "payload": payload}
 
 
 @pytest.mark.asyncio
@@ -24,13 +24,17 @@ async def test_skill_plus_prompt_shows_marker_and_reply():
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    records = [_rec({
-        "role": "user",
-        "content": "<skill>\nдавай",
-        "display_content": "давай",
-        "skill_loaded": "qa-x",
-        "id": "m1",
-    })]
+    records = [
+        _rec(
+            {
+                "role": "user",
+                "content": "<skill>\nдавай",
+                "display_content": "давай",
+                "skill_loaded": "qa-x",
+                "id": "m1",
+            }
+        )
+    ]
 
     class _A(App):
         def compose(self):
@@ -61,13 +65,17 @@ async def test_mid_run_delivery_shows_only_marker():
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    records = [_rec({
-        "role": "user",
-        "content": "<skill>",
-        "display_content": "",
-        "skill_loaded": "qa-x",
-        "id": "m2",
-    })]
+    records = [
+        _rec(
+            {
+                "role": "user",
+                "content": "<skill>",
+                "display_content": "",
+                "skill_loaded": "qa-x",
+                "id": "m2",
+            }
+        )
+    ]
 
     class _A(App):
         def compose(self):
@@ -96,11 +104,15 @@ async def test_normal_user_record_no_marker():
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    records = [_rec({
-        "role": "user",
-        "content": "привет",
-        "id": "m3",
-    })]
+    records = [
+        _rec(
+            {
+                "role": "user",
+                "content": "привет",
+                "id": "m3",
+            }
+        )
+    ]
 
     class _A(App):
         def compose(self):

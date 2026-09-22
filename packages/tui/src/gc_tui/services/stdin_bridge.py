@@ -13,6 +13,7 @@ mouse/key-escapes) → ask_human виснет.
 хранится в threading.local() — у каждого потока свой. Глобальный sys.stdin при
 этом неизменен, гонки между потоками нет.
 """
+
 from __future__ import annotations
 
 import io

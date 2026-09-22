@@ -1,4 +1,5 @@
 """Subagent token/tool-call limit: ok=false, finish_reason=token_limit|tool_call_limit."""
+
 from __future__ import annotations
 
 import json
@@ -18,16 +19,16 @@ async def test_run_limit_returns_ok_false_not_completed(monkeypatch, finish_reas
         child_state.terminal_outcome = finish_reason
         child_state.steps = 5
         # Child run_agent returns a limit envelope (build_limit_envelope).
-        return json.dumps({
-            "ok": False,
-            "status": finish_reason,
-            "message": f"Agent stopped: {finish_reason}.",
-            "raw_trace_summary": "",
-        })
+        return json.dumps(
+            {
+                "ok": False,
+                "status": finish_reason,
+                "message": f"Agent stopped: {finish_reason}.",
+                "raw_trace_summary": "",
+            }
+        )
 
-    out = await runner._arun_internal(
-        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
-    )
+    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
     # Runner pass-through: child envelope returned as-is (spec §6.2).
     payload = json.loads(out)
     assert payload["ok"] is False

@@ -17,31 +17,46 @@ _SPEC = {
     }
 }
 
+
 def test_double_encoded_object_is_coerced():
     # attributes пришёл JSON-строкой второго уровня
     args = '{"summary": "TC1", "attributes": "{\\"test_level\\": \\"UI\\"}"}'
     out = parse_and_validate_tool_arguments(
-        tool_name="t", arguments=args, tool_spec=_SPEC,
+        tool_name="t",
+        arguments=args,
+        tool_spec=_SPEC,
         allow_empty_for_empty_schema=False,
     )
     assert out["attributes"] == {"test_level": "UI"}  # развёрнут в объект
 
+
 def test_string_valid_as_is_not_touched():
-    spec = {"parameters": {"type": "object",
+    spec = {
+        "parameters": {
+            "type": "object",
             "properties": {"x": {"anyOf": [{"type": "string"}, {"type": "object"}]}},
-            "required": [], "additionalProperties": False}}
+            "required": [],
+            "additionalProperties": False,
+        }
+    }
     out = parse_and_validate_tool_arguments(
-        tool_name="t", arguments='{"x": "123"}', tool_spec=spec,
+        tool_name="t",
+        arguments='{"x": "123"}',
+        tool_spec=spec,
         allow_empty_for_empty_schema=False,
     )
     assert out["x"] == "123"  # строка валидна по строковой ветке → НЕ коэрсим в 123
 
+
 def test_unrecoverable_still_rejected():
     import pytest
+
     # строка, чей json.loads даёт скаляр (не dict/list) → коэрция не применяется
     args = '{"summary": "TC1", "attributes": "42"}'
     with pytest.raises(WrongFunctionArgumentsException):
         parse_and_validate_tool_arguments(
-            tool_name="t", arguments=args, tool_spec=_SPEC,
+            tool_name="t",
+            arguments=args,
+            tool_spec=_SPEC,
             allow_empty_for_empty_schema=False,
         )

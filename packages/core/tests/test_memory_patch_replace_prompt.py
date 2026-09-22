@@ -68,13 +68,15 @@ def test_request_patch_replace_injects_subagent_guidance_in_system_only(monkeypa
     )
     ctx = SimpleNamespace(config_dict={}, logger=None)
     child = SimpleNamespace(parent_state_id="parent-1")
-    run_coro(arequest_patch_replace(
-        ctx=ctx,
-        state=child,
-        history_text="hist",
-        summary_text="<summary/>",
-        persistent_state_block="<persistent_state/>",
-    ))
+    run_coro(
+        arequest_patch_replace(
+            ctx=ctx,
+            state=child,
+            history_text="hist",
+            summary_text="<summary/>",
+            persistent_state_block="<persistent_state/>",
+        )
+    )
     system = captured["messages"][0]["content"]
     user = captured["messages"][1]["content"]
     assert "Subagent run (shared thread memory)" in system
@@ -82,12 +84,14 @@ def test_request_patch_replace_injects_subagent_guidance_in_system_only(monkeypa
     assert user.startswith("<dialog_history>")
 
     main = SimpleNamespace(parent_state_id=None)
-    run_coro(arequest_patch_replace(
-        ctx=ctx,
-        state=main,
-        history_text="hist",
-        summary_text="<summary/>",
-        persistent_state_block="<persistent_state/>",
-    ))
+    run_coro(
+        arequest_patch_replace(
+            ctx=ctx,
+            state=main,
+            history_text="hist",
+            summary_text="<summary/>",
+            persistent_state_block="<persistent_state/>",
+        )
+    )
     system_main = captured["messages"][0]["content"]
     assert "Subagent run (shared thread memory)" not in system_main

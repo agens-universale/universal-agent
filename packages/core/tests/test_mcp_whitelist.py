@@ -108,6 +108,7 @@ async def test_discover_one_applies_whitelist(monkeypatch):
     Берём корутинный путь: SDK-транспорты после шага A1 ходят нативно, а
     синхронный вход для них теперь громко отказывает.
     """
+
     # Дискавери ходит через КЛИЕНТА, поэтому подменяем его: фильтр стоит
     # сразу после `alist_tools`. Форм дискавери больше не три, а одна, и
     # отдельного шва «забор тулов у SDK-ветки» в ней нет.
@@ -116,7 +117,8 @@ async def test_discover_one_applies_whitelist(monkeypatch):
             return list(_RAW)
 
     monkeypatch.setitem(
-        reg._adiscover_one.__globals__, "resolve_mcp_client",
+        reg._adiscover_one.__globals__,
+        "resolve_mcp_client",
         lambda *a, **kw: _Client(),
     )
     server_cfg = {
@@ -160,9 +162,7 @@ def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     from gc_testkit import run_coro
 
     calls = []
-    monkeypatch.setattr(
-        mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
-    )
+    monkeypatch.setattr(mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never")
     out = run_coro(tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={}))
     assert "mcp_srv_delete" in out
     assert calls == []

@@ -50,6 +50,8 @@ def test_turn_finish_success_with_comment():
 
 def test_turn_finish_normalize():
     tool = CallableTool(SubmitSolution())
+
+
 def test_turn_finish_success_does_not_duplicate_normalized_arguments():
     tool = CallableTool(SubmitSolution())
     res = json.loads(
@@ -185,14 +187,10 @@ def test_turn_finish_schema_declares_task():
 def test_turn_finish_task_is_optional_passthrough():
     """task — подсказка модели: отсутствие/пустота не отклоняют ход."""
     tool = CallableTool(SubmitSolution())
-    out = json.loads(
-        tool(solution_type="full_solution", task_report="Done", handoff='{"x":1}')
-    )
+    out = json.loads(tool(solution_type="full_solution", task_report="Done", handoff='{"x":1}'))
     assert out["ok"] is True
     assert "task" not in out
-    out = json.loads(
-        tool(solution_type="full_solution", task="  ", task_report="Done", handoff='{"x":1}')
-    )
+    out = json.loads(tool(solution_type="full_solution", task="  ", task_report="Done", handoff='{"x":1}'))
     assert out["ok"] is True
     assert "task" not in out
 

@@ -1,4 +1,5 @@
 """Тесты автозапуска MCP-daemon'ов по конфигу агента."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -212,9 +213,7 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(tmp_path: Path) -> N
     with patch("recommended_mcp.autostart.run_entry", _fake_run_entry):
         ensure_daemons_for_agent(config, manifest_path=manifest)
 
-    assert seen == ["broken", "healthy"], (
-        f"после провала первого рецепта очередь до соседа не дошла: {seen}"
-    )
+    assert seen == ["broken", "healthy"], f"после провала первого рецепта очередь до соседа не дошла: {seen}"
 
 
 def test_bridge_never_prevents_the_frontend_from_starting(monkeypatch, capsys) -> None:
@@ -235,9 +234,7 @@ def test_bridge_never_prevents_the_frontend_from_starting(monkeypatch, capsys) -
         raise RuntimeError("манифест не читается")
 
     monkeypatch.setattr(daemon_autostart, "_supervisor", None, raising=False)
-    monkeypatch.setattr(
-        "recommended_mcp.autostart.ensure_daemons_for_agent", _boom
-    )
+    monkeypatch.setattr("recommended_mcp.autostart.ensure_daemons_for_agent", _boom)
 
     daemon_autostart.ensure_mcp_daemons({})  # не должно бросить
 
@@ -307,11 +304,7 @@ def _raise_supervisor_error(entry, root, supervisor):
     raise SupervisorError("mcp 'science': failed to start: no such file")
 
 
-_SCIENCE_CONFIG = {
-    "mcp-servers": {
-        "science": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"}
-    }
-}
+_SCIENCE_CONFIG = {"mcp-servers": {"science": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"}}}
 
 
 def test_disable_hint_comes_from_the_frontend_not_from_this_module(tmp_path, capsys):
@@ -328,7 +321,8 @@ def test_disable_hint_comes_from_the_frontend_not_from_this_module(tmp_path, cap
 
     with patch("recommended_mcp.autostart.run_entry", _raise_supervisor_error):
         ensure_daemons_for_agent(
-            _SCIENCE_CONFIG, manifest_path=manifest,
+            _SCIENCE_CONFIG,
+            manifest_path=manifest,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
 
@@ -355,14 +349,11 @@ def test_autostart_warning_reaches_the_notices_channel(tmp_path, monkeypatch):
     manifest = _fail_one_recipe(tmp_path)
 
     with patch("recommended_mcp.autostart.run_entry", _raise_supervisor_error):
-        ensure_daemons_for_agent(
-            _SCIENCE_CONFIG, manifest_path=manifest, disable_hint="проба"
-        )
+        ensure_daemons_for_agent(_SCIENCE_CONFIG, manifest_path=manifest, disable_hint="проба")
 
     codes = [n.code for n in runtime_notices._notices]
     assert "mcp_autostart_recipe" in codes, codes
-    notice = next(n for n in runtime_notices._notices
-                  if n.code == "mcp_autostart_recipe")
+    notice = next(n for n in runtime_notices._notices if n.code == "mcp_autostart_recipe")
     assert notice.level == "warning"
     assert "gc-mcp install science" in notice.message
     # Имя рецепта помечено для подсветки — иначе карточка читается как сплошной
@@ -391,16 +382,17 @@ def test_no_frontend_flag_is_hardcoded_in_the_shared_module():
 
         docstrings = set()
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
-                                 ast.ClassDef)):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 doc = node.body[0] if node.body else None
-                if (isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant)
-                        and isinstance(doc.value.value, str)):
+                if (
+                    isinstance(doc, ast.Expr)
+                    and isinstance(doc.value, ast.Constant)
+                    and isinstance(doc.value.value, str)
+                ):
                     docstrings.add(id(doc.value))
 
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
-                    and id(node) not in docstrings):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
                 assert "--no-auto-mcp" not in node.value, (
                     f"{rel}:{node.lineno}: имя флага gc-ua зашито в общий модуль "
                     "— у gc-cli его нет, подсказка увела бы половину пользователей"
@@ -429,10 +421,10 @@ def test_both_frontends_pass_their_own_disable_hint(rel):
 
     tree = ast.parse((REPO / rel).read_text(encoding="utf-8"), rel)
     calls = [
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and getattr(node.func, "id", getattr(node.func, "attr", None))
-        == "ensure_mcp_daemons"
+        and getattr(node.func, "id", getattr(node.func, "attr", None)) == "ensure_mcp_daemons"
     ]
     assert calls, f"{rel}: вызов ensure_mcp_daemons не найден — тест устарел"
     for call in calls:

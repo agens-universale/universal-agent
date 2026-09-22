@@ -1,6 +1,7 @@
 """Пресеты адресов STT-сервисов для поля «URL» голосового ввода (спека
 2026-08-05-voice-endpoint-presets §2). Зеркало endpoint_presets: та же модель
 записи, тот же контракт чтения — справочник данных без TUI-логики."""
+
 from __future__ import annotations
 
 from gc_core.config_modules.endpoint_presets import EndpointPreset

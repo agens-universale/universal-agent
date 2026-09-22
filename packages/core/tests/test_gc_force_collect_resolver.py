@@ -10,24 +10,33 @@ from gc_core.config_modules.gc import gc_force_collect_enabled
 
 class TestExplicitFlagOverrides:
     def test_explicit_true_enables_even_for_server(self):
-        assert gc_force_collect_enabled(
-            {"gc": {"force_collect": True}},
-            is_tui=False,
-            is_cli_mode=False,
-        ) is True
+        assert (
+            gc_force_collect_enabled(
+                {"gc": {"force_collect": True}},
+                is_tui=False,
+                is_cli_mode=False,
+            )
+            is True
+        )
 
     def test_explicit_false_disables_even_for_tui(self):
-        assert gc_force_collect_enabled(
-            {"gc": {"force_collect": False}},
-            is_tui=True,
-            is_cli_mode=True,
-        ) is False
+        assert (
+            gc_force_collect_enabled(
+                {"gc": {"force_collect": False}},
+                is_tui=True,
+                is_cli_mode=True,
+            )
+            is False
+        )
 
     def test_explicit_zero_is_falsy(self):
-        assert gc_force_collect_enabled(
-            {"gc": {"force_collect": 0}},
-            is_tui=True,
-        ) is False
+        assert (
+            gc_force_collect_enabled(
+                {"gc": {"force_collect": 0}},
+                is_tui=True,
+            )
+            is False
+        )
 
 
 class TestDefaultByMode:
@@ -53,20 +62,29 @@ class TestEdgeCases:
         assert gc_force_collect_enabled({}, is_tui=True) is True
 
     def test_gc_key_not_dict(self):
-        assert gc_force_collect_enabled(
-            {"gc": "unexpected_string"},
-            is_tui=True,
-        ) is True
+        assert (
+            gc_force_collect_enabled(
+                {"gc": "unexpected_string"},
+                is_tui=True,
+            )
+            is True
+        )
 
     def test_gc_key_without_force_collect(self):
-        assert gc_force_collect_enabled(
-            {"gc": {"other_key": 123}},
-            is_tui=False,
-            is_cli_mode=False,
-        ) is False
+        assert (
+            gc_force_collect_enabled(
+                {"gc": {"other_key": 123}},
+                is_tui=False,
+                is_cli_mode=False,
+            )
+            is False
+        )
 
     def test_force_collect_none_falsy(self):
-        assert gc_force_collect_enabled(
-            {"gc": {"force_collect": None}},
-            is_tui=True,
-        ) is False
+        assert (
+            gc_force_collect_enabled(
+                {"gc": {"force_collect": None}},
+                is_tui=True,
+            )
+            is False
+        )

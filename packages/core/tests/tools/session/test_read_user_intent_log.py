@@ -77,9 +77,7 @@ def test_info_reports_closed_log_totals():
 def test_read_pagination_matches_read_page():
     records = [_record("alpha"), _record("beta", turn=2), _record("gamma", turn=3)]
     state = _make_state(log=records)
-    page = read_page(
-        records, offset=1, limit=1, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-    )
+    page = read_page(records, offset=1, limit=1, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT)
 
     res = _call(state, action="read", offset=1, limit=1)
 

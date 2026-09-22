@@ -73,9 +73,7 @@ def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
-            command="sudo apt update"
-        )
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(command="sudo apt update")
     )
 
     assert result["ok"] is False

@@ -55,10 +55,17 @@ def _stdout(files=20, lines_per_file=10):
 
 async def _run(backend, *, report_path=None, allow_path=None, **kw):
     return await arun_native_grep(
-        backend, "/work", PLAN,
-        exclude_dir_names=[], exclude_nested_dot_dirs=False, file_pattern=None,
-        max_matches=None, report_path=report_path or (lambda p: p),
-        is_dir_target=True, allow_path=allow_path, **kw,
+        backend,
+        "/work",
+        PLAN,
+        exclude_dir_names=[],
+        exclude_nested_dot_dirs=False,
+        file_pattern=None,
+        max_matches=None,
+        report_path=report_path or (lambda p: p),
+        is_dir_target=True,
+        allow_path=allow_path,
+        **kw,
     )
 
 

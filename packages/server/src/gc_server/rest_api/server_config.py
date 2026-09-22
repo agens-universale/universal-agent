@@ -58,6 +58,7 @@ def load_server_config() -> Dict[str, Any]:
     `swarm.config._user_config_dir`).
     """
     from gc_core.config_modules import env_vars
+
     if env_vars.env.server_config_path is not None:
         cfg_path = str(env_vars.env.server_config_path)
         searched = [cfg_path]
@@ -174,9 +175,10 @@ def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
         return bundled
 
     logger.warning(
-        "agent.server_agentmd_path=%r не найден (искал %s и %s) — агент будет "
-        "работать БЕЗ системных инструкций",
-        raw, local, bundled,
+        "agent.server_agentmd_path=%r не найден (искал %s и %s) — агент будет работать БЕЗ системных инструкций",
+        raw,
+        local,
+        bundled,
     )
     return local
 
@@ -232,4 +234,3 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 __all__ = ["PROJECT_ROOT", "build_agent_config_for_server", "load_server_config"]
-

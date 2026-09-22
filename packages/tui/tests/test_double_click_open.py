@@ -1,5 +1,6 @@
 """Ctrl+клик по строке tool-вызова открывает полный payload в Viewer (двойной
 клик больше не открывает — см. tests/tui/test_trace_click_model.py)."""
+
 import json
 from pathlib import Path
 
@@ -8,18 +9,28 @@ import pytest
 
 def _write(tmp_path, tid):
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 2}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 2}
+        ),
+        encoding="utf-8",
+    )
     lines = [
-        {"type": "message", "seq": 1, "ts_utc": "2026-05-22T12:00:00+00:00",
-         "payload": {"id": "u1", "role": "user", "content": "прочитай файл"}},
-        {"type": "message", "seq": 2, "ts_utc": "2026-05-22T12:00:01+00:00",
-         "payload": {"type": "function_call", "name": "read_file",
-                     "arguments": {"path": "x.py"}, "call_id": "c1"}},
+        {
+            "type": "message",
+            "seq": 1,
+            "ts_utc": "2026-05-22T12:00:00+00:00",
+            "payload": {"id": "u1", "role": "user", "content": "прочитай файл"},
+        },
+        {
+            "type": "message",
+            "seq": 2,
+            "ts_utc": "2026-05-22T12:00:01+00:00",
+            "payload": {"type": "function_call", "name": "read_file", "arguments": {"path": "x.py"}, "call_id": "c1"},
+        },
     ]
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
 
 
 @pytest.mark.asyncio
@@ -40,8 +51,16 @@ async def test_ctrl_click_tool_row_opens_detail_screen(tmp_path):
 
         row = pilot.app.screen.query_one(ToolCallRow)
         click = events.Click(
-            widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=True, chain=1,
+            widget=row,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=True,
+            chain=1,
         )
         row.on_click(click)
         await pilot.pause(0.2)
@@ -89,21 +108,34 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
     # Сценарий: user → tool_call → agent (с кодом). Цель — кликнуть по prose
     # агентской реплики и проверить что Viewer открыл её payload (не tool_call).
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 3}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 3}
+        ),
+        encoding="utf-8",
+    )
     lines = [
-        {"type": "message", "seq": 1, "ts_utc": "2026-05-26T12:00:00+00:00",
-         "payload": {"id": "u1", "role": "user", "content": "запрос"}},
-        {"type": "message", "seq": 2, "ts_utc": "2026-05-26T12:00:01+00:00",
-         "payload": {"type": "function_call", "name": "read_file",
-                     "arguments": {"path": "x.py"}, "call_id": "c1"}},
-        {"type": "message", "seq": 3, "ts_utc": "2026-05-26T12:00:02+00:00",
-         "payload": {"id": "a1", "role": "assistant",
-                     "content": "Готово:\n```python\nx = 1\n```\nКонец."}},
+        {
+            "type": "message",
+            "seq": 1,
+            "ts_utc": "2026-05-26T12:00:00+00:00",
+            "payload": {"id": "u1", "role": "user", "content": "запрос"},
+        },
+        {
+            "type": "message",
+            "seq": 2,
+            "ts_utc": "2026-05-26T12:00:01+00:00",
+            "payload": {"type": "function_call", "name": "read_file", "arguments": {"path": "x.py"}, "call_id": "c1"},
+        },
+        {
+            "type": "message",
+            "seq": 3,
+            "ts_utc": "2026-05-26T12:00:02+00:00",
+            "payload": {"id": "a1", "role": "assistant", "content": "Готово:\n```python\nx = 1\n```\nКонец."},
+        },
     ]
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -112,10 +144,7 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
 
         scr = pilot.app.screen
         # Prose-блоки — TraceRow с event_no; code-block panel — BlockPanel.
-        prose_rows = [
-            r for r in scr.query(TraceRow)
-            if r.has_class("line-agent")
-        ]
+        prose_rows = [r for r in scr.query(TraceRow) if r.has_class("line-agent")]
         code_panels = list(scr.query(BlockPanel))
         # Минимум: 2 prose-блока ("Готово:" и "Конец.") + 1 code-panel.
         assert len(prose_rows) >= 2
@@ -129,8 +158,16 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
         # содержащим именно этот event_no и «agent».
         target = prose_rows[0]
         click = events.Click(
-            widget=target, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=True, chain=1,
+            widget=target,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=True,
+            chain=1,
         )
         target.on_click(click)
         await pilot.pause(0.2)
@@ -154,21 +191,34 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
 
     tid = "agent_click_panel"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "status": "stopped",
-                    "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 3}),
-        encoding="utf-8")
+        json.dumps(
+            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 3}
+        ),
+        encoding="utf-8",
+    )
     lines = [
-        {"type": "message", "seq": 1, "ts_utc": "2026-05-26T12:00:00+00:00",
-         "payload": {"id": "u1", "role": "user", "content": "запрос"}},
-        {"type": "message", "seq": 2, "ts_utc": "2026-05-26T12:00:01+00:00",
-         "payload": {"type": "function_call", "name": "read_file",
-                     "arguments": {"path": "x.py"}, "call_id": "c1"}},
-        {"type": "message", "seq": 3, "ts_utc": "2026-05-26T12:00:02+00:00",
-         "payload": {"id": "a1", "role": "assistant",
-                     "content": "Готово:\n```python\nx = 1\n```\nКонец."}},
+        {
+            "type": "message",
+            "seq": 1,
+            "ts_utc": "2026-05-26T12:00:00+00:00",
+            "payload": {"id": "u1", "role": "user", "content": "запрос"},
+        },
+        {
+            "type": "message",
+            "seq": 2,
+            "ts_utc": "2026-05-26T12:00:01+00:00",
+            "payload": {"type": "function_call", "name": "read_file", "arguments": {"path": "x.py"}, "call_id": "c1"},
+        },
+        {
+            "type": "message",
+            "seq": 3,
+            "ts_utc": "2026-05-26T12:00:02+00:00",
+            "payload": {"id": "a1", "role": "assistant", "content": "Готово:\n```python\nx = 1\n```\nКонец."},
+        },
     ]
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -182,8 +232,16 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
         agent_no = target._event_no
 
         click = events.Click(
-            widget=target, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=True, chain=1,
+            widget=target,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=True,
+            chain=1,
         )
         target.on_click(click)
         await pilot.pause(0.2)
@@ -213,8 +271,16 @@ async def test_single_click_does_not_open_viewer(tmp_path):
 
         row = pilot.app.screen.query_one(ToolCallRow)
         click = events.Click(
-            widget=row, x=0, y=0, delta_x=0, delta_y=0, button=1,
-            shift=False, meta=False, ctrl=False, chain=1,
+            widget=row,
+            x=0,
+            y=0,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=False,
+            chain=1,
         )
         row.on_click(click)
         await pilot.pause(0.2)

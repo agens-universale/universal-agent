@@ -15,6 +15,7 @@ from gc_core.usage.account import UsageAccount
 @dataclass
 class SharedStateData:
     """Данные, разделяемые между оркестратором и его субагентами."""
+
     # In-process + persist key ``working_memory`` (goal/constraints/state/knowledge).
     # Agent tool API: ``session_memory``; summary wire: ``<session_memory>`` inside
     # ``<persistent_state>``. Intentionally not renamed in JSON/yaml (thread compat).
@@ -78,9 +79,7 @@ class State:
         if limit_project_metadata:
             # В серверном режиме не передаём чувствительные данные о файловой системе.
             # Оставляем только дату, остальные поля будут добавлены в set_call_metadata.
-            self.initial_project_data = {
-                "currentDate": self.initial_project_data.get("currentDate", "")
-            }
+            self.initial_project_data = {"currentDate": self.initial_project_data.get("currentDate", "")}
         self.tools = tools_spec
         self.tools_descr = tools_descr
         self.skills_list = skills_list
@@ -120,7 +119,7 @@ class State:
         self.current_user_intent: list[IntentRecord] = []
         self.user_turn_seq: int = 0
         self.finish_gate_rejection_count: int = 0
-        self.turn_tool_calls: int = 0   # вызовов инструментов за текущий ход (smart-гейт, спека §3)
+        self.turn_tool_calls: int = 0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         # Уровень моделей, зафиксированный на текущий ход (`turn_boundary.begin_turn`).
         # None — ход ещё не начинали; транспорт тогда резолвит живой уровень. Объявлено
         # здесь, а не заводится на лету: читатели берут поле через getattr, и без
@@ -161,8 +160,7 @@ class State:
         self.subagent_todo: List[Dict[str, str]] = []
 
     @classmethod
-    async def acreate(cls, *, workspace_config=None, workspace=None,
-                      os_backend=None, **kwargs) -> "State":
+    async def acreate(cls, *, workspace_config=None, workspace=None, os_backend=None, **kwargs) -> "State":
         """Собрать данные о проекте и построить состояние.
 
         Единственный вход для прода: файловый ввод-вывод происходит ЗДЕСЬ, до
@@ -172,9 +170,7 @@ class State:
         """
         from gc_core.utils.project_data import get_project_data
 
-        data = await get_project_data(
-            workspace_config, workspace=workspace, backend=os_backend
-        )
+        data = await get_project_data(workspace_config, workspace=workspace, backend=os_backend)
         return cls(
             workspace_config=workspace_config,
             workspace=workspace,
@@ -213,9 +209,7 @@ class State:
             config_dict=getattr(self, "workspace_config", None),
         )
         if self.skills_list:
-            metadata["promptVariables"]["available_skills"] = render_skills_catalog(
-                self.skills_list
-            )
+            metadata["promptVariables"]["available_skills"] = render_skills_catalog(self.skills_list)
         agent_md_path = getattr(self, "agent_md_path", None)
         loaded = build_instructions(
             agent_md_path=agent_md_path,
@@ -241,17 +235,15 @@ class State:
         return metadata
 
     def set_resp_headers_metadata(self, headers):
-        x_target = headers.get('x-target')
+        x_target = headers.get("x-target")
         if x_target and self.x_target is None:
             self.x_target = x_target
 
     def add_message(self, message):
         self.messages.append(message)
 
-
     def set_previous_response_id(self, previous_response_id):
-        self.previous_response_id =previous_response_id
-
+        self.previous_response_id = previous_response_id
 
     def init_user_intent_log(self, entries: Any) -> None:
         """Initialize closed user turns from persisted thread meta."""
@@ -299,4 +291,3 @@ class State:
             self.user_turn_seq,
         )
         self.turn_tool_calls = 0
-

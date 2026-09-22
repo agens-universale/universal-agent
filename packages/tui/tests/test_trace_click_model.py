@@ -3,6 +3,7 @@
 Мышь и клавиатура симметричны: {клик ↔ Tab} выделение, {Ctrl+клик ↔ Enter} открытие.
 Двойной клик события больше НЕ открывает (заменён Ctrl+кликом).
 """
+
 import pytest
 
 pytest.importorskip("textual")
@@ -18,8 +19,16 @@ from textual.app import App, ComposeResult
 def _click(widget, *, ctrl=False, chain=1):
     """Синтетический Click на виджет (координаты внутри виджета)."""
     return events.Click(
-        widget=widget, x=1, y=0, delta_x=0, delta_y=0,
-        button=1, shift=False, meta=False, ctrl=ctrl, chain=chain,
+        widget=widget,
+        x=1,
+        y=0,
+        delta_x=0,
+        delta_y=0,
+        button=1,
+        shift=False,
+        meta=False,
+        ctrl=ctrl,
+        chain=chain,
     )
 
 
@@ -29,11 +38,13 @@ def test_focus_on_click_not_disabled():
     Ctrl+клике до открытия экрана события). Явный focus() в on_click — лишь
     идемпотентная страховка, а не носитель поведения."""
     from gc_tui.widgets.block_panel import BlockPanel
+
     for cls in (TraceRow, ToolCallRow, UserReplyContainer, BlockPanel):
         assert cls.FOCUS_ON_CLICK is True, cls.__name__
 
 
 # ---- TraceRow ----
+
 
 @pytest.mark.asyncio
 async def test_plain_click_focuses_row_and_does_not_open():
@@ -121,9 +132,11 @@ async def test_ctrl_click_on_non_focusable_row_opens_without_focus():
 
         def compose(self) -> ComposeResult:
             yield TraceRow(
-                prefix="  ", content="continuation",
+                prefix="  ",
+                content="continuation",
                 kind_class="line-agent line-agent-cont",
-                event_no=7, focusable=False,
+                event_no=7,
+                focusable=False,
             )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
@@ -158,12 +171,15 @@ async def test_double_click_no_longer_opens():
 @pytest.mark.asyncio
 async def test_click_on_non_focusable_row_does_not_steal_focus():
     """Строка с focusable=False: клик не выделяет её."""
+
     class _App(App):
         def compose(self) -> ComposeResult:
             yield TraceRow(
-                prefix="  ", content="continuation prose",
+                prefix="  ",
+                content="continuation prose",
                 kind_class="line-agent line-agent-cont",
-                event_no=1, focusable=False,
+                event_no=1,
+                focusable=False,
             )
 
     async with _App().run_test() as pilot:
@@ -175,6 +191,7 @@ async def test_click_on_non_focusable_row_does_not_steal_focus():
 
 # ---- ToolCallRow ----
 
+
 @pytest.mark.asyncio
 async def test_tool_call_row_plain_click_focuses_and_does_not_open():
     received: list[str] = []
@@ -183,8 +200,7 @@ async def test_tool_call_row_plain_click_focuses_and_does_not_open():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file",
-                               args_summary="", event_no=1)
+            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
 
         def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
             received.append(message.call_id)
@@ -204,8 +220,7 @@ async def test_tool_call_row_ctrl_click_opens_detail():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file",
-                               args_summary="", event_no=1)
+            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
 
         def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
             received.append(message.call_id)
@@ -230,8 +245,7 @@ async def test_tool_call_row_ctrl_click_also_focuses():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file",
-                               args_summary="", event_no=1)
+            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
 
         def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
             received.append(message.call_id)
@@ -250,8 +264,7 @@ async def test_tool_call_row_double_click_no_longer_opens():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file",
-                               args_summary="", event_no=1)
+            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
 
         def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
             received.append(message.call_id)
@@ -267,10 +280,10 @@ async def test_tool_call_row_double_click_no_longer_opens():
 async def test_tool_call_row_focus_does_not_mount_preview_widget():
     """Выделение (focus, Tab/клик) — только выделение: никакого inline-раскрытия
     превью-виджета под строкой. Провалиться в событие — Ctrl+клик/Enter."""
+
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file",
-                               args_summary="", event_no=1)
+            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -281,6 +294,7 @@ async def test_tool_call_row_focus_does_not_mount_preview_widget():
 
 
 # ---- UserReplyContainer ----
+
 
 @pytest.mark.asyncio
 async def test_user_reply_plain_click_focuses_and_does_not_open():

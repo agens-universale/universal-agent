@@ -11,10 +11,16 @@ from gc_core.config_modules import env_vars
 
 
 def _isolate(tmp_path, monkeypatch):
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.setattr(env_vars, "project_slug", lambda: "p")
 
 
@@ -32,9 +38,11 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
     monkeypatch.setattr(tui, "_interactive", lambda: True)
 
     from gc_core import thread_store as ts_mod
+
     monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
 
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
+
     monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
     monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
 
@@ -43,6 +51,7 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
     import sys
 
     from gc_tui import app as app_mod
+
     OrigTuiApp = app_mod.TuiApp
 
     class FakeTuiApp(OrigTuiApp):
@@ -68,7 +77,7 @@ def test_tui_stop_guide_on_unconfigured(tmp_path, monkeypatch, capsys):
     _isolate(tmp_path, monkeypatch)
     rc = tui.main([])
     assert rc == 0
-    assert "gc-ua --init-config" in capsys.readouterr().err   # стоп-гайд с помощником, program=gc-ua
+    assert "gc-ua --init-config" in capsys.readouterr().err  # стоп-гайд с помощником, program=gc-ua
     assert (tmp_path / "gc" / "config.yml").is_file()
 
 
@@ -86,4 +95,5 @@ def test_tui_proceeds_when_configured(tmp_path, monkeypatch):
     )
     cfg = config.load_config(None)
     from gc_core import onboarding
+
     assert onboarding.is_unconfigured(cfg) is False

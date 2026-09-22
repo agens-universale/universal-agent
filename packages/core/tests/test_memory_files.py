@@ -14,9 +14,7 @@ from gc_testkit.helpers.tool_ctx import CallableTool
 def _make_state(memory_files=None):
     """Minimal state stub for deprecated tool (isolated from SharedStateData v2)."""
     state = SimpleNamespace()
-    state.shared = SimpleNamespace(
-        memory_files=memory_files if memory_files is not None else {}
-    )
+    state.shared = SimpleNamespace(memory_files=memory_files if memory_files is not None else {})
     return state
 
 
@@ -223,11 +221,13 @@ class TestLimits:
         assert res["error"]["type"] == "max_files_exceeded"
 
     def test_all_limits_from_config(self):
-        ctx = SimpleNamespace(config_dict={
-            "memory_files_max_file_chars": 200,
-            "memory_files_total_budget_chars": 300,
-            "memory_files_max_files": 5,
-        })
+        ctx = SimpleNamespace(
+            config_dict={
+                "memory_files_max_file_chars": 200,
+                "memory_files_total_budget_chars": 300,
+                "memory_files_max_files": 5,
+            }
+        )
         state = _make_state()
         tool = CallableTool(MemoryFiles(ctx=ctx, state=state))
         assert tool.MAX_FILE_CHARS == 200

@@ -20,6 +20,7 @@ httpx умеет ``NO_PROXY`` только сам, при ``trust_env=True``. Н
 сверяется с ``requests.utils.should_bypass_proxies`` напрямую, пока requests
 ещё есть в окружении разработки.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -77,7 +78,6 @@ def should_bypass_proxies(url: str, no_proxy: str | None) -> bool:
     if parsed.port:
         host_with_port += f":{parsed.port}"
     return any(_host_matches(hostname, host_with_port, entry) for entry in entries)
-
 
 
 __all__ = ["should_bypass_proxies"]

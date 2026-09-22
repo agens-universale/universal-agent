@@ -113,12 +113,8 @@ def log_llm_prompt_and_result(
 ) -> None:
     if logger is None:
         return
-    system_part = "\n\n".join(
-        str(m.get("content", "")) for m in messages if m.get("role") == "system"
-    )
-    user_part = "\n\n".join(
-        str(m.get("content", "")) for m in messages if m.get("role") == "user"
-    )
+    system_part = "\n\n".join(str(m.get("content", "")) for m in messages if m.get("role") == "system")
+    user_part = "\n\n".join(str(m.get("content", "")) for m in messages if m.get("role") == "user")
     logger.info(
         "summary_llm_prompt label=%s system=\n%s\n\nuser=\n%s",
         label,
@@ -140,11 +136,7 @@ def apply_payload_overrides(
     for key, value in overrides.items():
         if key in protected:
             continue
-        if (
-            key in payload
-            and isinstance(payload[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in payload and isinstance(payload[key], dict) and isinstance(value, dict):
             payload[key] = _deep_merge_dicts(payload[key], value)
         else:
             payload[key] = value
@@ -163,11 +155,7 @@ def _build_chat_completion_payload(
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
     # finish-gate, компакция памяти) — инструменты не использует. Пустой
     # "tools": [] — бессмысленный шум; для plain-completion ключ опускаем.
-    model = (
-        resolved.model
-        if resolved is not None
-        else (getattr(state, "default_model", None) or cfg.get("model"))
-    )
+    model = resolved.model if resolved is not None else (getattr(state, "default_model", None) or cfg.get("model"))
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,
@@ -205,11 +193,7 @@ async def _asend_chat_completion_text(
 ) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
     log_params = cfg.get("logging_params")
-    full_log_backend = (
-        bool(log_params.get("full_log_backend", False))
-        if isinstance(log_params, dict)
-        else False
-    )
+    full_log_backend = bool(log_params.get("full_log_backend", False)) if isinstance(log_params, dict) else False
 
     def _payload_factory(requested_max_tokens: int) -> Dict[str, Any]:
         return _build_chat_completion_payload(
@@ -221,9 +205,7 @@ async def _asend_chat_completion_text(
             resolved=resolved,
         )
 
-    _min_response_tokens_override = backend_override_value(
-        resolved, "chat_completions_min_response_tokens"
-    )
+    _min_response_tokens_override = backend_override_value(resolved, "chat_completions_min_response_tokens")
     min_response_tokens = _positive_int(
         cfg.get("chat_completions_min_response_tokens")
         if _min_response_tokens_override is NO_BACKEND_OVERRIDE
@@ -232,8 +214,9 @@ async def _asend_chat_completion_text(
     )
     headers = await acreate_call_headers(state, ctx, resolved=resolved)
     url = resolved.url if resolved is not None else cfg["completions_url"]
-    (verify, cert, use_retry, timeout, config_proxy,
-     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved)
+    (verify, cert, use_retry, timeout, config_proxy, retry_embedded_choice_errors) = resolve_network_params(
+        cfg, resolved
+    )
 
     usage_category = category_for_request_label(request_label)
     with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
@@ -258,11 +241,7 @@ async def _asend_chat_completion_text(
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
         _log_completion_response_meta(logger=logger, label=request_label, res=res)
-    text = (
-        res.get("choices", [{}])[0].get("message", {}).get("content")
-        if isinstance(res, dict)
-        else ""
-    )
+    text = res.get("choices", [{}])[0].get("message", {}).get("content") if isinstance(res, dict) else ""
     return (text or "").strip()
 
 

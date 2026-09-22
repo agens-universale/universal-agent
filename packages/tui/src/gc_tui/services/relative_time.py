@@ -1,12 +1,23 @@
 """Локальное относительное время для списка сессий (Spec 1, Rule A)."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Optional
 
 _MONTHS_GEN = [
-    "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
 ]
 
 
@@ -34,7 +45,7 @@ def format_relative_local(iso_utc: str, *, now: Optional[datetime] = None) -> st
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     dt = dt.astimezone()  # в локальную зону
-    now = (now or datetime.now().astimezone())
+    now = now or datetime.now().astimezone()
     if now.tzinfo is None:
         now = now.astimezone()
 
