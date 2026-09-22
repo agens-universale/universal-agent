@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.arg_decorators import parse_json_object_argument
-from gc_core.utils.json_arg_parser import JsonArgParseError, parse_json_object_arg
 
 if TYPE_CHECKING:
     from gc_core.intent_guard.guard import FinishGateDecision
@@ -59,21 +58,6 @@ class SubmitSolution(AbstractSimpleTool):
         out["task"] = task
         out["task_report"] = task_report
         return json.dumps(out, ensure_ascii=False)
-
-    @classmethod
-    def _parse_handoff_from_arguments(cls, payload: Dict[str, Any]) -> Dict[str, Any] | None:
-        handoff_data = payload.get("handoff_data")
-        if isinstance(handoff_data, dict):
-            return handoff_data
-        if "handoff" not in payload:
-            return None
-        raw = payload.get("handoff")
-        if isinstance(raw, dict):
-            return raw
-        try:
-            return parse_json_object_arg(raw, field="handoff")
-        except JsonArgParseError:
-            return None
 
     @staticmethod
     def _finish_gate_block_from_validation(validation: Any) -> Dict[str, Any]:

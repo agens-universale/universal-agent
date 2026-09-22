@@ -23,25 +23,6 @@ def _normalize_url(url: str) -> str:
     return url
 
 
-def _sync_client(
-    verify: Union[bool, str] = True,
-    cert: Optional[tuple] = None,
-) -> httpx.Client:
-    """Клиент на один обмен: у httpx TLS задаётся при создании, не на запросе.
-
-    ``trust_env=False`` — тот же контракт, что у остального ядра: ``~/.netrc``
-    не читаем (Basic-auth оттуда перетирает явный Authorization), прокси и CA
-    передаём явно.
-    """
-    from gc_core.utils.async_http import build_ssl_context
-
-    return httpx.Client(
-        verify=build_ssl_context(verify, cert),
-        trust_env=False,
-        follow_redirects=True,
-    )
-
-
 def _http_headers_for(headers: Dict[str, str]) -> Dict[str, str]:
     """Заголовки одного обмена. Общее для обеих форм.
 
@@ -205,8 +186,10 @@ def _sse_debug() -> bool:
 def _fix_sse_encoding(resp: "httpx.Response") -> None:
     """SSE почти всегда UTF-8; без явного указания httpx может взять заявленную
     сервером кодировку и сломать JSON с кириллицей."""
-    # NOSONAR: Response.encoding — str | None, сервер может не прислать кодировку
-    if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
+    # httpx типизирует Response.encoding как `str | None`, хотя сам подставляет
+    # utf-8, если сервер кодировку не прислал. Проверка на None — страховка от
+    # смены этого поведения в httpx, а не мёртвая ветка; NOSONAR — на её строке.
+    if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):  # NOSONAR: S3403
         resp.encoding = "utf-8"
 
 

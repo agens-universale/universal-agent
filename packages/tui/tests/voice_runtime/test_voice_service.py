@@ -54,7 +54,7 @@ def test_preheat_posts_and_swallow_errors():
         calls["model"] = kwargs["data"]["model"]
         calls["timeout"] = kwargs["timeout"]
 
-        class R:
+        class R:  # минимальный ответ
             status_code = 200
 
         return R()

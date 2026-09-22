@@ -55,7 +55,7 @@ class RedisLikeStore:
         self._delay = delay
         self.awaited = 0
 
-    def _make(name):
+    def _make(name):  # фабрика методов, self появляется в замыкании
         async def method(self, *args, **kwargs):
             self.awaited += 1
             await asyncio.sleep(self._delay)

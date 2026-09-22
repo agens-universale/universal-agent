@@ -36,10 +36,6 @@ import threading
 import pytest
 from gc_core.tools import aapply_tool
 
-# Тул уехал в tools/deprecated/ вместе с переработкой FS-поиска (PR #86):
-# на смену ему пришли fs_find_in_files / fs_find_files_by_name. Контракт
-# «инлайн на loop» проверяем и для него — он всё ещё зарегистрирован.
-from gc_core.tools.deprecated.search_files import SearchFiles
 from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
@@ -77,7 +73,6 @@ FILE_TOOLS = [
     (AppendToFile, lambda cls: cls(ctx=None)),
     (ApplyFileEdits, lambda cls: cls(ctx=None)),
     (SearchAndReplace, lambda cls: cls(ctx=None)),
-    (SearchFiles, lambda cls: cls(ctx=None)),
     (ListFiles, lambda cls: cls(ctx=None)),
     (FileInfo, lambda cls: cls(ctx=None)),
     # Тоже только ФС: обход дерева, процессов нет. Соседний find_in_files в

@@ -180,12 +180,12 @@ Python-класс-тул извне нельзя — `build_tools_data` соби
 
 ### Файловые тулы ядра идут инлайн
 
-`acall` объявляют не только асинхронные тулы. Четырнадцать встроенных файловых
+`acall` объявляют не только асинхронные тулы. Тринадцать встроенных файловых
 объявляют его, чтобы исполняться **на loop**, а не в потоке из пула:
 
-* девять из `tools/fs/` — `fs_read_file`, `fs_write_file`, `fs_append_file`,
-  `fs_apply_file_edits`, `fs_search_and_replace`, `fs_search_files`,
-  `fs_list_files`, `fs_file_info`, `fs_save_base64_file`;
+* восемь из `tools/fs/` — `fs_read_file`, `fs_write_file`, `fs_append_file`,
+  `fs_apply_file_edits`, `fs_search_and_replace`, `fs_list_files`,
+  `fs_file_info`, `fs_save_base64_file`;
 * `project_memory` — `read_text` / atomic write / восстановление из бэкапа;
 * четыре скилловых читателя — `skills_list`, `skills_load`,
   `skills_read_reference`, `skills_read_asset`. Они не наследуют

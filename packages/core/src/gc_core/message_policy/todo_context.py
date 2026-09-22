@@ -43,12 +43,6 @@ def format_todo_snapshot(items: Any) -> str:
     return "\n".join(_rows(items))
 
 
-def _done_of_total(items: Any) -> tuple[int, int]:
-    rows = _rows(items)
-    done = sum(1 for row in rows if row.startswith(SNAPSHOT_MARKS["completed"]))
-    return done, len(rows)
-
-
 def render_todo_for_persistent_state(items: Any) -> str:
     """Блок ``<session_todo>`` для ``<persistent_state>``. Пусто → пустая строка."""
     snapshot = format_todo_snapshot(items)

@@ -50,7 +50,7 @@ def _read_stdin_lines_into(box: queue.Queue[str]) -> None:
             if not line.strip():
                 break
             lines.append(line)
-    except Exception:
+    except Exception:  # stdin закрыли; отдаём, что успели
         pass
     box.put("\n".join(lines).strip())
 

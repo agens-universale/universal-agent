@@ -789,7 +789,7 @@ class TuiApp(App):
         разошлась бы с первой — витрина звала бы Enter туда, где Enter отказывает."""
         from gc_core.config import load_config_ex
 
-        load_config_ex(self._config_path, profile_override=name, apply_to_process=False)
+        load_config_ex(self._config_path, profile_override=name)
 
     def switch_session_profile(self, name: str) -> None:
         """Переключить профиль сессии (спека §9.1/§9.3): применяет как обычный

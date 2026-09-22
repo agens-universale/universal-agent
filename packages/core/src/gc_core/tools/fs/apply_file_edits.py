@@ -1,4 +1,3 @@
-import difflib
 import functools
 import json
 from typing import Any, Dict, List, Optional
@@ -11,23 +10,18 @@ from gc_core.tools.fs.edit_line_endings import (
     resolve_edit_line_endings,
 )
 from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
+from gc_core.tools.fs.literal_edit_common import (
+    LoadError,
+    build_unified_diff,
+    diff_arg_error,
+    encode_and_write,
+    load_text_source,
+    splice_replacements,
+)
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.file_text import (
-    check_expected_file_sha256,
-    decode_text_bytes,
-    is_valid_sha256_hex,
-    sha256_hex_of_bytes,
-    try_encode_text_bytes,
-)
-from gc_core.utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
+from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
-
-
-class _LoadError:
-    def __init__(self, message: str, error: Dict[str, Any]) -> None:
-        self.message = message
-        self.error = error
 
 
 class _EditBatch:
@@ -52,28 +46,7 @@ def _batch_arg_error(
         return "Argument 'atomic' must be true.", {"type": "invalid_argument", "field": "atomic"}
     if not isinstance(dry_run, bool):
         return "Argument 'dry_run' must be a boolean.", {"type": "invalid_argument", "field": "dry_run"}
-    if not isinstance(backup, bool):
-        return "Argument 'backup' must be a boolean.", {"type": "invalid_argument", "field": "backup"}
-    if not isinstance(return_diff, bool):
-        return "Argument 'return_diff' must be a boolean.", {"type": "invalid_argument", "field": "return_diff"}
-    if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
-        return "Argument 'diff_context_lines' must be a non-negative integer.", {
-            "type": "invalid_argument",
-            "field": "diff_context_lines",
-        }
-    if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
-        return "Argument 'max_diff_chars' must be a positive integer.", {
-            "type": "invalid_argument",
-            "field": "max_diff_chars",
-        }
-    if expected_file_sha256 is not None and (
-        not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256)
-    ):
-        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {
-            "type": "invalid_argument",
-            "field": "expected_file_sha256",
-        }
-    return None
+    return diff_arg_error(backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256)
 
 
 def _edit_arg_error(i: int, edit: Any) -> "tuple[str, Dict[str, Any]] | None":
@@ -131,17 +104,6 @@ def _select_matches(matches: list, occurrence: Any) -> tuple:
         },
         {"type": "invalid_argument", "field": "occurrence"},
     )
-
-
-def _splice_replacements(content: str, selected: list, search: str, replace: str) -> str:
-    parts: list[str] = []
-    prev_end = 0
-    for idx, _, _ in sorted(selected, key=lambda x: x[0]):
-        parts.append(content[prev_end:idx])
-        parts.append(replace)
-        prev_end = idx + len(search)
-    parts.append(content[prev_end:])
-    return "".join(parts)
 
 
 class ApplyFileEdits(AbstractSimpleTool):
@@ -285,30 +247,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             ensure_ascii=False,
         )
 
-    @staticmethod
-    def _build_unified_diff(
-        path: str,
-        old_content: str,
-        new_content: str,
-        *,
-        context_lines: int,
-        max_chars: int,
-    ) -> tuple[str, bool]:
-        diff_text = "".join(
-            line if line.endswith("\n") else f"{line}\n"
-            for line in difflib.unified_diff(
-                old_content.splitlines(keepends=True),
-                new_content.splitlines(keepends=True),
-                fromfile=path,
-                tofile=path,
-                n=context_lines,
-                lineterm="\n",
-            )
-        )
-        if len(diff_text) <= max_chars:
-            return diff_text, False
-        return diff_text[:max_chars], True
-
     def _apply_one_edit(
         self,
         *,
@@ -364,7 +302,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         if select_error is not None:
             return False, content, select_error[0], select_error[1], False
 
-        new_content = _splice_replacements(content, selected, search, replace)
+        new_content = splice_replacements(content, selected, search, replace)
         ranges = [{"start_line": m[1], "end_line": m[2]} for m in selected]
         meta: Dict[str, Any] = {
             "matched": True,
@@ -374,32 +312,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             "match_ranges": ranges,
         }
         return True, new_content, meta, None, resolved.eol_adapted
-
-    async def _load_source(self, path: str, encoding: "str | None", expected_file_sha256: "str | None"):
-        """(original_text, encoding_used) либо _LoadError с готовыми message/error."""
-        try:
-            file_size = await self._backend.getsize(path)
-        except Exception as e:
-            return _LoadError("Failed to get file size.", {"type": "stat_failed", "message": str(e)})
-        size_err = check_file_size(
-            file_size,
-            fs_mutate_max_bytes(self._config_dict),
-            operation="apply_file_edits",
-        )
-        if size_err is not None:
-            return _LoadError(size_err["message"], size_err)
-        try:
-            raw = await self._backend.read_bytes(path)
-        except Exception as e:
-            return _LoadError("Failed to read file.", {"type": "read_failed", "message": str(e)})
-        decoded = decode_text_bytes(raw, encoding=encoding)
-        if not decoded.ok:
-            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
-            return _LoadError(err.get("message", "Failed to decode file."), err)
-        stale_error = check_expected_file_sha256(sha256_hex_of_bytes(raw), expected_file_sha256)
-        if stale_error is not None:
-            return _LoadError(stale_error["message"], stale_error)
-        return decoded.text or "", decoded.encoding_used
 
     def _apply_edit_batch(self, edits: list, original: str) -> _EditBatch:
         batch = _EditBatch(original)
@@ -419,18 +331,6 @@ class ApplyFileEdits(AbstractSimpleTool):
             batch.edits_would_apply += 1
             batch.total_would_replace += meta["replaced"]
         return batch
-
-    async def _encode_and_write(self, path: str, current: str, encoding_used: "str | None"):
-        """(bytes, None) либо (None, (message, error))."""
-        try:
-            out_bytes, encode_err = try_encode_text_bytes(current, encoding_used or "utf-8")
-            if encode_err is not None:
-                return None, (encode_err.get("message", "Failed to encode file."), encode_err)
-            assert out_bytes is not None
-            await self._backend.write_bytes(path, out_bytes)
-        except Exception as e:
-            return None, ("Failed to write file.", {"type": "write_failed", "message": str(e)})
-        return out_bytes, None
 
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(
@@ -474,8 +374,14 @@ class ApplyFileEdits(AbstractSimpleTool):
             return fail(message="File not found.", error={"type": "not_found"})
         if not await self._backend.is_file(path):
             return fail(message="Path is not a file.", error={"type": "not_a_file"})
-        loaded = await self._load_source(path, encoding, expected_file_sha256)
-        if isinstance(loaded, _LoadError):
+        loaded = await load_text_source(
+            self,
+            path,
+            operation="apply_file_edits",
+            encoding=encoding,
+            expected_file_sha256=expected_file_sha256,
+        )
+        if isinstance(loaded, LoadError):
             return fail(message=loaded.message, error=loaded.error)
         original, encoding_used = loaded
 
@@ -503,7 +409,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         diff_text = None
         diff_truncated = False
         if return_diff:
-            diff_text, diff_truncated = self._build_unified_diff(
+            diff_text, diff_truncated = build_unified_diff(
                 path,
                 original,
                 current,
@@ -576,7 +482,7 @@ class ApplyFileEdits(AbstractSimpleTool):
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
-        out_bytes, write_error = await self._encode_and_write(path, current, encoding_used)
+        out_bytes, write_error = await encode_and_write(self, path, current, encoding_used)
         if write_error is not None:
             return partial(
                 message=write_error[0],

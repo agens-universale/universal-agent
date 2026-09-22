@@ -94,7 +94,7 @@ async def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | Non
 
     try:
         catalog = await get_skills_registry(config_dict).skill_catalog()
-    except Exception as exc:
+    except Exception as exc:  # surface as warning, not traceback
         print(
             f"warning: не удалось построить каталог скиллов для -s ({exc}); "
             f"агент стартует, '-s {name}' передан агенту как есть.",

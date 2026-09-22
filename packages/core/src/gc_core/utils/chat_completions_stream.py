@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
-from gc_core.utils.stream_assembler import (
+from gc_core.utils.stream_assembler import (  # публичные имена фасада
     BackendStreamError,
     OnDelta,
     StreamAssembler,

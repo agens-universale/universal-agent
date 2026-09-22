@@ -61,7 +61,7 @@ def test_use_retry_repeats_transient_404(monkeypatch):
 def test_without_use_retry_single_attempt(monkeypatch):
     spy = install_transport(monkeypatch, _flaky_handler(failures=1))
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # тип ошибки транспорта тут не важен
         _call()
 
     assert len(spy.requests) == 1

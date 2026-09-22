@@ -73,7 +73,7 @@ def _warn(text: str, *, code: str, highlights: tuple[str, ...] = ()) -> None:
         from gc_core.startup_notices import Notice
 
         push_runtime_notice(Notice("warning", code, text, highlights))
-    except Exception:
+    except Exception:  # канал уведомлений не обязателен
         pass
 
 

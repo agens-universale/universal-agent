@@ -4,15 +4,14 @@ import hashlib
 from types import SimpleNamespace
 
 from gc_core.backends.walk_util import (
+    FlatWalkMixin,
     WalkEntry,
-    iter_files_from_flat,
     iter_walk_entries_from_flat,
-    iter_walk_from_flat,
     prune_flat_entries,
 )
 
 
-class FakeBackend:
+class FakeBackend(FlatWalkMixin):
     """Models a container filesystem as path -> content (str)."""
 
     is_sandbox = True
@@ -111,24 +110,6 @@ class FakeBackend:
     async def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
         for _item in iter_walk_entries_from_flat(
             await self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
-            should_descend=should_descend,
-            join=self.join,
-            root=path,
-        ):
-            yield _item
-
-    async def iter_walk(self, path, *, should_descend=None):
-        for _item in iter_walk_from_flat(
-            await self.walk(path),
-            should_descend=should_descend,
-            join=self.join,
-            root=path,
-        ):
-            yield _item
-
-    async def iter_files(self, path, *, should_descend=None):
-        for _item in iter_files_from_flat(
-            await self.walk(path),
             should_descend=should_descend,
             join=self.join,
             root=path,

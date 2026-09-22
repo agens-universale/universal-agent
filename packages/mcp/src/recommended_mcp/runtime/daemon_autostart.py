@@ -54,7 +54,7 @@ def ensure_mcp_daemons(config_dict: dict[str, Any], *, disable_hint: str | None 
     kwargs = {} if disable_hint is None else {"disable_hint": disable_hint}
     try:
         _supervisor = ensure_daemons_for_agent(config_dict, **kwargs)
-    except Exception as exc:
+    except Exception as exc:  # сознательно широко, см. докстринг
         _supervisor = None
         from recommended_mcp.autostart import _warn
 

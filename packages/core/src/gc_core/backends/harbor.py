@@ -16,7 +16,7 @@ import shlex
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, ContextManager, Iterable, Optional, Sequence
+from typing import Any, ContextManager, Iterable, Optional, Sequence
 
 from gc_core.backends.capabilities import parse_find_printf_entries
 from gc_core.backends.capture import BoundedStreamAccumulator
@@ -30,7 +30,7 @@ from gc_core.backends.protocol import (
     argv_to_posix_command,
     bound_exec_result,
 )
-from gc_core.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
+from gc_core.backends.walk_util import FlatWalkMixin
 from gc_core.utils.file_text import (
     decode_text_best_effort,
     encode_text_for_append,
@@ -112,7 +112,7 @@ def _build_find_walk_command(
     return " ".join(shlex.quote(a) for a in argv)
 
 
-class HarborBackend(FsBackend):
+class HarborBackend(FlatWalkMixin, FsBackend):
     is_sandbox = True
     # Файлы живут в контейнере: `exists()` это `test -e` по сети, `read()` —
     # `env.download_file`. Прежний флаг `bridges_to_loop` снят вместе с
@@ -566,35 +566,6 @@ class HarborBackend(FsBackend):
             out.append((name, kind[:1] == "d" if kind else False))
         return sorted(out)
 
-    async def iter_walk(
-        self,
-        path: str,
-        *,
-        should_descend: Optional[Callable[[str], bool]] = None,
-    ) -> Iterable[tuple[str, bool]]:
-        """DFS from flat ``find`` listing (materialized ``walk()``)."""
-        for _item in iter_walk_from_flat(
-            await self.walk(path),
-            should_descend=should_descend,
-            join=self.join,
-            root=path,
-        ):
-            yield _item
-
-    async def iter_files(
-        self,
-        path: str,
-        *,
-        should_descend: Optional[Callable[[str], bool]] = None,
-    ) -> Iterable[str]:
-        for _item in iter_files_from_flat(
-            await self.walk(path),
-            should_descend=should_descend,
-            join=self.join,
-            root=path,
-        ):
-            yield _item
-
     # --- path semantics ---
     def normpath(self, path: str) -> str:
         # find печатает пути префиксом вызова, prune сравнивает строки — «//» и
@@ -629,7 +600,7 @@ class HarborBackend(FsBackend):
                 # Таймаут обязателен: без него сборка контекста ждала бы медленный
                 # контейнер сколько угодно — со стороны ядра дедлайна нет.
                 res = await self._aexec_impl("pwd", timeout=_CWD_PRIME_TIMEOUT_SEC)
-            except Exception:
+            except Exception:  # окружение может быть недоступно
                 return None
             lines = (res.stdout or "").strip().splitlines()
             if res.return_code == 0 and lines and lines[0].startswith("/"):

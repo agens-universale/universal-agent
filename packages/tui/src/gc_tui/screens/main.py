@@ -579,11 +579,6 @@ class TraceScreen(Screen):
         colors = {v.value: v.color for v in TOGGLES["level"].values}
         return colors.get(level, _INK)
 
-    def _footer_level_color(self) -> str:
-        """Цвет точки-индикатора уровня ЖИВОГО резолва — та же Router-витрина,
-        что у `_footer_model_name`."""
-        return self._level_color(self._footer_live_level())
-
     def _footer_profile_name(self) -> str | None:
         """Имя активного профиля для футера, или None — тот же источник, что
         `/config`/`/status` (`app.active_profile_ref`)."""

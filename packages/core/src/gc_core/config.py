@@ -475,9 +475,6 @@ def load_config_ex(
     config_path: Optional[str] = None,
     *,
     profile_override: Optional[str] = None,
-    # Единственный глобальный эффект (глушение urllib3 при `use_ssl: false`)
-    # ушёл вместе с urllib3; параметр держим ради вызывающих (TUI-витрины).
-    apply_to_process: bool = True,  # noqa: ARG001
 ) -> tuple[Dict[str, Any], ProfileMeta]:
     """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
 
@@ -487,12 +484,10 @@ def load_config_ex(
     `AppConfig.model_validate` → `validate_model_sections` → resolve_paths/flatten.
     `load_config` (ниже) — тонкая обёртка для обратной совместимости.
 
-    `apply_to_process=False` — собрать конфиг, НЕ применяя его к процессу. Сбор
-    сам по себе не безобиден: он глушит предупреждения TLS — эффект глобальный
-    и необратимый. Тому, кто конфиг ПРИМЕНЯЕТ (старт, reload, выбор профиля в
-    сессии), это и нужно; тому, кто его ПОКАЗЫВАЕТ (витрина чужого профиля в
-    Настройках), — нет: заглянуть в соседний профиль не должно менять того, как
-    работающий агент проверяет сертификаты."""
+    Сбор побочек на процесс не имеет: глушение TLS-предупреждений ушло вместе с
+    urllib3, глобальный конвейер проекций — в `754b8910`. Поэтому витрина чужого
+    профиля в Настройках зовёт ту же функцию, что старт и reload; отдельный
+    флаг `apply_to_process` для неё больше не нужен и снят."""
     if config_path is None and _xdg_config_path() is None:
         _bootstrap_user_config()
     path = resolve_config_path(config_path)

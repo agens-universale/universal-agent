@@ -330,21 +330,6 @@ class PersistentStdioSession:
             self._write_line(payload)
             return self._read_matching(req_id, timeout)
 
-    def _detach(self) -> "Optional[subprocess.Popen]":
-        """Снять процесс с сессии под локом. Дальше он уже ничей — ждать его
-        можно сколько угодно, никого не блокируя.
-
-        Лок держится ТОЛЬКО здесь. Раньше он удерживался на всё закрытие,
-        включая ожидание close-тула (до 10 с) и смерти процесса (до 7 с); для
-        асинхронного пути это недопустимо — ``threading.Lock``, удержанный
-        через ``await``, застопорил бы весь loop, если бы за ним пришла
-        корутина.
-        """
-        with self._lock:
-            proc = self._proc
-            self._proc = None
-        return proc
-
     def _detach_nowait(self) -> "tuple[Optional[subprocess.Popen], bool]":
         """Снять процесс, НЕ вставая в очередь за локом.
 

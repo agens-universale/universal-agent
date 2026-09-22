@@ -83,7 +83,7 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             request_label="project_memory_compaction",
             consumer="memory_compaction",
         )
-    except Exception as exc:
+    except Exception as exc:  # caller wants explicit ok=false, not exception.
         return CompactionResult(ok=False, text="", error_type="backend_error", error_message=str(exc))
 
     if not compressed:

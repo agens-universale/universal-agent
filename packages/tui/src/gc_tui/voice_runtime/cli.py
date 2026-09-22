@@ -57,6 +57,8 @@ def _cmd_status() -> int:
     if state is None:
         print("[voice] не установлен. Установка: gc-voice install")
     else:
+        # Устаревание называем прямо здесь: раньше status печатал версию, но ни с чем её не
+        # сравнивал — узнать, что движок отстал, было неоткуда, кроме экрана после апгрейда.
         upd = available_update(state)
         print(f"[voice] установлен: speaches {state.version} → {state.root}" + (f"  · доступно {upd}" if upd else ""))
         if upd:

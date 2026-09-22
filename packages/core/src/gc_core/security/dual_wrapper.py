@@ -226,7 +226,7 @@ async def _aserve_request(flow: Generator, request: Any) -> Any:
         # BaseException`, и вызов остался бы неотменяемым.
         _close_quietly(flow)
         raise
-    except Exception as exc:
+    except Exception as exc:  # отдаём в точку запроса
         return _Failed(exc)
 
 

@@ -107,7 +107,7 @@ def test_step_timings_survives_a_close_during_writes(tmp_path):
         while not stop.is_set():
             try:
                 timings._emit({"k": "v"})
-            except BaseException as exc:
+            except BaseException as exc:  # нам важен сам факт
                 errors.append(exc)
                 return
 

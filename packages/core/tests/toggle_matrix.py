@@ -696,7 +696,7 @@ async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, An
             answer = executor.run(["сделай что-нибудь"], thread_id=TID, system=SYS)
         result["answer"] = strip_volatile(answer) if isinstance(answer, (dict, list)) else answer
         result["error"] = None
-    except Exception as exc:
+    except Exception as exc:  # фиксируем ЛЮБОЙ отказ
         # Отказ — тоже наблюдаемое поведение и тоже подлежит сверке: важно, что
         # он ОДИНАКОВ по обе стороны, а не что его нет.
         result["answer"] = None

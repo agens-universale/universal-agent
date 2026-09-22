@@ -50,27 +50,6 @@ def parse_json_object_argument(
     def _decorator(func: Callable) -> Callable:
         def _parsed_or_error(self, kwargs: dict):
             return _parse_or_reject(self, kwargs, source_arg, target_arg, error_handler_method)
-            raw = kwargs.get(source_arg)
-            try:
-                parsed = parse_json_object_arg(raw, field=source_arg)
-            except JsonArgParseError as exc:
-                if error_handler_method:
-                    handler = getattr(self, error_handler_method)
-                    return handler(exc, kwargs), kwargs
-                return self._result(  # type: ignore[attr-defined]
-                    ok=False,
-                    status="rejected",
-                    message="Validation failed.",
-                    task_report="",
-                    error={
-                        "type": "invalid_argument",
-                        "field": exc.field,
-                        "message": exc.message,
-                    },
-                ), kwargs
-            kwargs[target_arg] = parsed
-            kwargs.pop(source_arg, None)
-            return None, kwargs
 
         # Корутинную функцию оборачиваем корутиной. Синхронная обёртка вернула
         # бы отказ ГОТОВЫМ СЛОВАРЁМ, минуя func, и вызывающий с ``await`` упал

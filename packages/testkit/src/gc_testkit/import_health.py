@@ -78,25 +78,12 @@ from dataclasses import asdict, dataclass
 from functools import cache
 from pathlib import Path
 
+# Каталоги, где ищем питон (`SKIP_DIRS`), — тот же набор, что в module_literals,
+# и взят оттуда же, а не скопирован: список исключений, а не включений, — новый
+# каталог с кодом подхватывается сам, и обе сетки видят одно дерево.
+from gc_testkit.module_literals import SKIP_DIRS
 from gc_testkit.paths import REPO, package_src_dirs
 from gc_testkit.sources import ensure_sources_on_path
-
-#: Каталоги, где ищем питон. Тот же принцип, что в module_literals: список
-#: исключений, а не включений, — новый каталог с кодом подхватывается сам.
-SKIP_DIRS = {
-    ".git",
-    ".venv",
-    ".idea",
-    ".vscode",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "__pycache__",
-    "dist",
-    "build",
-    "node_modules",
-    "docs",
-}
 
 
 @dataclass(frozen=True)

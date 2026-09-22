@@ -1,6 +1,5 @@
 """Каноничное текстовое представление сообщений треда для LLM-промптов и метрик длины."""
 
-import json
 import re
 from typing import Any, Dict, List, Sequence
 
@@ -52,24 +51,10 @@ def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
     return False
 
 
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: List[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-                    continue
-            parts.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
-        return "\n".join(parts)
-    if isinstance(content, dict):
-        return json.dumps(content, ensure_ascii=False, sort_keys=True)
-    if content is None:
-        return ""
-    return str(content)
+# Контент любого сообщения (arguments/output/content) сводится к тексту по тем же правилам, что и
+# user-контент: строка как есть, у элементов списка — поле ``text`` либо канонический JSON.
+# Единственная реализация живёт в ``user_message_policy``; здесь — локальное имя для читаемости.
+_message_content_to_text = user_content_to_text
 
 
 def message_text_for_summary(

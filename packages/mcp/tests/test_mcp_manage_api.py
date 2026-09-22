@@ -7,7 +7,7 @@ def test_wire_unknown_name_returns_false(monkeypatch):
 
 
 def test_wire_known_name_calls_wire_one(monkeypatch):
-    class E:
+    class E:  # fake manifest entry
         name = "office"
 
     calls = {}

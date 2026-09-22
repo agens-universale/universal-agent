@@ -6,11 +6,6 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.stream_client import (
-    alist_tools_stream_http,
-    alist_tools_stream_sse,
-    alist_tools_stream_stdio,
-)
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -150,27 +145,6 @@ def _apply_tools_whitelist(server_name: str, server_cfg: Dict[str, Any], tools_r
     return filtered
 
 
-async def _afetch_tools_sdk(
-    effective_transport: str,
-    *,
-    url: Optional[str],
-    server_cfg: Dict[str, Any],
-    token: Optional[str],
-    timeout: float,
-) -> list:
-    """Список тулов по SDK-транспорту, нативно, без потока.
-
-    Синхронных имён ``list_tools_stream_*`` больше нет: они были шимами через
-    ``run_coro_blocking`` и из уже асинхронного контекста заводили лишний loop
-    в отдельном потоке. Здесь — асинхронные точки напрямую.
-    """
-    if effective_transport == "stream_sse":
-        return await alist_tools_stream_sse(url=url, server_cfg=server_cfg, token=token, timeout=timeout)
-    if effective_transport == "stream_http":
-        return await alist_tools_stream_http(url=url, server_cfg=server_cfg, token=token, timeout=timeout)
-    return await alist_tools_stream_stdio(server_cfg=server_cfg, timeout=timeout)
-
-
 async def _adiscover_one(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -239,7 +213,7 @@ async def _adiscover_one(
             "tool_count": len(tools),
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
-    except Exception as exc:
+    except Exception as exc:  # дискавери никогда не бросает наверх
         reason = _humanize_discovery_error(exc, server_cfg if isinstance(server_cfg, dict) else {})
         logger.warning("MCP discovery failed for %s: %s", server_name, exc)
         print(f"[MCP] {server_name}: недоступен — {reason} (пропущен)")

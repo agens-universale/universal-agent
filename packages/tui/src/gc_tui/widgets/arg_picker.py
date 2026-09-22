@@ -14,18 +14,20 @@ import textwrap
 from typing import Callable, Optional
 
 from rich.text import Text
-from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from gc_tui import palette as _pal
+from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
-_NO_MATCH = "(нет совпадений)"
 
 
-class ArgPicker(VerticalScroll):
-    """Filtered overlay-список значений аргумента."""
+class ArgPicker(PaletteRowsMixin, VerticalScroll):
+    """Filtered overlay-список значений аргумента.
+
+    Навигация (`set_filter` / `move_selection`), `compose` и `_rebuild` — общие
+    с `SkillPicker`, в `PaletteRowsMixin`."""
 
     DEFAULT_CSS = ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
 
@@ -50,16 +52,6 @@ class ArgPicker(VerticalScroll):
         # пункта.
         self._hint_cache: Optional[tuple] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
-
-    def compose(self) -> ComposeResult:
-        rows = self._visible_rows()
-        if not rows:
-            yield Static(_NO_MATCH, classes="palette-hint", markup=False)
-        else:
-            for i, opt in enumerate(rows):
-                classes = "palette-row selected" if i == self._selected else "palette-row"
-                yield Static(self._format_row(opt), classes=classes, markup=False)
-        yield self._build_footer()
 
     def _build_footer(self) -> Vertical:
         """Докнутый подвал (паттерн CommandPalette._build_footer): hint — ПОСЛЕДНИЙ
@@ -184,43 +176,8 @@ class ArgPicker(VerticalScroll):
             footer += 1 + self._footer_line_count(self._hint_text(self.selected_value()))
         return flow + 2 + footer
 
-    def set_filter(self, prefix: str) -> None:
-        self._filter = prefix
-        self._selected = 0
-        self._rebuild()
-
-    def move_selection(self, delta: int) -> None:
-        rows = self._visible_rows()
-        if not rows:
-            return
-        self._selected = (self._selected + delta) % len(rows)
-        self._rebuild()
-
     def selected_value(self) -> Optional[str]:
-        rows = self._visible_rows()
-        if not rows:
+        row = self._selected_row()
+        if row is None:
             return None
-        idx = max(0, min(self._selected, len(rows) - 1))
-        return rows[idx][0]
-
-    def _rebuild(self) -> None:
-        if not self.is_mounted:
-            return
-        rows = self._visible_rows()
-        new_widgets: list = []
-        selected_widget: Optional[Static] = None
-        if not rows:
-            new_widgets.append(Static(_NO_MATCH, classes="palette-hint", markup=False))
-        else:
-            for i, opt in enumerate(rows):
-                classes = "palette-row selected" if i == self._selected else "palette-row"
-                w = Static(self._format_row(opt), classes=classes, markup=False)
-                if i == self._selected:
-                    selected_widget = w
-                new_widgets.append(w)
-        new_widgets.append(self._build_footer())
-        self._apply_size()
-        self.remove_children()
-        self.mount_all(new_widgets)
-        if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+        return row[0]

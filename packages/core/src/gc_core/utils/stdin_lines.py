@@ -56,7 +56,7 @@ def pollable_stdin_fd() -> int | None:
         return None
     try:
         fd = sys.stdin.fileno()
-    except Exception:
+    except Exception:  # подменённый stdin без fileno
         return None
     return fd if isinstance(fd, int) and fd >= 0 else None
 

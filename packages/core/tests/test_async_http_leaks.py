@@ -134,7 +134,7 @@ def test_registry_survives_concurrent_loops():
         for _ in range(40):
             try:
                 asyncio.run(_body())
-            except BaseException as exc:
+            except BaseException as exc:  # нам важен сам факт
                 errors.append(exc)
                 return
 

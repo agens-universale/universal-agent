@@ -43,7 +43,7 @@ def _remember_primed_cwd(backend: Any, cwd: str) -> None:
         # Бэкенд без поддержки weakref (слоты, прокси) — кладём на него самого.
         try:
             backend._gc_primed_cwd = cwd
-        except Exception:
+        except Exception:  # кэш не обязателен для корректности
             pass
 
 
@@ -101,7 +101,7 @@ def discover_backend_cwd(backend: FsBackend) -> str:
         return "/"
     try:
         res = exec_fn("pwd")
-    except Exception:
+    except Exception:  # env may be down; callers still need a root
         return "/"
     lines = (getattr(res, "stdout", "") or "").strip().splitlines()
     if getattr(res, "return_code", 1) == 0 and lines and lines[0].startswith("/"):
@@ -145,7 +145,7 @@ async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = No
             if await asyncio.wait_for(prime(), _CWD_PRIME_CEILING_SEC):
                 return
             reasons.append("aprime_default_cwd вернул None")
-        except Exception as exc:
+        except Exception as exc:  # окружение может быть недоступно
             reasons.append(f"aprime_default_cwd: {type(exc).__name__}")
 
     if _config_root_raw(config):
@@ -177,7 +177,7 @@ async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = No
             _remember_primed_cwd(backend, cwd)
             return
         reasons.append("pwd: пустой ответ или ненулевой код возврата")
-    except Exception as exc:
+    except Exception as exc:  # окружение может быть недоступно
         reasons.append(f"pwd: {type(exc).__name__}")
 
     logging.getLogger(__name__).warning(

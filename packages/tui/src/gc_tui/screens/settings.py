@@ -4882,8 +4882,8 @@ class SettingsScreen(Screen):
         Представление готовое: тем же `load_config_ex(..., profile_override=...)`
         приложение собирает базу при сессионном переключении профиля
         (`tui/app.py::_profile_remerge`) — с той разницей, что там профиль
-        применяют, а здесь показывают, и побочки сбора витрине не нужны
-        (`apply_to_process=False`). Стек не собрался — отвечают ДОКУМЕНТЫ
+        применяют, а здесь показывают; побочек на процесс у сбора нет, так что
+        показ ничего не меняет в работающем агенте. Стек не собрался — отвечают ДОКУМЕНТЫ
         (`_open_profile_connection_by_documents`), и в ответе тогда одно только
         подключение: чужой runtime витрине не подходит ничем."""
         if not self._config_path or name == (self._config or {}).get("profile"):
@@ -4891,12 +4891,11 @@ class SettingsScreen(Screen):
         from gc_core.config import load_config_ex
 
         try:
-            # `apply_to_process=False` — витрина ПОКАЗЫВАЕТ чужой профиль, а не
-            # активирует его: сбор сам по себе перепривязывает конвейер проекций
-            # всему процессу и глушит предупреждения TLS, и обратно их никто не
-            # ставит. Заглянуть в соседний профиль не должно менять того, как
-            # работающий агент режет теги и проверяет сертификаты.
-            cfg, _meta = load_config_ex(self._config_path, profile_override=name, apply_to_process=False)
+            # Витрина ПОКАЗЫВАЕТ чужой профиль, а не активирует его. Раньше для
+            # этого был флаг `apply_to_process=False`: сбор перепривязывал
+            # конвейер проекций всему процессу и глушил предупреждения TLS.
+            # Обе побочки из сбора ушли, флаг снят.
+            cfg, _meta = load_config_ex(self._config_path, profile_override=name)
         except Exception:
             return self._open_profile_connection_by_documents(name)
         return cfg

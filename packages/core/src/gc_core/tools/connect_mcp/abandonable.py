@@ -119,7 +119,7 @@ async def run_abandonable_in(
         if _on_abandoned is not None and _abandoned():
             try:
                 _on_abandoned()
-            except BaseException:
+            except BaseException:  # уборку не роняем
                 logger.debug("abandoned cleanup failed", exc_info=True)
 
     def _target() -> None:
@@ -135,7 +135,7 @@ async def run_abandonable_in(
                 return
             try:
                 result = ctx_snapshot.run(_marked)
-            except BaseException as exc:
+            except BaseException as exc:  # переносим как есть
                 _deliver(future.set_exception, exc)
             else:
                 _deliver(future.set_result, result)

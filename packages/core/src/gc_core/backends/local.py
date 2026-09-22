@@ -384,7 +384,7 @@ class LocalFsBackend(FsBackend):
             # фоновая команда погибала вместе с агентом; на macOS она выживала,
             # но в stderr сыпалось «Loop … is closed». Фоновому процессу loop
             # не нужен вовсе: мы его не ждём и не читаем.
-            proc = subprocess.Popen(
+            proc = subprocess.Popen(  # shell намеренно
                 command,
                 shell=True,
                 stdin=subprocess.DEVNULL,
@@ -486,7 +486,7 @@ def _reap_finished_background() -> None:
         try:
             if proc.poll() is not None:
                 _BACKGROUND_PROCS.discard(proc)
-        except Exception:
+        except Exception:  # учёт не критичен
             _BACKGROUND_PROCS.discard(proc)
 
 

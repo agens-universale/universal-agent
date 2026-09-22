@@ -1,9 +1,17 @@
+"""Декоратор ретраев с экспоненциальным backoff (синхронный).
+
+Здесь же живут части, общие с асинхронным двойником ``utils.aretry``: политика
+ретраев, её логи, разбор управляющих kwargs вызова и каркас декоратора. Своего
+у каждого модуля — только цикл попыток с паузой (``time.sleep`` здесь,
+``asyncio.sleep`` там) и форма обёртки (``def``/``async def``).
+"""
+
 import dataclasses
 import functools
 import inspect
 import logging
 import time
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 _T = TypeVar("_T")
 
@@ -23,6 +31,39 @@ class _RetryPolicy:
             return False
         return True if self.should_retry is None else self.should_retry(exc)
 
+    def log_no_more_retries(self, logger: Any, attempt: int, url: Any, exc: Exception) -> None:
+        logger.log(
+            self.no_more_retries_log_level,
+            "%s failed (attempt %s/%s, no more retries). url=%s error=%r",
+            self.operation_name,
+            attempt,
+            self.max_attempts,
+            url,
+            exc,
+        )
+
+    def log_retrying(self, logger: Any, attempt: int, delay: float, url: Any, exc: Exception) -> None:
+        logger.log(
+            self.retry_log_level,
+            "%s failed (attempt %s/%s). Retrying in %.1f sec url=%s error=%r",
+            self.operation_name,
+            attempt,
+            self.max_attempts,
+            delay,
+            url,
+            exc,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _PreparedCall:
+    """Управляющие kwargs, снятые декоратором, и kwargs для самой функции."""
+
+    use_retry: bool
+    logger: Any
+    url: Any
+    kwargs: dict
+
 
 def _call_kwargs(kwargs: dict, param_names: set, has_var_keyword: bool, req_logger) -> dict:
     if not has_var_keyword:
@@ -38,6 +79,33 @@ def _call_kwargs(kwargs: dict, param_names: set, has_var_keyword: bool, req_logg
     return kwargs
 
 
+def _call_preparer(func: Callable) -> Callable[[dict], _PreparedCall]:
+    """Сигнатура ``func`` разбирается один раз — при декорировании."""
+    sig = inspect.signature(func)
+    params = sig.parameters
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    param_names = set(params.keys())
+
+    def prepare(kwargs: dict) -> _PreparedCall:
+        # use_retry извлекается и не пробрасывается в целевую функцию.
+        use_retry = bool(kwargs.pop("use_retry", False))
+        req_logger = kwargs.pop("logger", None) or logging.getLogger(func.__module__)
+        url_for_log = kwargs.get("url")
+        kwargs = _call_kwargs(kwargs, param_names, has_var_keyword, req_logger)
+        return _PreparedCall(use_retry=use_retry, logger=req_logger, url=url_for_log, kwargs=kwargs)
+
+    return prepare
+
+
+def _retry_decorator(policy: _RetryPolicy, make_wrapper: Callable) -> Callable:
+    """Каркас декоратора: ``make_wrapper(func, prepare, policy)`` строит обёртку."""
+
+    def decorator(func):
+        return functools.wraps(func)(make_wrapper(func, _call_preparer(func), policy))
+
+    return decorator
+
+
 def _run_with_retries(func, args, kwargs, policy: _RetryPolicy, *, req_logger, url_for_log):
     delay = float(policy.initial_delay_sec)
     last_exc: Optional[Exception] = None
@@ -47,31 +115,24 @@ def _run_with_retries(func, args, kwargs, policy: _RetryPolicy, *, req_logger, u
         except Exception as exc:
             last_exc = exc
             if not policy.retriable(attempt, exc):
-                req_logger.log(
-                    policy.no_more_retries_log_level,
-                    "%s failed (attempt %s/%s, no more retries). url=%s error=%r",
-                    policy.operation_name,
-                    attempt,
-                    policy.max_attempts,
-                    url_for_log,
-                    exc,
-                )
+                policy.log_no_more_retries(req_logger, attempt, url_for_log, exc)
                 raise
-            req_logger.log(
-                policy.retry_log_level,
-                "%s failed (attempt %s/%s). Retrying in %.1f sec url=%s error=%r",
-                policy.operation_name,
-                attempt,
-                policy.max_attempts,
-                delay,
-                url_for_log,
-                exc,
-            )
+            policy.log_retrying(req_logger, attempt, delay, url_for_log, exc)
             time.sleep(delay)
             delay *= policy.backoff_factor
     if last_exc is not None:
         raise last_exc
     raise RuntimeError("retry loop ended unexpectedly")
+
+
+def _wrap_sync(func: Callable[..., _T], prepare: Callable[[dict], _PreparedCall], policy: _RetryPolicy):
+    def wrapper(*args, **kwargs) -> _T:
+        call = prepare(kwargs)
+        if not call.use_retry or policy.max_attempts <= 1:
+            return func(*args, **call.kwargs)
+        return _run_with_retries(func, args, call.kwargs, policy, req_logger=call.logger, url_for_log=call.url)
+
+    return wrapper
 
 
 def retry_with_backoff(
@@ -103,26 +164,7 @@ def retry_with_backoff(
         no_more_retries_log_level=no_more_retries_log_level,
         operation_name=operation_name,
     )
-
-    def decorator(func: Callable[..., _T]) -> Callable[..., _T]:
-        sig = inspect.signature(func)
-        params = sig.parameters
-        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-        param_names = set(params.keys())
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> _T:
-            use_retry = bool(kwargs.pop("use_retry", False))
-            req_logger = kwargs.pop("logger", None) or logging.getLogger(func.__module__)
-            url_for_log = kwargs.get("url")
-            kwargs = _call_kwargs(kwargs, param_names, has_var_keyword, req_logger)
-            if not use_retry or max_attempts <= 1:
-                return func(*args, **kwargs)
-            return _run_with_retries(func, args, kwargs, policy, req_logger=req_logger, url_for_log=url_for_log)
-
-        return wrapper
-
-    return decorator
+    return _retry_decorator(policy, _wrap_sync)
 
 
 __all__ = ["retry_with_backoff"]

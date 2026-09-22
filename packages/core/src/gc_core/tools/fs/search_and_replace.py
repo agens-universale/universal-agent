@@ -1,4 +1,3 @@
-import difflib
 import functools
 import json
 from typing import Any, Dict, Optional
@@ -11,23 +10,18 @@ from gc_core.tools.fs.edit_line_endings import (
     resolve_edit_line_endings,
 )
 from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
+from gc_core.tools.fs.literal_edit_common import (
+    LoadError,
+    build_unified_diff,
+    diff_arg_error,
+    encode_and_write,
+    load_text_source,
+    splice_replacements,
+)
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.file_text import (
-    check_expected_file_sha256,
-    decode_text_bytes,
-    is_valid_sha256_hex,
-    sha256_hex_of_bytes,
-    try_encode_text_bytes,
-)
-from gc_core.utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
+from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
-
-
-class _LoadError:
-    def __init__(self, message: str, error: Dict[str, Any]) -> None:
-        self.message = message
-        self.error = error
 
 
 def _replace_arg_error(
@@ -47,7 +41,7 @@ def _replace_arg_error(
     return (
         _text_arg_error(path, search, replace, dry_run)
         or _occurrence_arg_error(expected_matches, occurrence)
-        or _diff_arg_error(backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256)
+        or diff_arg_error(backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256)
     )
 
 
@@ -78,33 +72,6 @@ def _occurrence_arg_error(expected_matches, occurrence) -> "tuple[str, Dict[str,
         return "Argument 'expected_matches' is required when occurrence='all'.", {
             "type": "invalid_argument",
             "field": "expected_matches",
-        }
-    return None
-
-
-def _diff_arg_error(
-    backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
-) -> "tuple[str, Dict[str, Any]] | None":
-    if not isinstance(backup, bool):
-        return "Argument 'backup' must be a boolean.", {"type": "invalid_argument", "field": "backup"}
-    if not isinstance(return_diff, bool):
-        return "Argument 'return_diff' must be a boolean.", {"type": "invalid_argument", "field": "return_diff"}
-    if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
-        return "Argument 'diff_context_lines' must be a non-negative integer.", {
-            "type": "invalid_argument",
-            "field": "diff_context_lines",
-        }
-    if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
-        return "Argument 'max_diff_chars' must be a positive integer.", {
-            "type": "invalid_argument",
-            "field": "max_diff_chars",
-        }
-    if expected_file_sha256 is not None and (
-        not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256)
-    ):
-        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {
-            "type": "invalid_argument",
-            "field": "expected_file_sha256",
         }
     return None
 
@@ -175,17 +142,6 @@ def _select_entries(match_entries: list, occurrence) -> tuple:
     return [match_entries[target_idx]], None
 
 
-def _splice_replacements(content: str, selected_entries: list, search: str, replace: str) -> str:
-    parts: list[str] = []
-    prev_end = 0
-    for start_idx, _, _ in sorted(selected_entries, key=lambda x: x[0]):
-        parts.append(content[prev_end:start_idx])
-        parts.append(replace)
-        prev_end = start_idx + len(search)
-    parts.append(content[prev_end:])
-    return "".join(parts)
-
-
 class SearchAndReplace(AbstractSimpleTool):
     """
     Tool: search_and_replace
@@ -195,30 +151,6 @@ class SearchAndReplace(AbstractSimpleTool):
 
     default_diff_context_lines = 3
     default_max_diff_chars = 12000
-
-    @staticmethod
-    def _build_unified_diff(
-        path: str,
-        old_content: str,
-        new_content: str,
-        *,
-        context_lines: int,
-        max_chars: int,
-    ) -> tuple[str, bool]:
-        diff_text = "".join(
-            line if line.endswith("\n") else f"{line}\n"
-            for line in difflib.unified_diff(
-                old_content.splitlines(keepends=True),
-                new_content.splitlines(keepends=True),
-                fromfile=path,
-                tofile=path,
-                n=context_lines,
-                lineterm="\n",
-            )
-        )
-        if len(diff_text) <= max_chars:
-            return diff_text, False
-        return diff_text[:max_chars], True
 
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -444,36 +376,10 @@ Update version string:
             error=error,
         )
 
-    async def _load_source(self, path: str, encoding: "str | None", expected_file_sha256: "str | None"):
-        """(content, encoding_used) либо _LoadError с готовыми message/error."""
-        try:
-            file_size = await self._backend.getsize(path)
-        except Exception as e:
-            return _LoadError("Failed to get file size.", {"type": "stat_failed", "message": str(e)})
-        size_err = check_file_size(
-            file_size,
-            fs_mutate_max_bytes(self._config_dict),
-            operation="search_and_replace",
-        )
-        if size_err is not None:
-            return _LoadError(size_err["message"], size_err)
-        try:
-            raw = await self._backend.read_bytes(path)
-        except Exception as e:
-            return _LoadError("Failed to read file.", {"type": "read_failed", "message": str(e)})
-        decoded = decode_text_bytes(raw, encoding=encoding)
-        if not decoded.ok:
-            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
-            return _LoadError(err.get("message", "Failed to decode file."), err)
-        stale_error = check_expected_file_sha256(sha256_hex_of_bytes(raw), expected_file_sha256)
-        if stale_error is not None:
-            return _LoadError(stale_error["message"], stale_error)
-        return decoded.text or "", decoded.encoding_used
-
     def _diff_if_requested(self, return_diff: bool, path, old: str, new: str, context_lines: int, max_chars: int):
         if not return_diff:
             return None, False
-        return self._build_unified_diff(path, old, new, context_lines=context_lines, max_chars=max_chars)
+        return build_unified_diff(path, old, new, context_lines=context_lines, max_chars=max_chars)
 
     async def _maybe_backup(self, path: str, backup: bool) -> "tuple[str | None, dict | None]":
         if not backup:
@@ -484,18 +390,6 @@ Update version string:
         except Exception as e:
             return backup_path, {"type": "backup_failed", "message": str(e)}
         return backup_path, None
-
-    async def _encode_and_write(self, path: str, new_content: str, encoding_used: "str | None"):
-        """(bytes, None) либо (None, (message, error))."""
-        try:
-            out_bytes, encode_err = try_encode_text_bytes(new_content, encoding_used or "utf-8")
-            if encode_err is not None:
-                return None, (encode_err.get("message", "Failed to encode file."), encode_err)
-            assert out_bytes is not None
-            await self._backend.write_bytes(path, out_bytes)
-        except Exception as e:
-            return None, ("Failed to write file.", {"type": "write_failed", "message": str(e)})
-        return out_bytes, None
 
     @enforce_write_guard(path_arg="path", operation="search_and_replace")
     async def acall(
@@ -560,8 +454,14 @@ Update version string:
                 message="Argument 'search' cannot be an empty string.",
                 error={"type": "invalid_argument", "field": "search"},
             )
-        loaded = await self._load_source(path, encoding, expected_file_sha256)
-        if isinstance(loaded, _LoadError):
+        loaded = await load_text_source(
+            self,
+            path,
+            operation="search_and_replace",
+            encoding=encoding,
+            expected_file_sha256=expected_file_sha256,
+        )
+        if isinstance(loaded, LoadError):
             return fail(message=loaded.message, error=loaded.error)
         content, encoding_used = loaded
         original_search = search
@@ -593,7 +493,7 @@ Update version string:
         match_ranges = [{"start_line": entry[1], "end_line": entry[2]} for entry in selected_entries]
         replaced_count = len(selected_entries)
 
-        new_content = _splice_replacements(content, selected_entries, search, replace)
+        new_content = splice_replacements(content, selected_entries, search, replace)
         diff_text, diff_truncated = self._diff_if_requested(
             return_diff, path, content, new_content, diff_context_lines, max_diff_chars
         )
@@ -643,7 +543,7 @@ Update version string:
                 error=backup_error,
             )
 
-        out_bytes, write_error = await self._encode_and_write(path, new_content, encoding_used)
+        out_bytes, write_error = await encode_and_write(self, path, new_content, encoding_used)
         if write_error is not None:
             return _result(
                 ok=False,

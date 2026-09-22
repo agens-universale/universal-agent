@@ -67,7 +67,7 @@ def _cases() -> list[_Case]:
     def _load_config_ex(path, **_):
         from gc_core import config as config_mod
 
-        return config_mod.load_config_ex(str(path), apply_to_process=False)
+        return config_mod.load_config_ex(str(path))
 
     def _read_document(path, **_):
         from gc_core import config_raw

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional, Sequence
+from typing import AsyncIterator, Callable, Iterable, Optional, Sequence
 
 
 @dataclass(frozen=True)
@@ -120,6 +120,49 @@ def iter_files_from_flat(
         dir_children[parent_rel] = files + dirs
 
     yield from _dfs_flat(dir_children, "", should_descend, join, root)
+
+
+class FlatWalkMixin:
+    """``iter_walk``/``iter_files`` поверх материализованного ``walk()``.
+
+    Для бэкендов без нативного обхода: ``HarborBackend`` и его двойник
+    ``gc_testkit.harbor_fakes.FakeBackend`` собирают плоский список
+    ``(relpath, is_dir)`` и раскладывают его в порядке ``os.walk``. Раньше эти
+    два метода были скопированы в оба класса слово в слово — и фейк мог
+    незаметно разойтись с тем, что он подменяет.
+
+    Класс-хозяин даёт ``async walk(path)`` и ``join(base, name)``. В списке
+    баз миксин стоит ПЕРЕД ``FsBackend``: его методы закрывают абстрактные.
+    """
+
+    async def iter_walk(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> AsyncIterator[tuple[str, bool]]:
+        """DFS from flat ``find`` listing (materialized ``walk()``)."""
+        for item in iter_walk_from_flat(
+            await self.walk(path),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        ):
+            yield item
+
+    async def iter_files(
+        self,
+        path: str,
+        *,
+        should_descend: Optional[Callable[[str], bool]] = None,
+    ) -> AsyncIterator[str]:
+        for item in iter_files_from_flat(
+            await self.walk(path),
+            should_descend=should_descend,
+            join=self.join,
+            root=path,
+        ):
+            yield item
 
 
 def _group_by_parent(entries: list) -> dict:
