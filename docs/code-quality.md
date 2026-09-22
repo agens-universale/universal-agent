@@ -49,7 +49,8 @@ uv run python scripts/sonar_like_check.py packages/*/src packages/core/assets sc
 
 | Что | Область | Строгость |
 | --- | --- | --- |
-| `ruff format`, `ruff check` | весь репозиторий, включая тесты и `scripts/` | ноль нарушений |
+| `ruff format` | весь репозиторий, включая тесты и `scripts/` | ноль расхождений |
+| `ruff check` | весь репозиторий **кроме** `**/tests/**` и `conftest.py` | ноль нарушений |
 | complexipy (S3776) | `packages/*/src`, `packages/core/assets/skills/*/scripts`, `scripts/`, `integrations/` | core, cli, scripts, integrations — ноль; tui, server, mcp, testkit — снимок (см. ниже) |
 | `sonar_like_check.py` | тот же прод-код плюс `docs/*.html` | ноль нарушений во всех модулях |
 
@@ -110,9 +111,15 @@ uv run python scripts/sonar_like_check.py packages/*/src packages/core/assets sc
 * `ARG002`/`ARG003` выключены: «лишний» параметр метода — часть контракта
   (хуки тулов, `prompt_description(cls, config_dict)`).
 
-В тестах дополнительно игнорируются `ARG`, `F841`, `SIM102`, `PLR0913`,
-`B011`, `B017`, `RUF043`, `N815`, `ERA001`, `SIM115` — всё это жанровые
-особенности наборов, а не дефекты.
+**Наборы линтер не проверяет вовсе** (`[tool.ruff.lint] exclude`). У тестов
+свой жанр: фикстуры, которые «не используются», импорт ради побочного эффекта,
+голые `assert`. А главное — автофикс там опаснее, чем полезен: правило F401
+уже успело съесть `from gc_server import server` внутри
+`pytest.raises(SystemExit)`, где импорт и БЫЛ проверяемым действием, оставив
+вместо него `pass`. Тест при этом позеленел и перестал что-либо проверять.
+
+Форматтер по тестам идёт как и по остальному коду: единый стиль нужен и им, а
+переписать код `ruff format` не может.
 
 ## Снимок complexipy: замороженный долг
 

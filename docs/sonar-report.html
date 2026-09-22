@@ -354,8 +354,9 @@
 <code>ruff check --fix</code>, <code>ruff format</code>, complexipy, <code>sonar_like_check.py</code>,
 <code>uv lock --check</code>.</p>
 <ul>
-  <li><b>ruff</b> — линт и формат по всему репозиторию (кроме <code>external/</code>), карта правил
-      Sonar в <code>[tool.ruff.lint]</code>;</li>
+  <li><b>ruff</b> — формат по всему репозиторию (кроме <code>external/</code>), линт там же, но
+      <b>без тестов</b>: у наборов свой жанр, и автофикс в них опаснее, чем полезен. Карта правил
+      Sonar — в <code>[tool.ruff.lint]</code>;</li>
   <li><b>complexipy</b> — S3776 с порогом 15 и снимком для замороженного долга;</li>
   <li><b>scripts/sonar_like_check.py</b> — S1192, S5713, S3516, S3358, S4144, S108, S5527, S5843,
       S6353, S5857 и Web:S5256 для <code>.html</code>. Понимает <code>NOSONAR</code>.

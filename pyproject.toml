@@ -146,6 +146,12 @@ extend-exclude = ["external", ".venv", "packages/*/external"]
 docstring-code-format = false
 
 [tool.ruff.lint]
+# Наборы линтер НЕ проверяет: у тестов свой жанр (фикстуры «не используются»,
+# импорт ради побочного эффекта, голые assert'ы), и автофикс там опаснее, чем
+# полезен — он уже успел съесть `from gc_server import server` внутри
+# `pytest.raises(SystemExit)`, где импорт и был предметом проверки. Формат
+# (`ruff format`) по тестам по-прежнему идёт: единый стиль нужен и им.
+exclude = ["**/tests/**", "tests/**", "**/conftest.py"]
 select = [
     "F", "E", "W",   # pyflakes + pycodestyle
     "I",             # порядок импортов (заменяет isort)
@@ -206,15 +212,6 @@ ignore = [
 # S107 у Sonar: больше 13 параметров. Для существующего кода — won't fix
 # построчным `# noqa: PLR0913`, новые функции правило ловит.
 max-args = 13
-
-[tool.ruff.lint.per-file-ignores]
-# Тесты: неиспользуемые фикстуры и переменные — часть жанра, ERA001 ловит
-# закомментированные примеры данных, B011/B017 — осознанные assert False и
-# широкий pytest.raises, SIM115 — однострочные open(...).read() в проверках,
-# где закрытие дескриптора ничего не проверяет.
-"**/tests/**" = ["ARG", "F841", "SIM102", "PLR0913", "B011", "B017", "RUF043", "N815", "ERA001", "SIM115"]
-"tests/**" = ["ARG", "F841", "SIM102", "PLR0913", "B011", "B017", "RUF043", "N815", "ERA001", "SIM115"]
-"**/conftest.py" = ["ARG", "F841", "SIM102", "PLR0913", "B011", "B017", "RUF043", "N815", "ERA001", "SIM115"]
 
 [tool.complexipy]
 # S3776. Область — прод-код всех пакетов: ровно то, что видит sonar.sources.
