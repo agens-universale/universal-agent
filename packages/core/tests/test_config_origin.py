@@ -3,10 +3,9 @@
 Тесты — на НАСТОЯЩИХ файлах и НАСТОЯЩЕМ os.environ: мок-путь уже прятал дыру
 с ${ENV:VAR} (см. tests/tui/test_settings_screen.py).
 """
-import os
 from pathlib import Path
 
-from gc_core.config_origin import Origin, _overlay_paths, origins
+from gc_core.config_origin import _overlay_paths, origins
 
 
 def _write(path: Path, text: str) -> str:

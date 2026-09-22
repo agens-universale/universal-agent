@@ -17,7 +17,6 @@ import asyncio
 import time
 
 import pytest
-
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry

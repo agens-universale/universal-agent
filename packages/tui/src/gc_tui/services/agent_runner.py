@@ -82,7 +82,7 @@ def _tail_batch(messages: list) -> dict:
     return {"msgs": texts, **extra}
 
 
-async def _compact_body(executor, thread_id: str, system: "str | None") -> None:
+async def _compact_body(executor, thread_id: str, system: str | None) -> None:
     """Форс-сжатие со своим loop — и с той же уборкой, что у прогона.
 
     ``/compact`` поднимает собственный ``asyncio.run``, значит заводит и
@@ -119,7 +119,7 @@ class AgentRunner:
         self._build_lock = threading.Lock()
         self._on_error = on_error
         self._on_complete = on_complete
-        self._stdin_queue: "queue.Queue[str]" = queue.Queue()
+        self._stdin_queue: queue.Queue[str] = queue.Queue()
         self._prebuild_messages: list[dict] = []
         #: Прогон ещё принимает сообщения в свою очередь. Ставится при запуске
         #: воркера и снимается им под `_lock` в том же шаге, где он убедился,

@@ -1,5 +1,6 @@
 """trace_mapper на НОВЫХ именах тулов (master namespaces) — рендер не ломается."""
 import json
+
 from gc_tui.services.trace_mapper import map_message
 
 

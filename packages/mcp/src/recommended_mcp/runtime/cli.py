@@ -31,8 +31,8 @@ def _inst():
 
 def _load_manifest_entries(config: str | None = None):
     """(entries, recipe_root). Резолвит манифест (config=None → дефолтная цепочка)."""
-    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path, recipe_root
     from recommended_mcp.manifest import load_manifest
+    from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
     path = resolve_install_manifest_path(config)
     return load_manifest(path), recipe_root()
 
@@ -45,8 +45,8 @@ def _agent_dep_dir():
 def _load_repo_url(config: Optional[str] = None):
     from recommended_mcp.runtime.repo_path import ensure_repo_on_sys_path
     ensure_repo_on_sys_path()
-    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path
     from recommended_mcp import manifest as _r
+    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path
     load_repo_url = _r.load_repo_url
     return load_repo_url(resolve_install_manifest_path(config))
 
@@ -65,8 +65,9 @@ def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
 
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
-    from recommended_mcp.runtime import wiring
     from gc_core.config_modules.env_vars import gc_paths
+
+    from recommended_mcp.runtime import wiring
     npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
     cache = str(gc_paths()["cache"])
     recipe_dir = (root / entry.path).resolve()
@@ -222,6 +223,7 @@ def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = Fals
             print("[done] все MCP отключены (пакеты оставлены)")
             return 0
         import shutil
+
         from gc_core.config_modules.env_vars import gc_paths
         data = Path(gc_paths()["data"])
         for sub in ("recommended_mcp", "node"):

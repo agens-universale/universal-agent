@@ -3,12 +3,11 @@ import json
 import re
 
 import pytest
-
 from gc_core.tools.connect_mcp.os_backend_client import (
+    _REQUESTS_PER_OPERATION,
     EXEC_RESULT_MARKER,
     McpExecCarrierError,
     OsBackendStatelessClient,
-    _REQUESTS_PER_OPERATION,
     _split_share,
 )
 

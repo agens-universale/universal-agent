@@ -1,9 +1,9 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.harbor_fakes import bind_os_backend
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 class RecordingSandboxBackend(FsBackend):

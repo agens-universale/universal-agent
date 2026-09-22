@@ -235,8 +235,8 @@ async def test_menu_preview_names_the_cloud_endpoint(tmp_path):
     """Превью «Голосовой ввод» в меню — сам адрес и модель, зеркально локальной строке
     («локальный сервис · модель»): родовое «свой endpoint» не говорило ничего, а
     строка «Подключение» рядом уже показывает полный URL (смок владельца 2026-08-07)."""
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
@@ -446,8 +446,8 @@ async def test_cursor_starts_on_the_active_mode_row(tmp_path):
     """Вход в секцию — на строке ДЕЙСТВУЮЩЕГО режима: облачный юзер без батарейки иначе
     первым кадром видел бы «Enter — установить», а не свои настройки."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_tui.screens.settings import _VOICE_ROW_CLOUD, _VOICE_ROW_LOCAL
+    from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
@@ -632,8 +632,8 @@ async def test_ctrl_u_clears_the_saved_voice_token(tmp_path):
     жил в config.yml, пока его не удалят руками. Футер обещает клавишу ровно там, где
     ей есть что делать."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_tui.screens.settings import _VOICE_FOOTER_CLOUD_TOKEN
+    from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
@@ -702,8 +702,8 @@ async def test_token_placeholder_empty_without_saved_secret(tmp_path):
 def _token_hint(scr):
     """Подпись ПОД полем Token (канон `_mount_field_hints`) или None. Подписи полей
     редактора несут `.onb-hint`, контекстная — `.set-hint`: по нему и различаем."""
-    from textual.widgets import Static
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+    from textual.widgets import Static
     editors = list(scr.query(VoiceEndpointEditor))
     if not editors:
         return None
@@ -881,8 +881,7 @@ async def test_footer_turns_tab_around_when_the_cursor_enters_a_field(tmp_path):
     Конфиг здесь БЕЗ сохранённого токена: с ним футер обещал бы ещё и `Ctrl+U`
     (`_VOICE_FOOTER_CLOUD_TOKEN`), а тест — про разворот Tab, не про очистку."""
     from gc_tui.app import TuiApp
-    from gc_tui.screens.settings import (_TAB_TO_FIELDS, _TAB_TO_VARIANTS,
-                                      _VOICE_FOOTER_CLOUD_FIELD)
+    from gc_tui.screens.settings import _TAB_TO_FIELDS, _TAB_TO_VARIANTS, _VOICE_FOOTER_CLOUD_FIELD
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, CLOUD, config_text=(
@@ -907,8 +906,7 @@ def test_voice_footers_say_the_right_thing_about_lists_and_del():
     только на строке «Локальный сервис». Сама ширина стережётся отдельно, переносом на
     самом узком окне (`test_footer_contract.test_all_footers_fit_the_two_line_budget`)."""
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
-    from gc_tui.screens.settings import (
-        _VOICE_FOOTER_CLOUD, _VOICE_FOOTER_CLOUD_LIST, _VOICE_FOOTER_LOCAL_FRESH)
+    from gc_tui.screens.settings import _VOICE_FOOTER_CLOUD, _VOICE_FOOTER_CLOUD_LIST, _VOICE_FOOTER_LOCAL_FRESH
     assert LIST_CLOSED_HINT in _VOICE_FOOTER_CLOUD_LIST
     for footer in (_VOICE_FOOTER_CLOUD, _VOICE_FOOTER_CLOUD_LIST, _VOICE_FOOTER_LOCAL_FRESH):
         assert "Del" not in footer          # облако + непоставленный сервис: сносить нечего
@@ -1560,9 +1558,9 @@ async def test_cloud_save_blocked_on_a_readonly_config(tmp_path, monkeypatch):
     """Установка из пакета: config.yml — шаблон, писать в него нельзя. Остальные секции
     в этом случае объясняются, а голосовая шла писать вслепую и ловила только ValueError:
     прилетавший из файловой системы OSError ронял приложение."""
+    from gc_core import config as config_mod
     from gc_tui.app import TuiApp
     from textual.widgets import Input, Static
-    from gc_core import config as config_mod
 
     def _readonly(*a, **kw):
         raise PermissionError("Permission denied")
@@ -2207,8 +2205,7 @@ async def test_lang_list_footer_promises_the_probe_only_in_the_cloud_pane(tmp_pa
     §9.2 канона) — ради этого константа и раздвоена на `_VOICE_FOOTER_LANG_LIST_LOCAL`/
     `_VOICE_FOOTER_LANG_LIST_CLOUD`."""
     from gc_tui.app import TuiApp
-    from gc_tui.screens.settings import (
-        _VOICE_FOOTER_LANG_LIST_LOCAL, _VOICE_FOOTER_LANG_LIST_CLOUD)
+    from gc_tui.screens.settings import _VOICE_FOOTER_LANG_LIST_CLOUD, _VOICE_FOOTER_LANG_LIST_LOCAL
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, LOCAL)
@@ -2861,10 +2858,13 @@ async def test_footer_follows_the_url_field_and_its_list(tmp_path):
     видны, подсвеченной нет — §2.4) — «оставить свой адрес», фильтр нашёл пресет —
     «выбор адреса», фильтр без совпадений — общая строка «сохранить как есть» (та же,
     что у языка и моделей, спека §4) с пробой (облачная панель, спека 2026-08-06 §2.5)."""
-    from textual.widgets import Input
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import (
-        _VOICE_FOOTER_CLOUD_LIST, _VOICE_FOOTER_URL_LIST, _VOICE_FOOTER_LIST_NO_MATCH_CLOUD)
+        _VOICE_FOOTER_CLOUD_LIST,
+        _VOICE_FOOTER_LIST_NO_MATCH_CLOUD,
+        _VOICE_FOOTER_URL_LIST,
+    )
+    from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
@@ -3312,8 +3312,8 @@ async def test_voice_editor_is_the_freshly_mounted_one(tmp_path):
 async def test_probe_in_flight_animates_like_connection(tmp_path):
     """«В полёте» — та же волна, что у server-probe «Подключения», а не статичная строка."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input, Static
     from gc_tui.widgets.loading_wave import wave_glyph
+    from textual.widgets import Input, Static
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF)
@@ -3337,7 +3337,7 @@ async def test_probe_verdict_dropped_on_leaving_section(tmp_path):
     ляжет на свежие поля, а повторный вход показывает чистую строку."""
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import _MODES, _VOICE
-    from textual.widgets import Input, Static
+    from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF)
@@ -3387,8 +3387,8 @@ async def test_save_flash_visible_after_install_and_mouse_click(tmp_path, monkey
     плашка того же такта ложилась в обречённый виджет — исчезала вместе с ним. Путь без
     промежуточной клавиши (мышью в поле) вскрывает это: подтверждение сохранения не видно."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_tui.voice_runtime import autostart as autostart
+    from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
@@ -3544,8 +3544,8 @@ async def test_install_suspend_failing_after_operation_does_not_repeat(tmp_path)
 # --- подъём сервиса воркером и гейт колбэка ---------------------------------
 
 async def _wait_flash(pilot, scr, needle, tries=60):
-    from textual.widgets import Static
     from textual.css.query import NoMatches
+    from textual.widgets import Static
     for _ in range(tries):
         await pilot.pause()
         try:
@@ -3571,6 +3571,7 @@ async def test_service_start_does_not_block_ui(tmp_path, monkeypatch):
     воркер, обработчик клавиши возвращается сразу."""
     import threading
     import time
+
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
@@ -3620,6 +3621,7 @@ async def test_service_not_started_flashes_hint(tmp_path, monkeypatch):
 async def _install_with_slow_service(pilot, app, tmp_path, monkeypatch, status=OFF):
     """Секция «Голосовой ввод» с летящим (заблокированным) подъёмом сервиса."""
     import threading
+
     from gc_tui.voice_runtime import autostart as autostart
     entered = threading.Event()
     release = threading.Event()
@@ -3966,7 +3968,7 @@ def test_open_list_hint_offers_refresh_not_reopen():
     2026-08-06 §2, §4.1: роль ушла с Ctrl+Space, хинт её больше не называет); «вернуть»
     там было бы про действие, которое в этот момент не нужно."""
     from gc_tui.editors.field_list import LIST_CLOSED_HINT as _LIST_CLOSED_HINT
-    from gc_tui.editors.voice_endpoint import _MODEL_HINT, _LANG_HINT
+    from gc_tui.editors.voice_endpoint import _LANG_HINT, _MODEL_HINT
     assert "Alt+↓ — перечитать список" in _MODEL_HINT
     assert "Ctrl+Space" not in _MODEL_HINT
     assert "Ctrl+Space" not in _LANG_HINT          # локальный список перечитывать неоткуда
@@ -4069,8 +4071,8 @@ async def test_install_asks_before_it_starts(tmp_path):
 async def test_escape_cancels_the_install_confirm(tmp_path):
     """Esc снимает подтверждение и оставляет в секции — как у сноса."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
     from gc_tui.screens.settings import _VOICE
+    from textual.widgets import Static
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF)
@@ -4133,8 +4135,8 @@ async def test_tab_moves_between_groups(tmp_path):
 async def test_shift_tab_is_symmetric_to_tab(tmp_path):
     """Shift+Tab — предыдущая группа, симметрично Tab, и тоже перехвачен: без явной
     ветки он остался бы живым focus_previous и увёл бы фокус мимо курсора (§4.2.7)."""
-    from textual.widgets import Input
     from form_harness import settings_voice_section
+    from textual.widgets import Input
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         await pilot.press("shift+tab")
         await pilot.pause()
@@ -4150,8 +4152,8 @@ async def test_shift_tab_is_symmetric_to_tab(tmp_path):
 async def test_arrows_in_fields_do_not_move_the_variant_rows(tmp_path):
     """Стоя в поле, стрелка двигает по полям, а не по строкам режима (спека §4.2.5):
     раньше лента была сквозной, и стрелка из поля переключала режим под собой."""
-    from textual.widgets import Input
     from form_harness import settings_voice_section
+    from textual.widgets import Input
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         row_before = scr._voice_cursor_position()
         await pilot.press("tab")                           # в поля
@@ -4219,8 +4221,8 @@ async def test_remembered_field_position_is_clamped(tmp_path):
 @pytest.mark.asyncio
 async def test_mouse_click_moves_the_cursor(tmp_path):
     """Клик по полю переносит туда курсор, а не только фокус (спека §4.3)."""
-    from textual.widgets import Input
     from form_harness import settings_voice_section
+    from textual.widgets import Input
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
         assert scr._voice_cursor_group() == "variants"
         scr.query_one("#voice-model", Input).focus()
@@ -4289,9 +4291,9 @@ async def test_alive_is_measured_by_a_worker_and_lands_in_the_row(tmp_path):
 async def test_alive_delivery_updates_the_menu_glyph(tmp_path):
     """Меню: локальный режим даёт ✓ только живым сервисом — доставка воркера обязана
     перерисовать глиф с «—» на «✓», не дожидаясь захода в секцию."""
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import _VOICE
+    from textual.widgets import Static
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_gated_screen(tmp_path, LOCAL)
@@ -4338,9 +4340,9 @@ async def test_alive_delivery_updates_menu_rows_in_place(tmp_path):
     ~полсекунды после каждого захода в /settings (живая приёмка 2026-08-07 — свой
     endpoint + не поднятый сервис, где видимая часть меню от живости не зависит
     вовсе). Канон точечности — refresh_update_glyph."""
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import _VOICE
+    from textual.widgets import Static
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_gated_screen(tmp_path, LOCAL)

@@ -54,7 +54,7 @@ def _run_git(launch_root: PathLike, args: Sequence[str]) -> GitRunResult:
 def _kind_from_xy(x: str, y: str) -> GitStatusKind:
     if x == "D" or y == "D":
         return "deleted"
-    if x == "A" or x == "?" or y == "?":
+    if x in {"A", "?"} or y == "?":
         return "created"
     return "modified"
 

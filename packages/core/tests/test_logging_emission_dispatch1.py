@@ -14,12 +14,9 @@ Each test drives real code with a jsonl-mode per-run logger from
 import json
 
 import pytest
-import requests
-
 from gc_core.utils.logging_module import create_run_logger
-
-from transport_fakes import install_transport, json_response, stream_response
 from gc_testkit import run_coro
+from transport_fakes import install_transport, json_response, stream_response
 
 
 def _make_logger(tmp_path, level="info"):
@@ -52,7 +49,7 @@ def _flush(logger):
 
 
 def test_summary_started_and_precheck_events(tmp_path):
-    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_started, log_compaction_precheck
+    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_precheck, log_compaction_started
 
     logger, path = _make_logger(tmp_path)
     ctx = SummaryCompactionLog(trigger_reason="turn_end", thread_id="t1", trigger_volume=10)
@@ -78,7 +75,7 @@ def test_summary_started_and_precheck_events(tmp_path):
 
 
 def test_summary_raw_text_and_message_body_events(tmp_path):
-    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_summary_raw_text, log_summary_message_body
+    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_summary_message_body, log_summary_raw_text
 
     logger, path = _make_logger(tmp_path)
     ctx = SummaryCompactionLog(trigger_reason="pre_run", thread_id="t2", trigger_volume=1)
@@ -285,7 +282,7 @@ def test_system_prompt_read_failed_event(tmp_path):
 
     prompt_path = str(tmp_path / "missing_prompt.txt")
     try:
-        with open(prompt_path, "r", encoding="utf-8") as fd:
+        with open(prompt_path, encoding="utf-8") as fd:
             fd.read()
     except OSError:
         logger.warning(

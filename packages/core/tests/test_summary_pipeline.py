@@ -1,12 +1,12 @@
 import tempfile
 import types
 
-from gc_testkit.intent_fixtures import intent_user_ask_texts, meta_intent_log, user_ask_records
-from gc_core.intent_log import append_user_ask, serialize_for_meta
+from gc_core.intent_log import append_user_ask
 from gc_core.summarize.compaction import amaybe_run_summary_compaction
 from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
-from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit import run_coro
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.intent_fixtures import intent_user_ask_texts, meta_intent_log, user_ask_records
 
 TS = "2026-05-30T11:35:08Z"
 

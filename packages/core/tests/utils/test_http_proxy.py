@@ -3,7 +3,6 @@ RED phase — tests for utils/http_proxy.resolve_proxies.
 Covers: config / env / empty / override / strip / NO_PROXY bypass on url.
 """
 
-import pytest
 
 
 class TestResolveProxies:

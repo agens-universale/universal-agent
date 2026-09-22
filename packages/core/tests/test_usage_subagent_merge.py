@@ -1,11 +1,11 @@
 """Фаза 4: usage субагента сворачивается в категорию subagent родителя."""
 
-from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
+from gc_testkit import as_coro
 
 
 class _FakeChildState:

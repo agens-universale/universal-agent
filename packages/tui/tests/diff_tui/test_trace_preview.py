@@ -1,8 +1,6 @@
 """Diff-preview для trace: visual_diff → первые 3 строки (не tool-output)."""
 from __future__ import annotations
 
-import json
-
 from gc_core.config_modules import env_vars
 from gc_tui.diff_tui.service import DiffService
 from gc_tui.diff_tui.store import DiffStore

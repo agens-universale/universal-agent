@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Mapping
 
 from gc_core.intent_log.record import (
@@ -18,7 +18,7 @@ from gc_core.intent_log.serialize import serialize
 
 def utc_now_ts() -> str:
     return (
-        datetime.now(timezone.utc)
+        datetime.now(UTC)
         .replace(microsecond=0)
         .strftime("%Y-%m-%dT%H:%M:%SZ")
     )

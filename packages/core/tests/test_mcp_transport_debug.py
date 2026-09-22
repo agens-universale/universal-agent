@@ -1,7 +1,5 @@
 from unittest.mock import MagicMock
 
-import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 

@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
 
 from gc_core.mcp_runtime.env import augment_process_env, resolve_mcp_command
+
 from recommended_mcp.manifest import RunSpec
 
 

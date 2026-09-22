@@ -2,11 +2,10 @@ import importlib
 import logging
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
+
+from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
-from gc_testkit import as_coro
 
 
 def teardown_module(_module) -> None:

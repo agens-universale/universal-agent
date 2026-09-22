@@ -6,11 +6,11 @@
 """
 import inspect
 import json
-import pytest
 
+import pytest
 from gc_core.tools.fs.find_in_files import FindInFiles
-from gc_testkit.helpers.tool_ctx import with_local_ctx
 from gc_core.utils import native_fs_search as native_fs_search
+from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 MARKER = "sk-MUST-NOT-LEAK"
 

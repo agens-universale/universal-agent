@@ -1,8 +1,7 @@
 """Tool-пара рендерится как один widget, который мутирует от running к ok."""
 import json
+
 import pytest
-
-
 
 
 @pytest.mark.asyncio
@@ -203,9 +202,9 @@ async def test_local_stop_finalizes_running_rows(tmp_path):
     """Локальный стоп: runner перестал быть живым → на следующем тике поллинга
     открытые tool-строки финализируются «прервано»."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.containers import VerticalScroll
 
     class _ToggleRunner:
         def __init__(self): self.live = True

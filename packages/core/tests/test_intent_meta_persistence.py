@@ -1,13 +1,18 @@
 import json
 
-import pytest
-
-from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_USER_ASK, IntentRecord, append_user_ask, deserialize_list, serialize_for_meta
+from gc_core.intent_log import (
+    ACTION_TOOL_AGGREGATED,
+    ACTION_USER_ASK,
+    IntentRecord,
+    append_user_ask,
+    deserialize_list,
+    serialize_for_meta,
+)
 from gc_core.intent_log.serialize import LEGACY_LOAD_TS
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError
+from gc_core.persistence.schema import STATE_SCHEMA_VERSION
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-from gc_core.states import SharedStateData, State
+from gc_core.states import State
 from gc_core.thread_store import load_thread_meta, save_thread_meta
 
 FIXED_TS = "2026-05-30T11:35:08Z"

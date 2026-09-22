@@ -5,7 +5,6 @@ State no longer knows anything about long memory — the injection lives in
 after state construction. These tests pin that contract and the resulting
 rendered prompt.
 """
-from pathlib import Path
 
 from gc_core.project_memory import attach_status_to_prompt_vars
 from gc_testkit.paths import ASSETS

@@ -26,10 +26,10 @@ def _write_thread_with_tool_call(tmp_path, tid, call_payload, result_payload):
 @pytest.mark.asyncio
 async def test_ctrl_click_opens_detail_screen_with_call_and_output_sections(tmp_path):
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual import events
 
     tid = "detail_test"
     _write_thread_with_tool_call(
@@ -66,10 +66,10 @@ async def test_ctrl_click_opens_detail_screen_with_call_and_output_sections(tmp_
 async def test_detail_screen_pending_row_shows_placeholder(tmp_path):
     """Если result ещё не пришёл — OUTPUT-секция показывает placeholder."""
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual import events
     from textual.widgets import Static
 
     tid = "detail_pending"
@@ -102,10 +102,10 @@ async def test_detail_screen_pending_row_shows_placeholder(tmp_path):
 async def test_detail_screen_plain_output_not_json(tmp_path):
     """Если output — не JSON (raw stdout): рендерится plain без подсветки, без падения."""
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual import events
     from textual.widgets import Static
 
     tid = "detail_plain"
@@ -144,12 +144,12 @@ async def test_detail_screen_payload_is_selectable(tmp_path):
     собирает текст только с виджетов, чей get_selection не None.
     """
     pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual import events
     from textual.selection import Selection
     from textual.widgets import Static
-    from gc_tui.app import TuiApp
-    from gc_tui.widgets.tool_call_row import ToolCallRow
-    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 
     tid = "detail_selectable"
     _write_thread_with_tool_call(

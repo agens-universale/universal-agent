@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
@@ -10,8 +9,8 @@ from gc_tui.widgets.tool_call_row import ToolCallRow
 @pytest.mark.asyncio
 async def test_batch_calls_first_active_rest_waiting():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
 
     class _LiveRunner:
         def is_running(self) -> bool:
@@ -40,8 +39,8 @@ async def test_batch_calls_first_active_rest_waiting():
 @pytest.mark.asyncio
 async def test_drain_mounts_nested_under_parent():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
 
     class _LiveRunner:
         def is_running(self) -> bool:
@@ -92,9 +91,9 @@ async def test_drain_mounts_nested_under_parent():
 async def test_nested_stays_after_parent_result():
     """После finish + result parent nested остаётся под ✓ (живая сессия)."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
+    from textual.containers import VerticalScroll
 
     class _LiveRunner:
         def is_running(self) -> bool:

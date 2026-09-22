@@ -1,6 +1,7 @@
 """Медиум-независимое ядро онбординга: декларатив полей + общий копи.
 Потребляют оба фронтенда (плоский onboarding_wizard, Textual OnboardingScreen)."""
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 ADDRESS_HINT = "напр. https://host/v1/chat/completions"

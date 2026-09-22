@@ -12,8 +12,8 @@ async def test_first_message_creates_task(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             captured["run"] = {"messages": messages, "thread_id": thread_id}
-            from pathlib import Path
             import json
+            from pathlib import Path
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
                 json.dumps({"type": "message", "seq": 1,
                             "ts_utc": "2026-05-21T12:00:00+00:00",
@@ -96,8 +96,8 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            from pathlib import Path
             import json
+            from pathlib import Path
             captured["thread_ids"].append(thread_id)
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
                 json.dumps({"type": "message", "seq": 1, "ts_utc": "...",
@@ -142,9 +142,9 @@ async def test_no_duplicate_user_reply(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
+            import json
             import time
             from pathlib import Path
-            import json
             # attach_active_task + pending mount на UI-потоке — до записи .jsonl.
             time.sleep(0.4)
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(

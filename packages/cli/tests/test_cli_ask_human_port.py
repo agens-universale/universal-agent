@@ -19,7 +19,6 @@ import threading
 import time
 
 import pytest
-
 from gc_cli.ask_human_port import make_cli_ask_human_port
 
 READER_THREAD = "gc-cli-ask-human"

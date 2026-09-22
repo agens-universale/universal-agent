@@ -14,7 +14,6 @@ import ssl
 
 import httpx
 import pytest
-
 from gc_tui.voice_runtime import net
 
 

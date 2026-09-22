@@ -7,8 +7,6 @@ from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.summary_spec import render_output_shape_for_prompt, render_tag_roles_for_prompt
 
 
-
-
 async def acompress_summary_text(
     *,
     ctx: Any,

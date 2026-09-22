@@ -16,7 +16,6 @@
 import json
 
 import pytest
-
 from gc_core.project_memory import compaction
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_testkit.helpers.tool_ctx import local_ctx

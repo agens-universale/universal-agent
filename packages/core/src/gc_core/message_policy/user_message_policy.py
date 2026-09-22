@@ -180,7 +180,7 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
     try:
         json.loads(args_text)
         error_text = "tool arguments were marked invalid by pre-send validation"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         error_text = f"invalid JSON in tool arguments: {exc}"
 
     mitigation = ""

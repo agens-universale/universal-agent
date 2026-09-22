@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from recommended_mcp.manifest import RunSpec
 from recommended_mcp.process_supervisor import (
     RunSupervisor,

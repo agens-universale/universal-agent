@@ -1,4 +1,4 @@
-from gc_core.message_policy.user_message_policy import user_display_text, extract_real_user_message_text
+from gc_core.message_policy.user_message_policy import extract_real_user_message_text, user_display_text
 
 
 def test_display_text_prefers_display_content():

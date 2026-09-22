@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from gc_core.utils.aio_compat import await_callback
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
@@ -8,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from gc_core.intent_guard.agent_logging import log_finish_gate_output_patched
 from gc_core.intent_guard.guard import FinishGateDecision
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.utils.aio_compat import await_callback
 
 _logger = logging.getLogger(__name__)
 

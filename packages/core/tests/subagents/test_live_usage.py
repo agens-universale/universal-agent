@@ -1,12 +1,12 @@
 """Live usage: incremental child→parent merge, no double-count in finally."""
 from __future__ import annotations
 
-from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
+from gc_testkit import as_coro
 
 
 class _FakeChildState:

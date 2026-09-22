@@ -3,7 +3,6 @@
 from copy import deepcopy
 
 import pytest
-
 from gc_core.utils.prompt_cache import (
     CACHE_CONTROL,
     apply_prompt_cache,

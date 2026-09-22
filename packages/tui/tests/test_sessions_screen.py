@@ -1,9 +1,9 @@
 """SessionsScreen: карточки (2 строки), пагинация, фильтр веток, поиск, rename, preview."""
-import pytest
-
 import json
+from datetime import UTC
 from pathlib import Path
 
+import pytest
 from gc_core.thread_store import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -52,8 +52,8 @@ async def test_active_running_session_shows_running_not_completed(tmp_path):
         def is_running(self):
             return True
 
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         pilot.app.tui_state.active_task_id = tid
         pilot.app.active_runner = _FakeRunner()
@@ -73,8 +73,8 @@ async def test_long_prompt_card_stays_two_lines(tmp_path):
     from textual.containers import VerticalScroll
     long_prompt = "Используй skill `qa-req-validation`. " + ("очень длинный текст " * 80)
     _seed(tmp_path, "aaaaaaaa", long_prompt)
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test(size=(90, 40)) as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
@@ -93,8 +93,8 @@ async def test_card_shows_task_title_and_last_actual_subtitle(tmp_path):
         tmp_path, "bbbbbbbb", "посмотри логи",
         task="Добавить поле task", last_actual="посмотри логи",
     )
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test(size=(90, 40)) as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
@@ -111,8 +111,8 @@ async def test_card_shows_task_title_and_last_actual_subtitle(tmp_path):
 async def test_card_shows_title_branch_msgs(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "aaaaaaaa", "первый вопрос", branch="feat/x", last_actual="первый вопрос")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
@@ -132,8 +132,8 @@ async def test_card_shows_nonzero_session_cost(tmp_path):
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 2_000_000, 0)  # при input=1.0 → 2.0 ₽
     _seed(tmp_path, "cccccccc", "с ценой", token_usage=acc.to_meta())
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     pricing = {
         "enabled": True, "input": 1.0, "output": 2.0,
         "currency": "₽", "per_tokens": 1_000_000,
@@ -157,8 +157,8 @@ async def test_card_hides_zero_or_disabled_cost(tmp_path):
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 2_000_000, 0)
     _seed(tmp_path, "dddddddd", "без цены", token_usage=acc.to_meta())
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"pricing": {"enabled": False}, "model": "m"})
     async with app.run_test() as pilot:
@@ -179,8 +179,8 @@ async def test_lists_more_than_200_sessions(tmp_path):
             json.dumps({"thread_id": tid, "system": "cli", "status": "stopped",
                         "updated_at": f"2026-05-{(i % 28) + 1:02d}T10:00:00+00:00",
                         "messages_count": 1}), encoding="utf-8")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -191,8 +191,8 @@ async def test_lists_more_than_200_sessions(tmp_path):
 async def test_custom_title_overrides_prompt(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "bbbbbbbb", "длинный промпт", title="Мой заголовок")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -207,8 +207,8 @@ async def test_branch_filter_ctrl_b(tmp_path, monkeypatch):
     _seed(tmp_path, "offbranch", "другая ветка", branch="master", last_actual="другая ветка")
     from gc_tui.screens import sessions as sessions_mod
     monkeypatch.setattr(sessions_mod, "current_branch", lambda cwd: "feature-x")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -225,9 +225,9 @@ async def test_search_filters(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "find1111", "уникальный маркер альфа", last_actual="уникальный маркер альфа")
     _seed(tmp_path, "find2222", "совсем другое", last_actual="совсем другое")
+    from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
     from textual.widgets import Input
-    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -242,8 +242,8 @@ async def test_search_filters(tmp_path):
 async def test_rename_saves_title(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "ren00000", "исходный промпт")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
         await pilot.app.push_screen(scr)
@@ -275,8 +275,8 @@ async def test_dialog_summary_skipped_in_title(tmp_path):
                     "updated_at": "2026-05-30T10:00:00+00:00", "messages_count": 2,
                     "tui": {"last_actual": "реальный вопрос после саммари"}}),
         encoding="utf-8")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -308,8 +308,8 @@ async def test_first_prompt_from_archive(tmp_path):
         json.dumps({"thread_id": tid, "system": "cli", "status": "stopped",
                     "updated_at": "2026-05-30T10:00:00+00:00", "messages_count": 5}),
         encoding="utf-8")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -321,8 +321,8 @@ async def test_first_prompt_from_archive(tmp_path):
 @pytest.mark.asyncio
 async def test_pages_replace_not_grow(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.screens.sessions import SessionsScreen, _PAGE_SIZE
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import _PAGE_SIZE, SessionsScreen
     total = _PAGE_SIZE + 5
     rest = total - _PAGE_SIZE
     for i in range(total):
@@ -352,8 +352,8 @@ async def test_pages_replace_not_grow(tmp_path):
 @pytest.mark.asyncio
 async def test_home_end_within_page(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.screens.sessions import SessionsScreen, _PAGE_SIZE
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import _PAGE_SIZE, SessionsScreen
     for i in range(_PAGE_SIZE + 5):
         _seed(tmp_path, f"he{i:06d}", f"промпт {i}")
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
@@ -371,9 +371,9 @@ async def test_home_end_within_page(tmp_path):
 @pytest.mark.asyncio
 async def test_filter_resets_to_first_page(tmp_path):
     pytest.importorskip("textual")
-    from textual.widgets import Input
-    from gc_tui.screens.sessions import SessionsScreen, _PAGE_SIZE
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import _PAGE_SIZE, SessionsScreen
+    from textual.widgets import Input
     for i in range(_PAGE_SIZE + 5):
         _seed(tmp_path, f"fp{i:06d}", f"промпт {i}")
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
@@ -394,9 +394,9 @@ async def test_ctrl_p_opens_preview(tmp_path):
     не перехватывает Ctrl+P)."""
     pytest.importorskip("textual")
     _seed(tmp_path, "prev0001", "промпт для превью")
-    from gc_tui.screens.sessions import SessionsScreen
-    from gc_tui.screens.preview import PreviewScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -409,8 +409,9 @@ async def test_ctrl_p_opens_preview(tmp_path):
 async def test_single_delete_removes_archives_too(tmp_path):
     pytest.importorskip("textual")
     from pathlib import Path
-    from gc_tui.screens.sessions import SessionsScreen
+
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     _seed(tmp_path, "del0001", "промпт")
     archive = Path(tmp_path) / "data_cli_del0001__pre_summary__20260101_000000.jsonl"
     archive.write_text("x", encoding="utf-8")
@@ -428,9 +429,9 @@ async def test_single_delete_removes_archives_too(tmp_path):
 @pytest.mark.asyncio
 async def test_ctrl_d_opens_mass_delete(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.screens.sessions import SessionsScreen
-    from gc_tui.screens.mass_delete import MassDeleteScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.mass_delete import MassDeleteScreen
+    from gc_tui.screens.sessions import SessionsScreen
     _seed(tmp_path, "m0000001", "промпт")
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
@@ -444,9 +445,10 @@ async def test_ctrl_d_opens_mass_delete(tmp_path):
 @pytest.mark.asyncio
 async def test_mass_delete_keep_last_cycle(tmp_path):
     pytest.importorskip("textual")
-    from datetime import datetime, timezone
-    from gc_tui.screens.sessions import SessionsScreen
+    from datetime import datetime
+
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     for i in range(3):
         _seed(tmp_path, f"c{i:07d}", f"промпт {i}",
               updated_at=f"2026-06-{3 - i:02d}T00:00:00+00:00")
@@ -454,7 +456,7 @@ async def test_mass_delete_keep_last_cycle(tmp_path):
         scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        now = datetime(2026, 6, 6, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 6, tzinfo=UTC)
         scr._confirm_mass_delete(scr._store.list_tasks(limit=100), {"keep_last": 1}, now)
         await pilot.pause()
         await pilot.press("y")
@@ -471,8 +473,8 @@ async def test_r7_title_uses_last_actual(tmp_path):
     """R7: meta.tui.last_actual задан → заголовок = last_actual (не сканирует логи)."""
     pytest.importorskip("textual")
     _seed(tmp_path, "la000001", "сырой промпт в логе", last_actual="реализуй спеку X")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -487,8 +489,8 @@ async def test_r7_manual_title_over_last_actual(tmp_path):
     pytest.importorskip("textual")
     _seed(tmp_path, "prio0001", "лог-промпт", title="parser bugfix",
           last_actual="реализуй спеку")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -502,8 +504,8 @@ async def test_r7_empty_meta_unnamed(tmp_path):
     """R7: пустой tui (нет title, нет last_actual) → «Без названия» (не «(без заголовка)»)."""
     pytest.importorskip("textual")
     _seed(tmp_path, "empty0001", "какой-то промпт")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()
@@ -517,8 +519,8 @@ async def test_r10_ctrl_cyrillic_k_lower_renames(tmp_path):
     """R10: ctrl+к (русская раскладка) → _rename_selected (паритет с TraceScreen)."""
     pytest.importorskip("textual")
     _seed(tmp_path, "rk000001", "промпт", last_actual="имя сессии")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
         await pilot.app.push_screen(scr)
@@ -534,8 +536,8 @@ async def test_r10_ctrl_cyrillic_k_upper_renames(tmp_path):
     """R10: ctrl+К (Shift, русская раскладка) → _rename_selected."""
     pytest.importorskip("textual")
     _seed(tmp_path, "rk000002", "промпт", last_actual="имя сессии")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
         await pilot.app.push_screen(scr)
@@ -553,9 +555,9 @@ async def test_search_matches_subtitle(tmp_path):
     _seed(tmp_path, "sub11111", "уникальный маркер бета",
           task="Написать тесты", last_actual="уникальный маркер бета")
     _seed(tmp_path, "sub22222", "совсем другое", task="Починить парсер", last_actual="совсем другое")
+    from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
     from textual.widgets import Input
-    from gc_tui.app import TuiApp
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
         await pilot.pause()

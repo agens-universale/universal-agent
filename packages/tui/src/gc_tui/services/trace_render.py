@@ -87,8 +87,9 @@ def build_answered_question_widget(question, *, event_no: int = 0,
     после релиза) — янтарная рамка: сменить border в .answered-question на
     $run-color, точка правки одна."""
     from rich.text import Text
+
+    from gc_tui.palette import DIM, RUN_COLOR
     from gc_tui.widgets.trace_row import TraceRow
-    from gc_tui.palette import RUN_COLOR, DIM
     content = Text()
     content.append("? ", style=RUN_COLOR)
     content.append(question, style=DIM)
@@ -122,7 +123,7 @@ def build_intermediate_widgets(summary: str, *, event_no: int) -> list:
                                bullet="· ", kind_class_base="line-intermediate")
 
 
-def note_text(comment: str) -> "Text":
+def note_text(comment: str) -> Text:
     """Контент строки заметки submit_solution: ярлык «заметка: » прямой, текст
     ремарки — курсивом (цвет/отступ берутся из CSS `.line-note`)."""
     from rich.text import Text
@@ -169,8 +170,8 @@ def _mount_summary_widgets(mount_target, label: str, body_text: str,
 
 def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
     """Смонтировать виджеты одного события (read-only паритет с _render_event)."""
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     if ev.kind == "user":
@@ -228,6 +229,7 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
         # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
         # живого канала в main.py), здесь только монтируем.
         from gc_core.tools.subagents.progress import todo_items_from_arguments
+
         from gc_tui.services.todo_render import build_todo_block
         items = todo_items_from_arguments(
             (ev.full_payload or {}).get("arguments"))

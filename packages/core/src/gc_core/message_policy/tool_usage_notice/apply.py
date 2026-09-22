@@ -4,14 +4,14 @@ from typing import Any
 
 from gc_core.config_modules.message_notice import active_tool_usage_notice_rules
 from gc_core.config_modules.project_memory import project_memory_from_config_dict
+from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 from gc_core.message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
     on_persist_steps,
     project_memory_hints_enabled,
     wrap_project_memory_hint_user_message,
 )
-from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
-from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
 from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
 from gc_core.message_policy.tool_usage_notice.policy import (

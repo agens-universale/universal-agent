@@ -1,6 +1,7 @@
 import pytest
 from gc_core.tools.skills.registry import SkillsRegistry
 
+
 class _Skill:
     def __init__(self, sid): self.id = sid
 

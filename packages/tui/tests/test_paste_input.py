@@ -4,8 +4,8 @@ import pytest
 
 
 def _app_with_input():
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.paste_input import PasteInput
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -69,9 +69,7 @@ async def test_paste_replaces_full_selection(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.services import os_ops as os_ops
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "http://new/v1/chat/completions")
-    from textual.widgets import Input
     from gc_tui.widgets.paste_input import PasteInput
-
     from textual.app import App, ComposeResult
 
     class _App(App):

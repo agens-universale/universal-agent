@@ -5,7 +5,6 @@ from gc_core.config_modules.endpoint_presets import (
 )
 from gc_core.config_modules.root import AppConfig
 
-
 _EXPECTED = [
     ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions"),
     ("Cloud.ru", "https://foundation-models.api.cloud.ru/v1/chat/completions"),

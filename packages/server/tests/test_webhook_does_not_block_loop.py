@@ -32,7 +32,6 @@ def blocking_ctx(monkeypatch):
     транспорт, который остаётся в потоке. Если такой транспорт когда-нибудь
     начнут звать прямо на loop, тест это увидит.
     """
-    import gc_core.tools as tools_pkg
 
     def _slow(config_dict, on_progress=None, **kwargs):
         time.sleep(_BUILD_SEC)

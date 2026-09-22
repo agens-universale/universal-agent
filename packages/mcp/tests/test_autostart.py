@@ -6,9 +6,8 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
-
-from recommended_mcp.runtime.manifest_resolve import resolve_agent_manifest_path
 from recommended_mcp.autostart import ensure_daemons_for_agent, wait_daemon_url_ready
+from recommended_mcp.runtime.manifest_resolve import resolve_agent_manifest_path
 
 
 def _write_manifest(tmp_path: Path, content: str) -> Path:

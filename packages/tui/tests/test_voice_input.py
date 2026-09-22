@@ -1,6 +1,10 @@
 """VoiceInputFlow: переходы, min-duration, авто-стоп, ошибки. Без Textual/сети."""
 from gc_tui.services.voice_input import (
-    IDLE, MIN_SECONDS, RECORDING, TRANSCRIBING, VoiceInputFlow,
+    IDLE,
+    MIN_SECONDS,
+    RECORDING,
+    TRANSCRIBING,
+    VoiceInputFlow,
 )
 from gc_tui.voice.errors import VoiceError
 

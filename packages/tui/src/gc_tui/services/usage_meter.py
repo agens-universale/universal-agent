@@ -12,11 +12,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from rich.text import Text
-
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.cost import CostReport, compute_cost
 from gc_core.usage.report import format_money, format_tokens
+from rich.text import Text
 
 from gc_tui.palette import DIM, INK
 

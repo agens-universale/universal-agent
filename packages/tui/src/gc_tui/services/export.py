@@ -4,7 +4,11 @@ from __future__ import annotations
 import json
 import re
 
-from gc_core.message_policy.user_message_policy import is_technical_user_message_text, resolve_technical_user_content_type, user_content_to_text
+from gc_core.message_policy.user_message_policy import (
+    is_technical_user_message_text,
+    resolve_technical_user_content_type,
+    user_content_to_text,
+)
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _TECH_INNER_RE = re.compile(

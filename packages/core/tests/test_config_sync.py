@@ -1,6 +1,5 @@
 """config_sync: ре-материализация user config.yml из свежего шаблона."""
 import pytest
-
 from gc_core import config_sync
 from gc_core.config_modules import compat as compat
 
@@ -100,6 +99,7 @@ def test_needs_sync_true_for_legacy_llm_section():
 def test_sync_renames_legacy_llm_in_verbatim_section(tmp_path):
     """chat_completions нет в шаблоне — verbatim + финальный rename llm → auxiliary_llm."""
     import re
+
     import yaml
 
     user = (
@@ -123,6 +123,7 @@ def test_sync_renames_legacy_llm_in_verbatim_section(tmp_path):
 def test_sync_renames_legacy_llm_when_template_has_auxiliary(tmp_path):
     """Шаблон уже с auxiliary_llm — line-copy с rename секции."""
     import re
+
     import yaml
 
     template = (
@@ -168,6 +169,7 @@ def test_needs_sync_false_when_nothing_to_update():
 def test_sync_real_template_over_its_own_copy(tmp_path):
     """Sync копии реального шаблона на сам шаблон: без unknown, файл валиден."""
     from pathlib import Path as P
+
     from gc_core.config import _default_config_path
     real = P(_default_config_path()).read_text(encoding="utf-8")
     cfg = tmp_path / "config.yml"

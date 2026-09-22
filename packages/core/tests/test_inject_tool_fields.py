@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from gc_core import tools as tools_pkg
-from gc_core.tools import aapply_tool, abuild_tools_data, WrongFunctionArgumentsException
-from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec, resolve_inject_tool_fields, strip_injected_tool_args
+from gc_core.tools import aapply_tool, abuild_tools_data
+from gc_core.tools.inject_tool_fields import (
+    apply_injected_fields_to_spec,
+    resolve_inject_tool_fields,
+    strip_injected_tool_args,
+)
 
 _REASON = "reason"
 _REASON_DESC = (

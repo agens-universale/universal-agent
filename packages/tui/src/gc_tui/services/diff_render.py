@@ -31,7 +31,7 @@ def render_unified_diff_widget(text: str) -> Static:
 
 
 def _line_style(line: str) -> str:
-    if line.startswith("---") or line.startswith("+++"):
+    if line.startswith(("---", "+++")):
         return MUTED
     if line.startswith("@@"):
         return MUTED

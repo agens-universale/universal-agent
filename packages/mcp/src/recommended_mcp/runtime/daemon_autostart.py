@@ -56,7 +56,7 @@ def ensure_mcp_daemons(
     kwargs = {} if disable_hint is None else {"disable_hint": disable_hint}
     try:
         _supervisor = ensure_daemons_for_agent(config_dict, **kwargs)
-    except Exception as exc:  # noqa: BLE001 — сознательно широко, см. докстринг
+    except Exception as exc:
         _supervisor = None
         from recommended_mcp.autostart import _warn
 

@@ -6,7 +6,6 @@ import sys
 sys.argv = ["gc-cli", "-q", "x"]
 
 import pytest
-
 from gc_cli import cli
 from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
 

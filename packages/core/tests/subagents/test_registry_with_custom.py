@@ -1,7 +1,14 @@
 """Реестр как функция от конфига: встроенные + кастомные из папки."""
 import logging
 
-from gc_core.tools.subagents.registry import SUBAGENT_CLASSES, builtin_subagent_names, get_subagent_class, get_subagents_tools_data, is_subagent_tool, resolve_subagent_definitions
+from gc_core.tools.subagents.registry import (
+    SUBAGENT_CLASSES,
+    builtin_subagent_names,
+    get_subagent_class,
+    get_subagents_tools_data,
+    is_subagent_tool,
+    resolve_subagent_definitions,
+)
 
 BUILTIN_COUNT = len(SUBAGENT_CLASSES)
 

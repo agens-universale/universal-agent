@@ -1,13 +1,14 @@
+import importlib
 import logging
 import os
 import sys
 import tempfile
-import importlib
-import unittest
 import types
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
 from gc_testkit.paths import module_dir
 
 

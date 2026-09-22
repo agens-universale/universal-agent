@@ -1,5 +1,4 @@
 import pytest
-
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
 
 
@@ -93,7 +92,6 @@ def test_sync_port_serves_only_persistent_stdio():
     есть дефект, который чинили шаги A1 и A3.
     """
     import pytest as _pytest
-
     from gc_core.tools.connect_mcp import client_port as cp
 
     client = cp.AgentRuntimeClient(

@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from gc_testkit import as_coro
 
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
@@ -25,11 +24,12 @@ for _key in list(sys.modules.keys()):
     if _key == "harbor" or _key.startswith("harbor."):
         del sys.modules[_key]
 
-from gc_testkit.paths import HARBOR, REPO
+from gc_testkit.paths import HARBOR
+
 _HARBOR = HARBOR
 sys.path.insert(0, str(_HARBOR))
 
-from adapters.gc_cli_external import GcCliExternal  # noqa: E402
+from adapters.gc_cli_external import GcCliExternal
 
 
 def _skill(root: Path, name: str) -> Path:

@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.intent_log import ACTION_FINAL_ANSWER, ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_final_answer, append_tool_aggregated, append_tool_raw
+from gc_core.intent_log import (
+    ACTION_FINAL_ANSWER,
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    append_final_answer,
+    append_tool_aggregated,
+    append_tool_raw,
+)
 
 
 def _current_has_aggregated(
@@ -104,10 +111,7 @@ def append_tool_raw_to_current(
 
 def _current_has_final_answer(current: list[Any], content: str) -> bool:
     body = str(content or "")
-    for record in current:
-        if record.action == ACTION_FINAL_ANSWER and str(record.content) == body:
-            return True
-    return False
+    return any(record.action == ACTION_FINAL_ANSWER and str(record.content) == body for record in current)
 
 
 def append_final_answer_to_current(state: Any, content: str) -> bool:

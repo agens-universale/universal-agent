@@ -4,8 +4,6 @@
 agent.strict_turn_finish_validation=false даёт off; иначе smart (дефолт medium).
 Владелец правила — tui/session_settings.py (его читают и витрина тоггла, и
 сравнение с умолчанием)."""
-import pytest
-
 from gc_tui.session_settings import effective_finish_gate_mode
 
 
@@ -45,7 +43,6 @@ def test_template_yaml_default_is_string_not_bool(tmp_path):
     import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.tui import TuiConfig
-
     from gc_testkit.paths import REPO
 
     for tpl in (REPO / "demo_config.yml", Path(_default_config_path())):
@@ -111,8 +108,8 @@ def test_explicit_tui_key_beats_explicit_global_off_e2e(tmp_path):
 
 
 def test_toggle_values_carry_hint_and_color():
-    from gc_tui.toggles import TOGGLES
     from gc_tui import palette as pal
+    from gc_tui.toggles import TOGGLES
     gate = TOGGLES["gate"]
     assert gate.names == ("off", "smart", "on")
     off = gate.values[0]
@@ -153,8 +150,8 @@ def test_render_track_canonical():
 
 
 def test_gate_gains_smart_value():
-    from gc_tui.toggles import TOGGLES
     from gc_tui import palette as pal
+    from gc_tui.toggles import TOGGLES
     gate = TOGGLES["gate"]
     assert gate.names == ("off", "smart", "on")     # off·smart·on (мягкое→строгое, §3)
     smart = gate.values[1]
@@ -163,7 +160,7 @@ def test_gate_gains_smart_value():
 
 
 def test_rigor_toggle_spec_shape():
-    from gc_tui.toggles import TOGGLES, RIGOR_KEYS, resolve_rigor_state
+    from gc_tui.toggles import RIGOR_KEYS, TOGGLES, resolve_rigor_state
     rigor = TOGGLES["rigor"]
     assert rigor.names == ("low", "medium", "high")
     assert rigor.preset_keys == RIGOR_KEYS

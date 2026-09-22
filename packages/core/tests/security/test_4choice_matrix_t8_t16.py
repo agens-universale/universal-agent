@@ -11,7 +11,6 @@ import sys
 from unittest import mock
 
 import pytest
-
 from gc_testkit.paths import ASSETS
 
 PROMPT_PATH = ASSETS / "prompts" / "security" / "command_judge_system.md"
@@ -154,10 +153,16 @@ def test_t11c_cli_nontty_returns_deny_once(monkeypatch):
 def test_t13_write_guard_allow_choices_are_bool():
     """Write guard uses bool verdict; 4-choice allow_* maps to True, deny_* to False."""
     from gc_core.security.confirm_port import (
-        CONFIRM_ALLOW_REMEMBER as ALLOW_REMEMBER,
         CONFIRM_ALLOW_ONCE as ALLOW_ONCE,
-        CONFIRM_DENY_REMEMBER as DENY_REMEMBER,
+    )
+    from gc_core.security.confirm_port import (
+        CONFIRM_ALLOW_REMEMBER as ALLOW_REMEMBER,
+    )
+    from gc_core.security.confirm_port import (
         CONFIRM_DENY_ONCE as DENY_ONCE,
+    )
+    from gc_core.security.confirm_port import (
+        CONFIRM_DENY_REMEMBER as DENY_REMEMBER,
     )
 
     allow_choices = {ALLOW_REMEMBER, ALLOW_ONCE}

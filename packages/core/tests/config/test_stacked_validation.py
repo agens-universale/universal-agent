@@ -8,15 +8,14 @@
 from pathlib import Path
 
 import pytest
-
 from gc_core.config import (
     validate_config_text_with_sections,
     validate_profile_text_with_sections,
 )
 from gc_core.config_modules import env_vars
+from gc_core.config_modules import env_vars as mcp_paths
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.config_modules.profiles import validate_profile_text
-from gc_core.config_modules import env_vars as mcp_paths
 
 
 @pytest.fixture

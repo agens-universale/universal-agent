@@ -7,15 +7,11 @@ Strategy:
 - Compare structured output, normalizing absolute path roots (base=real tmpdir, shim=/work).
 """
 import json
-import os
-import re
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.deprecated.search_files import SearchFiles
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 # ---------------------------------------------------------------------------
 # Tree fixture

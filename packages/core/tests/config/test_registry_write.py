@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from gc_core import onboarding_config_writer as w
 from gc_core.config import _default_config_path
 from gc_core.config_modules.profiles import (
@@ -29,7 +28,6 @@ from gc_core.config_modules.registry_write import (
     write_assign,
     write_slot,
 )
-
 
 _BASE = (
     "# основной конфиг\n"

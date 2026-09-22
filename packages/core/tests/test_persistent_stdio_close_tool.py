@@ -17,13 +17,11 @@ SIGTERM/SIGKILL. То есть ломалось ровно то, ради чег
 не видит — поэтому здесь отдельный файл с сервером, который на close-тул
 ОТВЕЧАЕТ.
 """
-import asyncio
 import json
 import sys
 import time
 
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 
 #: Отвечает на всё мгновенно и по id — как настоящий сервер. Ответ на

@@ -38,6 +38,7 @@ async def test_history_available_in_empty_state(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
+
     from gc_tui.app import TuiApp
 
     project_dir = Path(tmp_path)
@@ -164,8 +165,8 @@ async def test_cursor_visual_line_helpers_with_soft_wrap():
     переносится → курсор логически в row 0, но визуально может быть на нижней
     строке. first/last_visual_line отражают визуальный ряд, а не логический."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.command_input import CommandTextArea
+    from textual.app import App, ComposeResult
 
     class _Host(App):
         def compose(self) -> ComposeResult:

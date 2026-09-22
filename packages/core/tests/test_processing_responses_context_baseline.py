@@ -1,23 +1,21 @@
 import importlib
-import logging
 import json
+import logging
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
 
-from gc_core.intent_guard import guard as intent_guard_guard
-import pytest
 import httpx
-
+import pytest
+from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
+from gc_testkit import run_coro
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,
     intent_user_ask_texts_from_jsonl,
     seed_state_intent,
 )
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
 
 
 async def _anoop(*_a, **_k):

@@ -3,8 +3,8 @@
 Tests themselves are added in Task 9; this file currently contains only the
 fixture to keep TDD ordering clean."""
 
-from gc_testkit.helpers.tool_ctx import CallableTool
 import pytest
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 @pytest.fixture
@@ -46,6 +46,7 @@ def reg_with_packs(tmp_path):
 def test_skills_list_default_hides_pack_internals(reg_with_packs):
     """Default skills_list: только bootstrap-скиллы пакетов и flat. Internal скрыты."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
     tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool())
@@ -58,6 +59,7 @@ def test_skills_list_default_hides_pack_internals(reg_with_packs):
 def test_skills_list_with_pack_returns_internals(reg_with_packs):
     """skills_list(pack='alpha') возвращает все internal alpha-пакета."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
     tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool(pack="alpha"))
@@ -69,6 +71,7 @@ def test_skills_list_with_pack_returns_internals(reg_with_packs):
 def test_skills_list_payload_has_is_pack_bootstrap_field(reg_with_packs):
     """Все entries имеют is_pack_bootstrap (true для bootstrap, false иначе)."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
     tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool())
@@ -82,6 +85,7 @@ def test_skills_list_payload_has_is_pack_bootstrap_field(reg_with_packs):
 def test_skills_list_internal_skill_payload_fields(reg_with_packs):
     """Internal non-bootstrap скиллы: is_pack_bootstrap=false, нет pack_size."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
     tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool(pack="alpha"))
@@ -94,6 +98,7 @@ def test_skills_list_internal_skill_payload_fields(reg_with_packs):
 def test_skills_load_ambiguous_returns_envelope_error(reg_with_packs):
     """skills_load("shared-name") → AMBIGUOUS_SKILL_ID envelope (alpha + beta оба имеют)."""
     import json
+
     from gc_core.tools.skills.skills_tools import LoadSkillTool
     tool = CallableTool(LoadSkillTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name"))
@@ -104,6 +109,7 @@ def test_skills_load_ambiguous_returns_envelope_error(reg_with_packs):
 
 def test_skills_load_reference_ambiguous_returns_envelope_error(reg_with_packs):
     import json
+
     from gc_core.tools.skills.skills_tools import LoadReferenceTool
     tool = CallableTool(LoadReferenceTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name", slug="anything"))
@@ -113,6 +119,7 @@ def test_skills_load_reference_ambiguous_returns_envelope_error(reg_with_packs):
 
 def test_skills_load_asset_ambiguous_returns_envelope_error(reg_with_packs):
     import json
+
     from gc_core.tools.skills.skills_tools import LoadAssetTool
     tool = CallableTool(LoadAssetTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name", slug="anything"))
@@ -122,6 +129,7 @@ def test_skills_load_asset_ambiguous_returns_envelope_error(reg_with_packs):
 
 def test_run_skill_script_ambiguous_returns_envelope_error(reg_with_packs):
     import json
+
     from gc_core.tools.skills.skills_tools import RunSkillScriptTool
     tool = CallableTool(RunSkillScriptTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name"))

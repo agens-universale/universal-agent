@@ -8,14 +8,22 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from gc_core.utils.url_addr import is_loopback
-
 from recommended_mcp.autostart import wait_daemon_url_ready
 from recommended_mcp.process_supervisor import (
-    RunSupervisor, is_pid_alive, read_pid, remove_pid, terminate_pid,
+    RunSupervisor,
+    is_pid_alive,
+    read_pid,
+    remove_pid,
+    terminate_pid,
 )
 
 from gc_tui.voice_runtime.leases import (
-    acquire, clear_agent_owned, is_agent_owned, live_leases, mark_agent_owned, release,
+    acquire,
+    clear_agent_owned,
+    is_agent_owned,
+    live_leases,
+    mark_agent_owned,
+    release,
 )
 from gc_tui.voice_runtime.paths import voice_pids_dir
 from gc_tui.voice_runtime.service import build_run_spec, port_alive, preheat, service_url

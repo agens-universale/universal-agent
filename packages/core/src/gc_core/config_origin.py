@@ -34,7 +34,7 @@ OVERLAY_LABELS: Dict[str, str] = {
 }
 
 
-def overlay_label(origin: "Origin") -> str:
+def overlay_label(origin: Origin) -> str:
     """Человекочитаемая подпись перекрывшего слоя. Профильные подписи (`profile:*`)
     подставляют имя профиля из пути перекрывшего файла (`overlay_path`) — оно не
     хранится отдельно в `Origin`, но однозначно восстанавливается как имя файла
@@ -80,6 +80,7 @@ def _overlay_paths(base_path: str, *, profile_override: Optional[str] = None
 
     Совпадающий с базовым файл пропускаем — ровно как load_config."""
     from pathlib import Path as _Path
+
     from gc_core.config_modules.env_vars import (
         managed_config_path,
         project_local_config_path,
@@ -137,8 +138,8 @@ def origins(base_path: str, dotted_keys: Iterable[str], *,
     raw = {dotted: config_raw.value_at(merged, dotted) for dotted in keys}
 
     effective = dict(raw)
-    kinds: Dict[str, str] = {dotted: "" for dotted in keys}
-    paths: Dict[str, Optional[str]] = {dotted: None for dotted in keys}
+    kinds: Dict[str, str] = dict.fromkeys(keys, "")
+    paths: Dict[str, Optional[str]] = dict.fromkeys(keys)
 
     for overlay_kind, overlay_path in _overlay_paths(base_path, profile_override=profile_override):
         merged = deep_merge(merged, _document(overlay_path))

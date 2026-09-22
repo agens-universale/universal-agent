@@ -9,14 +9,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Sequence, Union
 
-from gc_core.config_modules.diff_tui import DEFAULT_CACHE_MAX_ORIG, DEFAULT_FULL_FILE_MAX_LINES, DEFAULT_MAX_DIFF_CHARS, DEFAULT_PREVIEW_CONTEXT_LINES
+from gc_core.config_modules.diff_tui import (
+    DEFAULT_CACHE_MAX_ORIG,
+    DEFAULT_FULL_FILE_MAX_LINES,
+    DEFAULT_MAX_DIFF_CHARS,
+    DEFAULT_PREVIEW_CONTEXT_LINES,
+)
+from gc_core.utils.file_text import decode_text_best_effort
+
 from gc_tui.diff_tui import git_ops
 from gc_tui.diff_tui.mode import evict_stale_cache, resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key, orig_key
 from gc_tui.diff_tui.store import STATUS_CREATED, STATUS_DELETED, DiffStore, UndoResult
 from gc_tui.diff_tui.touched import TouchedJournal
 from gc_tui.diff_tui.visual import build_created_file_diff, build_visual_diff
-from gc_core.utils.file_text import decode_text_best_effort
 
 PathLike = Union[str, Path]
 

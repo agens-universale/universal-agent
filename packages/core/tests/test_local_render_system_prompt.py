@@ -1,6 +1,5 @@
 import unittest
 
-
 from gc_core.utils.local_render_system_prompt import render_system_prompt
 
 

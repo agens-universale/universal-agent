@@ -5,12 +5,10 @@
 в конвертации; здесь он обязан подняться как BackendStreamError.
 """
 import pytest
-
 from gc_core.utils import connect_backend as cb
 from gc_core.utils.chat_completions_stream import BackendStreamError
-
-from transport_fakes import install_transport, sse_body, stream_response
 from gc_testkit import run_coro
+from transport_fakes import install_transport, sse_body, stream_response
 
 
 def test_empty_stream_raises_retriable(monkeypatch):

@@ -2,9 +2,8 @@ import json
 import sys
 
 from gc_core.tools.exec.execute_command import ExecuteCommand
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_execute_success_and_non_zero():
     tool = with_local_ctx(ExecuteCommand)

@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable, Mapping
 
-from gc_core.intent_log.record import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK, IntentRecord, record_from_dict, validate_record
+from gc_core.intent_log.record import (
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    ACTION_USER_ASK,
+    IntentRecord,
+    record_from_dict,
+    validate_record,
+)
 
 # Placeholder ts for legacy meta lines (`user_intent_log: list[str]`).
 LEGACY_LOAD_TS = "1970-01-01T00:00:00Z"
@@ -22,7 +29,7 @@ def serialize(records: Iterable[IntentRecord | Mapping[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _parse_legacy_raw_body(body: str) -> tuple[str, "str | dict[str, Any]"]:
+def _parse_legacy_raw_body(body: str) -> tuple[str, str | dict[str, Any]]:
     """«tool: json» → (tool, content); без разделителя — ("unknown", body)."""
     if ": " not in body:
         return "unknown", body

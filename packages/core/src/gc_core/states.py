@@ -1,15 +1,15 @@
 from dataclasses import dataclass, field
-from uuid import uuid4
 from typing import Any, Dict, List, Optional
-from gc_core.project_memory import attach_status_to_prompt_vars
+from uuid import uuid4
+
 from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
-from gc_core.utils.project_data import get_project_data
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-from gc_core.message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
-from gc_core.tools.skills.skills_policy import render_skills_catalog
-from gc_core.intent_log import IntentRecord, deserialize_list, flush
-from gc_core.usage.account import UsageAccount
 from gc_core.instructions.loader import build_instructions
+from gc_core.intent_log import IntentRecord, deserialize_list, flush
+from gc_core.message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state
+from gc_core.project_memory import attach_status_to_prompt_vars
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+from gc_core.tools.skills.skills_policy import render_skills_catalog
+from gc_core.usage.account import UsageAccount
 
 
 @dataclass

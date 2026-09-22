@@ -42,8 +42,8 @@ from pathlib import Path
 
 import gc_testkit
 import gc_testkit.import_health as ih
-from gc_testkit.paths import REPO
 from gc_testkit.import_health import scan
+from gc_testkit.paths import REPO
 
 
 def test_no_broken_imports():
@@ -208,7 +208,7 @@ def test_main_reports_skipped_modules(monkeypatch, capsys):
     )
     monkeypatch.setattr(sys, "argv", ["import_health"])
 
-    monkeypatch.setattr(ih, "scan", lambda: [])
+    monkeypatch.setattr(ih, "scan", list)
     assert ih.main() == 0
     clean = capsys.readouterr().out
     assert "ПРОПУЩЕНО модулей: 1" in clean, clean

@@ -2,9 +2,8 @@ import json
 from pathlib import Path
 
 from gc_core.tools.deprecated.search_files import SearchFiles
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_search_basic_and_file_pattern(tmp_path):
     (tmp_path / "a.py").write_text("x = 42\nprint(x)\n", encoding="utf-8")

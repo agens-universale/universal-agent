@@ -2,24 +2,22 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.config_modules.project_memory import (
     project_memory_from_config_dict,
     project_memory_notice_enabled,
 )
+from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
     set_project_memory_check_cnt,
 )
-from gc_core.message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
+from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_CURRENT_CONTEXT, wrap_technical_user_content
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
 
 
 def tool_project_memory_enabled(config_dict: dict[str, Any] | None) -> bool:
     stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
-    if isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop:
-        return False
-    return True
+    return not (isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop)
 
 
 def project_memory_hints_enabled(config_dict: dict[str, Any] | None) -> bool:
@@ -45,7 +43,9 @@ def touch_project_memory_baseline(
 ) -> str | None:
     """Обновить baseline после read/write/append project_memory tool."""
     if get_hash_fn is None:
-        from gc_core.project_memory import get_hash  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
+        from gc_core.project_memory import (
+            get_hash,  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
+        )
         get_hash_fn = get_hash
     current = get_hash_fn(ctx)
     state.project_memory_content_hash = current
@@ -79,7 +79,9 @@ def collect_project_memory_hints(
     if not project_memory_hints_enabled(config_dict):
         return []
     if get_hash_fn is None:
-        from gc_core.project_memory import get_hash  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
+        from gc_core.project_memory import (
+            get_hash,  # nested: tests monkeypatch project_memory.get_hash; runtime lookup required
+        )
         get_hash_fn = get_hash
 
     cfg = project_memory_from_config_dict(config_dict)

@@ -150,9 +150,9 @@ async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_push_session_buffer_blocked_on_copy_buffer_screen(tmp_path, monkeypatch):
     """B8: когда CopyBufferScreen on top — push в сессию не происходит."""
-    from textual.screen import Screen
     from gc_tui.app import TuiApp
     from gc_tui.services import clipboard_ops
+    from textual.screen import Screen
 
     class _MarkerScreen(Screen):
         """Screen-маркер: имитирует CopyBufferScreen (без TextArea)."""

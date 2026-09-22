@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping
 
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, normalize_session_todo, normalize_working_memory, serialize_shared_block, validate_state_snapshot_for_load
+from gc_core.persistence.schema import (
+    STATE_SCHEMA_VERSION,
+    normalize_session_todo,
+    normalize_working_memory,
+    serialize_shared_block,
+    validate_state_snapshot_for_load,
+)
 from gc_core.states import SharedStateData, State
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
 from gc_core.usage.account import UsageAccount

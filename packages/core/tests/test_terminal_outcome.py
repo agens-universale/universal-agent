@@ -3,14 +3,11 @@ import importlib
 import json
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from gc_core.states import State
-from gc_testkit.paths import module_dir
 from gc_testkit import run_coro
+from gc_testkit.paths import module_dir
 
 
 def _make_state(max_steps=2):

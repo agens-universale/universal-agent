@@ -13,7 +13,6 @@
 import asyncio
 
 import pytest
-
 from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
 from gc_tui.diff_tui.tracking import TrackingFsBackend
 

@@ -2,13 +2,11 @@ import json
 import sys
 
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult, FsBackend
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.tools.skills.skills_tools import RunSkillScriptTool
-from gc_testkit.helpers.tool_ctx import local_ctx
-from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.helpers.tool_ctx import CallableTool, local_ctx
 
 
 def _write_skill_with_script(root, skill_id: str, script_body: str) -> None:

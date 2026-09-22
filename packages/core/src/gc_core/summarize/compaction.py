@@ -1,24 +1,40 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
-from gc_core.utils.aio_compat import await_callback
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
 from gc_core.loop_detector.detector import clear as clear_loop_detector
+from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total
+from gc_core.message_policy.todo_context import render_todo_for_persistent_state
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
-
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total
-from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_precheck, log_compaction_started, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, logger_from_ctx
+from gc_core.summarize.summary_logging import (
+    SummaryCompactionLog,
+    log_compaction_completed,
+    log_compaction_precheck,
+    log_compaction_started,
+    log_summary_message_body,
+    log_summary_raw_text,
+    log_summary_slice_fallback,
+    logger_from_ctx,
+)
 from gc_core.summarize.summary_message_body import build_dialog_summary_content, resolve_intent_log_preview_chars
 from gc_core.summarize.summary_spec import agent_summary_slice_mode, slice_summary
 from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
-from gc_core.message_policy.todo_context import render_todo_for_persistent_state
-from gc_core.summarize.working_memory_gateway import REGISTER_ORDER, WorkingMemoryDeltas, apply_memory_patch, apply_summary_memory_patch, coerce_working_memory_deltas, read_session_todo_from_state, read_snapshot_from_state, render_persistent_state_for_prompt, render_session_memory_for_summary_message
-
-
+from gc_core.summarize.working_memory_gateway import (
+    REGISTER_ORDER,
+    WorkingMemoryDeltas,
+    apply_memory_patch,
+    apply_summary_memory_patch,
+    coerce_working_memory_deltas,
+    read_session_todo_from_state,
+    read_snapshot_from_state,
+    render_persistent_state_for_prompt,
+    render_session_memory_for_summary_message,
+)
+from gc_core.utils.aio_compat import await_callback
+from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:

@@ -8,7 +8,6 @@
 когда прописана локальная батарейка.
 """
 import pytest
-
 from gc_core.utils.url_addr import is_loopback, same_service
 
 

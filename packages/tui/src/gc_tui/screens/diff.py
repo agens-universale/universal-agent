@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+from gc_core.config_modules.diff_tui import DEFAULT_FULL_FILE_MAX_LINES, DEFAULT_PREVIEW_CONTEXT_LINES
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -11,11 +12,16 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui.diff_tui.feedback import format_approve_ack, format_bulk_approve_ack, format_bulk_undo_ack, format_undo_ack, format_undo_noop_ack
-from gc_core.config_modules.diff_tui import DEFAULT_FULL_FILE_MAX_LINES, DEFAULT_PREVIEW_CONTEXT_LINES
+from gc_tui.diff_tui.feedback import (
+    format_approve_ack,
+    format_bulk_approve_ack,
+    format_bulk_undo_ack,
+    format_undo_ack,
+    format_undo_noop_ack,
+)
 from gc_tui.diff_tui.service import DiffFileEntry, DiffService, OpResult
 from gc_tui.diff_tui.visual import VISUAL_MODES, build_created_file_diff
-from gc_tui.palette import ACCENT, ERR, OK, MUTED, INK
+from gc_tui.palette import ACCENT, ERR, INK, MUTED, OK
 from gc_tui.services.diff_render import render_unified_diff_widget
 
 _FOOTER = (

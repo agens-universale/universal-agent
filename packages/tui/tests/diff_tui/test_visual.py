@@ -201,7 +201,7 @@ def test_build_visual_diff_adaptive_close_edits_merge_into_one_hunk():
     """
     old = "".join(f"line-{i}\n" for i in range(400))
     # два изменения в строках 10 и 20 — контексты (n=50) пересекаются
-    new_lines = list(f"line-{i}\n" for i in range(400))
+    new_lines = [f"line-{i}\n" for i in range(400)]
     new_lines[10] = "EDIT-A\n"
     new_lines[20] = "EDIT-B\n"
     new = "".join(new_lines)
@@ -222,7 +222,7 @@ def test_build_visual_diff_adaptive_close_edits_merge_into_one_hunk():
 def test_build_visual_diff_adaptive_far_edits_stay_two_hunks():
     """Длинный файл + два далёких edit (>2n) → два отдельных hunk."""
     old = "".join(f"line-{i}\n" for i in range(400))
-    new_lines = list(f"line-{i}\n" for i in range(400))
+    new_lines = [f"line-{i}\n" for i in range(400)]
     new_lines[10] = "EDIT-A\n"
     new_lines[300] = "EDIT-B\n"  # далеко от 10: 300-10=290 >> 2*50
     new = "".join(new_lines)

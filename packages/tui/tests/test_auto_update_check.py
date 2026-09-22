@@ -9,10 +9,10 @@ import pytest
 
 pytest.importorskip("textual")
 
-from gc_tui import app as app_mod
 from gc_core.updater import source as source_mod
 from gc_core.updater.check import CheckResult
 from gc_core.updater.source import UpdateSource
+from gc_tui import app as app_mod
 
 
 def _src(commit="old", ref="master"):

@@ -8,8 +8,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_skills_nav_wraps_around():
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.skills import SkillsScreen
+    from textual.app import App
 
     skills = [{"id": f"s{i}", "source": "system", "root_path": "/p"} for i in range(3)]
 
@@ -29,8 +29,8 @@ async def test_skills_nav_wraps_around():
 @pytest.mark.asyncio
 async def test_skills_header_has_no_brand_block():
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.skills import SkillsScreen
+    from textual.app import App
 
     class _A(App):
         def on_mount(self):
@@ -50,8 +50,8 @@ async def test_sessions_nav_wraps_within_page(tmp_path):
             json.dumps({"thread_id": tid, "system": "cli",
                         "updated_at": f"2026-05-30T10:00:0{i}+00:00",
                         "messages_count": 1}), encoding="utf-8")
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
 
     async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
         await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
@@ -67,8 +67,8 @@ async def test_sessions_nav_wraps_within_page(tmp_path):
 @pytest.mark.asyncio
 async def test_mcp_header_has_no_brand_block():
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.mcp import McpScreen
+    from textual.app import App
 
     class _A(App):
         def on_mount(self):

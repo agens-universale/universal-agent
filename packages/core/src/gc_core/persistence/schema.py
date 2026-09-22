@@ -40,9 +40,7 @@ def meta_has_persisted_agent_state(meta: Mapping[str, Any]) -> bool:
         return True
     if _intent_records_non_empty(meta.get("user_intent_log")):
         return True
-    if _intent_records_non_empty(meta.get("current_user_intent")):
-        return True
-    return False
+    return bool(_intent_records_non_empty(meta.get("current_user_intent")))
 
 
 def reject_legacy_memory_keys(payload: Mapping[str, Any], *, path: str = "root") -> None:

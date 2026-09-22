@@ -36,7 +36,7 @@ class AsyncAgent:
     """
 
     def __init__(
-        self, executor: AgentExecutor, subscribers: "set[asyncio.Queue]"
+        self, executor: AgentExecutor, subscribers: set[asyncio.Queue]
     ) -> None:
         self._executor = executor
         # Живые подписчики stream(). Пустой набор — дельты никуда не копятся.
@@ -60,7 +60,7 @@ class AsyncAgent:
         auth_connector: Any = None,
         on_stream_delta: Any = None,
         **context_kwargs: Any,
-    ) -> "AsyncAgent":
+    ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
 
         ``on_stream_delta`` — необязательный «второй слушатель»: дельты и так
@@ -93,7 +93,7 @@ class AsyncAgent:
         #   2. два stream() параллельно: первый забирал всё, включая чужое,
         #      второй получал пустоту.
         # Плюс агент копил события всегда, даже когда их никто не читал.
-        subscribers: "set[asyncio.Queue]" = set()
+        subscribers: set[asyncio.Queue] = set()
         loop = asyncio.get_running_loop()
 
         def _fanout(item: Any) -> None:
@@ -136,7 +136,7 @@ class AsyncAgent:
         """Исполнитель под фасадом — для того, чего фасад не покрывает."""
         return self._executor
 
-    async def run(self, prompt: "str | list[str]", **kwargs: Any) -> Any:
+    async def run(self, prompt: str | list[str], **kwargs: Any) -> Any:
         """Ход агента — и доигрывание хвоста. Возвращает ответ последнего хода.
 
         Хвост — отданное `send` после последнего забора очереди циклом: пока ход
@@ -215,7 +215,7 @@ class AsyncAgent:
         )
 
     async def stream(
-        self, prompt: "str | list[str]", **kwargs: Any
+        self, prompt: str | list[str], **kwargs: Any
     ) -> AsyncIterator[tuple]:
         """Ход агента с живыми дельтами: ``(kind, text)``.
 
@@ -345,7 +345,7 @@ class AsyncAgent:
 
         await _aclose_mcp_and_release(set_owner(owner))
 
-    async def __aenter__(self) -> "AsyncAgent":
+    async def __aenter__(self) -> AsyncAgent:
         return self
 
     async def __aexit__(self, *exc: Any) -> bool:

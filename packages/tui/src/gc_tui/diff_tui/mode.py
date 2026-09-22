@@ -35,7 +35,7 @@ def resolve_mode(launch_root: Union[str, Path]) -> DiffMode:
 
 
 def evict_stale_cache(
-    store: "DiffStore",
+    store: DiffStore,
     *,
     git_visible_keys: Set[str],
 ) -> int:

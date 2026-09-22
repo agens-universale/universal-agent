@@ -5,7 +5,6 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
-
 from recommended_mcp.manifest import (
     InstallSpec,
     ManifestError,
@@ -445,6 +444,7 @@ def test_manifest_dist_matches_pyproject_when_source_present():
     всегда возвращающей None. Счётчик ниже стережёт именно это.
     """
     import dataclasses
+
     from recommended_mcp import install as inst
     from recommended_mcp.manifest import default_manifest_path, load_manifest
     from recommended_mcp.runtime.manifest_resolve import recipe_root

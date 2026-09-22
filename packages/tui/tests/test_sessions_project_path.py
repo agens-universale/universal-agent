@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.thread_store import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -38,8 +37,8 @@ async def test_card_shows_project_path(tmp_path):
     pytest.importorskip("textual")
     ppath = str(tmp_path)
     _seed(tmp_path, "pp000001", "вопрос", project_path=ppath)
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -62,8 +61,8 @@ async def test_card_without_project_path_no_crash(tmp_path):
     """Старая сессия без project_path в meta → пути нет, карточка не падает."""
     pytest.importorskip("textual")
     _seed(tmp_path, "old00001", "старый вопрос", project_path=None)
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -82,8 +81,8 @@ async def test_long_project_path_truncated_left(tmp_path):
     long_path = "/home/alex/sber_gigacode/mini-cli-pub/very/deep/nested/dir/structure"
     assert len(long_path) > _PATH_MAXLEN
     _seed(tmp_path, "long0001", "длинный путь", project_path=long_path)
-    from gc_tui.screens.sessions import SessionsScreen
     from gc_tui.app import TuiApp
+    from gc_tui.screens.sessions import SessionsScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
         await pilot.app.push_screen(

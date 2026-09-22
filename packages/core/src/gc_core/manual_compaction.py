@@ -10,8 +10,8 @@ state под компакцию, зовёт RunSummaryCoordinator.aforce_compact
 from __future__ import annotations
 
 from copy import copy as _shallow_copy_msg
-from typing import Any
 from threading import Lock
+from typing import Any
 
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
@@ -83,7 +83,7 @@ async def acompact_thread(
         is_cli_mode=(system_id == "cli"),
         pre_backend_trigger_reason="pre_backend", logger=getattr(ctx, "logger", None),
     )
-    setattr(ctx, "on_summary_applied", coord.on_summary_applied)
+    ctx.on_summary_applied = coord.on_summary_applied
     await coord.aforce_compact_once(trigger_reason="manual")
 
 

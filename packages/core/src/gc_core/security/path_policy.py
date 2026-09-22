@@ -4,14 +4,14 @@ import functools
 import inspect
 import json
 import os
-from dataclasses import dataclass, field
-from pathlib import Path
 import sys
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from gc_core.trace_id import trace_id_from_config
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.trace_id import trace_id_from_config
 
 
 @dataclass(frozen=True)
@@ -188,8 +188,8 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
     Генератор, как и тело гарда: подтверждение человека идёт запросом
     `yield OffLoop(...)` драйверу, поэтому звать — через `yield from`.
     """
-    from gc_core.security.protected_paths import protected_decision, protection_enabled
     from gc_core.security.confirm_port import request_confirm
+    from gc_core.security.protected_paths import protected_decision, protection_enabled
     _cfg = getattr(context.ctx, "config_dict", None) or {}
     if not protection_enabled(_cfg):
         return None

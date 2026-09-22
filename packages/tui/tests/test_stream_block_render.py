@@ -8,8 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from gc_tui.services.stream_sink import StreamSink, format_stream_block, format_reasoning_line
+from gc_tui.services.stream_sink import StreamSink, format_reasoning_line, format_stream_block
 
 
 def test_block_text_from_sink_answer_wins():
@@ -164,10 +163,10 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
     """StreamBlock (эфемерная reasoning-строка) монтируется НИЖЕ уже
     зафиксированных canonical-виджетов, а не поверх них."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.widgets.stream_block import StreamBlock
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+    from textual.containers import VerticalScroll
 
     class _FakeRunner:
         def is_running(self) -> bool: return True

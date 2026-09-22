@@ -6,7 +6,6 @@
 import logging
 
 import pytest
-
 from gc_core.tools.connect_mcp import transport_policy
 from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
 

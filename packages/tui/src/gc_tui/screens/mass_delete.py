@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from gc_core.utils.is_number import is_number
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -16,7 +17,6 @@ from textual.widgets import Input, Static
 
 from gc_tui.palette import ACCENT, BRIGHT, DIM, INK
 from gc_tui.services.session_delete_select import select_for_deletion
-from gc_core.utils.is_number import is_number
 
 _MODES = ("keep_last", "older_than_days")
 _MODE_LABEL = {

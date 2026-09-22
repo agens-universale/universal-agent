@@ -1,11 +1,7 @@
 """A: Output formatting nudge — секция в системных промптах chat_completions."""
 import re
-from pathlib import Path
 
-import pytest
 from gc_testkit.paths import ASSETS
-
-
 
 
 def _read_prompt(name: str) -> str:

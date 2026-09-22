@@ -14,7 +14,6 @@ from gc_tui.services.session_title import (
     task_title,
 )
 
-
 # ---- display_name -------------------------------------------------------
 
 def test_display_none_meta_is_unnamed():

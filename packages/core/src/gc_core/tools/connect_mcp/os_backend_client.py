@@ -21,14 +21,13 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-
+from gc_core.backends.async_protocol import aexec_port, arun_backend_exec_raw
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.tools.connect_mcp.client import (
     MCP_INIT_PARAMS,
     _merge_mcp_headers,
     _normalize_url,
 )
-from gc_core.backends.async_protocol import aexec_port, arun_backend_exec_raw
 from gc_core.tools.connect_mcp.client_port import McpClientPort
 from gc_core.utils.ssl_config import get_verify_ssl
 

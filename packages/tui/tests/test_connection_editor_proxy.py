@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import pytest
+
 pytest.importorskip("textual")
 
+from gc_tui.editors.connection import ConnectionEditor
 from textual.app import App, ComposeResult
 from textual.widgets import Input
-
-from gc_tui.editors.connection import ConnectionEditor
 
 
 def _harness(editor):

@@ -1,5 +1,4 @@
 import httpx
-
 from gc_core.utils.connect_backend import _default_should_retry_backend_exception
 
 

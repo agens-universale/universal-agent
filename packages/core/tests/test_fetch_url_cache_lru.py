@@ -6,16 +6,14 @@
 """
 from __future__ import annotations
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
 import json
 from collections import OrderedDict
 
-from gc_core.states import SharedStateData
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.states import SharedStateData
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
-
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 # ── Стаб shared/state для _get_cache ──────────────────────────────────────────
 

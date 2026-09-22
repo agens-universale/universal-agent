@@ -29,9 +29,9 @@ async def test_copy_buffer_screen_chrome(tmp_path):
 
     (не дефолтная Textual — она рисуется box-глифами, которые на Windows
     консоли превращаются в мусорные квадратики по периметру, см. дефект)."""
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
+    from textual.widgets import Static
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

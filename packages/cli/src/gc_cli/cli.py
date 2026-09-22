@@ -2,11 +2,10 @@ import os
 import sys
 from typing import Any
 
-from gc_cli import arg_parser
-from gc_core import config_sync
-from gc_core import onboarding
+from gc_core import config_sync, onboarding
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
+    _bootstrap_user_config,
     apply_cli_overrides,
     build_auth_connector,
     cli_forces_legacy_model,
@@ -14,19 +13,20 @@ from gc_core.config import (
     load_config_ex,
     resolve_config_path,
     user_config_path,
-    _bootstrap_user_config,
 )
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
 from gc_core.run_context import RunContext, acreate_run_context
-from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
 from gc_core.utils.json_text import format_json_for_display
 from gc_core.utils.logging_module import human_console_enabled
+from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+
+from gc_cli import arg_parser
 
 
 def _ensure_project_gc_dir() -> None:
@@ -87,12 +87,12 @@ async def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | Non
     name = (skill_name or "").strip()
     if not name:
         return None
-    from gc_core.tools.skills.skill_arg_resolver import resolve_skill_arg, Failed
     from gc_core.tools.skills.registry import get_skills_registry
+    from gc_core.tools.skills.skill_arg_resolver import Failed, resolve_skill_arg
 
     try:
         catalog = await get_skills_registry(config_dict).skill_catalog()
-    except Exception as exc:  # noqa: BLE001 - surface as warning, not traceback
+    except Exception as exc:
         print(
             f"warning: не удалось построить каталог скиллов для -s ({exc}); "
             f"агент стартует, '-s {name}' передан агенту как есть.",
@@ -173,6 +173,7 @@ def _run_init() -> int:
 def _run_sync_config() -> int:
     """`gc-cli --sync-config`: обновить config.yml по свежему шаблону и выйти."""
     from pathlib import Path
+
     from gc_core.config import _default_config_path
     from gc_core.config_modules.env_vars import project_local_config_path
 
@@ -233,6 +234,7 @@ def _run_reset_config() -> int:
     выбранный профиль после сброса деактивирован). Интерактивное y/N-подтверждение;
     без TTY — честный отказ (не молчаливое да и не молчаливый отказ)."""
     from pathlib import Path
+
     from gc_core.config import _default_config_path
     from gc_core.config_modules.env_vars import project_local_config_path
 

@@ -6,10 +6,9 @@
 """
 import json
 
-from gc_testkit.helpers.tool_ctx import with_local_ctx
-
 from gc_core.backends import local as local_backend
 from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
 def _run_in_background(tmp_path, monkeypatch, command: str) -> dict:

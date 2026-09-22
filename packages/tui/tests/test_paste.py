@@ -23,9 +23,9 @@ async def test_action_paste_inserts_from_os_clipboard(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_right_click_pastes_from_os_clipboard(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
     from gc_tui.services import os_ops as os_ops
+    from textual import events
 
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "правый клик")
 

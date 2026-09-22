@@ -8,8 +8,6 @@ from gc_core.message_projection import project_text_for_model
 from gc_core.utils.llm_chat_client import arequest_chat_completion_text, log_llm_prompt_and_result
 
 
-
-
 def _require_auxiliary_llm(ctx: Any) -> Any:
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     if auxiliary_llm is None:

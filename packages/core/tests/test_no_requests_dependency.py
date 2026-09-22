@@ -22,10 +22,8 @@ requests всё равно стоит транзитивно (его тянут 
 """
 import ast
 import tomllib
-from pathlib import Path
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 _SRC = REPO / "packages" / "core" / "src" / "gc_core"

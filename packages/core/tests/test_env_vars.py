@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules.env_vars import EnvVars
 
 
@@ -150,8 +149,8 @@ def test_project_slug_uses_cwd_when_no_arg(monkeypatch, tmp_path):
     assert len(slug) > 0
 
 
-from gc_core.config_modules.env_vars import gc_paths
 from gc_core.config_modules import env_vars as env_vars_module
+from gc_core.config_modules.env_vars import gc_paths
 
 
 def _isolate_env(monkeypatch, **overrides):

@@ -9,7 +9,6 @@ Each test drives real code with a jsonl-mode per-run logger from
 ``create_run_logger`` and asserts the event line + expected keys appear.
 """
 import json
-import os
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch

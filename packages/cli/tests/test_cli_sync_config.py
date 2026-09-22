@@ -4,8 +4,8 @@ import sys
 # arg_parser.py парсит sys.argv на import — подменяем argv до импорта cli.
 sys.argv = ["gc-cli", "--sync-config"]
 
-from gc_core import config_sync
 from gc_cli import cli
+from gc_core import config_sync
 
 
 def _fake_run_args(config=None):

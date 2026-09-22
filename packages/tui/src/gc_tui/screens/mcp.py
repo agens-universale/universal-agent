@@ -1,16 +1,18 @@
 """McpScreen — статус MCP-серверов (read-only, снимок сессии). Карточки."""
 from __future__ import annotations
+
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
-from gc_tui.palette import TOOL_NAME as _TOOL_NAME
-from gc_tui.palette import OK as _OK
-from gc_tui.palette import ERR as _ERR
-from gc_tui.palette import DIM as _DIM
+
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
+from gc_tui.palette import DIM as _DIM
+from gc_tui.palette import ERR as _ERR
+from gc_tui.palette import OK as _OK
+from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 
 _FOOTER = "[Enter] раскрыть  [↑↓] серверы  [PgUp PgDn] прокрутка  [Esc] back"
 

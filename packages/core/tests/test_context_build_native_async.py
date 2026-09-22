@@ -19,7 +19,6 @@ import asyncio
 import threading
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 _CFG = {"stop_tools": [], "backend_api_mode": "chat_completions", "save_logs": False}

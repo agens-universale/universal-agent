@@ -36,7 +36,6 @@ async def test_picker_opens_on_skill_space(tmp_path, monkeypatch):
 async def test_picker_filters_by_id_substring(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     _patch_registry(monkeypatch)
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.widgets.skill_picker import SkillPicker
 
@@ -57,8 +56,8 @@ async def test_picker_closes_when_space_removed(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     _patch_registry(monkeypatch)
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.skill_picker import SkillPicker
     from gc_tui.widgets.command_palette import CommandPalette
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -78,8 +77,8 @@ async def test_palette_and_picker_mutually_exclusive(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     _patch_registry(monkeypatch)
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.skill_picker import SkillPicker
     from gc_tui.widgets.command_palette import CommandPalette
+    from gc_tui.widgets.skill_picker import SkillPicker
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

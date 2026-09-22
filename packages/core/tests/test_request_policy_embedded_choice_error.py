@@ -3,7 +3,6 @@ choices[0].error) должна ретраиться адаптивным цик�
 фатальным ValueError позже в конвертации. Регрессия: прогон H2, триал
 ZtjA5Bf — 504 "Upstream idle timeout exceeded" убил агента на 15-м шаге."""
 import pytest
-
 from gc_core import request_backend_policy as policy
 from gc_core.utils.backend_errors import EmbeddedChoiceError
 from gc_testkit import run_coro

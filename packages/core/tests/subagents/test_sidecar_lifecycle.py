@@ -134,9 +134,9 @@ class TestSidecarIntermediateReply:
 
 class TestSidecarFinished:
     async def test_finished_on_success(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -178,9 +178,9 @@ class TestSidecarFinished:
         assert finished[0]["parent_call_id"] == "call_sub_1"
 
     async def test_finished_on_user_stop(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -219,10 +219,10 @@ class TestSidecarFinished:
 
 class TestSidecarChildSummary:
     async def test_child_summary_on_compaction_applied(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
+        from gc_core import run_summary_coordinator as rsc
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
-        from gc_core import run_summary_coordinator as rsc
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path, trigger=10)
         parent = local_ctx(cfg)

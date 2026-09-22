@@ -20,8 +20,6 @@
 import importlib
 import types
 
-import pytest
-
 
 def _cfg(tmp_path):
     return {

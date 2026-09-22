@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
-from gc_core.config_modules import env_vars
 from gc_core.bundled_assets import bundled_root
+from gc_core.config_modules import env_vars
 
 # Корень bundled-ассетов. Раньше брался из rest_api.server_config — это была
 # единственная зависимость swarm → server, причём там PROJECT_ROOT объявлен как

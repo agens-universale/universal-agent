@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.thread_store import append_subagent_trace_record
 from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL
 from gc_tui.widgets.tool_call_row import ToolCallRow

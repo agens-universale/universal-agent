@@ -4,9 +4,14 @@
 спектр-эквалайзер braille-рампой, распознавание — braille-волна расщепления.
 """
 from gc_tui.services.voice_pill import (
-    PILL_WIDTH, _RAMP, format_rec_time, format_stt_time, render_pill,
+    _RAMP,
+    PILL_WIDTH,
     _transcribing_levels,
+    format_rec_time,
+    format_stt_time,
+    render_pill,
 )
+import itertools
 
 
 def test_pill_is_exactly_pill_width_cells():
@@ -66,7 +71,7 @@ def test_transcribing_wave_has_no_holes():
     for f in range(_CYCLE_FRAMES):
         lit = [i for i, lvl in enumerate(_transcribing_levels(f)) if lvl > 0]
         # разрывы допустимы только между копиями (их две пары), не внутри тела
-        gaps = [b - a for a, b in zip(lit, lit[1:]) if b - a > 1]
+        gaps = [b - a for a, b in itertools.pairwise(lit) if b - a > 1]
         assert len(gaps) <= 4, f"кадр {f}: слишком рваная лента ({gaps})"
 
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import pytest
-
 from gc_core.states import State
 from gc_core.tools import aapply_tool, is_unknown_tool_output
 from gc_testkit import run_coro

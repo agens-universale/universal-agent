@@ -1,4 +1,4 @@
-from gc_tui.services.stream_pump import StreamPump, STREAM_REFRESH_MS
+from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 
 
 class _Sink:

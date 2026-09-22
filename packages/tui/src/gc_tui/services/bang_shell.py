@@ -47,7 +47,7 @@ class BangShellSettings:
     max_output_lines: int = DEFAULT_MAX_OUTPUT_LINES
 
     @classmethod
-    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> "BangShellSettings":
+    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> BangShellSettings:
         if not data:
             return cls()
         timeout = data.get("timeout_sec", None)

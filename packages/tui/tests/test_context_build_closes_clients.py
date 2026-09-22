@@ -10,7 +10,6 @@
 реальными сокетами, а эта краснеет на самой правке.
 """
 import ast
-import pathlib
 
 from gc_testkit.paths import TUI_PKG
 

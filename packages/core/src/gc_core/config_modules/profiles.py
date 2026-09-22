@@ -19,10 +19,8 @@ from pydantic import ValidationError
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
-from gc_core.config_modules.root import (AppConfig, PROFILE_SCHEMA_ERROR_PREFIX,
-                                 schema_error_details)
+from gc_core.config_modules.root import PROFILE_SCHEMA_ERROR_PREFIX, AppConfig, schema_error_details
 from gc_core.utils.user_text import unreadable_reason
-
 
 # Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
 # ТОЛЬКО шапка-инструкция, без якорей секций (ревизия владельца по смоку:
@@ -101,7 +99,7 @@ def _register_profile(result: dict, path: Path, root_kind, notices: Optional[lis
 
 def discover_profiles(
     roots: list[Path], *, notices: Optional[list[str]] = None
-) -> dict[str, "ProfileRef"]:
+) -> dict[str, ProfileRef]:
     """Дискавери профилей по корням (в порядке приоритета — первый найденный побеждает).
 
     Зарезервированные имена (`RESERVED_WORDS`) пропускаются + warning в `notices`,
@@ -170,7 +168,7 @@ def _read_yaml_document(path: Path) -> dict:
     # `UnicodeDecodeError` (профиль сохранён в UTF-16) — тот же «не прочитался»,
     # только подкласс `ValueError`: без пути в сообщении объяснение винило базу.
     try:
-        with open(path, "r", encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             try:
                 raw = yaml.safe_load(file) or {}
             except yaml.YAMLError as exc:
@@ -289,7 +287,7 @@ def mtime_or_none(path: Path) -> Optional[float]:
         return None
 
 
-def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
+def discover_all_refs(roots: list[Path]) -> dict[str, list[ProfileRef]]:
     """Все найденные ссылки на профиль по имени, БЕЗ дедупликации тёзок (в отличие
     от `discover_profiles`, победившим первым идёт проектный корень) — витрине
     Settings (спека §12.3) нужен весь список тёзок, чтобы показать перекрытый файл
@@ -312,7 +310,7 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list["ProfileRef"]]:
 
 def find_active_ref(
     name: Optional[str], project_dir: Path, base_config_path: Path
-) -> Optional["ProfileRef"]:
+) -> Optional[ProfileRef]:
     """`ProfileRef` действующего имени профиля или `None` (нет имени / указатель
     не резолвится — санация уже случилась выше по стеку, здесь просто нечего
     показать). Общий источник для витрин `/config`, `/status`, Settings —
@@ -348,7 +346,7 @@ def profile_display_summary(path: Path) -> ProfileDisplaySummary:
     except (OSError, ValueError, yaml.YAMLError) as exc:
         return ProfileDisplaySummary(slots={}, overlay_sections=[], error=str(exc))
     slots = raw.get("slots")
-    overlay = sorted(k for k in raw.keys() if k not in _MODEL_SECTION_KEYS)
+    overlay = sorted(k for k in raw if k not in _MODEL_SECTION_KEYS)
     return ProfileDisplaySummary(
         slots=dict(slots) if isinstance(slots, dict) else {},
         overlay_sections=overlay,
@@ -357,18 +355,18 @@ def profile_display_summary(path: Path) -> ProfileDisplaySummary:
 
 
 __all__ = [
-    "ProfileRef",
-    "ProfileMeta",
-    "ProfileDisplaySummary",
     "PROFILE_SKELETON",
-    "mtime_or_none",
-    "profile_roots",
-    "discover_profiles",
+    "ProfileDisplaySummary",
+    "ProfileMeta",
+    "ProfileRef",
     "discover_all_refs",
+    "discover_profiles",
     "find_active_ref",
-    "resolve_profile",
     "find_literal_tokens",
     "load_profile_document",
-    "validate_profile_text",
+    "mtime_or_none",
     "profile_display_summary",
+    "profile_roots",
+    "resolve_profile",
+    "validate_profile_text",
 ]

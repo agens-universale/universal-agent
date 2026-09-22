@@ -8,10 +8,9 @@ import pytest
 # роняем сбор всего сьюта.
 pytest.importorskip("office_mcp")
 
-from mcp.server.fastmcp.utilities.func_metadata import func_metadata
-
-from office_mcp.server import ServerConfig, build_server
 from gc_core.tools.connect_mcp.agent_tools import normalize_tool_spec_for_agent
+from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+from office_mcp.server import ServerConfig, build_server
 
 
 def _ref_with_sibling_errors(node: object, path: tuple[str, ...] = ()) -> list[str]:

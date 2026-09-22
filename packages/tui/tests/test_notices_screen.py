@@ -19,8 +19,8 @@ async def test_notices_screen_lists_all(tmp_path):
 def test_header_text_counts_in_header():
     pytest.importorskip("textual")
     # Счётчики ⚠/ℹ — в шапке через «·» (как «mcp · серверы и тулы»), нули опущены.
-    from gc_tui.screens.notices import NoticesScreen
     from gc_core.startup_notices import Notice
+    from gc_tui.screens.notices import NoticesScreen
     notices = [
         Notice("warning", "a", "x"), Notice("warning", "b", "y"), Notice("info", "c", "z"),
     ]
@@ -38,8 +38,8 @@ def test_header_text_counts_in_header():
 def test_notice_text_highlights_technical_names():
     pytest.importorskip("textual")
     # Имена из highlights выделяются стилем имени; прочий текст — нет.
-    from gc_tui.screens.notices import _notice_text, _NAME_STYLE
     from gc_core.startup_notices import Notice
+    from gc_tui.screens.notices import _NAME_STYLE, _notice_text
     n = Notice("warning", "mcp_failed", "MCP не подключились: office.", highlights=("office",))
     t = _notice_text(n)
     styled = [t.plain[s.start:s.end] for s in t.spans if _NAME_STYLE in str(s.style)]

@@ -4,22 +4,25 @@ import logging
 import os
 import re
 import threading
-from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any, Set, Optional, Sequence
+from datetime import UTC, datetime
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
-from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.persistence.live_volume import bump_live_volume_for_messages, live_volume_from_messages, merge_tui_into_meta
+from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
+from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
+from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from gc_core.persistence.live_volume import (
+    bump_live_volume_for_messages,
+    live_volume_from_messages,
+    merge_tui_into_meta,
+)
 from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
-from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.aio_compat import await_callback
-
+from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -32,11 +35,11 @@ _sidecar_seq_lock = threading.Lock()
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _utc_now_suffix() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def make_message_key(message: Dict[str, Any]) -> str:
@@ -239,7 +242,7 @@ def _max_subagent_trace_seq(path: str) -> int:
     if not os.path.exists(path):
         return 0
     max_seq = 0
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             row = line.strip()
             if not row:
@@ -332,7 +335,7 @@ def read_subagent_trace(
     if not os.path.exists(path):
         return []
     records: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             row = line.strip()
             if not row:
@@ -376,7 +379,7 @@ def load_thread_messages(
     messages: List[Dict[str, Any]] = []
     message_keys: Set[str] = set()
     max_seq = 0
-    with open(data_path, "r", encoding="utf-8") as f:
+    with open(data_path, encoding="utf-8") as f:
         for line in f:
             row = line.strip()
             record = _parse_message_record(row) if row else None
@@ -406,7 +409,7 @@ def load_thread_meta(
     if not os.path.exists(meta_path):
         return {}
 
-    with open(meta_path, "r", encoding="utf-8") as f:
+    with open(meta_path, encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
         return {}
@@ -517,7 +520,7 @@ def _lines_without_message(data_path: str, message_id: str) -> Tuple[List[str], 
     """Строки data_*.jsonl без message-записей с данным id и число удалённых."""
     kept: List[str] = []
     removed = 0
-    with open(data_path, "r", encoding="utf-8") as f:
+    with open(data_path, encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue

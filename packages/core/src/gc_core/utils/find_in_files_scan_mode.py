@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 __all__ = [
-    "PatternMode",
     "Needles",
+    "PatternMode",
     "ScanPattern",
     "classify_scan_pattern",
     "is_literal_string",
@@ -156,7 +156,7 @@ def _pick_longer(a: str | None, b: str | None) -> str | None:
     return a if len(a) >= len(b) else b
 
 
-def _affix_or_pattern(body: str, effective_ci: bool) -> "ScanPattern | None":
+def _affix_or_pattern(body: str, effective_ci: bool) -> ScanPattern | None:
     """AFFIX_OR: литеральный префикс/суффикс вокруг одной группы альтернатив."""
     grouped = _split_single_group(body)
     if grouped is None:

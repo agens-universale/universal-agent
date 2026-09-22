@@ -3,7 +3,6 @@
 import asyncio
 
 import yaml
-
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.config import load_config

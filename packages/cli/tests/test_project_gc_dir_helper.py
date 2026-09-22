@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from gc_core.config_modules.env_vars import project_gc_dir

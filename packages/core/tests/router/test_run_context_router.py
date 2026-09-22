@@ -5,7 +5,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core import run_context as rc
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig

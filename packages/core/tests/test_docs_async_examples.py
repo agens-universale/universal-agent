@@ -4,9 +4,7 @@
 обнаруживается пользователем, а не нами.
 """
 import ast
-from gc_testkit import as_coro
 import re
-from pathlib import Path
 
 from gc_testkit.paths import REPO
 

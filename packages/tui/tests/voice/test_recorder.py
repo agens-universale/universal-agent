@@ -1,6 +1,5 @@
 """MicRecorder на fake-стриме: без микрофона и без sounddevice."""
 import pytest
-
 from gc_tui.voice.errors import VoiceError
 from gc_tui.voice.recorder import MicRecorder
 

@@ -3,7 +3,6 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
-
 from gc_core import model_picker as mp
 
 

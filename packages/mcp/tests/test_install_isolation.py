@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 from recommended_mcp import install as inst
-from recommended_mcp.manifest import MCPEntry, InstallSpec
+from recommended_mcp.manifest import InstallSpec, MCPEntry
 
 
 def _entry(name: str) -> MCPEntry:
@@ -29,8 +29,9 @@ def test_one_failure_does_not_abort_others(monkeypatch):
 
 def test_find_entry_by_name():
     from pathlib import Path
+
     from recommended_mcp import install as inst
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
 
     a = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
     b = MCPEntry(name="science", path=Path("."), install=InstallSpec(type="source"))

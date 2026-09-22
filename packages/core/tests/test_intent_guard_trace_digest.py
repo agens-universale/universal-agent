@@ -1,10 +1,16 @@
 import unittest
 from types import SimpleNamespace
 
-from gc_core.message_format import dialog_history
-from gc_core.config_modules.quality_gate import DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS, DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS, QualityGateConfig, digest_limits_from_params, normalize_quality_gate_config
+from gc_core.config_modules.quality_gate import (
+    DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS,
+    DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
+    QualityGateConfig,
+    digest_limits_from_params,
+    normalize_quality_gate_config,
+)
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
+from gc_core.message_format import dialog_history
 
 
 def _ask_human_scenario_messages(*, include_pending_submit: bool = True) -> list[dict]:

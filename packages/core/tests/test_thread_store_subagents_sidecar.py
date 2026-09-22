@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
-from gc_core.thread_store import append_subagent_trace_record, delete_thread, read_subagent_trace, reset_thread_files, subagent_trace_path
+from gc_core.thread_store import (
+    append_subagent_trace_record,
+    delete_thread,
+    read_subagent_trace,
+    reset_thread_files,
+    subagent_trace_path,
+)
 
 
 def test_subagent_trace_path_shape(tmp_path: Path) -> None:
@@ -165,14 +171,14 @@ def test_append_cold_init_continues_from_preseed_seq(tmp_path):
     threads_dir = str(tmp_path)
     path = tmp_path / "data_subagents_cli_t1.jsonl"
     preseed = []
-    import json as _json
     import datetime as _dt
+    import json as _json
 
     for seq in range(1, 6):  # K = 5
         preseed.append(
             _json.dumps(
                 {
-                    "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ts": _dt.datetime.now(_dt.UTC).isoformat(),
                     "seq": seq,
                     "parent_call_id": "p1",
                     "child_run_id": "c1",
@@ -244,7 +250,7 @@ def test_parallel_writers_unique_monotonic_seq(tmp_path):
                         "name": "shell",
                     },
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=writer, args=(w,)) for w in range(n_writers)]

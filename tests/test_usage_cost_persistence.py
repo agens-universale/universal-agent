@@ -2,12 +2,11 @@
 import threading
 import types
 
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_file import FileThreadStore
-
 import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
 from gc_core.thread_store import load_thread_meta
+from gc_core.thread_store_async import athread_store
+from gc_core.thread_store_file import FileThreadStore
 from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
 from gc_testkit import run_coro
 

@@ -7,9 +7,8 @@
 
 import os
 
-from gc_core.backends.local import LocalFsBackend
 import pytest
-
+from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.walk_util import (
     WalkEntry,
     iter_walk_entries_from_flat,

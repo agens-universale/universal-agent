@@ -29,8 +29,6 @@ import asyncio
 import time
 
 import pytest
-
-from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_core.tools.fs.list_files import ListFiles
 from gc_testkit.helpers.tool_ctx import local_ctx
 

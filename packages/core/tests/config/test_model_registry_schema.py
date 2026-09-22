@@ -1,9 +1,8 @@
 import pytest
-from pydantic import ValidationError
-
-from gc_core.config_modules.model_registry import ModelEntry, AssignConfig
+from gc_core.config_modules.model_registry import AssignConfig, ModelEntry
 from gc_core.config_modules.model_sections_validation import validate_model_sections
 from gc_core.config_modules.root import AppConfig, schema_error_details
+from pydantic import ValidationError
 
 
 def test_models_slots_assign_parse_minimal():

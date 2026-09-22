@@ -1,5 +1,7 @@
 """Таймстемп события берётся из record['ts'] (не из несуществующего 'ts_utc')."""
-import json, pytest
+import json
+
+import pytest
 
 
 @pytest.mark.asyncio

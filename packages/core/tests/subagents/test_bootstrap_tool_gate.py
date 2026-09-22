@@ -7,12 +7,11 @@
 """
 from types import SimpleNamespace
 
-from gc_testkit import as_coro
 import pytest
-
 from gc_core.tools.subagents import runner as runner_mod
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import UsageAccount
+from gc_testkit import as_coro
 
 BOOT_MARKER = "BOOTSTRAP-MARKER"
 

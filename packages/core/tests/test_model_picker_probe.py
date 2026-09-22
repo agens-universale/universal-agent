@@ -89,7 +89,6 @@ def test_probe_post_network_error():
 
 def test_get_ex_broken_body_keeps_status(monkeypatch):
     """_urllib_get_ex: битое тело (не JSON) → status сохраняется, payload=None."""
-    import io
     import urllib.request
 
     class FakeResponse:

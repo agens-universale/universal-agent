@@ -1,7 +1,6 @@
-import os
-from gc_core.config_modules.root import AppConfig, resolve_paths
+
 from gc_core.bundled_assets import bundled_root
-from gc_testkit.paths import ASSETS
+from gc_core.config_modules.root import AppConfig, resolve_paths
 
 
 def test_system_prompt_falls_back_to_bundled(tmp_path):

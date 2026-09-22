@@ -21,11 +21,11 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from gc_core.thread_store_types import MessageKey, SubagentTraceRecord, ThreadState
 from gc_core.thread_store_base import ThreadStoreBase
+from gc_core.thread_store_types import MessageKey, SubagentTraceRecord, ThreadState
 
 
 class MemoryThreadStore(ThreadStoreBase):
@@ -211,7 +211,7 @@ class MemoryThreadStore(ThreadStoreBase):
         # первая редакция их не писала, а конформанс смотрел только на ``kind``
         # и потому оставался зелёным при разъехавшихся реализациях.
         record: SubagentTraceRecord = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "seq": len(trace) + 1,
             "parent_call_id": parent_call_id,
             "child_run_id": child_run_id,

@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 
 
@@ -13,8 +12,8 @@ def fake_env(tmp_path, monkeypatch):
 
 
 def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime import cli
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
 
     office = MCPEntry(name="office", path=Path("recommended_mcp/office"),
                      install=InstallSpec(type="source", source=Path("../external/office-mcp")))
@@ -37,9 +36,10 @@ def test_install_unknown_name_errors(fake_env, monkeypatch):
 
 
 def test_install_all_wires_only_installed(fake_env, monkeypatch):
-    from recommended_mcp.runtime import cli
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
+
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime import cli
     good = MCPEntry(name="good", path=Path("."), install=InstallSpec(type="source"))
     bad = MCPEntry(name="bad", path=Path("."), install=InstallSpec(type="source"))
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([good, bad], Path(".")))
@@ -52,8 +52,8 @@ def test_install_all_wires_only_installed(fake_env, monkeypatch):
 
 
 def test_remove_unwires(fake_env, monkeypatch):
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime import cli, wiring
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
     office = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([office], Path(".")))
     monkeypatch.setattr(cli, "_uninstall_one", lambda e, root: None)
@@ -67,9 +67,10 @@ def test_remove_unwires(fake_env, monkeypatch):
 
 
 def test_wire_one_missing_snippet_does_not_raise(fake_env, monkeypatch):
-    from recommended_mcp.runtime import cli
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
+
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime import cli
     monkeypatch.setattr("recommended_mcp.install._node_install_paths", lambda dep: {"npx": "/n"})
     e = MCPEntry(name="x", path=Path("nope-dir"), install=InstallSpec(type="source"))
     # recipe dir has no agent_config.snippet.yml → wire_snippet raises FileNotFoundError;
@@ -78,9 +79,10 @@ def test_wire_one_missing_snippet_does_not_raise(fake_env, monkeypatch):
 
 
 def test_install_threads_config_and_editable(fake_env, monkeypatch):
-    from recommended_mcp.runtime import cli
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
+
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime import cli
     seen = {}
 
     def fake_load(config=None):
@@ -99,9 +101,10 @@ def test_install_threads_config_and_editable(fake_env, monkeypatch):
 
 
 def test_install_threads_repo_url(fake_env, monkeypatch):
-    from recommended_mcp.runtime import cli
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
+
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime import cli
     e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([e], Path(".")))
     monkeypatch.setattr(cli, "_load_repo_url", lambda config=None: ("https://x/repo", "main"))

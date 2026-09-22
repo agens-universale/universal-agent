@@ -6,55 +6,56 @@ from typing import Any, Dict, Optional
 
 CONFIG_FILE_NAME = "config.yml"
 
-from gc_core.config_modules.auth import build_auth_connector
 from pydantic import ValidationError as _PydanticValidationError
 
-from gc_core.config_modules.env_vars import project_gc_dir
-from gc_core.config_modules.backend import parse_chat_completions_max_tokens  # noqa: F401  # re-export: processing_responses импортирует из config
+from gc_core.bundled_assets import bundled_root
+from gc_core.config_modules import env_vars
+
+# managed_config_path живёт в config_modules.env_vars, а не в mcp_runtime.paths:
+# путь принадлежит конфигу, и держать его в MCP-подсистеме значило бы вернуть
+# статическую зависимость ядра конфига от MCP, снятую при разбиении на пакеты.
+from gc_core.config_modules import env_vars as mcp_paths
+from gc_core.config_modules.auth import build_auth_connector
+from gc_core.config_modules.backend import (
+    parse_chat_completions_max_tokens,  # noqa: F401  # re-export: processing_responses импортирует из config
+)
 from gc_core.config_modules.common import (
     apply_swarm_env_overrides,
 )
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.config_modules.root import (AppConfig, SCHEMA_ERROR_PREFIX, resolve_paths,
-                                 schema_error_details)
-from gc_core.config_modules.security import (
-    apply_cli_command_moderation_overrides,
-)
 from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_vars import project_gc_dir
+
+# Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
+# реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
+# зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
+from gc_core.config_modules.layers import (  # noqa: F401
+    _app_config_from_raw,
+    _app_config_from_text,
+    _layer_document,
+    _Layers,
+    _merge_layers,
+    _raw_from_text,
+    _stacked_app_config,
+    prospective_registry,
+    resolve_profile_pointer,
+    stack_documents,
+    validate_config_text,
+    validate_config_text_with_sections,
+    validate_profile_text_with_sections,
+)
 from gc_core.config_modules.model_registry import ModelEntry, validate_registry_pairs
 from gc_core.config_modules.model_sections_validation import validate_model_sections
 from gc_core.config_modules.profiles import (
     ProfileMeta,
     mtime_or_none,
     profile_roots,
-    validate_profile_text,
+)
+from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, AppConfig, resolve_paths, schema_error_details
+from gc_core.config_modules.security import (
+    apply_cli_command_moderation_overrides,
 )
 from gc_core.config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
-from gc_core.config_modules import env_vars
-from gc_core.bundled_assets import bundled_root
-# managed_config_path живёт в config_modules.env_vars, а не в mcp_runtime.paths:
-# путь принадлежит конфигу, и держать его в MCP-подсистеме значило бы вернуть
-# статическую зависимость ядра конфига от MCP, снятую при разбиении на пакеты.
-from gc_core.config_modules import env_vars as mcp_paths
-# Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
-# реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
-# зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
-from gc_core.config_modules.layers import (  # noqa: F401
-    _Layers,
-    _layer_document,
-    validate_config_text,
-    _merge_layers,
-    _raw_from_text,
-    _app_config_from_raw,
-    _app_config_from_text,
-    _stacked_app_config,
-    prospective_registry,
-    resolve_profile_pointer,
-    stack_documents,
-    validate_config_text_with_sections,
-    validate_profile_text_with_sections,
-)
-
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
 

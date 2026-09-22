@@ -3,7 +3,6 @@
 from pathlib import Path
 
 
-
 def _frontmatter_end(lines: list[str]) -> int | None:
     for i, line in enumerate(lines[1:], start=1):
         if line.strip() == "---":

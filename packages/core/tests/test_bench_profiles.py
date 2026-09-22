@@ -1,9 +1,11 @@
 # tests/test_bench_profiles.py
-import importlib.util, sys
+import importlib.util
+import sys
 from pathlib import Path
-import yaml
 
-from gc_testkit.paths import HARBOR, REPO
+import yaml
+from gc_testkit.paths import HARBOR
+
 PROFILES = HARBOR / "profiles"
 
 def _build(gc_cli_config):

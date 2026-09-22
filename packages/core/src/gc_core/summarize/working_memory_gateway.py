@@ -69,7 +69,7 @@ REGISTER_ORDER: tuple[str, ...] = tuple(r.name for r in SESSION_MEMORY_REGISTERS
 
 # Parsed/applied LLM memory patches: every register is a full replace (not append).
 # The ``session_memory`` tool trace path does not use this map.
-REGISTER_MERGE_MODES: Dict[str, str] = {name: "replace" for name in REGISTER_ORDER}
+REGISTER_MERGE_MODES: Dict[str, str] = dict.fromkeys(REGISTER_ORDER, "replace")
 
 SUMMARY_PATCH_REPLACE_REGISTERS: frozenset[str] = frozenset(REGISTER_ORDER)
 
@@ -266,7 +266,7 @@ def build_memory_deltas_format_repair_messages(
     )
     user_prompt = (
         "<raw_memory_step_output>\n"
-        f"{str(raw_output or '')}\n"
+        f"{raw_output or ''!s}\n"
         "</raw_memory_step_output>\n"
     )
     return [
@@ -494,24 +494,24 @@ def render_session_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -
 
 
 __all__ = [
-    "WorkingMemorySnapshot",
-    "WorkingMemoryDeltas",
-    "REGISTER_ORDER",
-    "REGISTER_MERGE_MODES",
-    "SUMMARY_PATCH_REPLACE_REGISTERS",
     "MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL",
-    "read_snapshot_from_state",
-    "render_persistent_state_for_prompt",
-    "resolve_persistent_state_block",
+    "REGISTER_MERGE_MODES",
+    "REGISTER_ORDER",
+    "SUMMARY_PATCH_REPLACE_REGISTERS",
+    "WorkingMemoryDeltas",
+    "WorkingMemorySnapshot",
+    "apply_append_deltas",
+    "apply_memory_patch",
+    "apply_replace_deltas",
+    "apply_summary_memory_patch",
     "build_memory_deltas_format_repair_messages",
+    "coerce_working_memory_deltas",
     "extract_register_bodies",
     "parse_memory_deltas",
-    "should_attempt_memory_deltas_repair",
     "parse_memory_deltas_with_repair",
-    "coerce_working_memory_deltas",
-    "apply_append_deltas",
-    "apply_replace_deltas",
-    "apply_memory_patch",
-    "apply_summary_memory_patch",
+    "read_snapshot_from_state",
+    "render_persistent_state_for_prompt",
     "render_session_memory_for_summary_message",
+    "resolve_persistent_state_block",
+    "should_attempt_memory_deltas_repair",
 ]

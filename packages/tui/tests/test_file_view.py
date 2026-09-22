@@ -1,9 +1,29 @@
 """Юнит-тесты tui.services.file_view: resolve, probe, window, store, limits."""
 from pathlib import Path
 
+from gc_tui.services.file_view import (
+    DEFAULT_MAX_FILE_BYTES,
+    MSG_BINARY,
+    MSG_IS_DIR,
+    MSG_NOT_FOUND,
+    MSG_TOO_LARGE,
+    MSG_USAGE,
+    FileViewSettings,
+    OpenErr,
+    OpenOk,
+    ViewPositionStore,
+    clamp_start_line,
+    count_lines,
+    format_range_label,
+    is_probably_binary,
+    lexer_name_for_path,
+    open_for_view,
+    read_window,
+    resolve_view_path,
+    textarea_language_for_lexer,
+    view_window_renderable,
+)
 from rich.syntax import Syntax
-
-from gc_tui.services.file_view import DEFAULT_MAX_FILE_BYTES, MSG_BINARY, MSG_IS_DIR, MSG_NOT_FOUND, MSG_TOO_LARGE, MSG_USAGE, FileViewSettings, OpenErr, OpenOk, ViewPositionStore, clamp_start_line, count_lines, format_range_label, is_probably_binary, lexer_name_for_path, open_for_view, read_window, resolve_view_path, textarea_language_for_lexer, view_window_renderable
 
 
 def test_resolve_relative_uses_cwd(tmp_path):

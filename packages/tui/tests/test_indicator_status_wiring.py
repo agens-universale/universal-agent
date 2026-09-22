@@ -5,7 +5,6 @@ import pytest
 async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

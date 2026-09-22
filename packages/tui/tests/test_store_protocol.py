@@ -1,5 +1,4 @@
 """TaskStore Protocol — структурный контракт (без реализации)."""
-from typing import get_type_hints
 
 from gc_tui.services.stores.base import TaskStore
 

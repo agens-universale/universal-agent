@@ -9,12 +9,10 @@
 """
 import httpx
 import pytest
-
 from gc_core.utils import aretry
 from gc_core.utils import connect_backend as cb
-
-from transport_fakes import install_transport, sse_body
 from gc_testkit import run_coro
+from transport_fakes import install_transport, sse_body
 
 _OK_BODY = sse_body(
     {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]},
@@ -62,7 +60,7 @@ def test_use_retry_repeats_transient_404(monkeypatch):
 def test_without_use_retry_single_attempt(monkeypatch):
     spy = install_transport(monkeypatch, _flaky_handler(failures=1))
 
-    with pytest.raises(Exception):  # noqa: B017 - тип ошибки транспорта тут не важен
+    with pytest.raises(Exception):
         _call()
 
     assert len(spy.requests) == 1

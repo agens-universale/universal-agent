@@ -4,9 +4,7 @@ import threading
 import time
 
 import pytest
-
 from gc_core.aio import AsyncAgent
-
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,

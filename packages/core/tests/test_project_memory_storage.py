@@ -1,9 +1,7 @@
 import os
 import threading
-from pathlib import Path
 
 import pytest
-
 from gc_core.project_memory import storage
 from gc_core.project_memory.storage import ProjectMemoryError, ProjectMemoryStat
 

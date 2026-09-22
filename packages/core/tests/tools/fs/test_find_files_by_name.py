@@ -1,13 +1,11 @@
-import sys
 import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.fs_tools import FsFindFilesByNameConfig
 from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from pydantic import ValidationError
 
 
 def _tool(extra=None):
@@ -367,8 +365,8 @@ def test_glob_auto_detection_rule_is_documented():
 def test_size_from_walk_spares_getsize():
     import json
 
-    from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
     from gc_core.tools.fs.find_files_by_name import FindFilesByName
+    from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
     class _Counting(FakeBackend):
         def __init__(self, files):
@@ -392,8 +390,8 @@ def test_size_from_walk_spares_getsize():
 def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
     import json
 
-    from gc_testkit.helpers.tool_ctx import with_local_ctx
     from gc_core.tools.fs.find_files_by_name import FindFilesByName
+    from gc_testkit.helpers.tool_ctx import with_local_ctx
 
     (tmp_path / "app.py").write_text("x\n", encoding="utf-8")
     tool = with_local_ctx(FindFilesByName, config_dict={"launch_root": str(tmp_path)})

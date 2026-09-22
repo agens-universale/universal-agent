@@ -16,7 +16,6 @@ import weakref
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.utils.logging_module import create_run_logger
 from gc_tui.services.agent_runner import AgentRunner
 

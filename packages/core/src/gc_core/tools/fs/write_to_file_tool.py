@@ -2,10 +2,10 @@ import json
 import os
 from typing import Any, Dict, Optional
 
+from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import resolve_encoding_arg, sha256_hex_of_bytes, try_encode_text_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.security.path_policy import enforce_write_guard
 
 
 def _validate_write_args(path, content, mode, make_dirs, encoding, newline, backup) -> "tuple[str | None, dict | None]":
@@ -122,7 +122,7 @@ Usage:
 '''
         return description
 
-    def _result(self, 
+    def _result(self,
         *,
         ok: bool,
         path: str,

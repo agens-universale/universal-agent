@@ -1,6 +1,5 @@
 import yaml
-
-from gc_core.config import load_config, apply_cli_overrides
+from gc_core.config import apply_cli_overrides, load_config
 
 
 def _write_cfg(tmp_path, body: dict) -> str:

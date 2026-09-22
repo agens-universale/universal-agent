@@ -3,12 +3,10 @@ import os
 import stat
 
 import pytest
-
 from gc_core.backends.local import _sanitize_env
 from gc_core.tools.exec.run_python_code import RunPythonCode
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_run_python_success_non_zero_and_timeout():
     tool = with_local_ctx(RunPythonCode)

@@ -2,8 +2,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, enforce_write_guard, is_within_root, normalize_path_for_policy
+from gc_core.security.path_policy import (
+    WriteGuardViolation,
+    audit_policy_decision,
+    check_write_path_allowed,
+    enforce_write_guard,
+    is_within_root,
+    normalize_path_for_policy,
+)
 
 
 class _Logger:

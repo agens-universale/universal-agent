@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from gc_core.config import apply_cli_overrides, cli_forces_legacy_model, load_config_ex
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
@@ -47,6 +46,7 @@ def _parse(argv, monkeypatch):
     """arg_parser парсит sys.argv на импорте — подменяем argv и перезагружаем модуль."""
     monkeypatch.setattr("sys.argv", argv)
     import importlib
+
     from gc_cli import arg_parser as ap_mod
     importlib.reload(ap_mod)
     return ap_mod

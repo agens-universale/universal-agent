@@ -1,4 +1,3 @@
-import os
 
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 

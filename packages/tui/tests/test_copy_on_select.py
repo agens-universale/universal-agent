@@ -64,9 +64,9 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
-    from textual import events
     from gc_tui.app import TuiApp
     from gc_tui.services import clipboard_ops
+    from textual import events
 
     seen: list = []
 
@@ -91,8 +91,8 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
-    from textual import events
     from gc_tui.app import TuiApp
+    from textual import events
 
     seen: list = []
 
@@ -120,8 +120,8 @@ async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_text_selected_empty_noop(tmp_path, monkeypatch):
-    from textual import events
     from gc_tui.app import TuiApp
+    from textual import events
 
     seen: list = []
 
@@ -145,9 +145,9 @@ async def test_copy_block_request_wins_race_with_pending_select_copy(tmp_path, m
     CopyBlockRequest кладёт markdown. Без отмены отложенной автокопии debounce
     0.15с срабатывает позже и затирает markdown псевдографикой — здесь мы
     ждём дольше окна debounce и проверяем, что в буфере остался markdown."""
-    from textual import events
     from gc_tui.app import TuiApp
     from gc_tui.messages import CopyBlockRequest
+    from textual import events
 
     seen: list = []
     pseudographics = "┌───┬───┐\n│ a │ b │\n└───┴───┘"

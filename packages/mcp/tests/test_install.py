@@ -1,16 +1,14 @@
 """Тесты для install.py: диспатч по install.type и platform-фильтр."""
 from __future__ import annotations
 
-import sys
 import types
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from recommended_mcp.runtime.venv import pip_install_target
 from recommended_mcp import install as install_mod
 from recommended_mcp.manifest import InstallSpec, MCPEntry
+from recommended_mcp.runtime.venv import pip_install_target
 
 _FAKE_MCP_PY = Path("/fake/mcp-env-python")
 

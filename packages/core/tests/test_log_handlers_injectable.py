@@ -17,7 +17,6 @@
 import logging
 
 import pytest
-
 from gc_core.utils.logging_module import create_run_logger
 
 

@@ -104,7 +104,7 @@ def _accepts_empty_string(prop_schema: Any) -> bool:
         from jsonschema import Draft7Validator
 
         return Draft7Validator(prop_schema).is_valid("")
-    except Exception:  # noqa: BLE001
+    except Exception:
         # Схему не удалось разобрать — не отнимаем подсказку, поведение
         # остаётся прежним.
         return True
@@ -304,16 +304,16 @@ def normalize_optional_empty_as_omit(
 
 
 __all__ = [
+    "OPTIONAL_EMPTY_AS_OMIT_HINT",
+    "OPTIONAL_OMIT_HINT",
     "X_PRESERVE_EMPTY_STRING",
     "X_SUPPRESS_OPTIONAL_HINT",
-    "OPTIONAL_OMIT_HINT",
-    "OPTIONAL_EMPTY_AS_OMIT_HINT",
-    "optional_property_description",
-    "resolve_optional_property_keys",
     "apply_openai_strict_object",
     "apply_openai_strict_parameters",
-    "parameters_schema_for_local_validation",
     "augment_optional_property_descriptions",
     "coalesce_optional_string",
     "normalize_optional_empty_as_omit",
+    "optional_property_description",
+    "parameters_schema_for_local_validation",
+    "resolve_optional_property_keys",
 ]

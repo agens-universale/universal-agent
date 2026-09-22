@@ -16,9 +16,9 @@ def _write_task(tmp_path, tid):
 @pytest.mark.asyncio
 async def test_indicator_docked_not_in_trace(tmp_path):
     pytest.importorskip("textual")
-    from textual.containers import Vertical, VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+    from textual.containers import Vertical, VerticalScroll
 
     tid = "dock1"
     _write_task(tmp_path, tid)
@@ -38,10 +38,10 @@ async def test_indicator_docked_not_in_trace(tmp_path):
 @pytest.mark.asyncio
 async def test_trace_row_lands_in_trace_with_indicator_docked(tmp_path):
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.containers import VerticalScroll
 
     tid = "dock2"
     _write_task(tmp_path, tid)

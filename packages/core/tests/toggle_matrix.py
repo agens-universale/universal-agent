@@ -28,7 +28,6 @@
 """
 from __future__ import annotations
 
-import copy
 import asyncio
 import json
 import sys
@@ -37,7 +36,7 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from parity_harness import (  # noqa: E402
+from parity_harness import (
     ScriptedBackend,
     assistant_text,
     assistant_tool_call,
@@ -597,11 +596,11 @@ ALL_CASES: List[Case] = [BASELINE, *SINGLE, *PAIRS]
 
 async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, Any]:
     """Один прогон. Возвращает наблюдаемое: ответ, дамп треда, meta, ошибку."""
-    from gc_core.agent_executor import AgentExecutor
     # Гарнис обязан идти на ОБЕИХ ветках: эталон снимается прогоном этого же
     # файла в worktree на develop, где сборка контекста синхронная. Ветку
     # выбираем по наличию имени, а не по вере.
     from gc_core import run_context as _rc
+    from gc_core.agent_executor import AgentExecutor
 
     work = tmp_root / case.id.replace("/", "__")
     cfg = parity_config(work, monkeypatch)
@@ -635,7 +634,7 @@ async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, An
             answer = executor.run(["сделай что-нибудь"], thread_id=TID, system=SYS)
         result["answer"] = strip_volatile(answer) if isinstance(answer, (dict, list)) else answer
         result["error"] = None
-    except Exception as exc:                    # noqa: BLE001 — фиксируем ЛЮБОЙ отказ
+    except Exception as exc:
         # Отказ — тоже наблюдаемое поведение и тоже подлежит сверке: важно, что
         # он ОДИНАКОВ по обе стороны, а не что его нет.
         result["answer"] = None
@@ -653,7 +652,7 @@ async def run_case(case: Case, tmp_root: Path, monkeypatch: Any) -> Dict[str, An
             if k in ("messages_count", "backend_api_mode", "runtime",
                      "dialog_steps_offset", "user_turn_seq")
         })
-    except Exception:                            # noqa: BLE001
+    except Exception:
         result["meta"] = {}
     return result
 

@@ -10,7 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from gc_core.config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS, project_memory_limits_from_config_dict
+from gc_core.config_modules.project_memory import (
+    DEFAULT_PROJECT_MEMORY_MAX_CHARS,
+    project_memory_limits_from_config_dict,
+)
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.project_memory import storage
 

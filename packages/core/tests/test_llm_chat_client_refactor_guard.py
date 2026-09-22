@@ -1,7 +1,6 @@
 """Characterization-тесты _positive_int из utils/llm_chat_client."""
 
 import pytest
-
 from gc_core.utils.llm_chat_client import _positive_int
 
 

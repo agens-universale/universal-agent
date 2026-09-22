@@ -9,7 +9,6 @@ import os
 
 import pytest
 
-
 _BACKEND = (
     'backend:\n'
     '  api_mode: chat_completions\n'
@@ -387,8 +386,8 @@ def test_schema_error_in_project_overlay_names_the_overlay(isolated_cwd, tmp_pat
     текста не читалась, объяснение советовало «поправить файл: <база>» и
     `--reset-config`, который оверлей не трогает. Координата у pydantic есть
     (`loc`) — по ней виновник тот файл, что задал ключ."""
-    from pydantic import ValidationError
     from gc_core.onboarding import explain_broken_config
+    from pydantic import ValidationError
 
     base = tmp_path / "base.yml"
     base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
@@ -418,8 +417,8 @@ def test_schema_error_inside_a_list_in_the_overlay_names_the_overlay(isolated_cw
 
     Координата обрезается до первого нестрокового элемента: `endpoint_presets`
     резолвится, и слой находится."""
-    from pydantic import ValidationError
     from gc_core.onboarding import explain_broken_config
+    from pydantic import ValidationError
 
     base = tmp_path / "base.yml"
     base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
@@ -608,8 +607,8 @@ def test_pydantic_validation_error_gets_readable_prefix(tmp_path):
     служебный («1 validation error for AppConfig\\n...»). В объяснении он должен
     получить тот же читаемый вид, что уже есть на путях записи
     (layers.py::_app_config_from_raw): «конфиг не проходит схему: …»."""
-    from pydantic import ValidationError
     from gc_core.onboarding import explain_broken_config
+    from pydantic import ValidationError
 
     base = tmp_path / "base.yml"
     base.write_text(

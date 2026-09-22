@@ -28,7 +28,7 @@ import importlib.util
 import json
 import re
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from gc_testkit.paths import REPO, module_map, package_src_dirs

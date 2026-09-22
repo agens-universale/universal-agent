@@ -155,10 +155,10 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
     """Быстрая отмена ставит заявку, а poll (когда тред idle) удаляет осиротевшую
     реплику из data_*.jsonl по её id."""
     pytest.importorskip("textual")
+    from gc_core.thread_store import ThreadSession, load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
-    from gc_core.thread_store import ThreadSession, load_thread_messages
 
     class _FakeRunner:
         def __init__(self): self._running = True
@@ -202,10 +202,10 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
     tail_events НЕ репортит stream_reset (иначе была бы полная перерисовка =
     моргание)."""
     pytest.importorskip("textual")
+    from gc_core.thread_store import ThreadSession
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
-    from gc_core.thread_store import ThreadSession
 
     class _FakeRunner:
         def __init__(self): self._running = True
@@ -248,9 +248,9 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
 async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
     """Пока на треде активен run — удаление откладывается (нет гонки с дозаписью)."""
     pytest.importorskip("textual")
+    from gc_core.thread_store import ThreadSession, load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
-    from gc_core.thread_store import ThreadSession, load_thread_messages
 
     class _Runner:
         def __init__(self, running): self._running = running
@@ -284,7 +284,6 @@ async def test_cancel_with_undo_skipped_when_events_present():
     """≥1 agent event → НЕ cancel-with-undo, нормальная отмена: индикатор → cancelled."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -311,7 +310,6 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
     """input.text != "" → НЕ cancel-with-undo, нормальная отмена: индикатор → cancelled."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
         def is_running(self) -> bool: return True

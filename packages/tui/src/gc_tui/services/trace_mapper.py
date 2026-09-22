@@ -8,7 +8,6 @@ from typing import Any, Optional
 from gc_tui.models import TraceEvent
 from gc_tui.services.tool_identity import tool_id
 
-
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
 # модель цитирует/обсуждает think-теги внутри рассуждения (рассогласованные/

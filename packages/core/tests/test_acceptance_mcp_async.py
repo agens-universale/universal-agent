@@ -35,10 +35,8 @@ import time
 from pathlib import Path
 
 import pytest
-
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport
-
 
 # --- M-1/M-2: не обещаем того, чего не делаем ------------------------------
 

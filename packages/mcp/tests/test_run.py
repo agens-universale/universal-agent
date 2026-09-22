@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from recommended_mcp import run as run_mod
 from recommended_mcp.manifest import InstallSpec, MCPEntry, RunSpec
 

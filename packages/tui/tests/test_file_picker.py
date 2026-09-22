@@ -1,6 +1,5 @@
 """FilePicker — overlay список путей, set_entries (внешний листинг), навигация."""
 import pytest
-
 from gc_tui.widgets.file_picker import FilePicker
 
 

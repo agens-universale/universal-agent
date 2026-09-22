@@ -1,5 +1,6 @@
 import pytest
 
+
 def _as_coro(fn):
     """Обернуть синхронный двойник в корутину."""
     async def _wrapped(*a, **kw):
@@ -9,16 +10,15 @@ def _as_coro(fn):
 
 
 def _trace_texts(scr):
-    from textual.widgets import Static
     return [str(w.render()) for w in scr.query("#trace Static")]
 
 
 @pytest.mark.asyncio
 async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(
         sd,
@@ -85,9 +85,9 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(
         sd,

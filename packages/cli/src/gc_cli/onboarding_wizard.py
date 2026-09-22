@@ -8,7 +8,7 @@ from typing import Callable
 
 from gc_core import onboarding
 from gc_core import onboarding_fields as _of
-from gc_core.onboarding import authorization_header, mask_authorization, _valid_endpoint_url  # re-export
+from gc_core.onboarding import _valid_endpoint_url, authorization_header, mask_authorization  # re-export
 from gc_core.utils.is_number import is_number
 
 

@@ -8,13 +8,11 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-
 from gc_core.utils.find_in_files_scan_mode import (
     PatternMode,
     classify_scan_pattern,
     is_literal_string,
 )
-
 
 # ---------------------------------------------------------------------------
 # is_literal_string

@@ -114,8 +114,8 @@ async def test_config_screen_has_header_and_footer(tmp_path):
 # ---- fieldset-панели (spec 2026-06-10) ----
 
 def test_paths_block_is_rich_text_without_pseudo_comment():
-    from rich.text import Text
     from gc_tui.screens.config import _paths_block
+    from rich.text import Text
     t = _paths_block({"agent_md_path": "/p/agent.md"}, "/p/config.yml", None)
     assert isinstance(t, Text)
     plain = t.plain
@@ -157,7 +157,7 @@ async def test_config_screen_snapshot_hint_caption(tmp_path):
     # спека §12.3a) и присутствует в rendered_text().
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.config import ConfigScreen, _SNAPSHOT_HINT
+    from gc_tui.screens.config import _SNAPSHOT_HINT, ConfigScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -191,6 +191,7 @@ async def test_config_trace_quiet_focus_keeps_keyboard_scroll(tmp_path):
 def test_quiet_focus_and_panel_rules_in_tcss():
     # Sync-тест на CSS (прецедент: BRAND_RULE): правила существуют в styles.tcss.
     from pathlib import Path
+
     import gc_tui as tui
     tcss = (Path(tui.__file__).parent / "styles.tcss").read_text(encoding="utf-8")
     assert "#trace.quiet-focus:focus" in tcss
@@ -238,9 +239,9 @@ def test_filtered_yaml_text_filters_full_and_no_match():
 @pytest.mark.asyncio
 async def test_config_filter_input_focused_and_filters(tmp_path):
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import ConfigScreen
+    from textual.widgets import Input
     cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     app._config_path = "/p/config.yml"

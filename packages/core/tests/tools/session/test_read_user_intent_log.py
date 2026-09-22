@@ -1,14 +1,19 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 
-import pytest
-
 from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_USER_ASK, IntentRecord, append_tool_aggregated, append_user_ask, flush, read_page, serialize
-from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+from gc_core.intent_log import (
+    ACTION_USER_ASK,
+    IntentRecord,
+    append_tool_aggregated,
+    append_user_ask,
+    flush,
+    read_page,
+    serialize,
+)
 from gc_core.tools.registry import get_builtin_tools_data
-
+from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 FIXED_TS = "2026-05-30T11:35:08Z"
 

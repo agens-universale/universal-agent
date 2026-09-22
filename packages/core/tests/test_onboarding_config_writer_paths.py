@@ -1,6 +1,5 @@
 """Path-aware якоря writer'а: одинаковые leaf-имена в разных секциях не путаются."""
 import pytest
-
 from gc_core import onboarding_config_writer as w
 
 DOC = (
@@ -100,15 +99,15 @@ def test_write_values_validation_failure_leaves_file_untouched(tmp_path):
 
 
 def test_validate_config_text_accepts_renamed_key(monkeypatch):
-    from gc_core.config_modules import compat as compat
     from gc_core.config import validate_config_text
+    from gc_core.config_modules import compat as compat
     monkeypatch.setattr(compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"})
     validate_config_text("backend:\n  legacy_url: \"http://x\"\n")  # не бросает
 
 
 def test_validate_config_text_rejects_broken_yaml():
-    from gc_core.config import validate_config_text
     import pytest
+    from gc_core.config import validate_config_text
     with pytest.raises(ValueError):
         validate_config_text("backend: [незакрытый\n  список")
 
@@ -122,8 +121,8 @@ def test_validate_config_text_ignores_unresolvable_sections():
 
 
 def test_validate_config_text_with_sections_rejects_dangling_slot():
-    from gc_core.config import validate_config_text_with_sections
     import pytest
+    from gc_core.config import validate_config_text_with_sections
     with pytest.raises(ValueError):
         validate_config_text_with_sections(
             'models:\n  flash:\n    url: "http://x"\n    token: "sk"\nslots:\n  default: "нет-такого"\n')
@@ -137,8 +136,9 @@ def test_validate_config_text_with_sections_accepts_resolvable_registry():
 
 def test_field_anchor_paths_resolve_in_real_template():
     from pathlib import Path
-    from gc_core.config import _default_config_path
+
     from gc_core import onboarding
+    from gc_core.config import _default_config_path
     template = Path(_default_config_path()).read_text(encoding="utf-8")
     for leaf, dotted in onboarding.FIELD_ANCHOR_PATHS.items():
         w.find_anchor(template, dotted)   # KeyError = спека/шаблон разошлись

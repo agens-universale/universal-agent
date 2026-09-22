@@ -4,6 +4,7 @@
 from gc_tui.models import TraceEvent
 from gc_tui.screens.main import TraceScreen
 
+
 class _FakeRow:
     def __init__(self): self.finalized = None
     def set_result(self, *, summary, error): self.finalized = (summary, error)

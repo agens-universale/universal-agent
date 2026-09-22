@@ -4,9 +4,6 @@
 строки, и раскладывать их по отдельным файлам значило бы плодить преамбулы.
 Блокер и high лежат отдельно, у каждого свой стенд.
 """
-import asyncio
-
-import pytest
 
 
 # --- M18: что ретраить, а что нести наверх сразу ---------------------------
@@ -22,7 +19,6 @@ def test_config_errors_are_not_retryable():
     Докстрока предохранителя требовала обратного.
     """
     import httpx
-
     from gc_core.utils.backend_errors import HTTP_TRANSPORT_ERRORS
 
     for exc_type in (httpx.UnsupportedProtocol, httpx.LocalProtocolError):
@@ -35,7 +31,6 @@ def test_config_errors_are_not_retryable():
 def test_real_network_failures_are_still_retryable():
     """Обратная половина: настоящие сетевые сбои ретраить по-прежнему надо."""
     import httpx
-
     from gc_core.utils.backend_errors import HTTP_TRANSPORT_ERRORS
 
     for exc_type in (

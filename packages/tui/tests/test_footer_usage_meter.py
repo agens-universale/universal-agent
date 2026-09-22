@@ -5,7 +5,6 @@
 сбрасывает кэш; без runner'а сегмента нет.
 """
 import pytest
-
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
 _PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",

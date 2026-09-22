@@ -1,7 +1,6 @@
 """Тело сообщения с резюме треда: разметка секций и связанные строковые константы."""
 
 import re
-
 from typing import Any, Iterable, Mapping
 
 from gc_core.config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS

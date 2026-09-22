@@ -1,6 +1,5 @@
-import yaml
-from pathlib import Path
 
+import yaml
 from gc_core.config_modules import env_vars
 
 
@@ -43,8 +42,8 @@ def test_wire_snippet_rejects_multi_key(tmp_path, monkeypatch):
     recipe.mkdir(parents=True)
     (recipe / "agent_config.snippet.yml").write_text(
         "a:\n  transport: stdio\nb:\n  transport: stdio\n", encoding="utf-8")
-    from recommended_mcp.runtime import wiring
     import pytest
+    from recommended_mcp.runtime import wiring
     with pytest.raises(ValueError):
         wiring.wire_snippet("bad", recipe, npx="/n", cache="/c")
 
@@ -53,10 +52,10 @@ def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": tmp_path / "cfg",
         "data": tmp_path / "d", "cache": tmp_path / "cache", "state": tmp_path / "s"})
-    from recommended_mcp.runtime import wiring
     # Путь от корня репозитория, а не от cwd: набор ядра гоняется и из
     # packages/core, где относительный путь никуда не ведёт.
     from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import wiring
     recipe = RECIPES / "browser_playwright"
     leftover = wiring.wire_snippet("browser_playwright", recipe, npx="/N/npx", cache="/C")
     srv = wiring.wired_servers()["browser_playwright"]

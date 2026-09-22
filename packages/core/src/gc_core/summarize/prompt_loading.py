@@ -2,9 +2,16 @@
 
 import os
 
-from gc_core.summarize.summary_spec import MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER, SUMMARY_OUTPUT_SHAPE_PLACEHOLDER, SUMMARY_SECTIONS_PLACEHOLDER, render_output_shape_for_prompt, render_sections_for_prompt, render_summary_tags_for_memory_patch_prompt
-from gc_core.summarize.working_memory_gateway import inject_working_memory_prompt_placeholders
 from gc_core.bundled_assets import bundled_root
+from gc_core.summarize.summary_spec import (
+    MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
+    SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
+    SUMMARY_SECTIONS_PLACEHOLDER,
+    render_output_shape_for_prompt,
+    render_sections_for_prompt,
+    render_summary_tags_for_memory_patch_prompt,
+)
+from gc_core.summarize.working_memory_gateway import inject_working_memory_prompt_placeholders
 from gc_core.utils.user_text import read_user_text
 
 

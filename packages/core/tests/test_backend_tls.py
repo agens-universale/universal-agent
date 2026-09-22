@@ -41,8 +41,8 @@ def test_get_backend_client_cert():
     assert get_backend_client_cert({}) is None
 
 
-from transport_fakes import install_transport, sse_body, stream_response
 from gc_testkit import run_coro
+from transport_fakes import install_transport, sse_body, stream_response
 
 
 def test_chat_completions_passes_verify_and_cert(monkeypatch):

@@ -12,17 +12,14 @@ covered separately below for the "no mark_current_run at startup during an
 upgrade" wiring.
 """
 import sys
-import types
 
 import pytest
 
 pytest.importorskip("textual")
 
-from gc_core import app_version
-from gc_core import config_sync
-from recommended_mcp.runtime import cli as mcp_cli_mod
-from gc_core import upgrade_gate
+from gc_core import config_sync, upgrade_gate
 from gc_tui.screens.post_update import PostUpdateScreen
+from recommended_mcp.runtime import cli as mcp_cli_mod
 
 
 def _stub_post_update_deps(monkeypatch):
@@ -86,11 +83,11 @@ async def test_no_upgrade_info_no_post_update_screen(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
     _stub_post_update_deps(monkeypatch)
+    from gc_core import config as cfg_mod
+    from gc_core import thread_store as ts_mod
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
     from gc_tui.screens.onboarding import OnboardingScreen
-    from gc_core import config as cfg_mod
-    from gc_core import thread_store as ts_mod
 
     configured = {"completions_url": "https://h/v1/chat/completions",
                   "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}

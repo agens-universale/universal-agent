@@ -5,9 +5,8 @@ test_builtin_tool_names.py чистит gc_core.tools* из sys.modules, поэ�
 модульный импорт держал бы устаревший объект, а monkeypatch по строке
 патчил бы заново импортированный модуль — фейк MCP не срабатывал.
 """
-from gc_testkit import run_coro
-
 from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES
+from gc_testkit import run_coro
 
 
 def _mcp_entry(name: str) -> dict:

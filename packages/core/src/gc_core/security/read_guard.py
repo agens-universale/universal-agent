@@ -10,19 +10,17 @@ path-policy). Контур 2 (sensitivity scan) и Контур 3 (anti-exfiltra
 """
 from __future__ import annotations
 
-import functools
 import fnmatch
+import functools
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from gc_core.security.dual_wrapper import OffLoop
 from gc_core.security.confirm_port import request_confirm
-from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context, _extract_named_value, _tool_name
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.path_policy import _extract_named_value, _tool_name, audit_policy_decision, resolve_tool_context
 from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
-from gc_core.security.dual_wrapper import dual_wrap
-
 
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
 

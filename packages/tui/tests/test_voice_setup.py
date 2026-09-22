@@ -2,14 +2,13 @@
 """Фасад voice_setup: снапшот статуса, маршрутизация слоёв, probe."""
 import pytest
 
-from gc_tui.services import voice_setup as vs
-from gc_tui.voice_runtime.state import SPEACHES_PIN, VoiceState
-
 # Захват ДО фикстур. Autouse `_no_network_model_fetch` из conftest (приехала с
 # develop, коммит 263eb403) подменяет сам `model_picker.fetch_models` на
 # постоянный ответ, и нижний шов транспорта до дела не доходит. Тестовые модули
 # импортируются на СБОРЕ, то есть раньше фикстур, — здесь ещё настоящая функция.
 from gc_core.model_picker import fetch_models as _REAL_FETCH_MODELS
+from gc_tui.services import voice_setup as vs
+from gc_tui.voice_runtime.state import SPEACHES_PIN, VoiceState
 
 # Версия — ОТ пина, а не литералом: иначе бамп пина превращал бы «установлен и свеж» в
 # «устарел», и падали бы тесты, к обновлению отношения не имеющие.
@@ -287,7 +286,6 @@ def test_list_models_sends_bearer_and_returns_ids(monkeypatch):
     """Список моделей endpoint'а — тем же сырым правилом авторизации, что и probe
     (`Bearer <токен из поля>`), и по тому же корню API (суффикс аудио-метода стрижёт
     `api_base`). Пустой токен = без заголовка (открытый/локальный сервис)."""
-    from gc_core import model_picker as mp
     seen = []
 
     def _get(url, headers, verify):
@@ -308,7 +306,6 @@ def test_list_models_sends_bearer_and_returns_ids(monkeypatch):
 
 def test_list_models_tells_failure_from_an_empty_answer(monkeypatch):
     """None (не достучались) и [] (ответил, но моделей нет) — разные сообщения человеку."""
-    from gc_core import model_picker as mp
 
     def _down(url, headers, verify):
         raise OSError("refused")

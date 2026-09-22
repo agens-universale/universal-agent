@@ -197,6 +197,7 @@ async def test_fuzzy_search_runs_off_ui_thread(tmp_path, monkeypatch):
     event loop на минуты (не работал даже Ctrl-C)."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -257,6 +258,7 @@ async def test_late_search_result_does_not_reopen_picker(tmp_path, monkeypatch):
     опоздавший результат пикер не открывает."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -359,6 +361,7 @@ async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch,
     уходит warning с корнем и запросом, пикер просто не открывается."""
     pytest.importorskip("textual")
     import logging
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -389,6 +392,7 @@ async def test_tab_on_stale_list_does_not_complete_wrong_path(tmp_path, monkeypa
     достраивать путь из него — иначе «@main» молча превращается в «@aaa/»."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -431,6 +435,7 @@ async def test_late_result_does_not_overwrite_directory_listing(tmp_path, monkey
     папки; опоздавший результат поиска его не перетирает."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -508,6 +513,7 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
     корня git уже не зовёт (иначе в огромном репозитории каждый «@» ждёт заново)."""
     pytest.importorskip("textual")
     import subprocess
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -548,6 +554,7 @@ async def test_slow_search_shows_searching_row_then_results(tmp_path, monkeypatc
     пришёл результат — она сменяется списком."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -618,6 +625,7 @@ async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, 
     опоздавший результат пикер не открывает; текст остаётся в поле."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -657,6 +665,7 @@ async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path
     поиска не должна его перехватывать."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -726,6 +735,7 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
     «ищу по проекту…», ни до неё; после результата достраивает путь."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -781,6 +791,7 @@ async def test_escape_then_enter_sends_text_as_is(tmp_path, monkeypatch):
     """Выход из ожидания: Esc отменяет поиск, следующий Enter отправляет набранное."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -830,6 +841,7 @@ async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypa
     сборки фильтруется только актуальный запрос, устаревшие выходят без фильтра."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -877,6 +889,7 @@ async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, 
     pytest.importorskip("textual")
     import subprocess
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -913,6 +926,7 @@ async def test_escape_during_index_build_does_not_start_second_build(tmp_path, m
     подхватывает идущую, а не запускает вторую параллельно."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -955,6 +969,7 @@ async def test_index_finished_after_close_is_not_reused_by_next_session(tmp_path
     было: следующий сеанс собирает свежий индекс, а не берёт залежавшийся."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -998,6 +1013,7 @@ async def test_switching_to_skill_input_ends_file_search_session(tmp_path, monke
     вставка): опоздавший результат не должен открыть файловый пикер поверх команды."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -1034,6 +1050,7 @@ async def test_switching_to_arg_picker_input_ends_file_search_session(tmp_path, 
     не должны оказаться открыты одновременно."""
     pytest.importorskip("textual")
     import threading
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 
@@ -1101,6 +1118,7 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
     пробует git."""
     pytest.importorskip("textual")
     import subprocess
+
     from gc_tui.app import TuiApp
     from gc_tui.services import file_index
 

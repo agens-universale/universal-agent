@@ -1,8 +1,7 @@
 from types import SimpleNamespace
 
 from gc_core.utils import llm_chat_client
-from gc_testkit import run_coro
-from gc_testkit import as_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _cfg(**overrides):

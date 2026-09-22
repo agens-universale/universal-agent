@@ -1,8 +1,9 @@
 """Классификация ошибок бэкенда для восстановления в цикле агента."""
 from __future__ import annotations
 
-import httpx
 from typing import NamedTuple
+
+import httpx
 
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.chat_completions_stream import BackendStreamError
@@ -71,7 +72,7 @@ HTTP_TRANSPORT_ERRORS = (
 )
 
 
-def http_status_code(exc: BaseException) -> "int | None":
+def http_status_code(exc: BaseException) -> int | None:
     """Код HTTP-ошибки независимо от транспорта; None — это не HTTP-ошибка."""
     if isinstance(exc, HTTP_STATUS_ERRORS):
         return getattr(getattr(exc, "response", None), "status_code", None)

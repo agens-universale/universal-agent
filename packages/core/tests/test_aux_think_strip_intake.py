@@ -4,11 +4,10 @@ import json
 from types import SimpleNamespace
 
 import yaml
-
 from gc_core.config import load_config
 from gc_core.intent_guard.validation_result import parse_validator_response
-from gc_core.intent_scope.summarizer import build_fallback_aggregated_content
 from gc_core.intent_log.user_turn import seed_subagent_current_user_intent
+from gc_core.intent_scope.summarizer import build_fallback_aggregated_content
 from gc_core.project_memory import compaction
 from gc_core.security import command_moderation
 from gc_core.summarize import llm as summary_llm

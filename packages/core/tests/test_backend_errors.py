@@ -1,13 +1,12 @@
 import httpx
 import requests
-
 from gc_core.utils.backend_errors import (
-    EmbeddedChoiceError,
     FINISH_KIND_BLOCKED,
     FINISH_KIND_LENGTH,
     FINISH_KIND_STOP,
     FINISH_KIND_TOOL_CALLS,
     FINISH_KIND_UNKNOWN,
+    EmbeddedChoiceError,
     classify_finish_kind,
     finish_blocks_final,
     finish_prevents_text_final,

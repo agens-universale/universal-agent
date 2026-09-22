@@ -210,12 +210,12 @@ def preload_minimal_tools_package() -> None:
     session_pkg = types.ModuleType("gc_core.tools.session")
     session_pkg.__path__ = [str(tools_dir / "session")]
     sys.modules["gc_core.tools.session"] = session_pkg
-    setattr(tools_pkg, "session", session_pkg)
+    tools_pkg.session = session_pkg
 
     stored_pkg = types.ModuleType("gc_core.tools.session.stored_outputs")
     stored_pkg.__path__ = [str(tools_dir / "session" / "stored_outputs")]
     sys.modules["gc_core.tools.session.stored_outputs"] = stored_pkg
-    setattr(session_pkg, "stored_outputs", stored_pkg)
+    session_pkg.stored_outputs = stored_pkg
     _load_file_module(
         "gc_core.tools.session.stored_outputs.tool_call_outputs_store",
         _STORE_SRC,

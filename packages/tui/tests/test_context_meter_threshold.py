@@ -1,5 +1,6 @@
 """_context_meter нормирует бар на ЖЁСТКИЙ порог (summary_trigger), а не turn-end."""
 import json
+
 import pytest
 
 

@@ -70,7 +70,7 @@ def cleanup_threads(
     for meta_path in sorted(meta_paths):
         result["scanned"] += 1
         try:
-            with open(meta_path, "r", encoding="utf-8") as f:
+            with open(meta_path, encoding="utf-8") as f:
                 meta = json.load(f)
             if not isinstance(meta, dict):
                 result["skipped"] += 1
@@ -111,7 +111,7 @@ def cleanup_threads(
                     result["removed_data"] += 1
             except FileNotFoundError:
                 pass
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result["errors"] += 1
             print(f"[cleanup] error for {meta_path}: {e!r}")
 
@@ -126,6 +126,7 @@ def _default_threads_dir() -> str:
     задан явно.
     """
     from gc_core.thread_store import resolve_threads_dir
+
     from gc_server.rest_api.server_config import (
         build_agent_config_for_server,
         load_server_config,

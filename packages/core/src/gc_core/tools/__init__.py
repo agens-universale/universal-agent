@@ -1,24 +1,26 @@
-import asyncio
 import difflib
-import inspect
 import json
-import traceback
-
-import sys
 import logging
-from typing import Any, Dict, Iterable, Tuple, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, annotate_output_with_dropped_arguments, parse_and_validate_tool_arguments
-from gc_core.tools.skills.registry import get_skills_registry
-from gc_core.tools.skills.skills_tools import get_skills_tools_data
-from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
-from gc_core.tools.skills.registry import SkillsRegistry
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    annotate_output_with_dropped_arguments,
+    parse_and_validate_tool_arguments,
+)
+from gc_core.tools.inject_tool_fields import (
+    apply_injected_fields_to_spec,
+    resolve_inject_tool_fields,
+    strip_injected_tool_args,
+)
+from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
+from gc_core.tools.schema_optional import apply_openai_strict_parameters, augment_optional_property_descriptions
+from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
-from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec, resolve_inject_tool_fields, strip_injected_tool_args
-from gc_core.tools.schema_optional import apply_openai_strict_parameters, augment_optional_property_descriptions
 
 _fallback_logger = logging.getLogger(__name__)
 _LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
@@ -434,7 +436,7 @@ def tool_arguments_valid(
 
 def _config_dict_for_call(ctx: Optional[Any], kwargs: Dict[str, Any]) -> Dict[str, Any]:
     if ctx is not None and hasattr(ctx, "config_dict"):
-        cfg = getattr(ctx, "config_dict") or {}
+        cfg = ctx.config_dict or {}
     else:
         cfg = kwargs.get("config_dict")
     return cfg if isinstance(cfg, dict) else {}
@@ -442,7 +444,7 @@ def _config_dict_for_call(ctx: Optional[Any], kwargs: Dict[str, Any]) -> Dict[st
 
 def _logger_for_call(ctx: Optional[Any]) -> logging.Logger:
     if ctx is not None and hasattr(ctx, "logger"):
-        candidate = getattr(ctx, "logger")
+        candidate = ctx.logger
         if isinstance(candidate, logging.Logger):
             return candidate
     return _fallback_logger
@@ -599,7 +601,7 @@ def _tool_failure_output(
     """
     log = _fallback_logger
     if ctx is not None and hasattr(ctx, "logger"):
-        candidate = getattr(ctx, "logger")
+        candidate = ctx.logger
         if isinstance(candidate, logging.Logger):
             log = candidate
 
@@ -661,7 +663,7 @@ async def aapply_tool(
         )
     try:
         res = await acall(**args)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return annotate_output_with_dropped_arguments(
             _tool_failure_output(
                 e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
@@ -675,12 +677,12 @@ async def aapply_tool(
 
 
 __all__ = [
-    "WrongFunctionArgumentsException",
     "INTERNAL_TOOL_ERROR",
+    "WrongFunctionArgumentsException",
     "aapply_tool",
-    "tool_arguments_valid",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",
     "is_unknown_tool_output",
+    "tool_arguments_valid",
 ]

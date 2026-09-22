@@ -39,7 +39,6 @@ def _write_task(tmp_path, tid):
 @pytest.mark.asyncio
 async def test_status_with_active_task_opens_viewer_with_meta_and_runtime(tmp_path):
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.viewer import ViewerScreen
 
@@ -66,7 +65,6 @@ async def test_status_with_active_task_opens_viewer_with_meta_and_runtime(tmp_pa
 @pytest.mark.asyncio
 async def test_status_without_active_task_shows_idle(tmp_path):
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.viewer import ViewerScreen
 

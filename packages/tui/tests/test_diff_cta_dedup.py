@@ -123,7 +123,8 @@ async def test_cta_shows_after_fast_turn_error_same_tick(tmp_path):
     _poll_active, не через предикат напрямую (иначе ошибка проходит мимо)."""
     pytest.importorskip("textual")
     from gc_core.message_policy.user_message_policy import (
-        TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content,
+        TECHNICAL_TYPE_ERROR_MESSAGE,
+        wrap_technical_user_content,
     )
     from gc_tui.app import TuiApp
 

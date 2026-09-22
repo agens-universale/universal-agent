@@ -9,9 +9,10 @@ from typing import Any, Optional, Sequence, Union
 
 from gc_core.config_modules.diff_tui import DEFAULT_CACHE_MAX_ORIG
 from gc_core.config_modules.env_vars import project_gc_dir
-from gc_tui.diff_tui.paths import canonical_path_key, orig_key
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.file_text import classify_file_content
+
+from gc_tui.diff_tui.paths import canonical_path_key, orig_key
 
 PathLike = Union[str, os.PathLike[str]]
 
@@ -150,14 +151,13 @@ class DiffStore:
                 # Не вытесняем только что созданный .orig: сразу после snapshot
                 # disk == .orig (clean), иначе LRU съест свежий baseline.
                 self._maybe_evict(index, protect_key=key)
-        else:
-            # Новый файл: .orig не создаём.
-            if key not in index:
-                index[key] = {
-                    "status": STATUS_CREATED,
-                    "baseline_exists": False,
-                }
-                self.save_index(index)
+        # Новый файл: .orig не создаём.
+        elif key not in index:
+            index[key] = {
+                "status": STATUS_CREATED,
+                "baseline_exists": False,
+            }
+            self.save_index(index)
 
         return key
 

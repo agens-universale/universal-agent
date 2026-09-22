@@ -10,10 +10,8 @@ import os
 from pathlib import Path
 
 import pytest
-
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_testkit.helpers.tool_ctx import with_local_ctx
-
 
 # ------------------------------------------------------------------
 # helpers

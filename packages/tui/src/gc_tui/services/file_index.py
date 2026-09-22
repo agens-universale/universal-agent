@@ -316,7 +316,7 @@ _GIT_TIMEOUT = 5.0
 _GIT_CHUNK = 1 << 16
 
 
-def _kill_process_tree(proc: "subprocess.Popen") -> None:
+def _kill_process_tree(proc: subprocess.Popen) -> None:
     """Погасить процесс вместе с потомками. Одного proc.kill() мало: git из PATH
     на Windows — обёртка, настоящий git — её дочерний процесс и пережил бы её."""
     try:
@@ -337,7 +337,7 @@ def _kill_process_tree(proc: "subprocess.Popen") -> None:
         pass
 
 
-def _reap(proc: "subprocess.Popen") -> None:
+def _reap(proc: subprocess.Popen) -> None:
     """Подобрать погашенный процесс, не дольше пары секунд (на POSIX иначе зомби)."""
     try:
         proc.wait(timeout=2)

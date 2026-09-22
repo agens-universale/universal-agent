@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 
 def _replace_tag_block(template: str, tag: str, new_inner: str) -> str:

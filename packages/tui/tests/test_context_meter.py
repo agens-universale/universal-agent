@@ -1,8 +1,7 @@
 """render_context_meter: фикс-ширины реверс-градиент плашка «контекст NN%» (pill-стиль)."""
 import pytest
-
-from gc_tui.services.context_meter import render_context_meter, _TRACK, _WIDTH
 from gc_tui.branding import gradient_color
+from gc_tui.services.context_meter import _TRACK, _WIDTH, render_context_meter
 
 
 def _bg_hex(span):

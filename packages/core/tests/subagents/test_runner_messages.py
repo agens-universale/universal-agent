@@ -1,10 +1,9 @@
 """Tests for SubagentRunner._build_initial_messages."""
-import pytest
-
 from types import SimpleNamespace
 
+import pytest
 from gc_core.intent_log.user_turn import init_subagent_open_turn
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
 
 

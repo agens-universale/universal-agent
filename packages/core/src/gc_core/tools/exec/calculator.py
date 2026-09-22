@@ -1,10 +1,10 @@
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
 import ast
 import json
 import operator
 from typing import Any, Dict, Optional
 
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 # --- AST whitelist walker (C1, C5, C6) ---
 

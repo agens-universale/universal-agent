@@ -74,6 +74,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
+
     from gc_tui.app import TuiApp
 
     tid = "t1"
@@ -155,6 +156,7 @@ async def test_brand_block_shown_on_attach_existing_session(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
+
     from gc_tui.app import TuiApp
 
     tid = "t-resume"

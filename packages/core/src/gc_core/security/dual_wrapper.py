@@ -33,8 +33,8 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
-from typing import Any, Callable, Generator
 import threading
+from typing import Any, Callable, Generator
 
 
 def _start(flow: Generator) -> tuple[bool, Any]:
@@ -146,7 +146,7 @@ class OffLoop:
     Ctrl+C на вопросе `y/n` рушит весь прогон вместо вежливого «не разрешаю».
     """
 
-    __slots__ = ("fn", "args", "on_interrupt")
+    __slots__ = ("args", "fn", "on_interrupt")
 
     def __init__(self, fn: Callable[..., Any], *args: Any,
                  on_interrupt: Any = _NO_INTERRUPT) -> None:
@@ -174,7 +174,7 @@ class _Failed:
 _INITIAL = object()
 
 
-async def _await_off_loop(request: "OffLoop", *, on_abandoned: Callable[[], None]) -> Any:
+async def _await_off_loop(request: OffLoop, *, on_abandoned: Callable[[], None]) -> Any:
     """Дождаться блокирующего вызова; для ожидания человека — с перехватом Ctrl+C.
 
     Перехват НАРОЧНО узкий и временный: он живёт только пока ждут человека и
@@ -232,7 +232,7 @@ async def _aserve_request(flow: Generator, request: Any) -> Any:
         # BaseException`, и вызов остался бы неотменяемым.
         _close_quietly(flow)
         raise
-    except Exception as exc:  # noqa: BLE001 — отдаём в точку запроса
+    except Exception as exc:
         return _Failed(exc)
 
 
@@ -269,7 +269,7 @@ def _drive_sync(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
                     outcome = run_coro_blocking(request.make_coro())
                 else:
                     outcome = request.fn(*request.args)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 outcome = _Failed(exc)
             continue
         return True, None

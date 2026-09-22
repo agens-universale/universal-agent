@@ -10,8 +10,13 @@ from gc_tui.voice_runtime.fs import force_rmtree
 from gc_tui.voice_runtime.net import with_system_trust_retry
 from gc_tui.voice_runtime.paths import speaches_python, speaches_root
 from gc_tui.voice_runtime.state import (
-    DEFAULT_MODEL, DEFAULT_PORT, SPEACHES_PIN, SPEACHES_PIN_SHA, SPEACHES_REPO,
-    VoiceState, save_state,
+    DEFAULT_MODEL,
+    DEFAULT_PORT,
+    SPEACHES_PIN,
+    SPEACHES_PIN_SHA,
+    SPEACHES_REPO,
+    VoiceState,
+    save_state,
 )
 from gc_tui.voice_runtime.wire import managed_language, user_voice_conflict, wire_voice
 

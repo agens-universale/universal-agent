@@ -185,7 +185,7 @@ def render_prose(text: str) -> Text:
 
 
 def build_markdown_table(headers: list[str], rows: list[list[str]],
-                         aligns: list[str]) -> "Table":
+                         aligns: list[str]) -> Table:
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
     заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
     здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,

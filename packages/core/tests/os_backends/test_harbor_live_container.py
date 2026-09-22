@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from gc_core.backends.harbor import HarborBackend
 
 IMAGE = "python:3.12-slim"

@@ -4,10 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
-from gc_tui.diff_tui.store import DiffStore
 from gc_core.runtime_notices import clear_runtime_notices
+from gc_tui.diff_tui.store import DiffStore
 
 
 @pytest.fixture
@@ -323,8 +322,8 @@ async def test_diff_viewer_caps_ф_approves_one_not_all(tmp_path, launch_root):
     """CapsLock/Shift: Ф не должен делать approve all — только текущий файл."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
     from gc_tui.diff_tui.store import DiffStore
+    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
 
     _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
@@ -361,8 +360,8 @@ async def test_diff_viewer_caps_ф_approves_one_not_all(tmp_path, launch_root):
 async def test_diff_screen_ctrl_a_approves_all(tmp_path, launch_root):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen
     from gc_tui.diff_tui.store import DiffStore
+    from gc_tui.screens.diff import DiffScreen
 
     _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
@@ -568,9 +567,9 @@ async def test_diff_viewer_created_shows_file_content(tmp_path, launch_root):
     """Cache-mode created: viewer показывает содержимое файла как addition."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.diff_tui.store import DiffStore
     from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
     from textual.widgets import Static
-    from gc_tui.diff_tui.store import DiffStore
 
     created = launch_root / "diff-test.txt"
     DiffStore(str(launch_root)).register_mutation(str(created))
@@ -598,8 +597,8 @@ async def test_diff_viewer_undo_created_deletes_file(tmp_path, launch_root):
     """Созданный файл: undo удаляет с диска и убирает из списка."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
     from gc_tui.diff_tui.store import DiffStore
+    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
 
     created = launch_root / "diff-test.txt"
     DiffStore(str(launch_root)).register_mutation(str(created))
@@ -631,9 +630,9 @@ async def test_trace_ctrl_a_selects_input_not_approve(tmp_path, launch_root):
     """На TraceScreen Ctrl+A — select-all во вводе; pending не approve."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.diff_tui.store import DiffStore
     from gc_tui.screens.main import TraceScreen
     from gc_tui.widgets.command_input import CommandTextArea
-    from gc_tui.diff_tui.store import DiffStore
 
     _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
@@ -799,7 +798,7 @@ async def test_full_viewer_approve_closes_stack(tmp_path, launch_root):
     """a/r на full → действие + закрытие viewer-стека до списка (D3)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
+    from gc_tui.screens.diff import DiffScreen
 
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
@@ -826,7 +825,7 @@ async def test_full_viewer_approve_closes_stack(tmp_path, launch_root):
 async def test_full_viewer_undo_restores(tmp_path, launch_root):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
+    from gc_tui.screens.diff import DiffScreen
 
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
@@ -852,8 +851,8 @@ async def test_full_viewer_undo_restores(tmp_path, launch_root):
 async def test_full_viewer_ctrl_a_approves_all(tmp_path, launch_root):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
     from gc_tui.diff_tui.store import DiffStore
+    from gc_tui.screens.diff import DiffScreen
 
     _seed_pending(launch_root, str(tmp_path / "threads"))
     other = launch_root / "src" / "bar.py"
@@ -911,7 +910,7 @@ async def test_full_viewer_header_marks_full(tmp_path, launch_root):
     """Header на full-viewer содержит «полный файл»."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen, DiffViewerScreen
+    from gc_tui.screens.diff import DiffScreen
     from textual.widgets import Static
 
     _seed_pending(launch_root, str(tmp_path / "threads"))

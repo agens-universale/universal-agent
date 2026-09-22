@@ -19,7 +19,6 @@
 import ast
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 _SRC = REPO / "packages" / "core" / "src" / "gc_core"

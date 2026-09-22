@@ -1,10 +1,9 @@
 import json
 
-from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-
-
+from gc_core.utils.file_text import sha256_hex_of_bytes
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_replace_first_occurrence_only(tmp_path):
     p = tmp_path / "f.txt"

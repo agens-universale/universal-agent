@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from gc_core.constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME, SESSION_MEMORY_TOOL_NAME, SESSION_TODO_TOOL_NAME
+from gc_core.constants.tool_names import (
+    FINISH_TOOL_NAME,
+    READ_STORED_TOOL_OUTPUT_NAME,
+    SESSION_MEMORY_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
+)
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
 
@@ -59,7 +64,7 @@ class FileDefinedSubagent(AbstractSubagent):
         self.reason = reason
 
     @classmethod
-    def bound(cls, definition: SubagentDefinition) -> "BoundFileSubagent":
+    def bound(cls, definition: SubagentDefinition) -> BoundFileSubagent:
         """Definition, замкнутое на контракт раннера/реестра.
 
         Раннер использует только ``create_instance``; registry — ещё
@@ -123,7 +128,7 @@ class FileDefinedSubagent(AbstractSubagent):
         task: str = "",
         reason: str = "",
         **_kwargs: Any,
-    ) -> "FileDefinedSubagent":
+    ) -> FileDefinedSubagent:
         # Прочие kwargs (model, config_dict, runtime_notices_enabled) раннер
         # передаёт всем сабагентам одинаково; файловому они не нужны — модель
         # наследуется от родителя, а LLM-вызова при создании у него нет.
@@ -183,6 +188,6 @@ REQUIRED_TOOL_NAMES = FileDefinedSubagent.REQUIRED_TOOL_NAMES
 
 __all__ = [
     "REQUIRED_TOOL_NAMES",
-    "FileDefinedSubagent",
     "BoundFileSubagent",
+    "FileDefinedSubagent",
 ]

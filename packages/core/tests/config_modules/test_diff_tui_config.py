@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.diff_tui import DiffTuiConfig
+from pydantic import ValidationError
 
 
 def test_diff_tui_defaults():

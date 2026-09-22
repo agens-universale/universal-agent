@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-
 DEFAULT_CACHE_MAX_ORIG = 500
 DEFAULT_PREVIEW_CONTEXT_LINES = 50
 DEFAULT_FULL_FILE_MAX_LINES = 300

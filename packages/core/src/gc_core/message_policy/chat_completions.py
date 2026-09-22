@@ -17,7 +17,7 @@ def _collect_tool_output_call_id(message: Dict) -> str | None:
     return None
 
 
-def _filter_assistant_tool_calls(message: Dict, future_tool_call_ids: set) -> "Dict | None":
+def _filter_assistant_tool_calls(message: Dict, future_tool_call_ids: set) -> Dict | None:
     """Оставить только tool_calls с ответом ниже; None — сообщение выбросить (пустое без вызовов)."""
     filtered_tool_calls = []
     for tool_call in message.get("tool_calls", []):
@@ -45,7 +45,7 @@ def _keep_function_call(message: Dict, future_tool_call_ids: set, keep_trailing:
     return keep_trailing or call_id in future_tool_call_ids
 
 
-def _repair_message(message: Dict, future_tool_call_ids: set, keep_trailing: bool) -> "Dict | None":
+def _repair_message(message: Dict, future_tool_call_ids: set, keep_trailing: bool) -> Dict | None:
     """Сообщение для истории (возможно, с урезанными tool_calls) либо None — выбросить."""
     if message.get("role") == "assistant" and isinstance(message.get("tool_calls"), list):
         # Optionally keep unresolved trailing assistant tool_calls as-is.

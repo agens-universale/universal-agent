@@ -7,7 +7,12 @@ and yaml ``working_memory:`` limits — unchanged for saved-thread compatibility
 import json
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_CONSTRAINTS as _DEFAULT_MAX_CHARS_CONSTRAINTS, DEFAULT_MAX_CHARS_GOAL as _DEFAULT_MAX_CHARS_GOAL, DEFAULT_MAX_CHARS_KNOWLEDGE as _DEFAULT_MAX_CHARS_KNOWLEDGE, DEFAULT_MAX_CHARS_STATE as _DEFAULT_MAX_CHARS_STATE, DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS, working_memory_limits_from_params
+from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_CONSTRAINTS as _DEFAULT_MAX_CHARS_CONSTRAINTS
+from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_GOAL as _DEFAULT_MAX_CHARS_GOAL
+from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_KNOWLEDGE as _DEFAULT_MAX_CHARS_KNOWLEDGE
+from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_STATE as _DEFAULT_MAX_CHARS_STATE
+from gc_core.config_modules.working_memory import DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS
+from gc_core.config_modules.working_memory import working_memory_limits_from_params
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool

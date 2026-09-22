@@ -18,8 +18,6 @@ MCP-серверов, переживание между тестами.
 """
 from typing import Any, Dict
 
-import pytest
-
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
 

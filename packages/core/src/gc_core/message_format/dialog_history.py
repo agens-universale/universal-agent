@@ -3,9 +3,12 @@
 import html
 from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
-from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, is_technical_user_message_text, user_content_to_text
-
 from gc_core.message_format.serialization import message_text_for_summary, strip_original_user_messages_block
+from gc_core.message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+    is_technical_user_message_text,
+    user_content_to_text,
+)
 
 T = TypeVar("T")
 

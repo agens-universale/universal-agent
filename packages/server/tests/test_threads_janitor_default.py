@@ -23,11 +23,10 @@ import logging
 import os
 import time
 
+import gc_server.server_cleanup_threads as janitor
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import gc_server.server_cleanup_threads as janitor
 from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup
 
 

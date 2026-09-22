@@ -17,11 +17,9 @@ MCP-тулов, а ``apply_subagent_tools_filter`` работает уже на�
 """
 from typing import Any, Dict
 
-import pytest
-
 import gc_core.tools as tools_pkg
+import pytest
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
-
 
 _MCP_TOOL = "mcp_srv_dangerous"
 

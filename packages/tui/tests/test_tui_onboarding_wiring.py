@@ -7,9 +7,6 @@ up to the early-return onboarding exits (which happen before alt-screen).
 import sys
 import types
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -72,7 +69,6 @@ def test_non_tty_onboarding_prints_guide_and_returns_0(monkeypatch, tmp_path, ca
     _patch_entry_prereqs(monkeypatch, tmp_path, config_dict={}, unconfigured=True)
 
     # Suppress tui.app import inside main() by providing a fake module
-    import importlib
     fake_app_mod = types.ModuleType("gc_tui.app")
     monkeypatch.setitem(sys.modules, "gc_tui.app", fake_app_mod)
 

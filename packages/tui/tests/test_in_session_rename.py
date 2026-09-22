@@ -9,7 +9,6 @@ import json
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Шаг 3: _update_terminal_title = display_name(meta.tui) + статус (R5)
 # ---------------------------------------------------------------------------
@@ -327,7 +326,6 @@ async def test_rename_active_session_title_priority(tmp_path, monkeypatch):
     """R2: при заданном ручном title current=title (приоритет над last_actual)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.rename import RenameScreen
 
     async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
         scr = pilot.app.screen

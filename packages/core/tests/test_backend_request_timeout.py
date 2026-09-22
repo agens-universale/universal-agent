@@ -2,9 +2,9 @@
 
 import os
 import tempfile
+
 import pytest
 import yaml
-
 from gc_core.config import load_config
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC, BackendConfig
 from gc_core.utils import connect_backend

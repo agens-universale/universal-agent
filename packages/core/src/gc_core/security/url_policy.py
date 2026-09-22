@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context
 
 
 @dataclass(frozen=True)

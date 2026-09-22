@@ -43,7 +43,7 @@ def _probe_tmp_name() -> str:
     return f"gc_probe_{uuid.uuid4().hex[:12]}"
 
 
-def _port(backend: "FsBackend"):
+def _port(backend: FsBackend):
     """Порт исполнения: свой бэкенд как есть, чужой синхронный — в адаптере."""
     from gc_core.backends.async_protocol import aexec_port
 
@@ -51,7 +51,7 @@ def _port(backend: "FsBackend"):
 
 
 async def _aexec(
-    backend: "FsBackend",
+    backend: FsBackend,
     command: str,
     *,
     timeout: int,
@@ -65,7 +65,7 @@ async def _aexec(
 
 
 async def _arun_argv(
-    backend: "FsBackend",
+    backend: FsBackend,
     argv: Sequence[str],
     *,
     stdin: Optional[str] = None,
@@ -81,7 +81,7 @@ async def _arun_argv(
     )
 
 
-async def _awhich_bin(backend: "FsBackend", name: str) -> Optional[str]:
+async def _awhich_bin(backend: FsBackend, name: str) -> Optional[str]:
     """Resolve binary via backend exec (no shell alias). Fail → None."""
     # Prefer `command -v` (POSIX); fall back to plain name.
     try:
@@ -133,7 +133,7 @@ def parse_find_printf_entries(stdout: str) -> List[WalkEntry]:
 
 
 
-async def aprobe_has_find(backend: "FsBackend") -> bool:
+async def aprobe_has_find(backend: FsBackend) -> bool:
     """True only if the whole prune recipe runs, not just one of its flags.
 
     ``has_find`` exists to gate ``find -print0 | xargs -0 -r grep``
@@ -144,7 +144,7 @@ async def aprobe_has_find(backend: "FsBackend") -> bool:
     return await aprobe_find_xargs_grep(backend)
 
 
-async def _acleanup_probe(backend: "FsBackend", tmp_remote: Optional[str], host_tmp: Optional[str]) -> None:
+async def _acleanup_probe(backend: FsBackend, tmp_remote: Optional[str], host_tmp: Optional[str]) -> None:
     try:
         if tmp_remote:
             await _aexec(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
@@ -159,7 +159,7 @@ async def _acleanup_probe(backend: "FsBackend", tmp_remote: Optional[str], host_
             pass
 
 
-async def _amake_sandbox_tmp(backend: "FsBackend") -> Optional[str]:
+async def _amake_sandbox_tmp(backend: FsBackend) -> Optional[str]:
     """Временный каталог в песочнице (mktemp, иначе mkdir по нашему имени); None при отказе."""
     res = await _aexec(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
     if res.return_code != 0 or not (res.stdout or "").strip():
@@ -173,7 +173,7 @@ def _has_line_numbers(text: str) -> bool:
     return bool(re.search(r"[:\x00]\d+:", text))
 
 
-async def _aprobe_pipe(backend: "FsBackend", grep_bin: str) -> bool:
+async def _aprobe_pipe(backend: FsBackend, grep_bin: str) -> bool:
     try:
         res = await _arun_argv(
             backend,
@@ -187,7 +187,7 @@ async def _aprobe_pipe(backend: "FsBackend", grep_bin: str) -> bool:
     return "beta" in out and bool(re.search(r"(?:^|:|\x00)\d+:", out, re.M))
 
 
-async def _amake_beta_file(backend: "FsBackend") -> tuple:
+async def _amake_beta_file(backend: FsBackend) -> tuple:
     """(root, fpath, tmp_remote, host_tmp); root=None — создать не удалось."""
     if getattr(backend, "is_sandbox", False):
         tmp_remote = await _amake_sandbox_tmp(backend)
@@ -205,7 +205,7 @@ async def _amake_beta_file(backend: "FsBackend") -> tuple:
     return host_tmp, fpath, None, host_tmp
 
 
-async def _aprobe_tree_and_file(backend: "FsBackend", grep_bin: str, root: str, fpath: str) -> bool:
+async def _aprobe_tree_and_file(backend: FsBackend, grep_bin: str, root: str, fpath: str) -> bool:
     res = await _arun_argv(
         backend,
         build_grep_argv_flags(grep_bin=grep_bin, recursive=True) + ["--", "b[ae]ta", root],
@@ -226,7 +226,7 @@ async def _aprobe_tree_and_file(backend: "FsBackend", grep_bin: str, root: str, 
     return "beta" in text and _has_line_numbers(text)
 
 
-async def aprobe_has_grep(backend: "FsBackend") -> bool:
+async def aprobe_has_grep(backend: FsBackend) -> bool:
     """Smoke the production argv: -E pipe, -R tree, and the -F/-i single file."""
     grep_bin = await _awhich_bin(backend, "grep")
     if not grep_bin or not await _aprobe_pipe(backend, grep_bin):
@@ -242,7 +242,7 @@ async def aprobe_has_grep(backend: "FsBackend") -> bool:
         await _acleanup_probe(backend, tmp_remote, host_tmp)
 
 
-async def _amake_probe_tree(backend: "FsBackend"):
+async def _amake_probe_tree(backend: FsBackend):
     """Create tmp with skip/hit.txt and keep/hit.txt. Returns (root, cleanup)."""
     tmp_remote: Optional[str] = None
     host_tmp: Optional[str] = None
@@ -286,7 +286,7 @@ def _lists_skip_dir(text: str) -> bool:
     return False
 
 
-async def aprobe_grep_exclude_dir(backend: "FsBackend") -> bool:
+async def aprobe_grep_exclude_dir(backend: FsBackend) -> bool:
     grep_bin = await _awhich_bin(backend, "grep")
     if not grep_bin:
         return False
@@ -312,7 +312,7 @@ async def aprobe_grep_exclude_dir(backend: "FsBackend") -> bool:
         await acleanup()
 
 
-async def aprobe_grep_include(backend: "FsBackend") -> bool:
+async def aprobe_grep_include(backend: FsBackend) -> bool:
     grep_bin = await _awhich_bin(backend, "grep")
     if not grep_bin:
         return False
@@ -338,7 +338,7 @@ async def aprobe_grep_include(backend: "FsBackend") -> bool:
         await acleanup()
 
 
-async def aprobe_find_xargs_grep(backend: "FsBackend") -> bool:
+async def aprobe_find_xargs_grep(backend: FsBackend) -> bool:
     """Smoke ``find -print0 | xargs -0 -r grep`` — the prune recipe, whole.
 
     Two steps, because ``-r`` cannot be seen from the first: a box that ignores
@@ -353,7 +353,7 @@ async def aprobe_find_xargs_grep(backend: "FsBackend") -> bool:
     try:
         if not root:
             return False
-        res = await _aexec(backend, 
+        res = await _aexec(backend,
             build_find_xargs_grep_command(
                 root,
                 exclude_dir_names=["skip"],
@@ -374,7 +374,7 @@ async def aprobe_find_xargs_grep(backend: "FsBackend") -> bool:
             return False
 
         # -r step: find matches nothing → xargs must not invoke grep at all.
-        res = await _aexec(backend, 
+        res = await _aexec(backend,
             build_find_xargs_grep_command(
                 root,
                 exclude_dir_names=["skip"],

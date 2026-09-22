@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from gc_core.mcp_runtime.paths import mcp_bin_dir, mcp_env_root, runtime_state_path
@@ -25,7 +25,7 @@ def save_runtime_state(*, manifest_path: Path | None) -> McpRuntimeState:
         venv_dir=venv_dir,
         bin_dir=bin_dir,
         manifest_path=manifest_path.resolve() if manifest_path else None,
-        updated_at=datetime.now(timezone.utc).isoformat(),
+        updated_at=datetime.now(UTC).isoformat(),
     )
     path = runtime_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)

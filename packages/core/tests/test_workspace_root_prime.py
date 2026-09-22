@@ -16,7 +16,6 @@ import logging
 import time
 
 import pytest
-
 from gc_core import execution_workspace as ew
 from gc_core.execution_workspace import (
     WorkspaceRootUnknownError,

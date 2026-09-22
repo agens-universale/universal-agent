@@ -37,7 +37,6 @@ import subprocess
 import sys
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 #: Тест-зонд: печатает то, что снаружи не видно, — какой rootdir выбрал pytest

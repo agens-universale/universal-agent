@@ -64,10 +64,11 @@ def test_subagent_system_prompt_asset_present():
 
 
 def test_server_agent_prompt_under_bundled_root():
-    from gc_server.rest_api import server_config
     # server_agentmd_path по умолчанию "./prompts/server_agent.md" резолвится
     # относительно PROJECT_ROOT → должен указывать на bundled-промпт.
     import os
+
+    from gc_server.rest_api import server_config
     resolved = os.path.join(server_config.PROJECT_ROOT, "prompts", "server_agent.md")
     assert Path(resolved) == _bp("prompts", "server_agent.md")
     assert Path(resolved).is_file()

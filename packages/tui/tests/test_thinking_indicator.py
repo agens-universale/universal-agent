@@ -126,7 +126,7 @@ def test_morph_frames_constant_shape():
 
 def test_thinking_render_uses_morph_glyph_for_frame():
     pytest.importorskip("textual")
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator, MORPH_FRAMES, FRAME_HOLD
+    from gc_tui.widgets.thinking_indicator import FRAME_HOLD, MORPH_FRAMES, ThinkingIndicator
     w = ThinkingIndicator()
     w._frame = 4
     rendered = str(w.render())
@@ -138,7 +138,7 @@ def test_thinking_render_uses_morph_glyph_for_frame():
 
 def test_thinking_glyph_uses_glow_shade_color():
     pytest.importorskip("textual")
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator, GLOW_SHADES
+    from gc_tui.widgets.thinking_indicator import GLOW_SHADES, ThinkingIndicator
     w = ThinkingIndicator()
     w._frame = 0
     t = w._render_text()
@@ -157,7 +157,7 @@ def test_validating_spark_breathes():
     """«завершаю…»: искра ✦ статична по форме (без ✧), а её цвет «дышит» по
     кадрам — серая рампа (та же техника, что пульс running-глифа ▸)."""
     pytest.importorskip("textual")
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator, _VALIDATING_SHADES
+    from gc_tui.widgets.thinking_indicator import _VALIDATING_SHADES, ThinkingIndicator
 
     def spark_color(w):
         t = w._render_text()
@@ -237,7 +237,6 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
     «сверяюсь…» — объясняет статус [running] (опция A)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):

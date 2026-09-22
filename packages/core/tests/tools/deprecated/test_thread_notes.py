@@ -1,9 +1,9 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 
 from gc_core.states import SharedStateData
 from gc_core.tools.deprecated.thread_notes import ThreadNotes
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_thread_notes_no_state():

@@ -1,6 +1,5 @@
 """kind=summary рендерит маркер-разделитель + блок с очищенной сводкой."""
 import pytest
-
 from gc_tui.models import TraceEvent
 
 
@@ -32,8 +31,8 @@ async def test_summary_marker_renders(tmp_path):
 async def test_summary_body_toggles_on_request(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import SummaryToggleRequest
+    from gc_tui.widgets.trace_row import TraceRow
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -61,8 +60,8 @@ async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
     """Стрелка маркера: ▸ когда свёрнут, ▾ когда раскрыт."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import SummaryToggleRequest
+    from gc_tui.widgets.trace_row import TraceRow
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -111,8 +110,8 @@ async def test_summary_expand_scrolls_body_into_view(tmp_path):
     """Раскрытие тела сводки подводит его в зону видимости; сворачивание — нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import SummaryToggleRequest
+    from gc_tui.widgets.trace_row import TraceRow
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         screen = pilot.app.screen

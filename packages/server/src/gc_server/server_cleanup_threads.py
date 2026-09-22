@@ -4,7 +4,6 @@ import time
 from typing import Any, Dict
 
 from fastapi import FastAPI
-
 from gc_core.thread_store import resolve_threads_dir
 
 _cleanup_thread_started = False
@@ -49,7 +48,7 @@ def _cleanup_threads_loop(
                     "чистка тредов: удалено %d старше %d дн. из %s",
                     stats["removed_meta"], ttl_days, threads_dir,
                 )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("threads cleanup failed: %r", e)
 
         time.sleep(interval_seconds)
@@ -102,7 +101,7 @@ def register_cleanup_threads_on_startup(
 
     @app.on_event("startup")
     async def _startup_cleanup_threads() -> None:
-        global _cleanup_thread_started  # noqa: PLW0603
+        global _cleanup_thread_started
 
         if _cleanup_thread_started:
             return
@@ -150,7 +149,7 @@ def _swarm_cleanup_loop(
     while True:
         try:
             cleanup_swarm(swarm_threads_dir, sandbox_root_dir, ttl_hours)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("swarm cleanup failed: %r", e)
         time.sleep(interval_seconds)
 
@@ -181,7 +180,7 @@ def register_swarm_cleanup_on_startup(
 
     @app.on_event("startup")
     async def _startup_swarm_cleanup() -> None:
-        global _swarm_cleanup_thread_started  # noqa: PLW0603
+        global _swarm_cleanup_thread_started
 
         if _swarm_cleanup_thread_started:
             return

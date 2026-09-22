@@ -6,13 +6,11 @@ an IDENTICAL envelope and IDENTICAL resulting file content for the same input.
 `_run_both` feeds one case through both backends.
 """
 import json
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.append_to_file import AppendToFile
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 
 EXISTING_CONTENT = "hello world"
 
@@ -155,7 +153,7 @@ def test_identical_to_base(tmp_path, case):
 
 def test_default_separator_inserts_double_newline(tmp_path):
     """Default separator must be \\n\\n, NOT empty string."""
-    b_env, b_content, h_env, h_content = _run_both(tmp_path, EXISTING_CONTENT, content="appended")  # noqa: E501 — `content` here is the tool kwarg, not the file param
+    b_env, b_content, h_env, h_content = _run_both(tmp_path, EXISTING_CONTENT, content="appended")
     assert h_content == EXISTING_CONTENT + "\n\n" + "appended"
     assert h_content == b_content
 

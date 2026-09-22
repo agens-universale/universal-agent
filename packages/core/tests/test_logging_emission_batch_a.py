@@ -6,17 +6,16 @@
 Each test drives the real code path with a jsonl-mode per-run logger and
 asserts the expected event line was written.
 """
-from gc_testkit.helpers.tool_ctx import CallableTool
 import builtins
 import json
 
 import pytest
-
 from gc_core import run_context as rc
 from gc_core.tools.turn.ask_human import AskHuman
 from gc_core.tools.turn.intermediate_reply import IntermediateReply
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import as_coro
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _jsonl_cfg(tmp_path, **extra):

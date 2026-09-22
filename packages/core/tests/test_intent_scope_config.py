@@ -1,4 +1,14 @@
-from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT, DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS, IntentScopeConfig, IntentScopeToolConfig, backend_allows_intent_scope_hook, intent_scope_active, intent_scope_from_config_dict, intent_scope_tool_record, normalize_intent_scope_config
+from gc_core.config_modules.intent_scope import (
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+    DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS,
+    IntentScopeConfig,
+    IntentScopeToolConfig,
+    backend_allows_intent_scope_hook,
+    intent_scope_active,
+    intent_scope_from_config_dict,
+    intent_scope_tool_record,
+    normalize_intent_scope_config,
+)
 
 
 def test_intent_scope_active_requires_non_empty_tools():

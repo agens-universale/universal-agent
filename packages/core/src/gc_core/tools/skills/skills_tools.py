@@ -70,7 +70,7 @@ class SkillsListTool:
         try:
             skills = await self._registry.list_skills(pack=pack)
             return _wrap(tool="skills_list", ok=True, result={"skills": skills})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_list failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_list",
@@ -115,7 +115,7 @@ class LoadSkillTool:
                 result=None,
                 error={"code": "SKILL_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_load failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_load",
@@ -229,7 +229,7 @@ class RunSkillScriptTool:
                 result=None,
                 error={"code": "SCRIPT_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_run_script failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_run_script",
@@ -296,7 +296,7 @@ class LoadReferenceTool:
                 result=None,
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_read_reference failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_read_reference",
@@ -346,7 +346,7 @@ class LoadAssetTool:
                 result=None,
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("skills_read_asset failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_read_asset",

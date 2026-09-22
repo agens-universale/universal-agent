@@ -11,7 +11,6 @@ import pytest
 from gc_testkit.paths import HARBOR
 
 
-
 @pytest.fixture
 def timings_mod(monkeypatch):
     core = types.ModuleType("gc_core.processing_responses")

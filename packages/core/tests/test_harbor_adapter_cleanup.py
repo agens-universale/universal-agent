@@ -16,7 +16,6 @@ import sys
 import threading
 from pathlib import Path
 
-import pytest
 from gc_testkit.paths import HARBOR
 
 ADAPTER = HARBOR / "adapters" / "gc_cli_external.py"
@@ -116,7 +115,7 @@ def test_step_timings_survives_a_close_during_writes(tmp_path):
         while not stop.is_set():
             try:
                 timings._emit({"k": "v"})
-            except BaseException as exc:  # noqa: BLE001 — нам важен сам факт
+            except BaseException as exc:
                 errors.append(exc)
                 return
 

@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from gc_testkit.tui_support import wait_until
 
 

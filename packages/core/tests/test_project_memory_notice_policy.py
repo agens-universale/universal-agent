@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
-from gc_core.message_policy.project_memory_notice.policy import collect_project_memory_hints, project_memory_hints_enabled, on_persist_steps, touch_project_memory_baseline
+from gc_core.message_policy.project_memory_notice.policy import (
+    collect_project_memory_hints,
+    on_persist_steps,
+    project_memory_hints_enabled,
+    touch_project_memory_baseline,
+)
 from gc_core.message_policy.tool_usage_notice.state import get_project_memory_check_cnt
 from gc_core.states import State
 

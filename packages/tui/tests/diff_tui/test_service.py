@@ -5,13 +5,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
+from gc_core.runtime_notices import clear_runtime_notices
 from gc_tui.diff_tui.paths import orig_key
 from gc_tui.diff_tui.service import DiffService
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
-from gc_core.runtime_notices import clear_runtime_notices
 
 
 def _has_git() -> bool:

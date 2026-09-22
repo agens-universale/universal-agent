@@ -44,7 +44,7 @@ def _run_with_retries(func, args, kwargs, policy: _RetryPolicy, *, req_logger, u
     for attempt in range(1, policy.max_attempts + 1):
         try:
             return func(*args, **kwargs)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last_exc = exc
             if not policy.retriable(attempt, exc):
                 req_logger.log(

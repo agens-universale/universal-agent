@@ -13,6 +13,7 @@ from typing import Optional, Sequence
 
 from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
 from gc_core.thread_store import delete_thread, discard_message_by_id, read_subagent_trace
+
 from gc_tui.models import TailResult, TaskCursor, TaskSummary
 from gc_tui.services.trace_mapper import _clean_summary
 
@@ -167,7 +168,7 @@ class FileTaskStore:
         max_seq: int = 0
         offset: int = 0
         if data_path.exists():
-            with open(data_path, "r", encoding="utf-8") as f:
+            with open(data_path, encoding="utf-8") as f:
                 for line in f:
                     rec = self._parse_line(line.rstrip("\n"))
                     if rec is None:
@@ -238,7 +239,7 @@ class FileTaskStore:
         parsed: list[tuple[list[dict], Optional[dict]]] = []
         for fpath in files:
             recs: list[dict] = []
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open(fpath, encoding="utf-8") as f:
                 for line in f:
                     rec = self._parse_line(line.rstrip("\n"))
                     if rec is not None:
@@ -277,7 +278,7 @@ class FileTaskStore:
         if not live.exists():
             return []
         out: list[dict] = []
-        with open(live, "r", encoding="utf-8") as f:
+        with open(live, encoding="utf-8") as f:
             for line in f:
                 rec = self._parse_line(line.rstrip("\n"))
                 payload = rec.get("payload") if isinstance(rec, dict) else None
@@ -319,7 +320,7 @@ class FileTaskStore:
         max_seq: int = (
             int(cursor.ordering_key) if isinstance(cursor.ordering_key, int) else 0
         )
-        with open(data_path, "r", encoding="utf-8") as f:
+        with open(data_path, encoding="utf-8") as f:
             f.seek(int(cursor.position_token or 0))
             for line in f:
                 rec = self._parse_line(line.rstrip("\n"))

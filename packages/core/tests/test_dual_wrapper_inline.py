@@ -30,7 +30,6 @@ import asyncio
 import threading
 
 import pytest
-
 from gc_core.security.dual_wrapper import dual_wrap
 
 

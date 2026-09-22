@@ -1,7 +1,5 @@
-import yaml
 import pytest
-from pydantic import ValidationError
-
+import yaml
 from gc_core.config import load_config
 from gc_core.config_modules.message_notice import (
     ToolUsageNoticeRule,
@@ -15,6 +13,7 @@ from gc_core.config_modules.project_memory import (
     project_memory_notice_enabled,
 )
 from gc_core.config_modules.root import AppConfig
+from pydantic import ValidationError
 
 
 def test_project_memory_notice_defaults():

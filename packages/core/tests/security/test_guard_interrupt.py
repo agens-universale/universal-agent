@@ -18,7 +18,6 @@ import signal
 import time
 
 import pytest
-
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
 
 pytestmark = pytest.mark.skipif(

@@ -12,12 +12,10 @@ Covers:
 import json
 import types
 
-import pytest
-
 from gc_core.security import command_guard as cg
-from gc_testkit.helpers.tool_ctx import with_local_ctx
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
 def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
@@ -87,6 +85,7 @@ def test_execute_command_rm_rf_gc_relative_denied(tmp_path, monkeypatch):
 def test_execute_command_skills_path_allowed(tmp_path, monkeypatch):
     """Commands on .gc/skills/... are allowed by the tripwire."""
     import sys
+
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -109,6 +108,7 @@ def test_execute_command_skills_path_allowed(tmp_path, monkeypatch):
 def test_execute_command_plain_command_allowed(tmp_path, monkeypatch):
     """Plain mkdir / echo commands must not be blocked by the tripwire."""
     import sys
+
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -126,6 +126,7 @@ def test_execute_command_plain_command_allowed(tmp_path, monkeypatch):
 def test_execute_command_protection_disabled_skips_tripwire(tmp_path, monkeypatch):
     """When protection_enabled=False the tripwire must not block anything."""
     import sys
+
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
@@ -148,6 +149,7 @@ def test_execute_command_protection_disabled_skips_tripwire(tmp_path, monkeypatc
 def test_execute_command_ask_path_confirmed_executes(tmp_path, monkeypatch):
     """ask-level path + user confirms → command executes."""
     import sys
+
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 

@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from gc_core.tools.connect_mcp.os_backend_client import (
     McpExecCarrierError,
     OsBackendStatelessClient,

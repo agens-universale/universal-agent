@@ -2,9 +2,8 @@ import json
 from pathlib import Path
 
 from gc_core.tools.fs.list_files import ListFiles
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def _mkproject(tmp_path):
     """Project with the agent's own .gc scaffolding plus real project files."""

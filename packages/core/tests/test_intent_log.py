@@ -1,10 +1,23 @@
 import json
 
 import pytest
-
 from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK, IntentRecord, append_tool_aggregated, append_tool_raw, append_user_ask, deserialize_list, flush, read_info, read_page, serialize, tail_preview, validate_record
-
+from gc_core.intent_log import (
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    ACTION_USER_ASK,
+    IntentRecord,
+    append_tool_aggregated,
+    append_tool_raw,
+    append_user_ask,
+    deserialize_list,
+    flush,
+    read_info,
+    read_page,
+    serialize,
+    tail_preview,
+    validate_record,
+)
 
 FIXED_TS = "2026-05-30T11:35:08Z"
 

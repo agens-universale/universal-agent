@@ -1,4 +1,3 @@
-from gc_core.tools.connect_mcp import registry as reg
 from gc_core import tools as tools_pkg
 
 

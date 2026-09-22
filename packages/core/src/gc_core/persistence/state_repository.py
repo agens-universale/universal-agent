@@ -39,6 +39,6 @@ class StateRepository:
 
     @staticmethod
     def load_snapshot(filepath: str) -> Dict[str, State]:
-        with open(filepath, "r", encoding="utf-8") as fd:
+        with open(filepath, encoding="utf-8") as fd:
             data = json.load(fd)
         return StateRepository.deserialize_storage(data)

@@ -6,8 +6,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
+from gc_core.execution_workspace import build_execution_workspace
+from gc_core.runtime_notices import clear_runtime_notices
+from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.helpers.tool_ctx import CallableTool, local_ctx
 from gc_tui.diff_tui.feedback import format_approve_ack, format_bulk_approve_ack, format_bulk_undo_ack
 from gc_tui.diff_tui.mode import evict_stale_cache
 from gc_tui.diff_tui.paths import orig_key
@@ -15,11 +18,6 @@ from gc_tui.diff_tui.service import DiffService
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
 from gc_tui.diff_tui.tracking import wrap_local_for_tui
-from gc_core.execution_workspace import build_execution_workspace
-from gc_core.runtime_notices import clear_runtime_notices
-from gc_testkit.helpers.tool_ctx import local_ctx
-from gc_core.tools.fs.write_to_file_tool import WriteToFile
-from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _has_git() -> bool:

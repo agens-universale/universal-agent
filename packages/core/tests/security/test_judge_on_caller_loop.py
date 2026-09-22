@@ -13,8 +13,6 @@
 """
 import asyncio
 
-import pytest
-
 from gc_core.security import command_moderation as cm
 from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
 

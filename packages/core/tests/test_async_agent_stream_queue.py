@@ -16,7 +16,6 @@
 import asyncio
 
 import pytest
-
 from gc_core.aio.agent import AsyncAgent
 
 

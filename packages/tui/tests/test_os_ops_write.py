@@ -3,7 +3,6 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
 from gc_tui.services import os_ops
 
 
@@ -21,7 +20,7 @@ def test_write_clipboard_darwin(monkeypatch):
     monkeypatch.setattr(os_ops.subprocess, "run", _ok_run(cap))
     assert os_ops.write_clipboard("привет") is True
     assert cap["cmd"] == ["pbcopy"]
-    assert cap["input"] == "привет".encode("utf-8")
+    assert cap["input"] == "привет".encode()
 
 
 def test_write_clipboard_windows_uses_winapi(monkeypatch):

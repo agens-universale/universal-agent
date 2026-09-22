@@ -1,7 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
-
 from gc_core.intent_scope import summarizer
 from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 from gc_testkit import run_coro

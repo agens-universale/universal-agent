@@ -2,9 +2,9 @@ import logging
 import os
 
 from gc_core.intent_scope import final_answer as fa
+from gc_core.intent_scope.append import append_final_answer_to_current
 from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.intent_scope.summarizer import asummarize_final_answer_line
-from gc_core.intent_scope.append import append_final_answer_to_current
 from gc_testkit import run_coro
 
 
@@ -20,7 +20,7 @@ def test_final_answer_prompt_file_exists_and_nonempty():
 
     path = _resolve_final_answer_prompt_path(_Ctx())
     assert os.path.exists(path)
-    with open(path, "r", encoding="utf-8") as fd:
+    with open(path, encoding="utf-8") as fd:
         assert fd.read().strip()
 
 

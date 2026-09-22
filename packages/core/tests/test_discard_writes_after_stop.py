@@ -1,6 +1,5 @@
 """State.discard_writes_after_stop — флаг для guard перед persist после стопа."""
 from gc_core.states import State
-from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -96,8 +95,8 @@ def _make_executor_cfg(tmp_path):
 
 async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     """executor.run(discard_writes_after_stop=True) выставляет state.discard_writes_after_stop=True."""
-    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
+    from gc_core.run_context import acreate_run_context
 
     cfg = _make_executor_cfg(tmp_path)
 
@@ -116,8 +115,8 @@ async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
 
 async def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     """Без kwarg — state.discard_writes_after_stop остаётся False."""
-    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
+    from gc_core.run_context import acreate_run_context
 
     cfg = _make_executor_cfg(tmp_path)
 

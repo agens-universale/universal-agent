@@ -23,7 +23,6 @@ develop, и он побеждает бандловый манифест — ``In
 from pathlib import Path
 
 import pytest
-
 from recommended_mcp import install as inst
 
 

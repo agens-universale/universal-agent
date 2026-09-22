@@ -7,14 +7,14 @@ from gc_tui.services.stdin_bridge import QueueStdin, redirect_stdin
 
 
 def test_queue_stdin_readline_blocks_until_item():
-    q: "queue.Queue[str]" = queue.Queue()
+    q: queue.Queue[str] = queue.Queue()
     q.put("hello\n")
     qsi = QueueStdin(q)
     assert qsi.readline() == "hello\n"
 
 
 def test_redirect_stdin_replaces_during_block():
-    q: "queue.Queue[str]" = queue.Queue()
+    q: queue.Queue[str] = queue.Queue()
 
     def _runner_thread(result: list) -> None:
         with redirect_stdin(q):
@@ -39,8 +39,8 @@ def test_two_threads_read_own_queue():
     """Регрессия бага: два потока, каждый со своей очередью внутри redirect_stdin,
     одновременно — input() в каждом читает СВОЮ очередь (нет затирания глобального
     sys.stdin)."""
-    qa: "queue.Queue[str]" = queue.Queue()
-    qb: "queue.Queue[str]" = queue.Queue()
+    qa: queue.Queue[str] = queue.Queue()
+    qb: queue.Queue[str] = queue.Queue()
     results: dict = {}
     inside = threading.Barrier(3)  # оба worker'а + main внутри/у барьера
 
@@ -65,8 +65,8 @@ def test_two_threads_read_own_queue():
 def test_nested_redirect_restores_outer_queue():
     """Вложенный redirect_stdin: после выхода из внутреннего input() снова читает
     внешнюю очередь (а не None/original)."""
-    outer: "queue.Queue[str]" = queue.Queue()
-    inner: "queue.Queue[str]" = queue.Queue()
+    outer: queue.Queue[str] = queue.Queue()
+    inner: queue.Queue[str] = queue.Queue()
     got: list = []
 
     def worker() -> None:

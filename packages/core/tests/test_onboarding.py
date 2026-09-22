@@ -1,9 +1,7 @@
 """Онбординг первого запуска: детект ненастроенного конфига + текст-гайд + запись."""
 import pytest
 import yaml
-
-from gc_core import config
-from gc_core import onboarding
+from gc_core import config, onboarding
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
 from gc_core.model_router import ModelRouter
@@ -808,6 +806,7 @@ def test_write_wizard_values_never_touches_the_profile_pointer(tmp_path):
     """Мастер профилями не управляет (спека §2): указатель в файле остаётся
     таким, каким был, при любом проходе."""
     from pathlib import Path
+
     from gc_core import onboarding
     from gc_core.config import _default_config_path
     cfg = tmp_path / "config.yml"

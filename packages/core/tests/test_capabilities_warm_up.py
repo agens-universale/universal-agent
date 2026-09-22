@@ -19,7 +19,6 @@ import asyncio
 import time
 
 import pytest
-
 from gc_core.backends import capabilities as capabilities
 from gc_core.backends.local import LocalFsBackend
 

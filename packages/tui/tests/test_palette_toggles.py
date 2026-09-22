@@ -899,8 +899,8 @@ def test_fit_hint_priority_truncation():
     ' · '; 2) клавиши теряют область — «переключить в текущей сессии» →
     «переключить», область уходит ЦЕЛЫМ куском, не обрывком; 3) клавиши
     сжимаются до ←/→/Enter; 4) многоточие на смысле. Механика видима всегда."""
-    from gc_tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
     from gc_tui.toggles import _HINT_KEYS_TOGGLE_MEDIUM, _HINT_KEYS_TOGGLE_SHORT
+    from gc_tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
 
     value, keys = "on", _HINT_KEYS_TOGGLE
     hint = ("самопроверка не даст закончить, пока запрос не закрыт · "

@@ -1,7 +1,6 @@
 """The three Wrong-arguments classes observed on SWE-bench Verified (13.07): 222 of 254 rejections."""
 
 import pytest
-
 from gc_core.tools import abuild_tools_data
 from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
 

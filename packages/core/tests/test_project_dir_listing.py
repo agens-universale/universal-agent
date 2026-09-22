@@ -11,7 +11,6 @@ Covers:
 """
 from gc_core.utils.project_data import cut_second, get_listing, get_listing_from_backend
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

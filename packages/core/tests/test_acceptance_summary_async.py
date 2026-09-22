@@ -25,10 +25,8 @@ import threading
 import time
 
 import pytest
-
 from gc_core.aio import AsyncAgent
 from gc_testkit import LoopPulse
-
 from parity_harness import (
     ScriptedBackend,
     assistant_text,
@@ -108,8 +106,9 @@ def compacting_config(tmp_path, monkeypatch, **overrides):
 
 
 def thread_dump(cfg, system_id, thread_id):
-    from gc_core.thread_store import _thread_paths, resolve_threads_dir
     from pathlib import Path
+
+    from gc_core.thread_store import _thread_paths, resolve_threads_dir
 
     data_path, _ = _thread_paths(resolve_threads_dir(cfg), system_id, thread_id)
     path = Path(data_path)

@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-from gc_tui import palette
 from gc_testkit.paths import TUI_PKG
-
+from gc_tui import palette
 
 _STYLES_TCSS = TUI_PKG / "styles.tcss"
 

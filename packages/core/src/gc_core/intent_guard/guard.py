@@ -4,12 +4,17 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
-from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
-from gc_core.intent_guard.agent_logging import log_finish_gate_decision, log_finish_gate_skipped, log_finish_gate_validate_done, log_finish_gate_validate_start
+from gc_core.intent_guard.agent_logging import (
+    log_finish_gate_decision,
+    log_finish_gate_skipped,
+    log_finish_gate_validate_done,
+    log_finish_gate_validate_start,
+)
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
 from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
+from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
 from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
 
 _logger = logging.getLogger(__name__)
 

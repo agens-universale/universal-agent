@@ -1,5 +1,10 @@
+from gc_core.updater.runner import (
+    build_install_command,
+    build_install_target,
+    install_location_phrase,
+    spawn_detached_update,
+)
 from gc_core.updater.source import UpdateSource
-from gc_core.updater.runner import build_install_command, build_install_target, install_location_phrase, spawn_detached_update
 
 
 def test_command_with_ref():

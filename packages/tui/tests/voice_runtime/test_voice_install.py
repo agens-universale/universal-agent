@@ -1,9 +1,11 @@
 """Оркестрация install на мок-runner: порядок шагов, ошибки, конфликт."""
 import pytest
-
 from gc_tui.voice_runtime import install as inst
 from gc_tui.voice_runtime.state import (
-    DEFAULT_MODEL, DEFAULT_PORT, SPEACHES_PIN, SPEACHES_PIN_SHA,
+    DEFAULT_MODEL,
+    DEFAULT_PORT,
+    SPEACHES_PIN,
+    SPEACHES_PIN_SHA,
 )
 
 

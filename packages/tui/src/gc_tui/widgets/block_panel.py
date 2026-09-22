@@ -87,7 +87,7 @@ class BlockPanel(ClickModelMixin, Vertical):
 
     @classmethod
     def for_code(cls, content: str, lang: str | None, *, event_no: int,
-                 focusable: bool = False, indent: bool = False) -> "BlockPanel":
+                 focusable: bool = False, indent: bool = False) -> BlockPanel:
         """Код: метка — язык (если известен), копия — чистый код без обрамления."""
         from gc_tui.services.code_render import highlight_code, normalize_code
 
@@ -103,7 +103,7 @@ class BlockPanel(ClickModelMixin, Vertical):
     @classmethod
     def for_table(cls, headers: list[str], rows: list[list[str]], aligns: list[str],
                   *, event_no: int, focusable: bool = False,
-                  indent: bool = False) -> "BlockPanel":
+                  indent: bool = False) -> BlockPanel:
         """Таблица: метка пустая, копия — markdown (его и вставляют, не рамки)."""
         from gc_tui.services.markdown_render import table_block_to_markdown
 

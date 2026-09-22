@@ -5,6 +5,7 @@
 "[intent_guard] попытка N отклонена" маркеров в трейсе.
 """
 import json
+
 import pytest
 
 
@@ -86,6 +87,7 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
     """Two submit_solutions separated by a real user message → both kept as full content."""
     pytest.importorskip("textual")
     import json
+
     from gc_tui.app import TuiApp
     from textual.widgets import Static
 
@@ -153,6 +155,7 @@ async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block
     pytest.importorskip("textual")
     import json
     from pathlib import Path
+
     from gc_tui.app import TuiApp
 
     tid = "collapse_multi"

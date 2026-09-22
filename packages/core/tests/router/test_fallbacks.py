@@ -8,17 +8,15 @@ Per-alias предохранитель (`model_router.CircuitBreaker`), дегр
 import json
 from types import SimpleNamespace
 
-import pytest
-
-from gc_testkit import as_coro, run_coro
 import httpx
-
+import pytest
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.utils import llm_chat_client
+from gc_testkit import as_coro, run_coro
 
 
 def _snapshot(raw: dict) -> dict:

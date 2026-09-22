@@ -19,7 +19,6 @@ import pathlib
 import threading
 
 import pytest
-
 from gc_core.tools.fs import find_in_files as fif
 from gc_core.tools.fs.cooperative import LoopYielder
 from gc_testkit.helpers.tool_ctx import local_ctx

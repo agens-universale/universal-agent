@@ -7,13 +7,14 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Optional
 
 from gc_core.thread_store import sanitize_system_id, validate_thread_id
-from gc_tui.services.relative_time import parse_iso_utc
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text_or_none
+
+from gc_tui.services.relative_time import parse_iso_utc
 
 TTL_SECONDS = 10.0
 HEARTBEAT_MIN_INTERVAL_S = 1.0
@@ -27,11 +28,11 @@ def lock_path(threads_dir: str, system: str, thread_id: str) -> str:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _now_iso(now: Optional[datetime] = None) -> str:
-    return (now or _utc_now()).astimezone(timezone.utc).isoformat()
+    return (now or _utc_now()).astimezone(UTC).isoformat()
 
 
 def read_lock(path: str) -> Optional[dict[str, Any]]:
@@ -68,7 +69,7 @@ def is_fresh(
         return False
     current = now or _utc_now()
     if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
+        current = current.replace(tzinfo=UTC)
     return (current - hb).total_seconds() <= ttl
 
 

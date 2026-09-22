@@ -197,7 +197,7 @@ def test_release_last_stops_service(monkeypatch):
     # наборе TUI проходил, в полном прогоне мигал: зависимость не от порядка тестов,
     # а от состояния машины. Сосед test_release_rereads_leases_right_before_killing
     # подменял live_leases с самого начала — здесь просто забыли.
-    monkeypatch.setattr(auto, "live_leases", lambda: [])   # других клиентов нет
+    monkeypatch.setattr(auto, "live_leases", list)   # других клиентов нет
     auto.release_voice_service()
     assert killed == [4242]
     assert cleared == ["speaches"]                 # пометка уходит вместе с сервисом

@@ -6,13 +6,12 @@
 """
 
 from __future__ import annotations
-from gc_testkit import as_coro
 
 import json
 from types import SimpleNamespace
 
 from gc_core import processing_responses as pr
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _state(**extra):

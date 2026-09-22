@@ -22,7 +22,6 @@ external/vendor в чужом дереве. Маркер стал строгим
 from __future__ import annotations
 
 import pytest
-
 from gc_core import bundled_assets
 from gc_testkit import paths as testkit_paths
 from gc_testkit.paths import REPO

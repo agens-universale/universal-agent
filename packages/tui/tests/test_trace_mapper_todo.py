@@ -92,6 +92,7 @@ def test_garbage_arguments_do_not_map_to_todo_kind():
 def test_failed_output_is_not_suppressed():
     """ok:false-результат session_todo НЕ глушится: ошибка вызова видна."""
     import json as _json
+
     from gc_tui.services.trace_mapper import map_message
     out = _json.dumps({"tool": "session_todo", "ok": False,
                        "error": {"type": "invalid_todos", "message": "bad"},
@@ -105,6 +106,7 @@ def test_failed_output_is_not_suppressed():
 
 def test_ok_output_still_suppressed():
     import json as _json
+
     from gc_tui.services.trace_mapper import map_message
     out = _json.dumps({"tool": "session_todo", "ok": True, "count": 2,
                        "message": "Checklist replaced: 2 items."})

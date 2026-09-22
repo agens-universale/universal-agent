@@ -6,11 +6,11 @@ import pytest
 async def test_address_and_presets_live_in_one_group(tmp_path):
     """Поле и строки списка — потомки одного контейнера с рамкой, а не соседи."""
     pytest.importorskip("textual")
+    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
-    from textual.widgets import Input
     from textual.containers import VerticalScroll
+    from textual.widgets import Input
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -30,9 +30,9 @@ async def test_address_and_presets_live_in_one_group(tmp_path):
 async def test_hint_is_below_the_group_not_inside(tmp_path):
     """Подсказка про клавиши — снаружи рамки: внутри неё только выбор (§3.2.2)."""
     pytest.importorskip("textual")
+    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -42,7 +42,7 @@ async def test_hint_is_below_the_group_not_inside(tmp_path):
         await pilot.app.screen.mount(ed)
         await pilot.pause()
         group = ed.query_one("#conn-url-group")
-        hints = [w for w in group.query(".onb-hint")]
+        hints = list(group.query(".onb-hint"))
         assert not hints, "подсказка не должна быть внутри рамки группы"
 
 
@@ -296,9 +296,9 @@ async def test_ctrl_space_on_an_unselected_filter_does_not_probe_the_typed_text(
     вердикт оседает. Возврат на поле той же стрелкой узнаёт те же значения по снимку
     и повторно не пробит — вердикт остаётся ЖИВЫМ, когда мы жмём проверяемую клавишу."""
     pytest.importorskip("textual")
-    from textual.widgets import Input, Static
-    from gc_testkit.tui_support import wait_until
     from form_harness import recording_probe, settings_connection
+    from gc_testkit.tui_support import wait_until
+    from textual.widgets import Input, Static
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
@@ -333,8 +333,8 @@ async def test_ctrl_space_on_an_empty_address_falls_back_like_before(tmp_path):
     пустое поле по-прежнему уходит в фолбэк на сохранённый адрес конфига (поведение
     `_start_draft_probe` не меняется)."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from form_harness import recording_probe, settings_connection
+    from textual.widgets import Input
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
@@ -355,8 +355,8 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path):
     переменных окружения умирает насовсем. Гейт обязан пропускать ссылку дальше, в
     `_start_draft_probe` — через обработчик клавиши, реальным нажатием."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from form_harness import recording_probe, settings_connection
+    from textual.widgets import Static
 
     calls = []
     async with settings_connection(tmp_path, probe=recording_probe(calls),

@@ -12,11 +12,9 @@ import re
 import shlex
 from typing import Any, Callable
 
-from gc_core.security.dual_wrapper import OffLoop
-from gc_core.security.dual_wrapper import dual_wrap
-
 from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, effective_command_cwd
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
 from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
 
 _TOKEN_RE = re.compile(r"[\s=;&|()<>]+")
@@ -126,7 +124,7 @@ def _blocked_command_result(self_obj: Any, effective_tool_name: str, err: dict, 
     )
 
 
-def _extract_payload(func: Callable[..., str], payload_arg: str, args: tuple, kwargs: dict) -> "str | None":
+def _extract_payload(func: Callable[..., str], payload_arg: str, args: tuple, kwargs: dict) -> str | None:
     """Строка команды/кода из аргументов вызова; None — проверять нечего."""
     try:
         bound = inspect.signature(func).bind_partial(*args, **kwargs)

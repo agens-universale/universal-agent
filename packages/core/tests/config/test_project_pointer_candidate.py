@@ -16,11 +16,10 @@
 from pathlib import Path
 
 import pytest
-
 from gc_core.config import _merge_layers, _raw_from_text, validate_config_text_with_sections
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.env_vars import EnvVars
 from gc_core.config_modules import env_vars as mcp_paths
+from gc_core.config_modules.env_vars import EnvVars
 
 
 @pytest.fixture

@@ -2,7 +2,6 @@
 import subprocess
 
 import pytest
-
 from gc_tui.services.git_info import current_branch
 
 

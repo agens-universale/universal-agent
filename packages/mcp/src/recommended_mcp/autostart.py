@@ -8,10 +8,10 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
-from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_agent_manifest_path
 from recommended_mcp.manifest import load_manifest
 from recommended_mcp.process_supervisor import RunSupervisor, SupervisorError
 from recommended_mcp.run import run_entry
+from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_agent_manifest_path
 
 # Транспорты, при которых агент ходит к уже запущенному серверу (не stdio-spawn).
 _DAEMON_TRANSPORTS = frozenset({"http", "sse", "stream_http", "stream_sse"})
@@ -73,7 +73,7 @@ def _warn(text: str, *, code: str, highlights: tuple[str, ...] = ()) -> None:
         from gc_core.startup_notices import Notice
 
         push_runtime_notice(Notice("warning", code, text, highlights))
-    except Exception:  # noqa: BLE001 — канал уведомлений не обязателен
+    except Exception:
         pass
 
 

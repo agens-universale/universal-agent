@@ -12,30 +12,33 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
+from gc_core.config_modules.agent import merge_special_instructions_with_model_steering
+from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
+from gc_core.mcp_session_owner import reset_owner, set_owner
+from gc_core.message_policy.chat_completions import repair_tool_call_pairing
+from gc_core.message_policy.stop_persist import is_persist_discarded
+from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
+from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.processing_responses import (
     _acall_blocking_hook,
     arun_agent,
     begin_turn_main_trace,
 )
 from gc_core.run_context import RunContext
-from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
-from gc_core.message_policy.chat_completions import repair_tool_call_pairing
-from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.run_summary_coordinator import (
     RunSummaryCoordinator,
     areset_stale_summarizing_flag,
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
 )
+from gc_core.security.permission_store import PermissionStore
+from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
-from gc_core.states import State, SharedStateData
-from gc_core.usage.account import UsageAccount
-from gc_core.usage.report import build_run_usage_report, build_run_usage_dict
 from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
-from gc_core.trace_id import trace_id_from_config
+from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from gc_core.tools.subagents.active_scope import (
     active_parent_call_id,
     is_child_input_active,
@@ -43,15 +46,12 @@ from gc_core.tools.subagents.active_scope import (
 )
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
-from gc_core.mcp_session_owner import reset_owner, set_owner
-from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
-from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
+from gc_core.trace_id import trace_id_from_config
+from gc_core.usage.account import UsageAccount
+from gc_core.usage.report import build_run_usage_dict, build_run_usage_report
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
-from gc_core.utils.logging_module import human_console_enabled
-from gc_core.config_modules.agent import merge_special_instructions_with_model_steering
 from gc_core.utils.local_render_system_prompt import render_system_prompt
-from gc_core.security.permission_store import PermissionStore
+from gc_core.utils.logging_module import human_console_enabled
 
 ORCHESTRATOR_SPECIFIC_ROLE = (
     "You are an orchestrator agent. You may execute work yourself or delegate to subagents when that clearly pays off.\n"
@@ -297,7 +297,7 @@ class AgentExecutor:
         prompt_path = config_dict.get("chat_completions_system_prompt_path")
         if isinstance(prompt_path, str) and prompt_path.strip():
             try:
-                with open(prompt_path, "r", encoding="utf-8") as fd:
+                with open(prompt_path, encoding="utf-8") as fd:
                     chat_completions_system_prompt = fd.read().strip()
             # Путь берётся из конфига — файл человека, кодировка его.
             # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`: он
@@ -321,7 +321,7 @@ class AgentExecutor:
         si_path = config_dict.get("chat_completions_special_instructions_path")
         if isinstance(si_path, str) and si_path.strip():
             try:
-                with open(si_path.strip(), "r", encoding="utf-8") as fd:
+                with open(si_path.strip(), encoding="utf-8") as fd:
                     special_instructions = fd.read().strip() or None
             except (OSError, UnicodeDecodeError):
                 special_instructions = None
@@ -662,10 +662,7 @@ class AgentExecutor:
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
-        setattr(
-            self._ctx, "permission_store",
-            PermissionStore(session_rules=state.shared.confirm_rules),
-        )
+        self._ctx.permission_store = PermissionStore(session_rules=state.shared.confirm_rules)
 
         if (
             thread_session is not None
@@ -690,8 +687,8 @@ class AgentExecutor:
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
         )
-        setattr(self._ctx, "on_summary_applied", summary.on_summary_applied)
-        setattr(self._ctx, "is_cli_mode", is_cli_mode)
+        self._ctx.on_summary_applied = summary.on_summary_applied
+        self._ctx.is_cli_mode = is_cli_mode
 
         # Хук компакции ждём тем же способом, что и три остальных
         # (_acall_blocking_hook): корутину — нативно, обычную функцию — в потоке.

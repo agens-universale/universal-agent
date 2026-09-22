@@ -13,14 +13,10 @@ absolute path roots (strip 'path' from each entry, compare only 'type' and
 'is_hidden'; also strip the top-level 'path' field).
 """
 import json
-import os
-from types import SimpleNamespace
 
-import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.list_files import ListFiles
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 # ---------------------------------------------------------------------------
 # Tree layout used in most tests (linear chain — BFS == DFS, kept for compat)

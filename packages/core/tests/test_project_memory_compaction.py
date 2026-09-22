@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.project_memory import compaction
-from gc_core.project_memory.compaction import CompactionResult, SOFT_APPEND_INPUT_LIMIT_CHARS
+from gc_core.project_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS, CompactionResult
 from gc_testkit import run_coro
 
 

@@ -3,10 +3,9 @@ import os
 from typing import Any, Dict
 
 import yaml
-
+from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.utils.user_text import read_user_text
 
 logger = logging.getLogger(__name__)
@@ -232,5 +231,5 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-__all__ = ["load_server_config", "build_agent_config_for_server", "PROJECT_ROOT"]
+__all__ = ["PROJECT_ROOT", "build_agent_config_for_server", "load_server_config"]
 

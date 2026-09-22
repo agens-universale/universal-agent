@@ -1,5 +1,5 @@
-from gc_core.utils.convertations import get_output_list
 from gc_core.utils.chat_completions_stream import assemble_streamed_completion
+from gc_core.utils.convertations import get_output_list
 
 
 def test_stream_assembly_and_direct_json_give_same_output():

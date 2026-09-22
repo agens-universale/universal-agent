@@ -1,7 +1,6 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import pytest
-
 from gc_core.tools.deprecated.update_plan import UpdatePlan
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_update_plan_success():

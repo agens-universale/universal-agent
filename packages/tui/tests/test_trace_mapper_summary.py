@@ -30,8 +30,8 @@ def test_dialog_summary_nested_section_tags_do_not_leak():
     """Реальный wire-form после summary-рефактора master (вложенные секционные теги
     внутри <summary>) не должен утекать сырым XML — секции разворачиваются в текст.
     Тело строится реальными core-функциями (не мок), чтобы тест ловил будущий дрейф."""
-    from gc_core.summarize.summary_spec import slice_summary
     from gc_core.summarize.summary_message_body import build_dialog_summary_content
+    from gc_core.summarize.summary_spec import slice_summary
 
     raw_model_summary = (
         "<summary>\n"

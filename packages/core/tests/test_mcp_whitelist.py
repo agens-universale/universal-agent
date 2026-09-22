@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.mcp import McpServerConfig
+from pydantic import ValidationError
 
 
 def _srv(**extra):
@@ -65,7 +64,6 @@ def test_loop_control_tools_must_be_all_or_list():
 import logging
 
 from gc_core.tools.connect_mcp import registry as reg
-
 
 _RAW = [
     {"name": "search", "description": "s"},
@@ -157,10 +155,9 @@ def test_cache_invalidated_by_whitelist_change():
 
 def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     """Enforcement: вызов не-whitelisted имени не доходит до MCP-транспорта."""
-    from gc_testkit import run_coro
-
     from gc_core import tools as tools_pkg
     from gc_core.tools.connect_mcp import api as mcp_api
+    from gc_testkit import run_coro
 
     calls = []
     monkeypatch.setattr(

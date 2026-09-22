@@ -2,12 +2,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_user_ask
 from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from gc_core.intent_scope.hook import (
-    amaybe_update_intent_scope_from_tool,
     amaybe_update_intent_scope_from_tool,
 )
 from gc_core.states import State
@@ -140,11 +138,14 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
 
 async def test_finish_gate_reject_submit_in_current_without_flush():
     """Ветка processing_responses после reject: patch output + hook, без flush."""
-    from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
     from gc_core.intent_guard.guard import FinishGateDecision
-    from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
+    from gc_core.intent_guard.turn_finish_emit import (
+        apply_finish_gate_to_turn_finish_output_in_state,
+        get_function_call_output_text,
+    )
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.tools.turn.submit_solution import SubmitSolution
+    from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
 
     state = _make_state()
     seed_state_intent(state, log=["closed turn"], current="open question")

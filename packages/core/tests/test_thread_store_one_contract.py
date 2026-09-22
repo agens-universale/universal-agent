@@ -12,7 +12,6 @@
 на наследование.
 """
 import pytest
-
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_base import (
     ASYNC_CONTRACT_METHODS,

@@ -1,8 +1,8 @@
 """_installed_status: трёхзначный статус INSTALLED для gc-mcp list."""
 from pathlib import Path
 
+from recommended_mcp.manifest import InstallSpec, MCPEntry
 from recommended_mcp.runtime import cli
-from recommended_mcp.manifest import MCPEntry, InstallSpec
 
 
 def _src(dist=None):
@@ -49,9 +49,10 @@ def test_status_npx_not_installed(monkeypatch):
 
 
 def test_install_all_skips_optional(monkeypatch):
-    from recommended_mcp.runtime import cli as cli_mod
-    from recommended_mcp.manifest import MCPEntry, InstallSpec
     from pathlib import Path
+
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime import cli as cli_mod
 
     entries = [
         MCPEntry("keep", Path("./keep"), InstallSpec(type="source", source=Path("../x")), optional=False),

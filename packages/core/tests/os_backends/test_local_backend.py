@@ -1,14 +1,12 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import os
-import stat as stat_module
 import sys
+import threading
 
 import pytest
-
-from gc_core.run_context import acreate_run_context
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult, FsBackend
-import threading
+from gc_core.run_context import acreate_run_context
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 @pytest.fixture()
@@ -356,7 +354,7 @@ async def test_drain_keeps_reading_after_head_is_full():
     прекращается по заполнении головы — иначе ни счётчик, ни хвост не будут
     настоящими, а вызывающий получит только начало вывода.
     """
-    from gc_core.backends.local import _Capture, _adrain_stream
+    from gc_core.backends.local import _adrain_stream, _Capture
 
     class _Stream:
         """Двойник `StreamReader`: отдаёт заготовленные чанки, потом EOF."""

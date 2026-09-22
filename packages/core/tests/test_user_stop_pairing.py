@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_testkit import run_coro
 
 
@@ -146,7 +145,7 @@ def test_successful_first_then_stop_before_second_gives_ok_then_b(monkeypatch):
     async def apply_ok_then_arm_stop(**kw):
         applied.append(kw["tool_name"])
         state.stop_requested = True
-        return '{"ok": true, "tool": "%s"}' % kw["tool_name"]
+        return '{{"ok": true, "tool": "{}"}}'.format(kw["tool_name"])
 
     _patch_process_tool_calls(monkeypatch, pr, apply=apply_ok_then_arm_stop)
 

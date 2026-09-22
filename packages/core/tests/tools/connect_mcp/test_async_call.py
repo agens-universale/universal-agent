@@ -5,12 +5,10 @@
 subprocess) блокирующие — их прервать нечем, поэтому они уходят в поток,
 который можно бросить по дедлайну.
 """
-import asyncio
 import inspect
 import threading
 
 import pytest
-
 from gc_core.tools.connect_mcp import api, client_port, stream_client
 from gc_core.tools.connect_mcp.agent_tools import MCPToolWrapper
 
@@ -187,7 +185,6 @@ async def test_dispatcher_awaits_acall_without_a_thread(monkeypatch):
 async def test_dispatcher_refuses_a_tool_without_acall():
     """Тул без `acall` — жёсткая ошибка проводки, а не тихий синхронный вызов."""
     import pytest
-
     from gc_core.tools import aapply_tool
 
     class _Legacy:

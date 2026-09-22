@@ -15,7 +15,7 @@ class McpProgress:
 
     def begin(self, server_names) -> None:
         with self._lock:
-            self._servers = {name: None for name in server_names}
+            self._servers = dict.fromkeys(server_names)
 
     def update(self, server: str, status: dict) -> None:
         with self._lock:

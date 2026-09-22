@@ -5,9 +5,8 @@ from typing import Any
 
 from gc_core.config_modules.quality_gate import digest_limits_from_params
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.message_format import dialog_history
-
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
+from gc_core.message_format import dialog_history
 
 _FINISH_TOOL_NAMES = frozenset({FINISH_TOOL_NAME})
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 
 import pytest
-
 from gc_core.config import load_config_ex
 from gc_testkit.paths import REPO
 

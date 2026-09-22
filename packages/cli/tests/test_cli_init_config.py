@@ -13,7 +13,6 @@ import sys
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import cli
-from gc_core import config
 from gc_core.config_modules import env_vars
 
 

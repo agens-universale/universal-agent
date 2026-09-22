@@ -3,11 +3,9 @@ import os
 from pathlib import Path
 
 import pytest
-
 from gc_core.tools.fs.list_files import ListFiles
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_list_default_and_hidden(tmp_path):
     (tmp_path / "a.txt").write_text("x", encoding="utf-8")

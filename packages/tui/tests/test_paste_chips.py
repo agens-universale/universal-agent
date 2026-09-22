@@ -1,5 +1,5 @@
 """Юнит-тесты сервиса paste_chips — без Textual."""
-from gc_tui.services.paste_chips import should_collapse, chip_label, ChipStore, token_spans, expand
+from gc_tui.services.paste_chips import ChipStore, chip_label, expand, should_collapse, token_spans
 
 
 def test_should_collapse_by_lines_boundary():

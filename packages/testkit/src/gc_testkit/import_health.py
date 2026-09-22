@@ -73,8 +73,8 @@ import ast
 import importlib.util
 import json
 import sys
-from dataclasses import dataclass, asdict
-from functools import lru_cache
+from dataclasses import asdict, dataclass
+from functools import cache
 from pathlib import Path
 
 from gc_testkit.paths import REPO, package_src_dirs
@@ -159,7 +159,7 @@ def _skip(mod_name: str, exc: BaseException) -> None:
         _SKIPPED.setdefault(mod_name, f"{type(exc).__name__}: {exc}")
 
 
-@lru_cache(maxsize=None)
+@cache
 def _module_exists(mod_name: str) -> bool | None:
     """Есть ли такой модуль. None — проверить не удалось, см. `_SKIPPED`.
 
@@ -277,7 +277,7 @@ def _target_names(target: ast.AST) -> set[str]:
     return set()
 
 
-@lru_cache(maxsize=None)
+@cache
 def _module_bindings(mod_name: str) -> frozenset[str] | None:
     """Имена модульного уровня по AST. None — модуль непрозрачен, не судим.
 

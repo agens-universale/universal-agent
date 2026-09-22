@@ -3,17 +3,16 @@ import logging
 import os
 import shutil
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
 import yaml
-
-from gc_server.swarm import storage as storage
 from gc_core.config import resolve_base_config_path
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.merge import deep_merge
 from gc_core.utils.user_text import read_user_text_or_none
 
+from gc_server.swarm import storage as storage
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +71,13 @@ def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _compute_deadline_iso(timeout_seconds: int) -> str:
     """Вернуть ISO-timestamp когда sworm должен быть принудительно убит по таймауту."""
     return (
-        datetime.now(timezone.utc) + timedelta(seconds=int(timeout_seconds))
+        datetime.now(UTC) + timedelta(seconds=int(timeout_seconds))
     ).isoformat()
 
 
@@ -141,7 +140,7 @@ def _materialize_runtime_config(
     # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
     try:
         project_path = env_vars.project_local_config_path()
-    except Exception:  # noqa: BLE001
+    except Exception:
         project_path = None
 
     if (
@@ -233,7 +232,7 @@ def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
         return explicit.strip()
     try:
         return resolve_base_config_path()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("could not resolve host config path", exc_info=True)
         return None
 
@@ -326,7 +325,7 @@ def start_swarm_process(
         if host_config_path:
             try:
                 _materialize_runtime_config(host_config_path, sandbox_dir, swarm_cfg)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception(
                     "swarm %s: runtime config materialization failed (proceeding without it)",
                     swarm_id,
@@ -408,7 +407,7 @@ def start_swarm_process(
         )
         meta_written = True
 
-        proc = subprocess.Popen(  # noqa: S603
+        proc = subprocess.Popen(
             [wrapper_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

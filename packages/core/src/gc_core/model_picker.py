@@ -123,6 +123,7 @@ def _requests_get_ex(
 ) -> HttpReply:
     """GET через backend-сессию: trust_env=False + resolve_proxies."""
     import httpx
+
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
@@ -157,6 +158,7 @@ def _requests_post_ex(
 ) -> HttpReply:
     """POST через backend-сессию: trust_env=False + resolve_proxies."""
     import httpx
+
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 

@@ -1,10 +1,10 @@
 """Capability probes and FakeBackend overrides."""
 import os
-import pytest
 import re
 import shlex
 from fnmatch import fnmatch
 
+import pytest
 from gc_core.backends.capabilities import (
     aprobe_find_xargs_grep,
     aprobe_grep_exclude_dir,
@@ -14,8 +14,8 @@ from gc_core.backends.capabilities import (
 )
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult
-from gc_testkit.harbor_fakes import FakeBackend
 from gc_core.utils.native_fs_search import build_grep_argv_flags
+from gc_testkit.harbor_fakes import FakeBackend
 
 
 def test_fake_backend_default_caps_false():
@@ -78,7 +78,7 @@ def test_reading_a_capability_before_warm_up_refuses_loudly():
 
 
 def _read_text(path):
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+    with open(path, encoding="utf-8", errors="replace") as fh:
         return fh.read()
 
 
@@ -252,9 +252,7 @@ class _PosixBox(LocalFsBackend):
                 fixed = True
             elif tok == "-i":
                 ci = True
-            elif tok in ("-E", "--color=never", "--no-messages"):
-                pass
-            elif tok.startswith("--binary-files="):
+            elif tok in ("-E", "--color=never", "--no-messages") or tok.startswith("--binary-files="):
                 pass
             elif tok.startswith("--include="):
                 include = tok.split("=", 1)[1]

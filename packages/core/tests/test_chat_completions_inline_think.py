@@ -1,4 +1,4 @@
-from gc_core.utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion
+from gc_core.utils.chat_completions_stream import assemble_streamed_completion, iter_sse_data_lines
 
 
 def _deltas(lines):

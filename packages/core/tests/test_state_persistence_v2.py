@@ -3,13 +3,17 @@ import tempfile
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.intent_log import ACTION_USER_ASK, deserialize_list, serialize_for_meta
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError, meta_has_persisted_agent_state, validate_thread_meta_for_load
+from gc_core.persistence.schema import (
+    STATE_SCHEMA_VERSION,
+    StateSchemaError,
+    meta_has_persisted_agent_state,
+    validate_thread_meta_for_load,
+)
 from gc_core.persistence.state_repository import StateRepository
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-from gc_core.states import SharedStateData, State
+from gc_core.states import State
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
 
 

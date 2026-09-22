@@ -3,7 +3,6 @@ import asyncio
 import threading
 
 import pytest
-
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,

@@ -15,7 +15,7 @@ class ToolCallOutputRecord:
     truncated_in_message: bool = True
 
 
-def _record_from_item(item: Any) -> "Optional[ToolCallOutputRecord]":
+def _record_from_item(item: Any) -> Optional[ToolCallOutputRecord]:
     """Запись из сериализованного словаря; None — форма не та (запись пропускается)."""
     if not isinstance(item, dict):
         return None
@@ -46,7 +46,7 @@ def _record_from_item(item: Any) -> "Optional[ToolCallOutputRecord]":
 @dataclass
 class ToolCallOutputsStore:
     max_entries: int = 10
-    _records: "OrderedDict[str, ToolCallOutputRecord]" = field(default_factory=OrderedDict)
+    _records: OrderedDict[str, ToolCallOutputRecord] = field(default_factory=OrderedDict)
 
     _SERIALIZATION_SCHEMA_VERSION: int = 1
 
@@ -132,7 +132,7 @@ class ToolCallOutputsStore:
         }
 
     @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "ToolCallOutputsStore":
+    def from_dict(cls, raw: Dict[str, Any]) -> ToolCallOutputsStore:
         if not isinstance(raw, dict):
             raise TypeError("ToolCallOutputsStore.from_dict expects dict")
         max_entries = int(raw.get("max_entries", 10))
@@ -144,7 +144,7 @@ class ToolCallOutputsStore:
         if not isinstance(records_raw, list):
             records_raw = []
 
-        reconstructed: "OrderedDict[str, ToolCallOutputRecord]" = OrderedDict()
+        reconstructed: OrderedDict[str, ToolCallOutputRecord] = OrderedDict()
         for item in records_raw:
             record = _record_from_item(item)
             if record is not None:

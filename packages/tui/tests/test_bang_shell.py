@@ -5,8 +5,16 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from gc_tui.services.bang_shell import BangShellController, BangShellSettings, ClearMeta, normalize_output, parse_body, parse_clear_meta, preflight, truncate_output
+from gc_tui.services.bang_shell import (
+    BangShellController,
+    BangShellSettings,
+    ClearMeta,
+    normalize_output,
+    parse_body,
+    parse_clear_meta,
+    preflight,
+    truncate_output,
+)
 
 
 def test_parse_body_strips_bang_and_optional_space():

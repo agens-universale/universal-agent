@@ -1,11 +1,9 @@
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
-from gc_testkit import run_coro
-from gc_testkit import as_coro
+from gc_testkit import as_coro, run_coro
 
 
 def test_auxiliary_llm_completion_kwargs_matches_auxiliary_llm():

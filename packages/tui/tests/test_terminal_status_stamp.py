@@ -5,6 +5,7 @@
 объект раннера в момент стампа нельзя (баг: давало «completed» вместо «stopped»).
 """
 import json
+
 import pytest
 
 

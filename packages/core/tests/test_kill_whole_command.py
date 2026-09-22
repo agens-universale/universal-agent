@@ -7,11 +7,9 @@
 """
 import asyncio
 import os
-import time
 from pathlib import Path
 
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="групп процессов нет на Windows")

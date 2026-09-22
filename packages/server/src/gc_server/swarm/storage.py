@@ -1,13 +1,13 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Tuple
 
 from gc_core.utils.atomic_io import atomic_replace
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _ensure_dir(path: str) -> None:
@@ -31,7 +31,7 @@ def load_swarm_meta(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
     _, meta_path, _, _ = _swarm_paths(threads_dir, swarm_id)
     if not os.path.exists(meta_path):
         return {}
-    with open(meta_path, "r", encoding="utf-8") as f:
+    with open(meta_path, encoding="utf-8") as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError:
@@ -52,7 +52,7 @@ def load_completion_info(threads_dir: str, swarm_id: str) -> Dict[str, Any]:
     comp_path = os.path.join(base_dir, "completion.json")
     if not os.path.exists(comp_path):
         return {}
-    with open(comp_path, "r", encoding="utf-8") as f:
+    with open(comp_path, encoding="utf-8") as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError:
@@ -166,7 +166,7 @@ def load_swarm_messages(
         return []
 
     result: List[Dict[str, Any]] = []
-    with open(data_path, "r", encoding="utf-8") as f:
+    with open(data_path, encoding="utf-8") as f:
         for line in f:
             row = line.strip()
             if not row:
@@ -196,20 +196,20 @@ def load_swarm_stdout_stderr(
         # нечитаемое: тот же приём, что у вывода команд (`bang_shell`).
         if not os.path.exists(path):
             return []
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             return [line.rstrip("\n") for line in f]
 
     return _read_lines(stdout_path), _read_lines(stderr_path)
 
 
 __all__ = [
-    "delete_swarm_meta",
-    "load_swarm_meta",
-    "save_swarm_meta",
-    "load_completion_info",
     "append_swarm_message",
+    "delete_swarm_meta",
+    "load_completion_info",
     "load_swarm_messages",
+    "load_swarm_meta",
     "load_swarm_stdout_stderr",
+    "save_swarm_meta",
 ]
 
 

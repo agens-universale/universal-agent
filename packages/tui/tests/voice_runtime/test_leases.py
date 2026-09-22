@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from gc_tui.voice_runtime import leases as leases
 
 #: Умеет ли платформа отдать отпечаток процесса. `process_start_key` реализован

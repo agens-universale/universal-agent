@@ -18,10 +18,9 @@
 import json
 import sys
 
+from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_testkit import run_coro
 from gc_testkit.helpers.tool_ctx import local_ctx, with_local_ctx
-
-from gc_core.tools.exec.execute_command import ExecuteCommand
 
 _CMD = f'"{sys.executable}" -c "print(1)"'
 

@@ -10,7 +10,6 @@ import tempfile
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.config import load_config
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.tools import abuild_tools_data

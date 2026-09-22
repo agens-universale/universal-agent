@@ -16,14 +16,21 @@ import pytest
 pytest.importorskip("textual")
 
 import yaml
-from textual.widgets import Input, Static
-
-from test_profiles_crud import (_PROFILE_BODY, _base_config_text, _base_dict,
-                                          _flash, _footer, _notice, _profiles_screen,
-                                          _put_cursor, _type_name, _write)
 from gc_tui.editors import models_section as m
 from gc_tui.screens import settings as s
-
+from test_profiles_crud import (
+    _PROFILE_BODY,
+    _base_config_text,
+    _base_dict,
+    _flash,
+    _footer,
+    _notice,
+    _profiles_screen,
+    _put_cursor,
+    _type_name,
+    _write,
+)
+from textual.widgets import Input, Static
 
 # Секция-оверлей для стражей превью: НЕПУСТАЯ намеренно. Пустой якорь
 # (`security: {}`) переопределением по §11 не считается — писатель оставляет
@@ -217,8 +224,8 @@ async def test_the_profile_key_cannot_be_written_into_a_profile(tmp_path, monkey
     """Профильный валидатор реально подключён (Task 1, `is_profile=True`): документ с
     `profile:` внутри — запрещённая цепочка профилей (§3.2), и запись отвергается
     целиком. КОНФИГ-валидатор тот же текст принимает — разницу даёт только цель."""
-    from gc_tui import app as app_mod
     from gc_core.config import validate_config_text_with_sections
+    from gc_tui import app as app_mod
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profile = _write(tmp_path / "base" / "profiles" / "work.yml",
@@ -477,8 +484,8 @@ async def test_an_empty_profile_shows_its_own_empty_state(tmp_path, monkeypatch)
     """Только что созданный профиль (бланк `PROFILE_SKELETON`) — реестр пуст. Легаси-
     редактора модели у профиля нет, поэтому пустое состояние своё: самодостаточная
     подсказка на «вы» + вход в реестр клавишей `n`."""
-    from gc_tui import app as app_mod
     from gc_core.config_modules.profiles import PROFILE_SKELETON
+    from gc_tui import app as app_mod
     from gc_tui.editors.model import ModelEditor
     from gc_tui.editors.model_entry_form import ModelEntryForm
     _project(tmp_path, monkeypatch)

@@ -7,17 +7,14 @@
 собирает сам. Сбой судьи → bounce (строгий fallback)."""
 from __future__ import annotations
 
-
 from dataclasses import dataclass
 from typing import Any
 
-from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
+from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
 from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
 from gc_core.intent_guard.guard import judge_available
-from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
 from gc_core.intent_guard.validation_result import ValidationResult
-
-
+from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
 
 
 @dataclass(frozen=True)

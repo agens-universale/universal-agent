@@ -2,7 +2,12 @@
 
 import json
 
-from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL, SidecarNestedAction, apply_sidecar_nested_actions, plan_sidecar_nested_actions
+from gc_tui.services.subagent_sidecar_mapper import (
+    CHILD_SUMMARY_LABEL,
+    SidecarNestedAction,
+    apply_sidecar_nested_actions,
+    plan_sidecar_nested_actions,
+)
 
 
 def test_plan_groups_by_parent_and_seq():

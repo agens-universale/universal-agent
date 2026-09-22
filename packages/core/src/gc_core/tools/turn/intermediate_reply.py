@@ -103,7 +103,7 @@ Usage:
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
-                    "message": f"Argument 'answer' must be a string. Got: {type(answer)} ({repr(answer)})",
+                    "message": f"Argument 'answer' must be a string. Got: {type(answer)} ({answer!r})",
                 },
             )
 
@@ -146,7 +146,7 @@ Usage:
                         "field": "artifact_path",
                         "message": (
                             f"Argument 'artifact_path' must be a string when provided. "
-                            f"Got: {type(artifact_path)} ({repr(artifact_path)})"
+                            f"Got: {type(artifact_path)} ({artifact_path!r})"
                         ),
                     },
                 )

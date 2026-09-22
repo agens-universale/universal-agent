@@ -1,6 +1,5 @@
 """upgrade_gate: стамп agent_state.json + детект «меня обновили»."""
-from gc_core import app_version
-from gc_core import upgrade_gate
+from gc_core import app_version, upgrade_gate
 
 
 def _fake_versions(monkeypatch, version="0.2.0", commit="abc"):

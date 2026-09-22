@@ -1,5 +1,3 @@
-from rich.text import Text
-
 from gc_core.startup_notices import Notice
 from gc_tui.services.notices_ui import (
     INFO_GLYPH,
@@ -8,6 +6,7 @@ from gc_tui.services.notices_ui import (
     format_notices_badge,
     notice_counts,
 )
+from rich.text import Text
 
 
 def test_notice_counts_and_badge():

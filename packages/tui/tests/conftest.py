@@ -102,7 +102,7 @@ def pytest_collection_modifyitems(items):
             path = Path(str(item.fspath)).resolve()
         except Exception:
             continue
-        if _TUI_DIR == path or _TUI_DIR in path.parents:
+        if path == _TUI_DIR or _TUI_DIR in path.parents:
             item.add_marker(flaky)
             if item.name in _SNAPSHOT_DRIFT:
                 item.add_marker(drift)
@@ -221,10 +221,9 @@ def tui_app_factory():
     __file__: набор TUI лежит в packages/tui/tests, а стили — в
     packages/tui/src/gc_tui, и арифметика уровней здесь уже ломалась.
     """
-    from textual.app import App, ComposeResult
-
     from gc_testkit.paths import TUI_PKG
     from gc_tui import palette
+    from textual.app import App, ComposeResult
 
     def _factory(widget):
         class _StyledHost(App):

@@ -1,11 +1,10 @@
 import asyncio
 
 import pytest
-
-from gc_core.run_context import acreate_run_context
 from gc_core.backends.factory import parse_os_backend_kind, resolve_os_backend
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
+from gc_core.run_context import acreate_run_context
 
 
 def test_parse_os_backend_defaults_to_local():

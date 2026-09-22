@@ -8,11 +8,10 @@ and asserts it forwards the RAW code/cwd/timeout/validated-env dict to
 (validation errors, non_zero_exit, timeout, execution_failed, truncation).
 """
 import json
-from types import SimpleNamespace
 
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_testkit.harbor_fakes import bind_os_backend
 
 
 class _RecordingFakeBackend:

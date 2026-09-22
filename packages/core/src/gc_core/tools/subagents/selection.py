@@ -109,7 +109,7 @@ def filter_subagents_by_allowlist(
 
 __all__ = [
     "filter_subagents_by_allowlist",
-    "subagents_allowlist_ordered",
     "subagents_allowlist",
+    "subagents_allowlist_ordered",
     "subagents_enabled",
 ]

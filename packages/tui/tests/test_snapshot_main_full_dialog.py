@@ -9,7 +9,6 @@ from gc_testkit.tui_fixtures.stub_executor import StubExecutor
 
 def test_main_full_dialog_snapshot(snap_compare, tmp_path):
     from gc_tui.app import TuiApp
-
     from gc_tui.services.stores.file_store import FileTaskStore
 
     tid = "7f3a9b1c"

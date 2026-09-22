@@ -27,7 +27,7 @@ class _Response:
         self.headers: dict[str, str] = {}
         self.text = json.dumps(payload, ensure_ascii=False)
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self) -> _Response:
         return self
 
     def __exit__(self, *exc: Any) -> bool:
@@ -138,10 +138,9 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
     асинхронный: гейт паритета обязан кормить оба одним и тем же сценарием.
     """
     import httpx
-
     from gc_core.utils import connect_backend
 
-    def handler(request: "httpx.Request") -> "httpx.Response":
+    def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content or b"{}")
         turn = backend.next_payload(payload)
         if payload.get("stream"):
@@ -182,10 +181,9 @@ def install_many(monkeypatch, backends: dict) -> dict:
     отличаться полем ``model``.
     """
     import httpx
-
     from gc_core.utils import connect_backend
 
-    def handler(request: "httpx.Request") -> "httpx.Response":
+    def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content or b"{}")
         model = payload.get("model")
         backend = backends.get(model)

@@ -17,11 +17,10 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Input, Static
-
 from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
 from gc_testkit.tui_support import open_settings_section
 from gc_tui.screens import settings as s
+from textual.widgets import Input, Static
 
 
 def _write(path: Path, text: str) -> Path:
@@ -114,8 +113,8 @@ async def test_create_writes_the_blank_skeleton_into_the_base_root(tmp_path, mon
     """`n` → инлайн-ввод имени → файл `<база>/profiles/<имя>.yml` из
     `PROFILE_SKELETON` (Task 1). Корень — базовый: проектные профили остаются
     ручной YAML-территорией (§12.3, территорию не расширяем)."""
-    from gc_tui import app as app_mod
     from gc_core.config_modules.profiles import PROFILE_SKELETON
+    from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -136,8 +135,8 @@ async def test_create_writes_the_blank_skeleton_into_the_base_root(tmp_path, mon
 async def test_created_file_is_valid_by_the_profile_schema(tmp_path, monkeypatch):
     """Страж бланка: то, что кладёт создание, обязано грузиться профильным
     валидатором — иначе первый же созданный профиль был бы нерабочим."""
-    from gc_tui import app as app_mod
     from gc_core.config_modules.profiles import validate_profile_text
+    from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -221,8 +220,8 @@ async def test_create_refuses_on_the_package_template(tmp_path, monkeypatch):
     """Запуск на пакетном шаблоне: корень профилей лежит ВНУТРИ установленного
     пакета — тот же отказ, что у записи указателя (`_target_writable`), иначе
     создание писало бы файлы в пакет."""
-    from gc_tui import app as app_mod
     from gc_core.config import _default_config_path
+    from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -481,8 +480,8 @@ async def test_delete_of_the_active_profile_clears_the_pointer(tmp_path, monkeyp
 
 
 def _app_for_session(tmp_path, base_cfg):
-    from gc_tui import app as app_mod
     from gc_core.config import load_config_ex
+    from gc_tui import app as app_mod
     cfg, _meta = load_config_ex(str(base_cfg))
     app = app_mod.TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
     app.set_config_path(str(base_cfg))
@@ -1103,6 +1102,7 @@ async def test_failed_delete_move_rolls_the_pointer_back_in_the_file(tmp_path, m
     возвращается в базовый конфиг — иначе холодный старт падал бы на указателе
     в никуда (§3.1), хотя файл профиля никуда не делся."""
     import shutil
+
     from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1135,6 +1135,7 @@ async def test_failed_rename_move_rolls_the_pointer_back_in_the_file(tmp_path, m
     """Сбой самого `rename()` ПОСЛЕ уже переписанных на новое имя указателей:
     указатель вернулся на СТАРОЕ имя, файла под новым именем не появилось."""
     import pathlib
+
     from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1170,6 +1171,7 @@ async def test_failed_delete_rolls_the_pointer_back_in_every_layer(tmp_path, mon
     откат возвращает исходное значение в КАЖДЫЙ — полу-откат оставлял бы слои
     спорящими, и победитель мержа ссылался бы в никуда."""
     import shutil
+
     from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1364,8 +1366,8 @@ async def test_delete_refuses_on_the_package_template_before_the_banner(tmp_path
     """`Del` отказывает НА ВХОДЕ, как `r`: поднимать вопрос, на который заведомо
     ответишь отказом, — ложное обещание. Профиль в шаблоне подкладываем сами —
     важен гейт, а не содержимое установленного пакета."""
-    from gc_tui import app as app_mod
     from gc_core.config import _default_config_path
+    from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1389,8 +1391,8 @@ async def test_delete_refuses_on_the_package_template_before_the_banner(tmp_path
 async def test_refusal_names_the_action_that_did_not_happen(tmp_path, monkeypatch):
     """Отказ говорит о своём действии: «не создано», а не «не сохранено» — глагол
     чужого действия заставляет гадать, что именно не произошло."""
-    from gc_tui import app as app_mod
     from gc_core.config import _default_config_path
+    from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1814,8 +1816,8 @@ async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(
 
 
 def _app_with_flag(tmp_path, base_cfg, profile_override):
-    from gc_tui import app as app_mod
     from gc_core.config import load_config_ex
+    from gc_tui import app as app_mod
     cfg, _meta = load_config_ex(str(base_cfg), profile_override=profile_override)
     app = app_mod.TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg,
                          profile_override=profile_override)
@@ -2217,6 +2219,7 @@ async def test_renaming_reports_a_clean_refusal_when_the_profile_file_vanishes_m
     окно гонки не расширилось. Ничего ещё не записано — ждём чистый отказ, а
     не краш."""
     import pathlib
+
     from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()

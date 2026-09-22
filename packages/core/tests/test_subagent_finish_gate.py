@@ -1,12 +1,10 @@
 """Finish gate для subagent: assignment в scope, не CLI user оркестратора."""
-import pytest
-
 import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from gc_core.intent_guard import guard as intent_guard_guard
-
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log.user_turn import init_subagent_open_turn

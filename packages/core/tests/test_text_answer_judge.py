@@ -1,7 +1,8 @@
 """TUI adaptive bounce: судья текст-ответа переиспользует finish-gate-судью."""
 from types import SimpleNamespace
+
 from gc_core.intent_guard import text_answer_judge as taj
-from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer, TextAnswerDecision
+from gc_core.intent_guard.text_answer_judge import TextAnswerDecision, ashould_return_text_answer
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit import run_coro
 

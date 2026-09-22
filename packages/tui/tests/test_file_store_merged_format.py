@@ -5,13 +5,8 @@
 """
 from __future__ import annotations
 
-import json
-
-import pytest
-
-from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta, load_thread_meta
+from gc_core.thread_store import ThreadSession, save_thread_meta
 from gc_tui.services.stores.file_store import FileTaskStore
-
 
 _SYSTEM = "cli"
 _TID = "roundtrip01"

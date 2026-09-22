@@ -1,5 +1,5 @@
-from gc_core import onboarding
 from gc_cli import onboarding_wizard as wz
+from gc_core import onboarding
 
 
 def _io(answers):

@@ -8,7 +8,6 @@
 from gc_core.usage.account import CATEGORY_FINISH_GATE, CATEGORY_MAIN, UsageAccount
 from gc_core.usage.cost import compute_cost
 from gc_core.usage.report import render_cost_report
-
 from gc_tui.services.usage_meter import format_nonzero_cost, render_usage_meter
 
 _PRICING_ON = {

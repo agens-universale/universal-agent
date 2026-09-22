@@ -1,4 +1,6 @@
-import json, types
+import json
+import types
+
 from gc_core.security.read_guard import enforce_read_guard
 
 

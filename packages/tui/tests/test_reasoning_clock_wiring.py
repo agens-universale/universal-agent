@@ -1,6 +1,5 @@
 """Проводка ReasoningClock в TraceScreen: когнитивные тул-события + stream-источник."""
 import pytest
-
 from gc_tui.models import TraceEvent
 from gc_tui.services.reasoning_clock import ReasoningClock
 

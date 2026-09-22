@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.agent import AgentConfig
+from pydantic import ValidationError
 
 
 def test_limits_default_none():

@@ -1,4 +1,3 @@
-import pytest
 
 
 def test_mcp_server_config_accepts_headers():

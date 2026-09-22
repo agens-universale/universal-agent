@@ -31,9 +31,9 @@ async def test_right_column_leaves_room_for_notices_suffix():
     """Правая колонка + фактическая левая ≤ ширины окна, и левой хватает ОДНОГО
     ряда: суффикс уведомлений стоит рядом с командами, а не выдавлен и не наехал
     на имя модели."""
+    from gc_core.startup_notices import Notice
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
-    from gc_core.startup_notices import Notice
 
     app = TuiApp(config={"model": "anthropic/claude-opus-5"})
     async with app.run_test(size=(120, 30)) as pilot:
@@ -64,7 +64,7 @@ async def test_right_column_without_notices_is_unchanged():
     app = TuiApp(config={"model": "m"})
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
-        app.collect_footer_notices = lambda: []
+        app.collect_footer_notices = list
         await pilot.pause()
         need = _need(scr)
         assert need + cell_len(scr._footer_left_text()) + _CHROME <= 120
@@ -122,6 +122,7 @@ async def test_profile_name_survives_when_dropping_it_frees_nothing(tmp_path, mo
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from pathlib import Path as _P
+
     from gc_core.config_modules.profiles import ProfileRef
     from gc_tui.app import TuiApp
 

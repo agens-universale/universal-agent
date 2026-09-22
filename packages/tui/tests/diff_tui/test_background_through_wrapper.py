@@ -18,9 +18,8 @@ import sys
 import time
 
 from gc_core.tools.exec.execute_command import ExecuteCommand
-from gc_tui.diff_tui.tracking import TrackingFsBackend
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_tui.diff_tui.tracking import TrackingFsBackend
 
 #: Вывод фона уходит в нулевое устройство, поэтому жизнь потомка видна только по
 #: его СОБСТВЕННОМУ файлу (путь — первым аргументом).

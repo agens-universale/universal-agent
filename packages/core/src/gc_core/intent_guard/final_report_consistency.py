@@ -2,10 +2,18 @@ import json
 import os
 from typing import Any, Dict, List
 
-from gc_core.intent_guard.trace_digest import FinishGateTraceDigest, build_finish_gate_trace_digest
-from gc_core.intent_guard.validation_result import ValidationResult, fail_open_validation_result, parse_validator_response
-from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
 from gc_core.bundled_assets import bundled_root
+from gc_core.intent_guard.trace_digest import FinishGateTraceDigest, build_finish_gate_trace_digest
+from gc_core.intent_guard.validation_result import (
+    ValidationResult,
+    fail_open_validation_result,
+    parse_validator_response,
+)
+from gc_core.summarize.llm import (
+    arequest_auxiliary_completion_text,
+    auxiliary_llm_completion_kwargs,
+    auxiliary_llm_judge_max_tokens,
+)
 from gc_core.utils.user_text import read_user_text
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).

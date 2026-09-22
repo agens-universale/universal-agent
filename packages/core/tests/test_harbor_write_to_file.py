@@ -6,13 +6,11 @@ an IDENTICAL envelope (path/backup_path fields stripped) and IDENTICAL resulting
 content for the same input. `_run_both` feeds one case through both backends.
 """
 import json
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 
 # A sentinel file that makes /work/ appear as an existing directory in FakeBackend.
 # FakeBackend.is_dir(p) checks: any file in files that starts with p.rstrip("/") + "/".
@@ -51,7 +49,7 @@ def _run_both(tmp_path, initial_content, path_name, call_kwargs):
     # Read with newline="" to suppress universal newline translation — FakeBackend
     # stores strings verbatim, so we need the raw bytes-as-text for a fair comparison.
     if real_file.exists():
-        with open(str(real_file), "r", encoding="utf-8", newline="") as _fh:
+        with open(str(real_file), encoding="utf-8", newline="") as _fh:
             base_content = _fh.read()
     else:
         base_content = None

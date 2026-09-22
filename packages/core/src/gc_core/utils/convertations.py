@@ -56,7 +56,7 @@ def _has_valid_json_arguments(message: Dict) -> bool:
         return False
     try:
         json.loads(raw_args)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     return True
 

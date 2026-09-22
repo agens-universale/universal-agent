@@ -8,18 +8,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
-
-from gc_core.config_modules.security import validate_command_moderation_mode
-from gc_core.constants.tool_names import EXEC_PYTHON_NAME
-from gc_core.security.confirm_port import confirm_available, request_confirm
-from gc_core.security.path_policy import ToolSecurityContext, _extract_config_dict, audit_policy_decision, resolve_tool_context
-from gc_core.security.protected_paths import protected_paths
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.message_projection import project_text_for_model
-from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
-from gc_core.utils.project_data import os_label
 from gc_core.bundled_assets import bundled_root
+from gc_core.config_modules.security import validate_command_moderation_mode
+from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.constants.tool_names import EXEC_PYTHON_NAME
+from gc_core.message_projection import project_text_for_model
+from gc_core.security.confirm_port import confirm_available, request_confirm
+from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
+from gc_core.security.path_policy import (
+    ToolSecurityContext,
+    _extract_config_dict,
+    audit_policy_decision,
+    resolve_tool_context,
+)
+from gc_core.security.protected_paths import protected_paths
+from gc_core.summarize.llm import (
+    arequest_auxiliary_completion_text,
+    auxiliary_llm_completion_kwargs,
+    auxiliary_llm_judge_max_tokens,
+)
+from gc_core.utils.project_data import os_label
 
 SAFE_VERDICT = "safe"
 DANGEROUS_VERDICT = "potentially_dangerous"

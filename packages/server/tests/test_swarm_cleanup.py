@@ -11,11 +11,8 @@ sandboxes; --dry-run; обработку отсутствующих/невали
 
 import json
 import os
-import sys
 import time
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 # Обычный импорт: чистка стала модулем пакета. Раньше файл лежал в scripts/ и
 # грузился через spec_from_file_location по пути от корня репозитория — а
@@ -47,7 +44,7 @@ def _setup_pair(tmp_path, sid: str, age_hours: float):
     t_dir = threads / sid; t_dir.mkdir()
     s_dir = sandbox / sid; s_dir.mkdir()
 
-    updated_at = datetime.now(timezone.utc) - timedelta(hours=age_hours)
+    updated_at = datetime.now(UTC) - timedelta(hours=age_hours)
     meta = _make_meta(updated_at)
     (t_dir / "meta.json").write_text(json.dumps(meta))
     (s_dir / "scratch.txt").write_text("data")

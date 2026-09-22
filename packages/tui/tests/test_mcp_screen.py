@@ -118,8 +118,8 @@ def test_mcp_card_reason_on_failed_line():
 
 
 def test_mcp_renderable_is_rich_text_with_styles():
-    from rich.text import Text
     from gc_tui.screens.mcp import McpScreen
+    from rich.text import Text
     snap = {"office": {"status": "connected", "reason": None, "description": "d",
                        "tools": [{"name": "mcp_office_x", "description": "y"}]}}
     rend = McpScreen(tools_snapshot=snap).cards[0]._renderable()

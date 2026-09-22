@@ -1,15 +1,16 @@
 """ConfigScreen — снимок конфига сессии (read-only) + пути к файлам."""
 from __future__ import annotations
+
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Input, Static
-from rich.text import Text
 
+from gc_tui.palette import DIM, MUTED
 from gc_tui.services.redact import redact_secrets
 from gc_tui.services.yaml_view import safe_yaml_dump, yaml_syntax_renderable, yaml_syntax_widget
-from gc_tui.palette import DIM, MUTED
 
 _FOOTER = "[Esc] back  [↑↓ / PgUp PgDn] прокрутка"
 _SNAPSHOT_HINT = "снимок на момент запуска · правки применятся после перезапуска"
@@ -83,8 +84,8 @@ def _effective_model_name(config: dict) -> str:
     честный фоллбэк на плоский ключ, шапка не место для отказа.
 
     Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4)."""
-    from gc_core.onboarding import MODEL_SENTINEL
     from gc_core.model_router import ModelRouter
+    from gc_core.onboarding import MODEL_SENTINEL
     name = config.get("model")
     try:
         resolved = ModelRouter(

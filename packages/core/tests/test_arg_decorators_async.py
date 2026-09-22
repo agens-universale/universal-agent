@@ -11,8 +11,6 @@
 (``security/dual_wrapper.py``): корутинную функцию оборачиваем корутиной,
 обычную — обычной.
 """
-import pytest
-
 from gc_core.utils.arg_decorators import parse_json_object_argument
 
 

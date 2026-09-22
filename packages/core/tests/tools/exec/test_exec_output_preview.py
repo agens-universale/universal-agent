@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 CAP = 100

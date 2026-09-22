@@ -4,9 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from gc_tui.services.trace_mapper import map_message
-
 
 # ---------- Unit-тесты Фикса A: mapper для ask_human function_call_output ----------
 

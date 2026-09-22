@@ -4,7 +4,6 @@
 Security НЕ ослабляется: синонимы в 'safe' не маппим, неузнанный вердикт по-прежнему
 отвергается (→ декоратор → fail-closed)."""
 import pytest
-
 from gc_core.security import command_moderation as cm
 from gc_core.security.command_moderation import validate_judge_result
 

@@ -20,8 +20,6 @@
 import ast
 import inspect
 
-import pytest
-
 from gc_testkit.paths import REPO
 
 _TOOLS_DIR = REPO / "packages" / "core" / "src" / "gc_core" / "tools"

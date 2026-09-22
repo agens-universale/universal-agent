@@ -16,11 +16,11 @@ Usage:
         --model openai/MiniMaxAI/MiniMax-M2.7
 """
 import asyncio
-import threading
 import json
 import os
 import re
 import shlex
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -570,8 +570,8 @@ class GcCliExternal(BaseAgent):
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        from gc_core.run_context import acreate_run_context
         from gc_core.agent_executor import AgentExecutor
+        from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
@@ -666,7 +666,7 @@ class GcCliExternal(BaseAgent):
                 executor.stop_run()
             try:
                 state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.logger.warning(
                     "gc-cli worker thread still running after stop_run(); "
                     "abandoning it and dumping best-effort partial state"

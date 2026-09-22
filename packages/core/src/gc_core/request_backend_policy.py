@@ -4,12 +4,12 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.utils.connect_backend import arequest_backend_chat_completions
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
     has_payload,
     is_retriable_backend_error,
 )
+from gc_core.utils.connect_backend import arequest_backend_chat_completions
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5

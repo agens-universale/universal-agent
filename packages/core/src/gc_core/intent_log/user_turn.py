@@ -13,10 +13,7 @@ def current_has_user_ask(current: list[Any], text: str) -> bool:
     line = str(text or "").strip()
     if not line:
         return False
-    for record in current:
-        if record.action == ACTION_USER_ASK and str(record.content).strip() == line:
-            return True
-    return False
+    return any(record.action == ACTION_USER_ASK and str(record.content).strip() == line for record in current)
 
 
 def append_user_ask_deduped(

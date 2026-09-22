@@ -1,5 +1,6 @@
-from gc_core.updater.source import UpdateSource
 from gc_core.updater.check import _git_ls_remote, check_for_update
+from gc_core.updater.source import UpdateSource
+
 
 def _src(commit="old", ref="master"):
     return UpdateSource(url="https://x/y", ref=ref, commit=commit)
@@ -75,6 +76,7 @@ def test_update_available_from_state():
 
 def test_record_check_result_persists_and_preserves_on_none(tmp_path):
     import json
+
     from gc_core.updater.check import record_check_result
     p = tmp_path / "state.json"
     record_check_result(1000.0, "abc", "inst", p)

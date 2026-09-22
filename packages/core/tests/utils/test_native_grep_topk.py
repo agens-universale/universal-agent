@@ -94,7 +94,7 @@ async def test_top_k_builds_records_only_for_the_winners():
 
 
 async def test_top_k_respects_allow_path_before_ranking_and_counting():
-    denied = lambda p: "m00" not in p  # noqa: E731
+    denied = lambda p: "m00" not in p
 
     top = await _run(_Backend(_stdout()), allow_path=denied, rank_key=_key, top_k=50)
 

@@ -11,7 +11,6 @@ import logging
 
 import httpx
 import pytest
-
 from gc_core.utils import connect_backend
 
 

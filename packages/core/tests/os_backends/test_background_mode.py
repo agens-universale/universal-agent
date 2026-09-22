@@ -24,7 +24,6 @@ import sys
 import time
 
 import pytest
-
 from gc_core.backends import local as local_backend
 from gc_core.backends.local import LocalFsBackend
 

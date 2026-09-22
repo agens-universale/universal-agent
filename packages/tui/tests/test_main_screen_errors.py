@@ -1,7 +1,6 @@
 """Единое правило ошибок (§3.3): одна строка одним Static; цветовые зоны — rich.Text spans
 ([!]+суть = red, путь = slate, подсказка = deep-dim)."""
 import pytest
-
 from gc_tui.palette import DEEP_DIM
 
 
@@ -13,7 +12,7 @@ def _rgb(hex_: str) -> str:
 
 def _error_text(trace):
     """Renderable (rich.Text) единственного error-Static в trace."""
-    statics = [s for s in trace.query(".line-error")]
+    statics = list(trace.query(".line-error"))
     assert len(statics) == 1
     return statics[0].render()
 

@@ -1,6 +1,4 @@
-import pytest
-
-from gc_core.security.log_redaction import Redactor, build_redactor, MASK
+from gc_core.security.log_redaction import MASK, Redactor, build_redactor
 
 
 def test_value_patterns_masked():

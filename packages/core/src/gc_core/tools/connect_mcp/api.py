@@ -1,17 +1,13 @@
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
-
 import base64
 import json
 import logging
 import os
 import time
 import uuid
-
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 from gc_core.config import load_config
-from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
 from gc_core.tools.connect_mcp.validation import (
@@ -19,7 +15,6 @@ from gc_core.tools.connect_mcp.validation import (
     format_mcp_tool_result,
 )
 from gc_core.utils.aretry import retry_with_backoff_async
-from gc_core.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 

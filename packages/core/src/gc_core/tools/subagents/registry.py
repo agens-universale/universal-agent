@@ -2,16 +2,20 @@ import logging
 from typing import Any, Dict, List, Optional, Type
 
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
-from gc_core.tools.subagents.worker import Worker
-from gc_core.tools.subagents.coder import CodeGenerator
 from gc_core.tools.subagents.code_planner import CodePlanner
-from gc_core.tools.subagents.planner import Planner
-from gc_core.tools.subagents.critic import Critic
 from gc_core.tools.subagents.code_reviewer import CodeReviewer
-from gc_core.tools.subagents.special_agent import SpecialAgent
-from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition, discover_subagent_definitions, resolve_max_count
-from gc_core.tools.subagents.selection import subagents_allowlist_ordered
+from gc_core.tools.subagents.coder import CodeGenerator
+from gc_core.tools.subagents.critic import Critic
+from gc_core.tools.subagents.custom.file_definitions import (
+    SubagentDefinition,
+    discover_subagent_definitions,
+    resolve_max_count,
+)
 from gc_core.tools.subagents.custom.file_subagent import FileDefinedSubagent
+from gc_core.tools.subagents.planner import Planner
+from gc_core.tools.subagents.selection import subagents_allowlist_ordered
+from gc_core.tools.subagents.special_agent import SpecialAgent
+from gc_core.tools.subagents.worker import Worker
 
 SUBAGENT_CLASSES: List[Type[AbstractSubagent]] = [
     Worker,

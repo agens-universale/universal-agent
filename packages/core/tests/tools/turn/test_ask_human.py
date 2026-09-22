@@ -1,11 +1,8 @@
 import builtins
 import json
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
-import pytest
-
 from gc_core.tools.turn.ask_human import AskHuman
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_ask_human_multiline(monkeypatch):

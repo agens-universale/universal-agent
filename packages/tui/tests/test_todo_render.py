@@ -1,9 +1,8 @@
 """Билдеры rich.Text чек-листов — канон spec 2026-07-31 §1-§3."""
-from rich.text import Text
-
 from gc_tui import palette
 from gc_tui.services.todo_render import build_main_todo_lines, build_subagent_todo_lines
 from gc_tui.services.trace_mapper import _todo_checklist_summary
+from rich.text import Text
 
 ITEMS = [
     {"content": "Изучить структуру", "status": "completed"},

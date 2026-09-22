@@ -9,18 +9,17 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.tools.connect_mcp.client import (
-    _MCP_SESSIONS,
-    forget_session,
     _acall_mcp_tool,
     _aget_or_init_session_id,
     _atools_list_request,
+    forget_session,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     is_persistent_stdio,
 )
-from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.tools.connect_mcp.stream_client import (
     acall_tool_stream_http,
     acall_tool_stream_sse,
@@ -294,4 +293,4 @@ class AgentRuntimeClient(McpClientPort):
         return data
 
 
-__all__ = ["McpClientPort", "AgentRuntimeClient"]
+__all__ = ["AgentRuntimeClient", "McpClientPort"]

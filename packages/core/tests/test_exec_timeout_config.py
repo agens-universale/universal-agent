@@ -4,15 +4,18 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-from gc_core.config import load_config
-from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, AgentConfig, exec_output_capture_max_chars_from_config_dict
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult
+from gc_core.config import load_config
+from gc_core.config_modules.agent import (
+    DEFAULT_EXEC_TIMEOUT_SEC,
+    AgentConfig,
+    exec_output_capture_max_chars_from_config_dict,
+)
 from gc_core.config_modules.root import AppConfig
-from gc_testkit.helpers.tool_ctx import with_local_ctx
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
 def test_agent_config_timeout_default():

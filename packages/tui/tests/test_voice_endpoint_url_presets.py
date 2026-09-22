@@ -3,9 +3,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.app import App, ComposeResult
-
 from gc_core.config_modules.endpoint_presets import EndpointPreset
+from textual.app import App, ComposeResult
 
 PRESETS = [
     EndpointPreset(name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"),

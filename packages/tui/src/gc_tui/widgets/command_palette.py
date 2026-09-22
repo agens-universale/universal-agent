@@ -17,7 +17,7 @@ from textual.widgets import Rule, Static
 
 from gc_tui import palette as _pal
 from gc_tui.commands import Command, CommandRegistry
-from gc_tui.toggles import TOGGLES, _fit_hint, _HINT_KEYS_TOGGLE, padded_track
+from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
@@ -275,7 +275,7 @@ class CommandPalette(VerticalScroll):
         Зазор +3, как и у колонки описаний (§4): было +2, и на строке с самым длинным
         описанием рядом оказывались два разных зазора — 3 слева от описания и 2 справа.
         На одной строке это видно глазом (находка живой приёмки)."""
-        rows = [c for c in self._visible_rows()]
+        rows = list(self._visible_rows())
         if not any(c.hotkey for c in rows):
             return 0
         # По ВСЕМ видимым описаниям, а не только по строкам с хоткеем: у длинного

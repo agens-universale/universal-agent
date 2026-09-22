@@ -5,7 +5,6 @@ replace-семантика — субагент затирал план орке
 маршрутизируется по ``parent_state_id``: у оркестратора — общий ``shared``
 (персистится), у субагента — собственное поле (живёт только его прогон).
 """
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
@@ -13,6 +12,7 @@ from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.working_memory_gateway import read_session_todo_from_state
 from gc_core.tools.session.todo import SessionTodo
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 PARENT_ITEMS = [
     {"content": "Спроектировать", "status": "completed"},

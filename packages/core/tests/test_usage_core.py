@@ -1,8 +1,8 @@
 from gc_core.usage.account import (
     CATEGORY_FINISH_GATE,
     CATEGORY_MAIN,
-    CATEGORY_SUMMARY,
     CATEGORY_SUBAGENT,
+    CATEGORY_SUMMARY,
     LEGACY_CURRENCY,
     MONEY_FIELD,
     UsageAccount,
@@ -12,7 +12,6 @@ from gc_core.usage.context import current_usage_context, record_usage, usage_sco
 from gc_core.usage.cost import CostPart, compute_cost
 from gc_core.usage.normalize import normalize_usage
 from gc_core.usage.report import format_money, format_tokens, render_cost_report
-
 
 # ---------------- normalize ----------------
 

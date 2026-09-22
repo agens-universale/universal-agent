@@ -1,7 +1,12 @@
 import json
 from types import SimpleNamespace
 
-from gc_core.security.url_policy import enforce_url_policy, match_url_blacklist, parse_and_validate_url, validate_url_policy
+from gc_core.security.url_policy import (
+    enforce_url_policy,
+    match_url_blacklist,
+    parse_and_validate_url,
+    validate_url_policy,
+)
 
 
 class _Logger:

@@ -85,6 +85,7 @@ def _extract_frontmatter(skill_path: Path) -> dict:
     skill_md = skill_path / "SKILL.md"
     content = skill_md.read_text(encoding="utf-8")
     import re
+
     import yaml
     match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
     if not match:
@@ -222,9 +223,9 @@ def _generate_readme(
     demo_section = ""
     if has_demo:
         demo_section = (
-            f"- `demo/` — артефакты разработки скилла (intent_brief, "
-            f"text_review_report, self_check_report, completion_report, "
-            f"тестовые промпты и outputs).\n"
+            "- `demo/` — артефакты разработки скилла (intent_brief, "
+            "text_review_report, self_check_report, completion_report, "
+            "тестовые промпты и outputs).\n"
         )
 
     return (

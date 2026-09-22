@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("textual")
 from textual.widgets import Static
 
@@ -10,9 +11,11 @@ async def _open(pilot, scr, app, name):
 
 
 async def test_section_titles_show_section_name(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_testkit.tui_support import open_settings_section
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     monkeypatch.setattr(check_mod, "check_for_update",
@@ -29,9 +32,10 @@ async def test_section_titles_show_section_name(tmp_path, monkeypatch):
 
 
 async def test_mcp_space_uninstalled_flashes_title_note(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
     from gc_testkit.tui_support import open_settings_section
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     cfg = tmp_path / "c.yml"; cfg.write_text("backend: {}\n", encoding="utf-8")

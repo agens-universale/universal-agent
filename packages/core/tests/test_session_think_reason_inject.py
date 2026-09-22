@@ -5,7 +5,6 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.tools import aapply_tool, abuild_tools_data
 
 

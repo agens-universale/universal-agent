@@ -8,7 +8,6 @@ from gc_core.message_policy.no_tool_call_bounce import (
     is_content_filter_finish,
 )
 
-
 # --- extract_last_assistant_text ---
 
 

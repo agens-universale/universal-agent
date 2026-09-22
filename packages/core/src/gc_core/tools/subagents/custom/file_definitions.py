@@ -163,7 +163,7 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
     if not isinstance(meta, dict):
         raise SubagentDefinitionError(path, "frontmatter должен быть отображением ключ-значение")
 
-    unknown = sorted(str(key) for key in meta.keys() if str(key) not in _ALLOWED_KEYS)
+    unknown = sorted(str(key) for key in meta if str(key) not in _ALLOWED_KEYS)
     if unknown:
         raise SubagentDefinitionError(
             path,
@@ -316,6 +316,6 @@ __all__ = [
     "SubagentDefinition",
     "SubagentDefinitionError",
     "discover_subagent_definitions",
-    "resolve_max_count",
     "parse_subagent_file",
+    "resolve_max_count",
 ]

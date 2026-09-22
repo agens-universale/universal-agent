@@ -9,7 +9,6 @@ from gc_core.constants.tool_names import SESSION_COMPACT_TOOL_NAME
 from gc_core.summarize.compaction import arun_summary_compaction, without_system_messages
 from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_failed, logger_from_ctx
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.aio_compat import run_coro_blocking
 
 TRIGGER_REASON = "session_compact"
 
@@ -185,4 +184,4 @@ Return format (JSON string):
         )
 
 
-__all__ = ["SessionCompact", "TRIGGER_REASON"]
+__all__ = ["TRIGGER_REASON", "SessionCompact"]

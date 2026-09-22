@@ -2,7 +2,6 @@
 from gc_core.message_format import calc_history_chars_for_trigger
 from gc_core.thread_store import (
     ThreadSession,
-    append_new_thread_messages,
     discard_message_by_id,
     load_thread_messages,
     load_thread_meta,

@@ -23,22 +23,19 @@
 проверяется на живом асинхронном хранилище.
 """
 import asyncio
-import inspect
 
 import pytest
-
 from gc_core.thread_store import ThreadSession
 from gc_core.thread_store_async import (
     ASYNC_CONTRACT_METHODS,
-    SLOW_CALL_WARN_SEC,
     AsyncThreadStore,
     SyncThreadStoreAdapter,
     ThreadStoreContractError,
     athread_store,
     is_async_thread_store,
 )
-from gc_core.thread_store_file import FileThreadStore
 from gc_core.thread_store_base import CONTRACT_METHODS
+from gc_core.thread_store_file import FileThreadStore
 from gc_testkit.memory_thread_store import MemoryThreadStore
 from gc_testkit.thread_store_conformance import assert_conforms_async
 
@@ -57,7 +54,7 @@ class RedisLikeStore:
         self._delay = delay
         self.awaited = 0
 
-    def _make(name):  # noqa: N805 — фабрика методов, self появляется в замыкании
+    def _make(name):
         async def method(self, *args, **kwargs):
             self.awaited += 1
             await asyncio.sleep(self._delay)

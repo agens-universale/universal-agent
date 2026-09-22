@@ -18,9 +18,10 @@ from typing import Any, Dict, NamedTuple, Optional
 import yaml
 from pydantic import ValidationError
 
+from gc_core.config_modules import env_vars
+from gc_core.config_modules import env_vars as mcp_paths
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.env_interpolation import resolve_env_only, resolve_env_placeholders
-from gc_core.config_modules import env_vars
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
 from gc_core.config_modules.model_sections_validation import validate_model_sections
@@ -31,9 +32,7 @@ from gc_core.config_modules.profiles import (
     resolve_profile,
     validate_profile_text,
 )
-from gc_core.config_modules.root import (AppConfig, SCHEMA_ERROR_PREFIX,
-                                 schema_error_details)
-from gc_core.config_modules import env_vars as mcp_paths
+from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, AppConfig, schema_error_details
 from gc_core.utils.user_text import read_user_text_or_none, unreadable_reason
 
 # `None` у пути слоя — законное значение («слоя нет»), поэтому «не передано»
@@ -78,7 +77,7 @@ def _layer_document(path, subject: str) -> Dict[str, Any]:
     load_config_ex`, своя формулировка). Слои читаются не отсюда напрямую, а
     через `_readable_layer_document` ниже: граница по нечитаемому файлу стоит
     там."""
-    with open(path, "r", encoding="utf-8") as file:
+    with open(path, encoding="utf-8") as file:
         try:
             raw = yaml.safe_load(file) or {}
         except yaml.YAMLError as exc:

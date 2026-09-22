@@ -1,5 +1,5 @@
-from gc_core.processing_responses import _make_technical_feedback_user_message
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
+from gc_core.processing_responses import _make_technical_feedback_user_message
 
 
 def test_call_id_attached_as_sibling_key():

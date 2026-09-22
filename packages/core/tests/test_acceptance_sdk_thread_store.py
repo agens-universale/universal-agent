@@ -22,10 +22,8 @@
 import asyncio
 
 import pytest
-
 from gc_core.aio import AsyncAgent
 from gc_testkit.memory_thread_store import MemoryThreadStore
-
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
@@ -79,7 +77,7 @@ class AsyncMemoryThreadStore:
         self.inner = MemoryThreadStore()
         self.awaited = 0
 
-    def _make(name):  # noqa: N805
+    def _make(name):
         async def method(self, *args, **kwargs):
             self.awaited += 1
             await asyncio.sleep(0)
@@ -258,7 +256,7 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
     class SlowAsyncStore(AsyncMemoryThreadStore):
-        def _make(name):  # noqa: N805
+        def _make(name):
             async def method(self, *args, **kwargs):
                 self.awaited += 1
                 await asyncio.sleep(0.005)

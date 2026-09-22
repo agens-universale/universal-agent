@@ -61,7 +61,6 @@ def base_config_raw() -> dict:
     оба TUI-входа подавали в проверку пустой словарь — предупреждение «перекрою ваш
     voice.url» там не показывалось никогда."""
     import yaml
-
     from gc_core.config import resolve_config_path
     from gc_core.utils.user_text import read_user_text_or_none
 

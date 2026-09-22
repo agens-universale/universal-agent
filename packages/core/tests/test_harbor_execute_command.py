@@ -1,9 +1,8 @@
 import json
-from types import SimpleNamespace
 
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_testkit.harbor_fakes import bind_os_backend
 
 
 class _RecordingFakeBackend:

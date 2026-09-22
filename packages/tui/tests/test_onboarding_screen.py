@@ -26,6 +26,7 @@ def _write_conn_cfg(tmp_path, *, url=None, auth=None, proxy=None, model=None):
     Шаг «Подключение» берёт поля ИЗ ФАЙЛА (сырыми, без резолва ${ENV:...}) — на
     мок-пути ссылку было бы не увидеть."""
     from pathlib import Path
+
     from gc_core import onboarding_config_writer as w
     from gc_core.config import _default_config_path, validate_config_text
     template = Path(_default_config_path())
@@ -85,8 +86,15 @@ def test_wizard_steps_are_named_and_static():
     «Голосовой ввод» стоит между MCP и подтверждением — тем же местом, что и в
     install.html, readme и шапке `/settings`: порядок шагов человек читает раньше,
     чем видит, и расходиться эти два описания не имеют права."""
-    from gc_tui.screens.onboarding import (_BASE_STEPS, STEP_CONFIRM, STEP_CONNECTION,
-                                        STEP_LEVELS, STEP_MCP, STEP_MODEL, STEP_VOICE)
+    from gc_tui.screens.onboarding import (
+        _BASE_STEPS,
+        STEP_CONFIRM,
+        STEP_CONNECTION,
+        STEP_LEVELS,
+        STEP_MCP,
+        STEP_MODEL,
+        STEP_VOICE,
+    )
     scr = _screen()
     assert scr._steps == _BASE_STEPS == (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS,
                                          STEP_MCP, STEP_VOICE, STEP_CONFIRM)
@@ -743,9 +751,9 @@ async def test_model_step_receives_proxy_from_connection_step(tmp_path):
 @pytest.mark.asyncio
 async def test_model_list_marks_and_pick(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     fake = lambda *a, **k: [ModelInfo("Qwen", tool_capable=True),
@@ -767,10 +775,10 @@ async def test_model_list_marks_and_pick(tmp_path):
 @pytest.mark.asyncio
 async def test_model_manual_fallback(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: None)   # список не получен
@@ -939,11 +947,11 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
     """Уход с поля токена (стрелкой) запускает авто-пробу; результат ложится в
     строку .onb-conn-probe (ту же, что показывает «— не проверено» до пробы)."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
     from textual.widgets import Input
-    from gc_testkit.tui_support import wait_until
 
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         return ProbeResult("ok", 200, None, 5, "доступен")
@@ -971,10 +979,10 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
     """Подстановка пресета (Enter на открытом списке) — тоже триггер авто-пробы,
     не только уход с поля (спека §5.5)."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
 
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         return ProbeResult("ok", 200, None, 5, "доступен")
@@ -1001,10 +1009,10 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
 @pytest.mark.asyncio
 async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
     pytest.importorskip("textual")
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
-    from gc_core.model_picker import ModelInfo
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
@@ -1031,10 +1039,10 @@ async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
 @pytest.mark.asyncio
 async def test_onboarding_model_step_filter_and_pick(tmp_path):
     pytest.importorskip("textual")
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
-    from gc_core.model_picker import ModelInfo
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
@@ -1079,11 +1087,11 @@ async def test_filter_fragment_does_not_become_the_model(tmp_path):
     модель «gpt». Путь проверяем настоящий — через двухролевой Enter мастера,
     а не через submit() редактора."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
@@ -1237,8 +1245,8 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
 async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
     """Финал подтверждают Enter'ом: навигационная PgDn конфиг не пишет."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core import onboarding_config_writer as w
+    from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
     written = []
     monkeypatch.setattr(w, "write_values", lambda path, vals, **kw: written.append(vals) or [])
@@ -1272,9 +1280,9 @@ async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
 async def test_model_enter_marks_then_advances(tmp_path):
     """Шаг «Модель»: Enter#1 помечает подсвеченную (● переезжает на неё), Enter#2 — далее."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -1300,11 +1308,11 @@ async def test_model_enter_marks_then_advances(tmp_path):
 async def test_model_footer_and_pagedown(tmp_path):
     """Футер шага модели меняется по пометке; PgDn ведёт дальше и без неё."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Static
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)])
@@ -1327,11 +1335,11 @@ async def test_model_manual_row_two_beat(tmp_path):
     """Своё имя — один такт: строки-посредника больше нет (смок 2026-08-04), поэтому
     метить нечего и Enter сразу ведёт дальше, унося набранное."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)])
@@ -1354,11 +1362,11 @@ async def test_model_footer_follows_filter_reselect(tmp_path):
     """Фильтрация двигает курсор (строка исчезла → якорь): роль Enter меняется — футер
     обязан догнать, как на ↑↓."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input, Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input, Static
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
@@ -1384,10 +1392,10 @@ async def test_model_footer_says_next_when_no_list(tmp_path):
     """Сервер не отдал список — остаётся ручной ввод: помечать нечего, Enter ведёт
     дальше, и футер обещает «далее», а не «выбрать»."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input, Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input, Static
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: None)
@@ -1411,11 +1419,11 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
     """Модель уже задана в конфиге: список догрузился, курсор встал на помеченную —
     футер честно обещает «Enter — далее» (список приезжает воркером, футер догоняет)."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Static
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
@@ -1435,8 +1443,8 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
 async def test_mcp_space_toggles(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from test_onboarding_voice_step import FakeVoice
     from gc_tui.screens.onboarding import STEP_MCP, STEP_VOICE
+    from test_onboarding_voice_step import FakeVoice
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(voice=FakeVoice())
@@ -1452,9 +1460,9 @@ async def test_mcp_space_toggles(tmp_path):
 @pytest.mark.asyncio
 async def test_summary_line_fills_as_steps_complete(tmp_path):
     """Строка сводки под степпером заполняется по ходу; токен маскируется."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.widgets import Static
-    from gc_tui import app as app_mod
 
     app = app_mod.TuiApp(config={"completions_url": "", "chat_completion_headers": {},
                                  "model": ""})
@@ -1482,9 +1490,9 @@ async def test_final_commit_writes_and_calls_on_commit(tmp_path):
     pytest.importorskip("textual")
     import yaml
     from gc_core import onboarding
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    from gc_testkit.tui_support import wait_until
     cfg_path = _write_conn_cfg(tmp_path)      # чистый config.yml из пакетного шаблона
     committed = []
     installed = []
@@ -1517,6 +1525,7 @@ def _registry_cfg(tmp_path, model_id, *, alias):
 
     Возвращает (путь к файлу, конфиг «как его видит приложение»)."""
     from pathlib import Path
+
     import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.registry_write import apply_registry_ops
@@ -1546,10 +1555,10 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
     import yaml
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_MODEL
+    from textual.widgets import Static
     cfg_path, cfg = _registry_cfg(tmp_path, "openai/gpt-5.6-terra", alias="gpt-5.6-terra")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -1588,8 +1597,9 @@ async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(t
     подписью об источнике (правило — в ядре, общее с плоским мастером), предвыбор
     — встать на неё, а проход насквозь — оставить резолв прежним."""
     pytest.importorskip("textual")
-    import yaml
     from pathlib import Path
+
+    import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.registry_write import apply_registry_ops
     from gc_core.model_picker import ModelInfo
@@ -1685,6 +1695,7 @@ async def test_confirm_row_of_the_default_slot_ignores_the_active_level(tmp_path
     же>», а Enter записывал третье."""
     pytest.importorskip("textual")
     import re
+
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
     cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
@@ -1713,8 +1724,9 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(tm
     остался на старом резолве."""
     pytest.importorskip("textual")
     import re
-    import yaml
     from pathlib import Path
+
+    import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.registry_write import apply_registry_ops
     from gc_tui.app import TuiApp
@@ -1749,6 +1761,7 @@ async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
     ждём подмену в обоих."""
     pytest.importorskip("textual")
     import re
+
     from gc_core import onboarding
     # gc-tui от gc-cli НЕ зависит: тест межповерхностный, и в наборе одного
     # пакета он законен только как условный. importorskip, а не import:
@@ -1927,9 +1940,9 @@ async def test_auto_probe_resolves_env_ref_in_address(tmp_path, monkeypatch):
     """Проба должна проверять то, что реально уйдёт в запрос, — раскрытый адрес,
     а не литерал ${ENV:...}, которым теперь префилено поле."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
     monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}")
     cfg = _resolved_conn_cfg(cfg_path)
@@ -1954,10 +1967,10 @@ async def test_auto_probe_resolution_does_not_leak_into_field_or_file(tmp_path, 
     """Парный к тесту выше: раскрытие адреса для пробы — только для самого
     запроса, оно не оседает ни в поле, ни в _values, ни в файле."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
     from textual.widgets import Input
     monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}")
@@ -1998,9 +2011,9 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
     токеном, а не без авторизации — иначе рабочий сервер, требующий Bearer, отвечает
     401 «токен отклонён» под полностью рабочим конфигом."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer sk-REALSECRET123")
     cfg = _resolved_conn_cfg(cfg_path)
@@ -2032,9 +2045,9 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
     с настоящим секретом. Раскрытие ссылки, НАБРАННОЙ на самом шаге, не покрыто:
     поле токена здесь принципиально пустое, и такой путь сейчас недостижим."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
     monkeypatch.setenv("GC_TOKEN", "sk-REALSECRET123")
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer ${ENV:GC_TOKEN}")
@@ -2112,11 +2125,11 @@ async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
     Сервер здесь ТРЕБУЕТ авторизацию (401 на контрольный запрос): без этого токену
     некуда доехать, и «ушла без токена» вышло бы верным само собой."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
-    from gc_tui.editors.connection import ConnectionEditor, _TOKEN_PH_CLEARED
+    from gc_tui.editors.connection import _TOKEN_PH_CLEARED, ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
     cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
                                auth="Bearer sk-REALSECRET123")
@@ -2156,11 +2169,11 @@ async def test_ctrl_space_reprobes_the_connection_step(tmp_path):
     менялись: снимок против дребезга гасит только автопробу, ручную глушить нельзя
     (спека §5.2 канона; развод клавиш — спека 2026-08-06 §2)."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
     calls = []
 
@@ -2193,9 +2206,9 @@ async def test_alt_down_on_the_model_step_reloads_the_list(tmp_path):
     Ctrl+Space на этом шаге пробы не даёт, см. `test_ctrl_space_on_the_model_step_does_nothing`).
     Сервер лежал (одинокое поле), ожил — список собирается."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
     calls = []
@@ -2227,9 +2240,9 @@ async def test_ctrl_space_on_the_model_step_does_nothing(tmp_path):
     """Пробы на шаге «Модель» нет (§2.5, §5.1 спеки 2026-08-06) — Ctrl+Space
     съедается молча: список не трогает, шаг не листает, не падает."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
     def fetch(*a, **k):
@@ -2259,10 +2272,10 @@ async def test_ctrl_space_on_an_empty_address_says_what_is_missing(tmp_path):
     стартует с ПУСТЫМ адресом — именно там новичок жмёт клавишу первым делом, а
     _auto_probe выходит на `if not url` до записи любой строки."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
     calls = []
 
@@ -2296,10 +2309,10 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path, monkeypatch
     сценарий, а не край. Ctrl+Space обязан довести до `_auto_probe`, реальным
     нажатием (не прямым вызовом)."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
     monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}", model="m")
@@ -2332,9 +2345,9 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
     значит и здесь перечитывание (Alt+↓) после УДАЧНОЙ загрузки обязано идти мимо
     него — иначе клавиша детерминированный no-op."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
     calls = []
@@ -2414,9 +2427,9 @@ async def test_probe_verdict_is_pulled_into_frame_on_every_update(tmp_path, monk
     Подводка живёт у единственного писателя строки — заказанная при монтаже тела, она
     досталась бы только первому вердикту."""
     pytest.importorskip("textual")
-    from rich.text import Text
-    from gc_tui.screens import onboarding as onb
     from gc_tui.app import TuiApp
+    from gc_tui.screens import onboarding as onb
+    from rich.text import Text
 
     revealed = []
     monkeypatch.setattr(onb, "reveal", lambda w: revealed.append(w), raising=False)
@@ -2455,9 +2468,9 @@ async def test_levels_step_skipped_writes_nothing(tmp_path):
     не уезжает ни записи, ни слота."""
     pytest.importorskip("textual")
     import yaml
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS, STEP_MCP
-    from gc_testkit.tui_support import wait_until
     committed = []
     cfg_path, scr = _levels_screen(tmp_path, on_commit=lambda: committed.append(True))
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2483,10 +2496,10 @@ async def test_levels_step_fills_light_and_max(tmp_path):
     выбора, что на шаге «Модель»: Enter#1 помечает, Enter#2 фиксирует)."""
     pytest.importorskip("textual")
     import yaml
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS
-    from gc_testkit.tui_support import wait_until
     committed = []
     cfg_path, scr = _levels_screen(tmp_path, on_commit=lambda: committed.append(True))
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2526,11 +2539,11 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
     """Esc-вложенность второго под-состояния: под-форма уровня закрывается Esc к
     списку уровней, ничего не зафиксировав."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.confirm import ConfirmScreen
     from gc_tui.screens.onboarding import STEP_LEVELS
-    from gc_testkit.tui_support import wait_until
     _cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -2564,9 +2577,9 @@ async def test_model_step_names_the_level_it_fills(tmp_path):
     Подпись называет связь: без неё слово «default» человек впервые встречает уже
     в итоговой сводке («модель default: …»)."""
     pytest.importorskip("textual")
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_MODEL
-    from gc_core.model_picker import ModelInfo
     scr = _screen(fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True)])
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -2621,9 +2634,9 @@ async def test_levels_footer_follows_the_row_under_the_cursor(tmp_path):
     """Футер обещает роль Enter для строки ПОД КУРСОРОМ: на уровне — «выбрать»
     (далее уводит PgDn), на строке-действии Enter сам и есть «далее»."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_LEVELS
+    from textual.widgets import Static
     cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -2642,11 +2655,11 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
     """Футер шага: в списке уровней Enter выбирает (далее — PgDn), в под-форме
     работают Alt+↓ (перечитать список) и Esc — назад к списку, а не выход."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_LEVELS
-    from gc_testkit.tui_support import wait_until
+    from textual.widgets import Static
     _cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -2677,16 +2690,15 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, mo
     Итог — валидный конфиг (та же двухфазная проверка, что у записи реестра)."""
     pytest.importorskip("textual")
     import yaml
-    from gc_core.model_picker import ModelInfo
-    from textual.widgets import Input
     from gc_core.config import validate_config_text_with_sections
+    from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.editors.model import ModelEditor
-    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
-                                        STEP_MODEL, STEP_VOICE)
-    from gc_testkit.tui_support import wait_until
+    from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS, STEP_MCP, STEP_MODEL, STEP_VOICE
     from test_onboarding_voice_step import FakeVoice
+    from textual.widgets import Input
     monkeypatch.chdir(tmp_path)
     committed = []
     cfg_path, scr = _screen_with_profiles_on_disk(
@@ -2746,10 +2758,10 @@ async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
     """То же правило для второго под-состояния: под-форма уровня не переживает уход
     со шага — вернувшийся застаёт список уровней."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_LEVELS, STEP_MCP
-    from gc_testkit.tui_support import wait_until
     _cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -2790,8 +2802,8 @@ async def test_layer_note_in_the_wizard_carries_the_settings_address(tmp_path, m
     """Экран мастера — единственная поверхность, где «Настройки · Профили»
     существуют: общий текст политики он дополняет адресом действия."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2809,8 +2821,8 @@ async def test_no_active_profile_shows_no_warning_plaque(tmp_path, monkeypatch):
     нет — действующего профиля тоже нет, и плашки `#onb-profile-warn` на экране
     быть не должно вовсе (а не пустой строкой)."""
     pytest.importorskip("textual")
-    from textual.css.query import NoMatches
     from gc_tui.app import TuiApp
+    from textual.css.query import NoMatches
     monkeypatch.chdir(tmp_path)
     cfg_path = _profiles_cfg(tmp_path, "home", "work")
     scr = _screen(config_path=str(cfg_path))
@@ -2907,9 +2919,9 @@ async def test_layer_note_shows_on_every_step_for_an_active_profile(tmp_path, mo
     """Информирование остаётся: активный профиль виден на каждом шаге и на
     подтверждении (спека §3)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_MODEL
+    from textual.widgets import Static
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2933,9 +2945,9 @@ async def test_degraded_config_note_shows_on_every_step(tmp_path, monkeypatch):
     Человек не видел ни строчки и не понимал, почему поля мастера выглядят иначе,
     чем его файл (живой смок)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
-    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_CONNECTION, STEP_MODEL)
+    from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_CONNECTION, STEP_MODEL
+    from textual.widgets import Static
     monkeypatch.chdir(tmp_path)
     message = ('config.yml не читается с профилем "work" (алиас "strong" не найден) — '
                "профиль снят на этот запуск")
@@ -2974,7 +2986,7 @@ async def test_confirm_shows_the_profile_layer_values(tmp_path, monkeypatch):
     работать, а плашка рядом объясняет их происхождение."""
     pytest.importorskip("textual")
     import re
-    from textual.widgets import Static
+
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
     monkeypatch.chdir(tmp_path)
@@ -3203,8 +3215,8 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
     инъецируется у самой плоской записи, чтобы политика отработала настоящая."""
     pytest.importorskip("textual")
     from gc_core import onboarding_config_writer
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions",
                                auth="Bearer t", model="m")
@@ -3238,8 +3250,8 @@ async def test_commit_reports_an_oserror_instead_of_crashing(tmp_path, monkeypat
     здесь нет, не легло ничего."""
     pytest.importorskip("textual")
     from gc_core import onboarding_config_writer
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions",
                                auth="Bearer t", model="m")
@@ -3272,11 +3284,11 @@ async def test_commit_names_the_deactivation_when_only_the_pointer_landed(
     из его порядка: реестра здесь нет вовсе, и «записи моделей уже в конфиге» было
     бы второй ложью на той же строке."""
     pytest.importorskip("textual")
+    import yaml
     from gc_core import onboarding_config_writer
     from gc_core import onboarding_fields as _of
-    import yaml
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions")
     cfg_path.write_text(
@@ -3327,8 +3339,8 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monk
     # соседнего дистрибутива, иначе зелёный цвет означал бы лишь то, что
     # сосед оказался в общем окружении (см. tests/test_test_ownership.py).
     wz = pytest.importorskip("gc_cli.onboarding_wizard")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
     sentinel = "СЛОВО-ИЗ-ОБЩЕГО-ДОМА"
     monkeypatch.setattr(_of, "LANDED_WORDS", {"registry": sentinel})
 
@@ -3338,7 +3350,7 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monk
     monkeypatch.setattr(onboarding, "write_wizard_values", refusing_after_the_registry)
 
     printed: list = []
-    monkeypatch.setattr(wz, "_reload_config", lambda: {})
+    monkeypatch.setattr(wz, "_reload_config", dict)
     # Ридер отвечает URL только на ПЕРВЫЙ вопрос (адрес), дальше — Enter.
     # Константа здесь не годится: шаг выбора модели трактует непустой
     # несовпадающий ответ как новый запрос (см. `_ask_as_is`), и мастер честно
@@ -3412,9 +3424,9 @@ async def test_confirm_commits_the_deactivation_along_with_the_settings(tmp_path
     собственную починку — гейт судит стек следующего старта, а там профиль."""
     pytest.importorskip("textual")
     import yaml
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    from gc_testkit.tui_support import wait_until
     committed = []
     cfg_path, scr = _levels_screen(
         tmp_path, on_commit=lambda: committed.append(True), deactivate_profile=True)
@@ -3456,7 +3468,7 @@ async def test_both_wizards_take_the_deactivation_warning_from_one_place(tmp_pat
     monkeypatch.setattr(_of, "PROFILE_DEACTIVATION_WARNING", sentinel)
 
     printed: list = []
-    monkeypatch.setattr(wz, "_reload_config", lambda: {})
+    monkeypatch.setattr(wz, "_reload_config", dict)
     wz.run({}, tmp_path / "nowhere.yml", review_all=False,
            io=wz.WizardIO(reader=lambda p, s: "", printer=printed.append),
            deactivate_profile=True)

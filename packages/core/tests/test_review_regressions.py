@@ -6,10 +6,8 @@
 своим стендом.
 """
 import asyncio
-import threading
 
 import pytest
-
 
 # --- F8: ключ кэша MCP-сессий -------------------------------------------
 

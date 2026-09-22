@@ -6,7 +6,7 @@ from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import TextArea
 
-from gc_tui.services.paste_chips import ChipStore, should_collapse, token_spans, expand
+from gc_tui.services.paste_chips import ChipStore, expand, should_collapse, token_spans
 
 
 class CommandTextArea(TextArea):

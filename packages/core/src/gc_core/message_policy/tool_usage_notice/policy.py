@@ -6,7 +6,7 @@ from gc_core.config_modules.message_notice import (
     ToolUsageNoticeRule,
     tool_usage_notice_policy_enabled,
 )
-from gc_core.message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
+from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_CURRENT_CONTEXT, wrap_technical_user_content
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
 
 

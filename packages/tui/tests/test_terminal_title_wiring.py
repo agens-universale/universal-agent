@@ -4,8 +4,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_new_resets_terminal_title(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_tui.services import terminal_title as tt
     from gc_tui.app import TuiApp
+    from gc_tui.services import terminal_title as tt
 
     calls = []
     monkeypatch.setattr(tt, "set_terminal_title", lambda text, **k: calls.append(text))

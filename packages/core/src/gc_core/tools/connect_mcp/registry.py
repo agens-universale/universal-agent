@@ -1,21 +1,16 @@
-from typing import Any, Dict, Optional
-
 import asyncio
 import json
-import time
-
-
 import logging
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
-from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.stream_client import (
     alist_tools_stream_http,
     alist_tools_stream_sse,
     alist_tools_stream_stdio,
 )
-from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client, runs_in_agent_runtime
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -262,7 +257,7 @@ async def _adiscover_one(
             "tool_count": len(tools),
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
-    except Exception as exc:  # noqa: BLE001 — дискавери никогда не бросает наверх
+    except Exception as exc:
         reason = _humanize_discovery_error(
             exc, server_cfg if isinstance(server_cfg, dict) else {}
         )
@@ -343,7 +338,7 @@ async def _abuild_tools_registry(
         ...
     }
     """
-    items = [(n, c) for n, c in servers_cfg.items()]
+    items = list(servers_cfg.items())
     all_tools: Dict[str, Dict[str, Any]] = {}
     status_map: Dict[str, Dict[str, Any]] = {}
     if not items:
@@ -501,6 +496,6 @@ class ToolsCache:
 
 
 __all__ = [
-    "_abuild_tools_registry",
     "ToolsCache",
+    "_abuild_tools_registry",
 ]

@@ -8,12 +8,8 @@
 import sys
 from pathlib import Path
 
-import pytest
-
-from gc_core import config_sync
-from gc_core import onboarding
+from gc_core import config_sync, onboarding
 from gc_core import onboarding_config_writer as ocw
-
 
 # --- config_sync.reset_config: бэкап + содержимое = шаблон + профили пережили ---
 

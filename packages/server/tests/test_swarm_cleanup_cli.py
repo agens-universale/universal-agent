@@ -16,10 +16,9 @@ scripts/cleanup_swarm_threads.py, а scripts/ не попадал ни в одн
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from gc_server.swarm import cleanup as cleanup_mod
 
 
@@ -29,7 +28,7 @@ def _aged_dir(parent, name: str, age_hours: float):
     path = parent / name
     path.mkdir()
     (path / "marker").write_text("x", encoding="utf-8")
-    old = (datetime.now(timezone.utc) - timedelta(hours=age_hours)).timestamp()
+    old = (datetime.now(UTC) - timedelta(hours=age_hours)).timestamp()
     os.utime(path, (old, old))
     return path
 

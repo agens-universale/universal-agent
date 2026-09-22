@@ -1,8 +1,7 @@
 import json
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
 from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_intermediate_reply_success(capsys):

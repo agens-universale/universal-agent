@@ -52,8 +52,6 @@ def test_skills_write_allowed(tmp_path, monkeypatch):
 # TUI repro — guard ask должен идти через confirm-порт, не stdin
 # ---------------------------------------------------------------------------
 import types as _types
-from gc_core.security import path_policy as _pp
-from gc_core.security import confirm_port as _cp
 
 
 def _ctx_ask_tui(launch_root, tui_confirm):

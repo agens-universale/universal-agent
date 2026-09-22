@@ -17,18 +17,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, ContextManager, Iterable, Optional, Sequence
 
+from gc_core.backends.capabilities import parse_find_printf_entries
 from gc_core.backends.capture import BoundedStreamAccumulator
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
-    argv_to_posix_command,
     FIND_PRINTF_FORMAT,
     WALK_OUTPUT_MAX_CHARS,
     ExecResult,
     FsBackend,
     WalkOutputTooLargeError,
+    argv_to_posix_command,
     bound_exec_result,
 )
-from gc_core.backends.capabilities import parse_find_printf_entries
 from gc_core.backends.walk_util import iter_files_from_flat, iter_walk_from_flat
 from gc_core.utils.file_text import (
     decode_text_best_effort,
@@ -36,7 +36,6 @@ from gc_core.utils.file_text import (
     encode_text_for_write,
 )
 from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
-
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
 # иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
@@ -628,7 +627,7 @@ class HarborBackend(FsBackend):
                 # Таймаут обязателен: без него сборка контекста ждала бы медленный
                 # контейнер сколько угодно — со стороны ядра дедлайна нет.
                 res = await self._aexec_impl("pwd", timeout=_CWD_PRIME_TIMEOUT_SEC)
-            except Exception:  # noqa: BLE001 — окружение может быть недоступно
+            except Exception:
                 return None
             lines = (res.stdout or "").strip().splitlines()
             if res.return_code == 0 and lines and lines[0].startswith("/"):

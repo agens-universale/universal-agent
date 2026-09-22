@@ -1,7 +1,5 @@
-import os
 
 import pytest
-
 from gc_core.utils.atomic_io import atomic_replace
 
 

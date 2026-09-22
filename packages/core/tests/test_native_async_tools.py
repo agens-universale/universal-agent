@@ -25,11 +25,9 @@
 """
 import asyncio
 import json
-import threading
 import time
 
 import pytest
-
 from gc_core.tools.exec.sleep_tool import Sleep
 from gc_core.tools.turn.ask_human import AskHuman
 from gc_testkit.helpers.tool_ctx import local_ctx

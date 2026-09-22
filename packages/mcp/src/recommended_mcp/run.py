@@ -31,9 +31,9 @@ if __package__ in (None, ""):
     ensure_repo_on_sys_path()
     __package__ = "recommended_mcp"
 
-from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
 from recommended_mcp.manifest import MCPEntry, load_manifest
 from recommended_mcp.process_supervisor import RunSupervisor, stop_command_daemons
+from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
 
 
 class RunError(RuntimeError):

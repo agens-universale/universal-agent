@@ -1,12 +1,12 @@
 """child_run_id в output meta (без path к логу)."""
 from __future__ import annotations
 
-from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import UsageAccount
+from gc_testkit import as_coro
 
 
 class _FakeChildState:

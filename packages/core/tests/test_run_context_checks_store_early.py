@@ -9,9 +9,7 @@ import ast
 import pathlib
 
 import pytest
-
 from gc_core import run_context
-from gc_testkit.paths import REPO
 
 
 class _BadStore:

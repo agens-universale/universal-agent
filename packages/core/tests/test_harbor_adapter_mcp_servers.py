@@ -10,7 +10,7 @@ from gc_testkit.paths import HARBOR
 if str(HARBOR) not in sys.path:
     sys.path.insert(0, str(HARBOR))
 
-from adapters.gc_cli_external import GcCliExternal  # noqa: E402
+from adapters.gc_cli_external import GcCliExternal
 
 
 def _server(name, transport, url=None, command=None, args=None):

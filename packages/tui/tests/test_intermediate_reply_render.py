@@ -1,6 +1,5 @@
 """Рендер intermediate_reply (· проза) и error_msg ([!] красный) в трейсе."""
 import pytest
-
 from gc_tui.models import TraceEvent
 
 

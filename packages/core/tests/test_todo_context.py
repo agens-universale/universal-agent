@@ -86,8 +86,8 @@ def test_summary_message_carries_checklist_verbatim():
 
     Это единственный канал после сжатия: система-промпт больше снимок не несёт,
     а вызовы session_todo компакция вырезает."""
-    from gc_core.summarize.summary_message_body import build_dialog_summary_content
     from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+    from gc_core.summarize.summary_message_body import build_dialog_summary_content
 
     body = build_dialog_summary_content(
         summary_text="пересказ диалога",
@@ -102,8 +102,8 @@ def test_summary_message_carries_checklist_verbatim():
 
 
 def test_summary_message_without_checklist_has_no_block():
-    from gc_core.summarize.summary_message_body import build_dialog_summary_content
     from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+    from gc_core.summarize.summary_message_body import build_dialog_summary_content
 
     body = build_dialog_summary_content(
         summary_text="пересказ",
@@ -116,6 +116,7 @@ def test_summary_message_without_checklist_has_no_block():
 def test_compaction_puts_checklist_into_summary_message():
     """Сквозная проверка: после сжатия сообщение-baseline несёт актуальный список."""
     import inspect
+
     from gc_core.summarize import compaction
     src = inspect.getsource(compaction)
     assert "session_todo_block=" in src, (

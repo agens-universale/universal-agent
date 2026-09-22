@@ -7,10 +7,9 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from gc_core.message_policy.user_message_policy import wrap_technical_user_content
 from gc_core.states import SharedStateData, State
+from gc_core.thread_store import read_subagent_trace
 from gc_core.tools.subagents.active_scope import (
     activate_child_input,
     active_parent_call_id,
@@ -19,8 +18,6 @@ from gc_core.tools.subagents.active_scope import (
 )
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
-from gc_core.thread_store import read_subagent_trace
-
 
 # Уборщика глобали больше нет: скоуп живёт в контексте прогона и не может
 # пережить тест — переживать негде.
@@ -108,8 +105,6 @@ class TestActiveScopeRegistry:
 
 class TestAgentExecutorRoutesToChild:
     def test_add_message_goes_to_child_when_active(self):
-        from gc_core.agent_executor import AgentExecutor
-
         # Активатор берём У ТОГО ЖЕ МОДУЛЯ, что и исполнитель.
         #
         # Конфтесты подменяют `sys.modules["gc_core.tools"]` заглушкой и
@@ -124,6 +119,7 @@ class TestAgentExecutorRoutesToChild:
         # удалён, и поиск по имени падает с `KeyError`, — а `__globals__`
         # живут вместе с самой функцией.
         import gc_core.agent_executor as _ae
+        from gc_core.agent_executor import AgentExecutor
 
         _activate = _ae.try_enqueue_user_message.__globals__["activate_child_input"]
 

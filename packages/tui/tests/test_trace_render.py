@@ -64,11 +64,11 @@ def _env(payload, ts="2026-05-30T10:00:00Z"):
 @pytest.mark.asyncio
 async def test_render_thread_readonly_kinds():
     pytest.importorskip("textual")
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.user_reply import UserReplyContainer
     from textual.app import App
     from textual.containers import VerticalScroll
-    from gc_tui.services.trace_render import render_thread_readonly
-    from gc_tui.widgets.user_reply import UserReplyContainer
-    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     records = [
         _env({"role": "user", "content": "привет", "id": "m1"}),
@@ -109,10 +109,10 @@ async def test_render_segments_readonly_parity():
     """Превью из сегментов = паритет с основным трейсом: hidden(policy) скрыт,
     маркер сжатия #K + синтез, intermediate_reply как ·, error_msg красным."""
     pytest.importorskip("textual")
-    from textual.app import App
-    from textual.containers import VerticalScroll
     from gc_tui.services.trace_render import render_segments_readonly
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App
+    from textual.containers import VerticalScroll
 
     segments = [
         _seg([
@@ -238,10 +238,11 @@ async def test_readonly_submit_note_label():
     """submit_solution.comment в превью → строка line-note «на заметку: …»."""
     pytest.importorskip("textual")
     import json as _json
-    from textual.app import App
-    from textual.containers import VerticalScroll
+
     from gc_tui.services.trace_render import render_segments_readonly
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App
+    from textual.containers import VerticalScroll
 
     segments = [{"index": 0, "compacted_by": None, "messages": [_env({
         "type": "function_call", "id": "fc", "call_id": "c", "name": "submit_solution",
@@ -318,9 +319,9 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     """`·`-реплика (intermediate_reply) — фаза хода, как ●-проза:
     пустая строка сверху (margin-top: 1), не прилипает к предыдущей строке."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.containers import VerticalScroll
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -337,6 +338,7 @@ def test_dispatch_readonly_renders_todo_checklist():
     (паритет с живым путём main.py), а не ронять в generic line-meta."""
     pytest.importorskip("textual")
     import json
+
     from gc_tui.services.trace_mapper import map_message
     from gc_tui.services.trace_render import _dispatch_readonly
     from gc_tui.widgets.trace_row import TraceRow
@@ -371,15 +373,16 @@ def test_dispatch_readonly_renders_todo_checklist():
 def test_kind_literal_includes_todo():
     """C2: тип Kind должен объявлять 'todo' (честность контракта)."""
     from typing import get_args
+
     from gc_tui.models import Kind
     assert "todo" in get_args(Kind)
 
 
 def test_todo_event_renders_rich_text_with_glyph_colors():
     """kind=todo → TraceRow с rich.Text (канон §2), а не plain-строкой."""
-    from rich.text import Text as RichText
     from gc_tui.models import TraceEvent
     from gc_tui.services.trace_render import _dispatch_readonly
+    from rich.text import Text as RichText
 
     todos = [{"content": "Шаг раз", "status": "completed"},
              {"content": "Шаг два", "status": "in_progress"}]

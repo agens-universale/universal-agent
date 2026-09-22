@@ -1,27 +1,27 @@
-import html as html_lib
 import asyncio
 import functools
+import html as html_lib
 import json
 import os
 import re
 from collections import OrderedDict
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 import trafilatura
 from readability import Document
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.security.path_policy import resolve_tool_context
 from gc_core.security.url_policy import enforce_url_policy
-from gc_core.utils.async_http import get_async_client
-from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.tools.exec.redirect_policy import (
     RedirectBlocked,
     TooManyRedirects,
     fetch_validating_redirects,
 )
-from gc_core.security.path_policy import resolve_tool_context
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -122,9 +122,9 @@ class FetchUrl(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        return f"""Tool name: exec_fetch_url
+        return """Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
-Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}
+Input schema: {"type": "object", "properties": {"url": {"type": "string", "description": "Absolute URL to fetch."}, "timeout": {"type": "integer", "description": "HTTP timeout in seconds."}, "offset": {"type": "integer", "description": "Character offset for paginated reads."}, "limit": {"type": "integer", "description": "Max characters to return in this call."}, "proxy": {"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}, "required": ["url"], "additionalProperties": false}
 
 Usage:
 - Use this tool when you need readable text from a web page.
@@ -203,9 +203,7 @@ Usage:
         ):
             return True
         # Default: unknown application/* considered binary to be safe
-        if ct.startswith("application/"):
-            return True
-        return False
+        return bool(ct.startswith("application/"))
 
     @staticmethod
     def _is_text_like_content_type(content_type: str) -> bool:
@@ -308,7 +306,7 @@ Usage:
         # а для LRU нужен OrderedDict. Если тип не совпадает — пересобираем.
         if not isinstance(cache, OrderedDict):
             cache = OrderedDict(cache if isinstance(cache, dict) else {})
-            setattr(shared, "fetch_url_cache", cache)
+            shared.fetch_url_cache = cache
         return cache
 
     @staticmethod

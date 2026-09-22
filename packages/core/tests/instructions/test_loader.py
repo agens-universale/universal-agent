@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from gc_core.instructions.loader import build_instructions, AGENTSMD_OVERRIDE_IGNORED_WARNING
+from gc_core.instructions.loader import AGENTSMD_OVERRIDE_IGNORED_WARNING, build_instructions
 
 
 def _write(p: Path, text: str):

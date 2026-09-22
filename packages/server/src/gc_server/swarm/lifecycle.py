@@ -28,11 +28,10 @@ import shutil
 import signal
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict
 
 from gc_server.swarm import storage as storage
-
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +101,7 @@ def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> N
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_iso_deadline(value: Any) -> datetime | None:
@@ -115,7 +114,7 @@ def _parse_iso_deadline(value: Any) -> datetime | None:
         return None
     # Если timezone-naive (на всякий случай) — считаем UTC.
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -129,7 +128,7 @@ def _get_dir_size_mb(dir_path: str) -> float | None:
         return None
     # Сначала пробуем du -sb (GNU).
     try:
-        result = subprocess.run(  # noqa: S603, S607
+        result = subprocess.run(
             ["du", "-sb", dir_path],
             capture_output=True,
             text=True,
@@ -188,7 +187,7 @@ def _persist_agent_artifacts(
     try:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copytree(src, dst, dirs_exist_ok=True)
-    except OSError as e:  # noqa: BLE001
+    except OSError as e:
         logger.warning(
             "swarm %s: не удалось сохранить agent_logs из песочницы: %r",
             swarm_id, e,
@@ -233,7 +232,7 @@ def _finalize_with_resource_violation(
     """Зафиксировать violation (disk/memory/cpu) в meta + status=failed."""
     patch = {
         "status": "failed",
-        "finished_at": storage._utc_now_iso(),  # noqa: SLF001
+        "finished_at": storage._utc_now_iso(),
         "error_type": error_type,
         "error_message": error_message,
         "sandbox_status": "completed",
@@ -410,7 +409,7 @@ def check_and_finalize(
             )
             patch: Dict[str, Any] = {
                 "status": "timeout",
-                "finished_at": storage._utc_now_iso(),  # noqa: SLF001
+                "finished_at": storage._utc_now_iso(),
                 "error_type": "timeout",
                 "error_message": (
                     "Killed by Python-side timeout after deadline "
@@ -484,7 +483,7 @@ def check_and_finalize(
     # PID мёртв и нет completion.json → процесс упал не отчитавшись.
     patch = {
         "status": "unknown_failed",
-        "finished_at": storage._utc_now_iso(),  # noqa: SLF001
+        "finished_at": storage._utc_now_iso(),
         "error_type": "process_crash",
         "error_message": "Process terminated without writing completion.json",
         "sandbox_status": "completed",
@@ -514,7 +513,7 @@ def check_and_finalize(
 
 __all__ = [
     "FINAL_STATUSES",
-    "check_and_finalize",
     "_is_pid_alive",
     "_kill_process_tree",
+    "check_and_finalize",
 ]

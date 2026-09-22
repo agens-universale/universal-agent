@@ -7,9 +7,9 @@
 
 import json
 
+from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.utils import native_fs_search as native_fs_search
 from gc_core.utils.native_fs_search import NativeGrepResult
-from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_testkit import as_coro
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 

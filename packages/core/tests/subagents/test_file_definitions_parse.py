@@ -4,8 +4,12 @@
 общего шаблона промпта, поэтому пустое тело бессмысленно и отвергается.
 """
 import pytest
-
-from gc_core.tools.subagents.custom.file_definitions import MAX_DESCRIPTION_LEN, MAX_NAME_LEN, SubagentDefinitionError, parse_subagent_file
+from gc_core.tools.subagents.custom.file_definitions import (
+    MAX_DESCRIPTION_LEN,
+    MAX_NAME_LEN,
+    SubagentDefinitionError,
+    parse_subagent_file,
+)
 
 VALID = """---
 name: subagent_db_migrator

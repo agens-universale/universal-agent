@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import difflib
 
-from gc_core.config_modules.diff_tui import DEFAULT_FULL_FILE_MAX_LINES, DEFAULT_MAX_DIFF_CHARS, DEFAULT_PREVIEW_CONTEXT_LINES
+from gc_core.config_modules.diff_tui import (
+    DEFAULT_FULL_FILE_MAX_LINES,
+    DEFAULT_MAX_DIFF_CHARS,
+    DEFAULT_PREVIEW_CONTEXT_LINES,
+)
 
 VISUAL_MODES = ("adaptive", "full")
 
@@ -120,12 +124,11 @@ def build_visual_diff(
 
     if mode == "full":
         n = None  # без порога — весь файл
+    # adaptive: короткий файл → весь, длинный → preview
+    elif max(len(old_lines), len(new_lines)) <= int(full_file_max_lines):
+        n = None
     else:
-        # adaptive: короткий файл → весь, длинный → preview
-        if max(len(old_lines), len(new_lines)) <= int(full_file_max_lines):
-            n = None
-        else:
-            n = max(0, int(preview_context_lines))
+        n = max(0, int(preview_context_lines))
 
     # ``difflib.unified_diff`` с n=None → склеивает пересекающиеся контексты
     # сам (hunk merge не пишем, D4).

@@ -2,10 +2,19 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from gc_tui.services.session_lock import TTL_SECONDS, heartbeat, is_fresh, is_held_by_other, lock_path, read_lock, release, try_acquire
+from gc_tui.services.session_lock import (
+    TTL_SECONDS,
+    heartbeat,
+    is_fresh,
+    is_held_by_other,
+    lock_path,
+    read_lock,
+    release,
+    try_acquire,
+)
 
 
 def _write_raw(path: Path, payload) -> None:
@@ -39,7 +48,7 @@ def test_acquire_allows_own_tui_id(tmp_path):
 def test_acquire_stale_after_ttl(tmp_path):
     path = Path(lock_path(str(tmp_path), "cli", "t1"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    stale_at = (datetime.now(timezone.utc) - timedelta(seconds=TTL_SECONDS + 1)).isoformat()
+    stale_at = (datetime.now(UTC) - timedelta(seconds=TTL_SECONDS + 1)).isoformat()
     _write_raw(path, {"tui_id": "old", "heartbeat_at": stale_at})
     assert try_acquire(str(tmp_path), "cli", "t1", "new") is True
     assert read_lock(str(path))["tui_id"] == "new"
@@ -78,7 +87,7 @@ def test_acquire_lost_race(tmp_path, monkeypatch):
 
 
 def test_is_fresh_boundary():
-    now = datetime(2026, 7, 15, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 15, 12, 0, 0, tzinfo=UTC)
     fresh = {
         "tui_id": "x",
         "heartbeat_at": (now - timedelta(seconds=TTL_SECONDS)).isoformat(),

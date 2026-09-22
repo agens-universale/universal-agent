@@ -1,5 +1,4 @@
 import pytest
-
 from gc_core.config import apply_cli_overrides
 
 

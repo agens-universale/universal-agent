@@ -2,9 +2,8 @@
 повторяет запрос ровно один раз; прочие ошибки — наверх без ретрая."""
 import types
 
-import pytest
 import httpx
-
+import pytest
 from gc_core import processing_responses as pr
 from gc_testkit import run_coro
 

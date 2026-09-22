@@ -16,16 +16,16 @@
 нет ни `Esc`-отката, ни префилла поля — `close()` зовётся только на пересборке."""
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, Static
 
-from gc_tui.editors.field_list import FieldListController, LIST_FAILED, LIST_LOADING
+from gc_tui.editors.field_list import LIST_FAILED, LIST_LOADING, FieldListController
 from gc_tui.palette import ACCENT, DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
-
-from typing import NamedTuple
 
 
 class _Row(NamedTuple):

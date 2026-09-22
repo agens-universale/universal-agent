@@ -15,10 +15,8 @@
 """
 import threading
 import time
-from types import SimpleNamespace
 
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 
 

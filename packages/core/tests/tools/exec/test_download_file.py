@@ -1,15 +1,10 @@
-import asyncio
-
-import httpx
 import json
 import os
 
+import httpx
 import pytest
 import requests
-
 from gc_core.tools.exec.download_file import DownloadFile
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 PDF_BYTES = b"%PDF-1.4 fake pdf content"
@@ -113,7 +108,7 @@ def _install(monkeypatch, handler):
             return handler(request)
         return handler
 
-    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+    factory = lambda **kw: httpx.AsyncClient(
         transport=httpx.MockTransport(_dispatch)
     )
     monkeypatch.setattr(async_http, "get_async_client", factory)

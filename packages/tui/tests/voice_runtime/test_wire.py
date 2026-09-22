@@ -1,6 +1,5 @@
 """Wire voice-секции в managed config.local.yml + детект конфликта с base."""
 import yaml
-
 from gc_tui.voice_runtime import wire
 
 

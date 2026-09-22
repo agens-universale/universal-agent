@@ -3,7 +3,11 @@ import io
 import wave
 
 from gc_tui.voice_runtime.service import (
-    build_run_spec, make_silence_wav, preheat, service_url, transcriptions_url,
+    build_run_spec,
+    make_silence_wav,
+    preheat,
+    service_url,
+    transcriptions_url,
 )
 from gc_tui.voice_runtime.state import VoiceState
 
@@ -21,7 +25,7 @@ def test_build_run_spec_command_env():
     assert spec.command == "uv"
     assert spec.args[:4] == ("run", "--no-sync", "--project", "C:/data/voice/speaches")
     assert "uvicorn" in spec.args and "speaches.main:create_app" in spec.args
-    assert ("--port", "8735") == spec.args[-2:]
+    assert spec.args[-2:] == ("--port", "8735")
     env = dict(spec.env)
     assert env["ENABLE_UI"] == "false"      # без ui-extra create_app падает на gradio
     assert env["WHISPER__TTL"] == "-1"      # ключ пина v0.8.3 (не STT_MODEL_TTL)
@@ -49,7 +53,7 @@ def test_preheat_posts_and_swallow_errors():
         calls["url"] = url
         calls["model"] = kwargs["data"]["model"]
         calls["timeout"] = kwargs["timeout"]
-        class R:  # noqa: N801 — минимальный ответ
+        class R:
             status_code = 200
         return R()
 

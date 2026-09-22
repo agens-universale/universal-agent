@@ -104,7 +104,7 @@ class Redactor:
         return obj
 
 
-def build_redactor(redact_cfg: dict | None) -> "Redactor | None":
+def build_redactor(redact_cfg: dict | None) -> Redactor | None:
     """Собрать Redactor из секции logging.redact_secrets. None — если редактинг выключен."""
     if not redact_cfg or not redact_cfg.get("enabled"):
         return None
@@ -114,4 +114,4 @@ def build_redactor(redact_cfg: dict | None) -> "Redactor | None":
     )
 
 
-__all__ = ["MASK", "Redactor", "build_redactor", "SENSITIVE_KEY_SUBSTRINGS", "SECRET_VALUE_PATTERNS"]
+__all__ = ["MASK", "SECRET_VALUE_PATTERNS", "SENSITIVE_KEY_SUBSTRINGS", "Redactor", "build_redactor"]

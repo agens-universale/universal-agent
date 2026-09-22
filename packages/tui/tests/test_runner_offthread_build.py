@@ -8,7 +8,6 @@ import threading
 import time
 
 import pytest
-
 from gc_tui.services.agent_runner import AgentRunner
 
 

@@ -1,5 +1,4 @@
-from gc_core import config
-from gc_core import onboarding
+from gc_core import config, onboarding
 from gc_core.config_modules import env_vars
 
 

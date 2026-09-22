@@ -1,11 +1,13 @@
 import pytest
+
 pytest.importorskip("textual")
-from textual.widgets import Static
 from gc_testkit.tui_support import open_settings_section, settings_section_index
 
 
 async def test_update_section_shows_actions_and_hint(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://gitverse.ru/x/y", "master", "abc", False))
@@ -30,9 +32,11 @@ async def test_update_section_shows_actions_and_hint(tmp_path, monkeypatch):
 async def test_update_section_auto_checks_on_entry_and_cursor_on_top(tmp_path, monkeypatch):
     """Вход в секцию сам запускает проверку (статус, не «не проверялось»); курсор по
     умолчанию — на верхнем «Обновить агента»; повторный вход не долбит сеть (кэш)."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_core.updater.check import CheckResult
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     calls = []
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
@@ -60,10 +64,11 @@ async def test_update_section_auto_checks_on_entry_and_cursor_on_top(tmp_path, m
 
 
 async def test_check_updates_sets_status(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_core import app_version
     from gc_core.updater import check as check_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_core.updater.check import CheckResult
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     monkeypatch.setattr(check_mod, "check_for_update",
@@ -85,8 +90,10 @@ async def test_update_confirm_and_hint_text_use_location_phrase(tmp_path, monkey
     """I4: confirm-баннер и подсказка обновления берут формулировку места установки из
     ЕДИНОГО владельца (updater.runner.install_location_phrase), а не хардкодят
     «в отдельном окне» — на POSIX там просто нет никакого окна (spawn без консоли)."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_core.updater import runner as runner_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(runner_mod, "install_location_phrase", lambda: "в фоне")
     monkeypatch.setattr(app_version, "install_source",
@@ -108,8 +115,10 @@ async def test_update_confirm_and_hint_text_use_location_phrase(tmp_path, monkey
 
 
 async def test_update_confirm_banner_then_spawn(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_core.updater import runner as runner_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
@@ -138,7 +147,9 @@ async def test_update_confirm_banner_blocks_section_switch(tmp_path, monkeypatch
     PgUp/PgDn через on_key НЕ листает секцию и НЕ уничтожает баннер; escape — отменяет
     confirm, а не секцию. Ранний гейт секции «Обновление» (до pageup-ветки) глотает всё,
     кроме enter (→ confirm) и escape (→ cancel)."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
@@ -172,9 +183,11 @@ async def test_update_confirm_banner_blocks_section_switch(tmp_path, monkeypatch
 async def test_update_blocked_when_current(tmp_path, monkeypatch):
     """При актуальной версии Enter на «Обновить агента» не поднимает confirm,
     а даёт title-note о том, что уже установлена последняя версия."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_core.updater.check import CheckResult
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     monkeypatch.setattr(check_mod, "check_for_update",
@@ -196,9 +209,11 @@ async def test_apply_check_result_persists_even_if_view_changed(tmp_path, monkey
     «Обновление» (Esc/PgUp) — результат всё равно сохраняется и _update_checking
     сбрасывается, иначе секция залипает на «проверяю…» навсегда (гейт авто-чека в
     _open_section больше не срабатывает, т.к. _update_checking никогда не станет False)."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_core.updater.check import CheckResult
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     monkeypatch.setattr(check_mod, "check_for_update",           # вход авто-проверяет → без сети
@@ -222,8 +237,9 @@ async def test_apply_check_result_persists_verdict_and_syncs_main_card(tmp_path,
     record_check_result, что и стартовый авто-чек) и обновлять app._update_available +
     карточку главного экрана — иначе секция и карточка/`/notices` расходятся, а
     ручная находка не переживает перезапуск."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_core import upgrade_gate
+    from gc_core import app_version, upgrade_gate
+    from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
@@ -253,8 +269,9 @@ async def test_apply_check_result_unknown_keeps_known_update_verdict(tmp_path, m
     известное «доступно обновление» — record_check_result намеренно сохраняет прошлый
     вердикт при unknown, а app._update_available обязан пере-выводиться из персиста
     (update_available_from_state), а не из статуса текущего результата напрямую."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_core import upgrade_gate
+    from gc_core import app_version, upgrade_gate
+    from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
@@ -281,8 +298,9 @@ async def test_apply_check_result_unknown_keeps_known_update_verdict(tmp_path, m
 async def test_apply_check_result_current_clears_available(tmp_path, monkeypatch):
     """Не сломать существующее поведение: настоящий «current»-вердикт должен опускать
     app._update_available в False (в отличие от unknown)."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_core import upgrade_gate
+    from gc_core import app_version, upgrade_gate
+    from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
@@ -305,9 +323,11 @@ async def test_apply_check_result_current_clears_available(tmp_path, monkeypatch
 
 async def test_checked_line_unknown_is_dash_not_warn(tmp_path, monkeypatch):
     """v3: «не удалось проверить» — нет вердикта (— dim), а не проблема (⚠)."""
-    from gc_core import app_version; from gc_core.updater import check as check_mod; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
     from gc_core.updater.check import CheckResult
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
     monkeypatch.setattr(check_mod, "check_for_update",
@@ -328,7 +348,8 @@ async def test_checked_line_unknown_is_dash_not_warn(tmp_path, monkeypatch):
 async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
     """Confirm-баннер обновления: при живом ходе агента — явное «прервёт выполнение»;
     в простое — обычное «агент закроется». Одна ветка формулировки, не новая логика."""
-    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://gitverse.ru/x/y", "master", "abc", False))
@@ -360,7 +381,8 @@ async def test_update_confirm_warns_when_agent_running(tmp_path, monkeypatch):
 # --- Task 14: «Сбросить конфиг к умолчанию» (спека §11) ---
 
 async def test_reset_action_present_next_to_sync(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)   # dev, без сети
     cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
@@ -376,7 +398,8 @@ async def test_reset_action_present_next_to_sync(tmp_path, monkeypatch):
 
 
 async def test_reset_confirm_banner_then_reset_reloads_and_notices_backup(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import app_version, config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
     cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
@@ -410,9 +433,10 @@ async def test_reset_confirm_banner_then_reset_reloads_and_notices_backup(tmp_pa
 async def test_reset_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
     """Тот же Critical-гейт, что у confirm обновления/MCP: пока висит confirm сброса,
     PgUp/PgDn не листает секцию и не уничтожает баннер; escape отменяет confirm."""
-    from gc_core import app_version; from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
+    from gc_core import app_version
     from gc_testkit.tui_support import settings_section_index
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
     cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
     app = app_mod.TuiApp(config={})
@@ -436,7 +460,9 @@ async def test_reset_confirm_banner_blocks_section_switch(tmp_path, monkeypatch)
 
 
 async def test_reset_action_blocked_when_not_writable(tmp_path, monkeypatch):
-    from gc_core import app_version; from gc_core import config as config_mod; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import app_version, config_sync
+    from gc_core import config as config_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
     cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")
@@ -461,7 +487,8 @@ async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(t
     """После сброса: если в сессии активен профиль-оверрайд — notice об этом (сброс базы
     его не снимает, §2 позиционность); если детект «не настроен» сработал — предложение
     настройки (существующий `onboarding.setup_guide`-канон текста)."""
-    from gc_core import app_version; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import app_version, config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
     cfg_file = tmp_path / "c.yml"; cfg_file.write_text("backend: {}\n", encoding="utf-8")

@@ -3,17 +3,14 @@
 
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-8-brief.md.
 """
+
 from gc_core.config import flatten_app_config
-import asyncio
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
+from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit import run_coro as _await
 from gc_testkit.helpers.tool_ctx import local_ctx
-from gc_core.tools.subagents.runner import SubagentRunner
-
-
-
 
 
 def _snapshot(raw: dict) -> dict:

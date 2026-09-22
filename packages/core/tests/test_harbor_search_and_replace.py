@@ -1,12 +1,10 @@
 import hashlib
 import json
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
 SHA = hashlib.sha256(CONTENT.encode()).hexdigest()

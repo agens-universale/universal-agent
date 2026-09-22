@@ -1,15 +1,11 @@
 """Интеграция захвата: connect_backend пишет usage в активный usage_scope."""
 
-import json
-
-import pytest
 
 import gc_core.utils.connect_backend as cb
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, MONEY_FIELD, UsageAccount
 from gc_core.usage.context import usage_scope
-
-from transport_fakes import install_transport, json_response, sse_body, stream_response
 from gc_testkit import run_coro
+from transport_fakes import install_transport, json_response, sse_body, stream_response
 
 
 def _patch_post(monkeypatch, payload: dict):

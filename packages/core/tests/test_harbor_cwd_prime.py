@@ -11,8 +11,6 @@ import ast
 import logging
 import pathlib
 
-import pytest
-
 from gc_core.backends import harbor as harbor_backend
 from gc_core.execution_workspace import aprime_backend_cwd
 

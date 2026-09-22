@@ -12,12 +12,12 @@ from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import gc_paths, project_slug
 from gc_core.config_modules.project_memory import project_memory_limits_from_config_dict
+from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
+from gc_core.message_policy.project_memory_notice.policy import touch_project_memory_baseline
 from gc_core.project_memory import compaction, storage
 from gc_core.project_memory.status import fill_percent
 from gc_core.project_memory.storage import ProjectMemoryError
-from gc_core.message_policy.project_memory_notice.policy import touch_project_memory_baseline
-from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
@@ -282,7 +282,7 @@ Return format (JSON string):
             combined, await compaction.acompact_text(combined, self._ctx, self._state)
         )
 
-    def _append_prepare(self, content: str) -> "tuple[Optional[str], str]":
+    def _append_prepare(self, content: str) -> tuple[Optional[str], str]:
         """``(готовый ответ, текст для компакции)`` — ровно одно из двух значимо.
 
         Всё, что не зависит от способа дождаться компакции: валидация, чтение

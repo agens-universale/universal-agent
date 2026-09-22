@@ -12,10 +12,9 @@ import shlex
 import threading
 
 import pytest
-
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.harbor import HarborBackend
 from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_testkit.harbor_fakes import bind_os_backend
 
 
 class _Res:

@@ -17,8 +17,7 @@ import threading
 import time
 
 import pytest
-
-from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
+from gc_core.backends.async_protocol import aexec_port
 
 
 class _SlowSyncBackend:

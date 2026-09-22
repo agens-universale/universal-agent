@@ -19,7 +19,6 @@ import inspect
 import threading
 
 import pytest
-
 from gc_core.processing_responses import _acall_blocking_hook
 
 
@@ -143,7 +142,6 @@ def test_loop_receives_coroutine_hooks():
     что в цикл уезжают именно они.
     """
     import ast
-    import pathlib
 
     from gc_testkit.paths import REPO
 

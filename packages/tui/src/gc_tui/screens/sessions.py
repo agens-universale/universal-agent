@@ -14,7 +14,15 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from gc_tui.palette import (
-    BRIGHT, CODE, DEEP_DIM, DIM, ERR, INK, MUTED, OK, RUN_COLOR,
+    BRIGHT,
+    CODE,
+    DEEP_DIM,
+    DIM,
+    ERR,
+    INK,
+    MUTED,
+    OK,
+    RUN_COLOR,
 )
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.notices_ui import format_notices_badge

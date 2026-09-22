@@ -10,7 +10,6 @@ import yaml
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text
 
-
 # Ключ строки — либо квотированный скаляр ЦЕЛИКОМ, либо плоский до первого
 # двоеточия. Квотированные формы идут первыми не для красоты: `"llama3:8b":`
 # (Ollama-стиль, схема такой алиас пропускает) плоская ветка резала по первому

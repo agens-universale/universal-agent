@@ -4,11 +4,10 @@
 выглядел кросс-пакетным по импортам, но взаимодействия cli ↔ tui в нём не было:
 каждый фронтенд общается с ядром независимо. Разнесён по пакетам 18.08.2026.
 """
-import sys
 
+import gc_tui as tui
 from gc_core import config
 from gc_core.config_modules import env_vars
-import gc_tui as tui
 
 
 def _isolate(tmp_path, monkeypatch):
@@ -42,6 +41,7 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
     captured = {}
 
     import sys
+
     from gc_tui import app as app_mod
     OrigTuiApp = app_mod.TuiApp
 

@@ -40,7 +40,7 @@ from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd, take_an
 _POLL_SEC = 0.05
 
 
-def _read_stdin_lines_into(box: "queue.Queue[str]") -> None:
+def _read_stdin_lines_into(box: queue.Queue[str]) -> None:
     """Запасной путь (Windows, stdin без fileno): построчно до пустой строки."""
     lines: list[str] = []
     try:
@@ -49,14 +49,14 @@ def _read_stdin_lines_into(box: "queue.Queue[str]") -> None:
             if not line.strip():
                 break
             lines.append(line)
-    except Exception:  # noqa: BLE001 — stdin закрыли; отдаём, что успели
+    except Exception:
         pass
     box.put("\n".join(lines).strip())
 
 
 async def _ask_via_thread() -> str:
     """Запасной путь: поток-читатель, без перехвата Ctrl+C (см. докстроку модуля)."""
-    box: "queue.Queue[str]" = queue.Queue()
+    box: queue.Queue[str] = queue.Queue()
     threading.Thread(
         target=_read_stdin_lines_into, args=(box,),
         name="gc-cli-ask-human", daemon=True,

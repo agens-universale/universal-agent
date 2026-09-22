@@ -1,8 +1,9 @@
 """Backend smart (спека §3): судья при >=1 вызове инструмента за ход.
 Счётчик — State.turn_tool_calls; проекция — apply_finish_gate_mode;
 чтение — FinishGateGuard.enabled. CLI/server ключ finish_gate_smart не ставят."""
-import pytest
 from types import SimpleNamespace
+
+import pytest
 from gc_testkit import run_coro
 
 
@@ -135,8 +136,8 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
     import json
     import logging
 
-    from gc_core.intent_guard import guard as intent_guard_guard
     from gc_core import processing_responses as pr
+    from gc_core.intent_guard import guard as intent_guard_guard
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.states import State
 

@@ -23,7 +23,7 @@ def test_effective_names_union_extra_and_ignores_empty_config():
     assert effective_exclude_dir_names(["venv"]) == HARD_EXCLUDE_DIR_NAMES
     extra = effective_exclude_dir_names(["build", "dist", ""])
     assert "build" in extra and "dist" in extra
-    assert HARD_EXCLUDE_DIR_NAMES <= extra
+    assert extra >= HARD_EXCLUDE_DIR_NAMES
 
 
 def test_should_skip_reasons():

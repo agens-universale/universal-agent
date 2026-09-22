@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import copy
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from gc_core.thread_store_types import (
@@ -74,7 +74,7 @@ class _ThreadStoreInvariants:
         from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 
         stamped = ThreadMetaMapper.ensure_v2_meta(meta)
-        stamped["updated_at"] = datetime.now(timezone.utc).isoformat()
+        stamped["updated_at"] = datetime.now(UTC).isoformat()
         if not stamped.get("created_at"):
             stamped["created_at"] = stamped["updated_at"]
         return stamped
@@ -457,7 +457,7 @@ ASYNC_CONTRACT_METHODS = _abstract_names(AsyncThreadStoreBase)
 
 __all__ = [
     "ASYNC_CONTRACT_METHODS",
-    "AsyncThreadStoreBase",
     "CONTRACT_METHODS",
+    "AsyncThreadStoreBase",
     "ThreadStoreBase",
 ]

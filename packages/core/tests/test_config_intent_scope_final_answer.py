@@ -1,4 +1,8 @@
-from gc_core.config_modules.intent_scope import DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS, IntentScopeConfig, normalize_intent_scope_config
+from gc_core.config_modules.intent_scope import (
+    DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS,
+    IntentScopeConfig,
+    normalize_intent_scope_config,
+)
 
 
 def test_default_final_answer_threshold_is_2000():

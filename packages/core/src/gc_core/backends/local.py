@@ -1,15 +1,15 @@
 """Host implementation of FsBackend (os / open() / subprocess); the host-I/O
 details that used to live inline in the tools are concentrated here."""
 import asyncio
-import signal
 import codecs
 import hashlib
 import logging
 import os
+import signal
 import stat as stat_module
+import sys
 import threading
 import time
-import sys
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from gc_core.backends.capture import BoundedStreamAccumulator, CapturedStream
@@ -357,7 +357,7 @@ class LocalFsBackend(FsBackend):
             # фоновая команда погибала вместе с агентом; на macOS она выживала,
             # но в stderr сыпалось «Loop … is closed». Фоновому процессу loop
             # не нужен вовсе: мы его не ждём и не читаем.
-            proc = subprocess.Popen(                       # noqa: S602 — shell намеренно
+            proc = subprocess.Popen(
                 command,
                 shell=True,
                 stdin=subprocess.DEVNULL,
@@ -458,7 +458,7 @@ def _reap_finished_background() -> None:
         try:
             if proc.poll() is not None:
                 _BACKGROUND_PROCS.discard(proc)
-        except Exception:                      # noqa: BLE001 — учёт не критичен
+        except Exception:
             _BACKGROUND_PROCS.discard(proc)
 
 
@@ -523,7 +523,7 @@ class _Capture:
     захваченное терялось. Держим его в объекте, переживающем отмену таски.
     """
 
-    __slots__ = ("stream", "acc")
+    __slots__ = ("acc", "stream")
 
     def __init__(self, capture_max_chars: int) -> None:
         #: Накопитель с ОГРАНИЧЕННОЙ памятью: настоящая голова, настоящий
@@ -607,12 +607,12 @@ async def _astop_process(proc) -> None:
         try:
             await _await_process_exit(proc, _KILL_GRACE_SEC)
             return                       # вышла сама, убивать некого
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             pass
     _kill_quietly(proc)
     try:
         await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
-    except (asyncio.TimeoutError, asyncio.CancelledError):
+    except (TimeoutError, asyncio.CancelledError):
         pass
 
 
@@ -633,7 +633,7 @@ async def _await_process_exit(proc, timeout: Optional[float]):
     delay = 0.001
     while proc.returncode is None:
         if deadline is not None and time.monotonic() >= deadline:
-            raise asyncio.TimeoutError
+            raise TimeoutError
         await asyncio.sleep(delay)
         # Растим паузу: короткие команды ловим почти мгновенно, длинные не
         # заставляют loop просыпаться сотни раз в секунду.
@@ -959,7 +959,7 @@ async def _await_exit_or_stop(proc, timeout: Optional[int]) -> tuple:
     try:
         await _await_process_exit(proc, timeout)
         return proc.returncode, False
-    except asyncio.TimeoutError:
+    except TimeoutError:
         await _astop_process(proc)
         return None, True
 

@@ -13,9 +13,8 @@ import math
 from rich.style import Style
 from rich.text import Text
 
-from gc_tui.palette import TEXT_ON_FILL
-
 from gc_tui import palette
+from gc_tui.palette import TEXT_ON_FILL
 
 PILL_WIDTH = 21
 # Рампа уровней (индекс 0 = «пусто», виден только градиент): braille — рисуется
@@ -42,11 +41,7 @@ def format_stt_time(seconds: float) -> str:
 def _lerp_hex(c1: str, c2: str, t: float) -> str:
     r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
     r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
-    return "#{:02x}{:02x}{:02x}".format(
-        round(r1 + (r2 - r1) * t),
-        round(g1 + (g2 - g1) * t),
-        round(b1 + (b2 - b1) * t),
-    )
+    return f"#{round(r1 + (r2 - r1) * t):02x}{round(g1 + (g2 - g1) * t):02x}{round(b1 + (b2 - b1) * t):02x}"
 
 
 def _gradient_bg(pos: float) -> str:

@@ -1,4 +1,5 @@
 import io
+
 from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
 
 
@@ -59,7 +60,7 @@ def test_set_terminal_title_uses_utf8_buffer_when_present():
             self.buffer = io.BytesIO()
     s = _Stream()
     set_terminal_title("✦ GigaCode ✗ x", out=s)
-    assert s.buffer.getvalue() == "\033]0;✦ GigaCode ✗ x\007".encode("utf-8")
+    assert s.buffer.getvalue() == "\033]0;✦ GigaCode ✗ x\007".encode()
 
 
 def test_set_terminal_title_none_out_is_safe():

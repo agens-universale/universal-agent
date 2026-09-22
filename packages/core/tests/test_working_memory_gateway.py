@@ -1,6 +1,27 @@
 import types
 
-from gc_core.summarize.working_memory_gateway import SESSION_MEMORY_REGISTERS, WorkingMemoryDeltas, WorkingMemorySnapshot, REGISTER_MERGE_MODES, REGISTER_ORDER, _REGISTER_BODY_PATTERNS, extract_register_bodies, apply_append_deltas, apply_memory_patch, apply_replace_deltas, apply_summary_memory_patch, coerce_working_memory_deltas, build_memory_deltas_format_repair_messages, parse_memory_deltas, parse_memory_deltas_with_repair, read_snapshot_from_state, render_persistent_state_for_prompt, render_session_memory_for_summary_message, resolve_persistent_state_block, should_attempt_memory_deltas_repair
+from gc_core.summarize.working_memory_gateway import (
+    _REGISTER_BODY_PATTERNS,
+    REGISTER_MERGE_MODES,
+    REGISTER_ORDER,
+    SESSION_MEMORY_REGISTERS,
+    WorkingMemoryDeltas,
+    WorkingMemorySnapshot,
+    apply_append_deltas,
+    apply_memory_patch,
+    apply_replace_deltas,
+    apply_summary_memory_patch,
+    build_memory_deltas_format_repair_messages,
+    coerce_working_memory_deltas,
+    extract_register_bodies,
+    parse_memory_deltas,
+    parse_memory_deltas_with_repair,
+    read_snapshot_from_state,
+    render_persistent_state_for_prompt,
+    render_session_memory_for_summary_message,
+    resolve_persistent_state_block,
+    should_attempt_memory_deltas_repair,
+)
 
 
 def test_read_snapshot_from_state_normalizes_registers():
@@ -112,7 +133,7 @@ def test_parse_memory_deltas_empty_tag_clears_register():
 
 
 def test_register_merge_modes_all_replace():
-    assert REGISTER_MERGE_MODES == {name: "replace" for name in REGISTER_ORDER}
+    assert dict.fromkeys(REGISTER_ORDER, "replace") == REGISTER_MERGE_MODES
 
 
 def test_apply_append_deltas_is_noop_when_all_replace():

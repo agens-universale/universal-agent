@@ -1,34 +1,38 @@
 import asyncio
+import json
 import logging
 import os
-import httpx
 import re
-import json
 from copy import deepcopy
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
-from typing import Any, List, Dict, Optional, Tuple
 
+import httpx
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.message_policy.chat_completions import prepare_chat_completion_messages_for_api
 from gc_core.model_router import ResolvedModel
-from gc_core.utils.schema_markers import schema_without_internal_markers
-from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
-from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.trace_id import (
+    model_trace_header_enabled,
+    trace_header_name,
+    trace_id_from_config,
+)
+from gc_core.usage.context import record_usage
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.async_http import get_async_client
-from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
-from gc_core.utils.stream_assembler import StreamAssembler
-from gc_core.utils.ssl_config import get_backend_client_cert
-from gc_core.usage.context import record_usage
-from gc_core.utils.chat_completions_stream import OnDelta, BackendStreamError
-from gc_core.utils.backend_errors import HTTP_STATUS_ERRORS, HTTP_TRANSPORT_ERRORS, http_status_code, is_empty_completion
-from gc_core.trace_id import (
-    trace_id_from_config,
-    trace_header_name,
-    model_trace_header_enabled,
+from gc_core.utils.backend_errors import (
+    HTTP_STATUS_ERRORS,
+    HTTP_TRANSPORT_ERRORS,
+    http_status_code,
+    is_empty_completion,
 )
-
+from gc_core.utils.chat_completions_stream import BackendStreamError, OnDelta
+from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
+from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
+from gc_core.utils.schema_markers import schema_without_internal_markers
+from gc_core.utils.ssl_config import get_backend_client_cert
+from gc_core.utils.stream_assembler import StreamAssembler
 
 logger = logging.getLogger(__name__)
 
@@ -707,7 +711,7 @@ def create_call_data_responses(
     )
     return call_data
 
-    
+
 def _safe_positive_int(raw: object) -> Optional[int]:
     try:
         value = int(raw)  # type: ignore[arg-type]
@@ -728,7 +732,7 @@ def _merge_state_messages(state_messages: Any, messages) -> List[Dict]:
     if not (isinstance(state_messages, list) and len(state_messages) > 0):
         return [m for m in messages if isinstance(m, dict)]
     to_send_messages = state_messages
-    msgs_ids = set((_message_key(m) for m in state_messages if isinstance(m, dict)))
+    msgs_ids = {_message_key(m) for m in state_messages if isinstance(m, dict)}
     for m in messages:
         if not isinstance(m, dict):
             continue
@@ -841,6 +845,6 @@ def create_call_data_completions(
         data = apply_prompt_cache(data)
 
     return data
-    
+
 if __name__ == "__main__":
     ...

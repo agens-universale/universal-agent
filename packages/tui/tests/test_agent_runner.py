@@ -3,7 +3,6 @@ import threading
 import time
 
 import pytest
-
 from gc_tui.services.agent_runner import AgentRunner
 
 
@@ -293,6 +292,7 @@ def test_ensure_executor_build_once():
 
 def test_warm_builds_executor_in_background():
     import time
+
     from gc_tui.services.agent_runner import AgentRunner
     calls = {"n": 0}
 
@@ -311,6 +311,7 @@ def test_warm_builds_executor_in_background():
 
 def test_warm_idempotent():
     import time
+
     from gc_tui.services.agent_runner import AgentRunner
     calls = {"n": 0}
 

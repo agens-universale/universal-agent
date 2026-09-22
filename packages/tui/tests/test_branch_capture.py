@@ -1,6 +1,5 @@
 """При создании новой сессии в git-проекте ветка пишется в tui_meta.branch."""
 import pytest
-
 from gc_tui.services.stores.file_store import FileTaskStore
 
 

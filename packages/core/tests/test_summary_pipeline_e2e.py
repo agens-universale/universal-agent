@@ -3,12 +3,11 @@ import os
 import tempfile
 import types
 
-from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_core.intent_log import deserialize_list
 from gc_core.summarize.compaction import amaybe_run_summary_compaction
 from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
-from gc_testkit import run_coro
+from gc_testkit.intent_fixtures import intent_user_ask_texts
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -58,7 +57,7 @@ def _valid_summary(seed: str) -> str:
 
 def _read_current_data_rows(tmp_dir: str, thread_id: str):
     data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
-    with open(data_path, "r", encoding="utf-8") as fd:
+    with open(data_path, encoding="utf-8") as fd:
         return [json.loads(line) for line in fd if line.strip()]
 
 

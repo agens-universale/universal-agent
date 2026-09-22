@@ -1,7 +1,6 @@
 """Characterization-тесты краевых случаев glob_to_regex (фиксируют текущее поведение)."""
 
 import pytest
-
 from gc_core.utils.glob_to_regex import glob_to_regex
 
 

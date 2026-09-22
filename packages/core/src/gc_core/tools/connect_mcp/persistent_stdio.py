@@ -46,8 +46,6 @@ asyncio уместен и применён (``transport._astdio_exchange``), ч�
 ``run_abandonable``/``to_thread``, а GIL на ожидании pipe отпускается.
 """
 
-from typing import Any, Dict, Optional
-
 import asyncio
 import json
 import os
@@ -55,9 +53,9 @@ import signal
 import subprocess
 import threading
 import time
+from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
@@ -66,6 +64,7 @@ from gc_core.tools.connect_mcp.transport import (
     _resolve_command,
     forget_stdio_reader,
 )
+from gc_core.utils.aio_compat import run_coro_blocking
 
 #: Общий бюджет на дочистку остатка сессий, когда прогон сняли снаружи.
 #: Именно общий, а не на сессию: закрытие одной стоит до 7 с (SIGTERM →
@@ -849,8 +848,8 @@ def is_persistent_stdio(server_cfg: Dict[str, Any]) -> bool:
 
 
 __all__ = [
-    "PersistentStdioSession",
     "PersistentStdioRegistry",
-    "is_persistent_stdio",
+    "PersistentStdioSession",
     "is_persistent_session",
+    "is_persistent_stdio",
 ]

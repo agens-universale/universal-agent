@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_CURRENT_CONTEXT, wrap_technical_user_content
-from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state, remove_exact_suffix_if_matches
+from gc_core.run_summary_coordinator import (
+    build_preserved_batch,
+    filter_messages_not_in_state,
+    remove_exact_suffix_if_matches,
+)
 from gc_core.thread_store import make_message_key
 
 

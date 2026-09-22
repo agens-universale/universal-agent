@@ -1,7 +1,7 @@
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.states import State
-from test_project_data_backend import FakeSandboxBackend
 from gc_core.utils.local_render_system_prompt import render_system_prompt
+from test_project_data_backend import FakeSandboxBackend
 
 TEMPLATE = "System rules.\n<user_info>\n</user_info>\n<specific_role>\n</specific_role>"
 

@@ -5,7 +5,6 @@
 это стережёт `test_core_alone_collects_no_voice_notices`.
 """
 from gc_core.startup_notices import collect_startup_notices
-
 from gc_tui.services.voice_notices import voice_notices
 
 

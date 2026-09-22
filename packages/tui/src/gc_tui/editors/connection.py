@@ -5,6 +5,22 @@
 адреса (спека умных форм §3.1) — общий контроллер списка (`preset_list`)."""
 from __future__ import annotations
 
+from gc_core import onboarding
+from gc_core.onboarding_fields import (
+    NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_LABEL as _NO_AUTH_LABEL,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
+)
+from gc_core.onboarding_fields import (
+    URL_EMPTY as _URL_EMPTY,
+)
+from gc_core.onboarding_fields import (
+    URL_ERROR as _URL_ERROR,
+)
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -12,16 +28,9 @@ from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widgets import Input, Static
 
-from gc_core import onboarding
-from gc_core.onboarding_fields import (
-    NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
-    NO_AUTH_LABEL as _NO_AUTH_LABEL,
-    NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
-    URL_EMPTY as _URL_EMPTY,
-    URL_ERROR as _URL_ERROR,
-)
 from gc_tui.editors.field_list import write_field
-from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
+from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT
+from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
 

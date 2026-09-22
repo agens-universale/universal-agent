@@ -11,7 +11,26 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Static, TextArea
 
-from gc_tui.services.file_view import DEFAULT_PAGE_LINES_FALLBACK, MSG_EMPTY, PAGE_LINES_MAX, PAGE_LINES_MIN, FileViewSettings, OpenErr, OpenOk, ViewPositionStore, ViewWindow, apply_pygments_highlights, clamp_page_lines, clamp_start_line, count_lines, format_range_label, lexer_name_for_path, open_for_view, read_window, textarea_language_for_lexer
+from gc_tui.services.file_view import (
+    DEFAULT_PAGE_LINES_FALLBACK,
+    MSG_EMPTY,
+    PAGE_LINES_MAX,
+    PAGE_LINES_MIN,
+    FileViewSettings,
+    OpenErr,
+    OpenOk,
+    ViewPositionStore,
+    ViewWindow,
+    apply_pygments_highlights,
+    clamp_page_lines,
+    clamp_start_line,
+    count_lines,
+    format_range_label,
+    lexer_name_for_path,
+    open_for_view,
+    read_window,
+    textarea_language_for_lexer,
+)
 from gc_tui.services.skill_view import truncate_path_left
 
 _PATH_MAXLEN = 56

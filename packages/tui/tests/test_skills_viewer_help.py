@@ -35,9 +35,9 @@ async def test_viewer_screen_shows_content():
 @pytest.mark.asyncio
 async def test_viewer_header_shows_full_title_no_version():
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.viewer import ViewerScreen
+    from textual.widgets import Static
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(ViewerScreen(title="skill · x · системный · /p/x",
                                            content="тело"))

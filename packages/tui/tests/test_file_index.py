@@ -200,7 +200,7 @@ def test_fuzzy_git_respects_gitignore(tmp_path):
 
 import os
 
-from gc_tui.services.file_index import extract_at_mentions, resolve_attachment, build_attachment_footer
+from gc_tui.services.file_index import build_attachment_footer, extract_at_mentions, resolve_attachment
 
 
 def test_extract_mentions():
@@ -330,6 +330,7 @@ def test_concurrent_searches_build_index_once(tmp_path, monkeypatch):
     список, второй ждёт его, а не запускает свой обход."""
     import threading
     import time
+
     from gc_tui.services import file_index
     from gc_tui.services.file_index import PathIndex
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
@@ -548,6 +549,7 @@ def test_stream_bounded_kills_whole_process_tree_on_timeout(tmp_path):
     вернуться около таймаута, а не ждать закрытия пайпа, и потомка не оставить."""
     import sys
     import time
+
     from gc_tui.services import file_index
     beat = tmp_path / "beat.txt"
     # Потомок и родитель самоограничены (~20 с): если гашение дерева сломают,
@@ -666,6 +668,7 @@ def test_stream_bounded_wait_is_bounded_even_if_tree_kill_fails(tmp_path, monkey
     поток, а не вызывающий."""
     import sys
     import time
+
     from gc_tui.services import file_index
     child = ("import time, sys\n"
              "for _ in range(200):\n"
@@ -687,6 +690,7 @@ def test_stream_bounded_stops_feeding_chunks_after_timeout(tmp_path, monkeypatch
     звать on_chunk (иначе разбор вывода git идёт вхолостую до конца процесса)."""
     import sys
     import time
+
     from gc_tui.services import file_index
     child = ("import time, sys\n"
              "for _ in range(80):\n"
@@ -707,6 +711,7 @@ def test_shallowest_paths_equals_stable_sort_prefix_on_random_inputs():
     прихода сохранён; при превышении — ровно sorted(по глубине)[:n]. Включает
     n=0 (потолок <= 0) и пустой вход."""
     import random
+
     from gc_tui.services.file_index import _ShallowestPaths
     rnd = random.Random(20260921)
     for _ in range(2000):

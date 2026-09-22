@@ -6,8 +6,8 @@ import pytest
 async def test_header_shows_session_id_and_meta_shows_model(tmp_path):
     """После реструктуризации хрома: хедер = Сессия:id + cwd; мета = модель + статус."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli",

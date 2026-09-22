@@ -14,7 +14,6 @@ OSC 52 остаётся: всегда в SSH (нативная запись ле
 from __future__ import annotations
 
 import pytest
-
 from gc_tui.services import clipboard_ops
 
 

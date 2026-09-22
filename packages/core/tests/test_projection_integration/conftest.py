@@ -7,9 +7,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core import processing_responses as pr
-
 
 DIRTY_THINK = "<think>длинное рассуждение агента</think>"
 USER_LITERAL_THINK = "цитата <think>не стрипать</think>"

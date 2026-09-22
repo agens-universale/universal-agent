@@ -1,8 +1,9 @@
 import inspect
-import sys
 import json
 import logging
-from typing import Optional, Dict, Any
+import sys
+from typing import Any, Dict, Optional
+
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -266,7 +267,7 @@ Do not implement until they confirm.
                 error={
                     "type": "invalid_argument",
                     "field": "question",
-                    "message": f"Argument 'question' must be a string. Got: {type(question)} ({repr(question)})",
+                    "message": f"Argument 'question' must be a string. Got: {type(question)} ({question!r})",
                 },
             )
         if not question.strip():
@@ -322,7 +323,7 @@ Do not implement until they confirm.
 
         if response == "":
             response = "(empty response)"
-        print(f"Human responded: {repr(response)}", file=sys.stderr)
+        print(f"Human responded: {response!r}", file=sys.stderr)
         print("="*60 + "\n", file=sys.stderr)
         self._run_logger().info(
             "ask_human_response",
@@ -369,7 +370,7 @@ Do not implement until they confirm.
     def _ask_failed(self, question: str, via_name: Optional[str], exc: Exception) -> str:
         from gc_core.tools.subagents.progress import emit_progress
 
-        error_msg = f"(error reading input: {str(exc)})"
+        error_msg = f"(error reading input: {exc!s})"
         print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
         self._run_logger().warning(
             "ask_human_error",

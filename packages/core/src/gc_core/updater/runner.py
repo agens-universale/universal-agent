@@ -138,7 +138,7 @@ def _spawn(script_argv: list) -> None:
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen(script_argv, close_fds=True, **kwargs)  # noqa: S603
+    subprocess.Popen(script_argv, close_fds=True, **kwargs)
 
 
 def spawn_detached_update(

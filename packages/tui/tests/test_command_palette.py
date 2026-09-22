@@ -329,8 +329,8 @@ async def test_palette_hugs_content(tmp_path):
     """Рамка палитры обнимает список (height: auto) — не растянута на весь экран."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.command_palette import CommandPalette
     from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
@@ -352,8 +352,8 @@ async def test_palette_keys_hint_has_air_above(tmp_path):
     не получает: там отделять нечего."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.command_palette import CommandPalette
     from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:

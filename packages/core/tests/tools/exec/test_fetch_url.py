@@ -4,18 +4,14 @@
 транспортом httpx, а не заглушкой requests: подмена на уровне транспорта
 проверяет и путь редиректов, который у этих тулов свой.
 """
-import asyncio
 import json
 from types import SimpleNamespace
 
 import httpx
-
 from gc_core.tools.exec import fetch_url as fetch_url_module
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
 from gc_core.utils import async_http
-
-
 from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
 
 

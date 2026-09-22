@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.thread_store import append_subagent_trace_record
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
-from gc_tui.services.subagent_sidecar_mapper import detail_from_sidecar_records, resolve_nested_tool_detail, trace_events_from_nested_detail
+from gc_tui.services.subagent_sidecar_mapper import (
+    detail_from_sidecar_records,
+    resolve_nested_tool_detail,
+    trace_events_from_nested_detail,
+)
 
 
 def test_detail_from_sidecar_records_pairs_call_result():
@@ -155,9 +158,9 @@ def _write_parent_and_sidecar(tmp_path: Path, tid: str) -> None:
 @pytest.mark.asyncio
 async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
     from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from textual import events
 
     tid = "nested_detail"
     _write_parent_and_sidecar(tmp_path, tid)
@@ -205,12 +208,13 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
 async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
     """Mid-session: detail из sidecar на диске (persist), не из in-memory cache."""
     pytest.importorskip("textual")
-    from textual import events
-    from textual.containers import VerticalScroll
     from types import SimpleNamespace
+
     from gc_tui.app import TuiApp
     from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual import events
+    from textual.containers import VerticalScroll
 
     threads = str(tmp_path)
     ctx = SimpleNamespace(

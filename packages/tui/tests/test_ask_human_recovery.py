@@ -5,10 +5,8 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gc_tui.app import TuiApp
 from gc_tui.models import TraceEvent
-from gc_tui.services.stores.file_store import FileTaskStore
 
 
 class _DeadRunner:
@@ -97,7 +95,6 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         assert app.tui_state.ask_human_state is None, "ask_human_state должен быть сброшен"
         assert app.active_runner is None, "active_runner должен быть обнулён (clean-restart pattern)"
         # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
-        from gc_tui.widgets.thinking_indicator import ThinkingIndicator
         assert screen._thinking is not None, "ThinkingIndicator должен остаться (cancelled-state)"
         assert screen._thinking._state == "cancelled", (
             f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"

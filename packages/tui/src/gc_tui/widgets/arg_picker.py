@@ -19,7 +19,6 @@ from textual.widgets import Static
 
 from gc_tui import palette as _pal
 
-
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
 _NO_MATCH = "(нет совпадений)"
 
@@ -31,7 +30,7 @@ class ArgPicker(VerticalScroll):
 
     def __init__(
         self,
-        options: "list[tuple[str, str] | tuple[str, str, str]]",
+        options: list[tuple[str, str] | tuple[str, str, str]],
         initial_filter: str = "",
         hint_provider: Optional[Callable[[Optional[str]], str]] = None,
     ) -> None:
@@ -94,7 +93,7 @@ class ArgPicker(VerticalScroll):
             return 0
         return max(len(d) for d in descs) + 3
 
-    def _format_row(self, opt: tuple) -> "str | Text":
+    def _format_row(self, opt: tuple) -> str | Text:
         """Строка списка: `(value, desc)` — как раньше, простой `str` (другие
         пикеры — /export и т.п. — не должны заметить правку). `(value, desc,
         status)` — опции со статус-колонкой (`/profiles`, задача 10): `Text` с
@@ -118,7 +117,7 @@ class ArgPicker(VerticalScroll):
             return f" {value}"
         return f" {value.ljust(self._value_col_w())}{desc}"
 
-    def _visible_rows(self) -> "list[tuple[str, str] | tuple[str, str, str]]":
+    def _visible_rows(self) -> list[tuple[str, str] | tuple[str, str, str]]:
         f = self._filter.strip().lower()
         if not f:
             return list(self._options)

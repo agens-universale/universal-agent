@@ -7,8 +7,13 @@ from uuid import uuid4
 from gc_core.config_modules.stored_outputs import get_tool_output_inline_max_chars
 from gc_core.constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME
 from gc_core.states import State
-from gc_core.tools.session.stored_outputs.envelope import PAGINATION_EOF_MARKER_DOC, dumps_stored_tool_output_payload, utf8_byte_length
+from gc_core.tools.session.stored_outputs.envelope import (
+    PAGINATION_EOF_MARKER_DOC,
+    dumps_stored_tool_output_payload,
+    utf8_byte_length,
+)
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
+
 _fallback_logger = logging.getLogger(__name__)
 
 

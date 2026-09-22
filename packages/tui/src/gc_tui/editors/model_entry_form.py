@@ -25,22 +25,29 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from gc_core import onboarding
+from gc_core.config_modules.model_registry import connection_parts, resolve_entry_address, validate_model_alias
+from gc_core.onboarding_fields import (
+    ADDRESS_HINT as _ADDRESS_HINT,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_LABEL as _NO_AUTH_LABEL,
+)
+from gc_core.onboarding_fields import (
+    NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
+)
+from gc_core.onboarding_fields import (
+    URL_ERROR as _URL_ERROR,
+)
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
-from gc_core import onboarding
-from gc_core.config_modules.model_registry import (connection_parts, resolve_entry_address,
-                                           validate_model_alias)
-from gc_core.onboarding_fields import (
-    ADDRESS_HINT as _ADDRESS_HINT,
-    NO_AUTH_FROZEN_PLACEHOLDER as _NO_AUTH_FROZEN_PLACEHOLDER,
-    NO_AUTH_LABEL as _NO_AUTH_LABEL,
-    NO_AUTH_TOGGLE_HINT as _NO_AUTH_TOGGLE_HINT,
-    URL_ERROR as _URL_ERROR,
-)
 from gc_tui.editors.connection import PRESET_NO_MATCH_CLOSED
 from gc_tui.editors.field_list import (
     LIST_EMPTY,
@@ -50,7 +57,8 @@ from gc_tui.editors.field_list import (
     FieldListController,
     write_field,
 )
-from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT, preset_list_controller
+from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT
+from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import ACCENT, DEEP_DIM, WARN
 from gc_tui.services.probe_presentation import connection_line_text, plural_models
 from gc_tui.widgets.paste_input import PasteInput
@@ -294,6 +302,7 @@ class ModelEntryForm(Vertical):
         self._config_proxy = config_proxy
         if fetch is None:
             from gc_core.model_picker import fetch_models
+
             from gc_tui.services.model_list_cache import make_cached_fetch
             fetch = make_cached_fetch(fetch_models)
         if probe is None:

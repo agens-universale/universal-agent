@@ -1,9 +1,8 @@
 """usage_segments + compose_adaptive_footer_right: раздельные сегменты и
 адаптивная вёрстка (сессия уезжает под запрос, когда не хватает ширины)."""
-from rich.text import Text
-
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 from gc_tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
+from rich.text import Text
 
 _PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽",
             "per_tokens": 1_000_000}

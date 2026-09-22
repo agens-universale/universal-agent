@@ -1,14 +1,16 @@
-from gc_core.backends.async_protocol import aexec_port
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-import json
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
-from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+from gc_core.backends.async_protocol import aexec_port
+from gc_core.config_modules.agent import (
+    DEFAULT_EXEC_TIMEOUT_SEC,
+    exec_output_preview_edge_chars_from_config_dict,
+    exec_timeout_from_config_dict,
+)
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
 from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":

@@ -1,9 +1,8 @@
 """code_render — подсветка кода в rich.Text, пригодный для выделения мышью."""
 from __future__ import annotations
 
-from rich.text import Text
-
 from gc_tui.services.code_render import highlight_code, normalize_code
+from rich.text import Text
 
 
 def test_normalize_strips_trailing_newlines():

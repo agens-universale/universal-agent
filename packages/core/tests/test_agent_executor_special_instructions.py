@@ -3,7 +3,7 @@ from gc_core.utils.local_render_system_prompt import render_system_prompt
 
 def _load_special(path):
     if isinstance(path, str) and path.strip():
-        with open(path.strip(), "r", encoding="utf-8") as fd:
+        with open(path.strip(), encoding="utf-8") as fd:
             return fd.read().strip() or None
     return None
 

@@ -10,7 +10,6 @@ import copy
 import json
 
 import pytest
-
 from gc_core.tools import abuild_tools_data
 from gc_core.tools.schema_optional import resolve_optional_property_keys
 from gc_core.utils.connect_backend import normalize_chat_completions_tools

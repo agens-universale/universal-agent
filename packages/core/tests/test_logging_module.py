@@ -1,6 +1,4 @@
-from gc_core.utils.logging_module import build_run_log_paths
-from gc_core.utils.logging_module import create_run_logger
-from gc_core.utils.logging_module import generate_run_id
+from gc_core.utils.logging_module import build_run_log_paths, create_run_logger, generate_run_id
 
 
 def test_build_run_log_paths_include_agent_kind_and_run_id(tmp_path):

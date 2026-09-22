@@ -8,7 +8,6 @@ import json
 
 import httpx
 import pytest
-
 from gc_core.utils import connect_backend
 from gc_testkit import run_coro
 
@@ -133,7 +132,7 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypat
         f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         f"data: {json.dumps(done, ensure_ascii=False)}\n\n"
         "data: [DONE]\n\n"
-    ).encode("utf-8")
+    ).encode()
 
     def handler(request):
         return httpx.Response(

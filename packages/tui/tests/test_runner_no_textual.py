@@ -1,9 +1,6 @@
 """main() без textual должен дать понятный stderr и exit 1, без трейсбэка."""
 import builtins
-import io
 import sys
-
-import pytest
 
 
 def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys):

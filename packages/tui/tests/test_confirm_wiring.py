@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import threading
 import types
-import pytest
 
+import pytest
 
 # ── unit-тест ────────────────────────────────────────────────────────────────
 

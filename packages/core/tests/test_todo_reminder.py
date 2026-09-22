@@ -107,8 +107,12 @@ def test_reminder_counter_round_trips_through_meta():
     Без этого задача из серии коротких ходов (каждый короче reminder_steps)
     никогда не докатывается до напоминания: State строится заново на каждый run().
     """
-    from gc_core.message_policy.tool_usage_notice.state import hydrate_tool_usage_notice_state, persist_tool_usage_notice_state
     from types import SimpleNamespace
+
+    from gc_core.message_policy.tool_usage_notice.state import (
+        hydrate_tool_usage_notice_state,
+        persist_tool_usage_notice_state,
+    )
 
     state = SimpleNamespace(todo_reminder_cnt=7, tool_usage_notice_cnt={},
                             project_memory_content_hash=None)
@@ -123,8 +127,12 @@ def test_reminder_counter_round_trips_through_meta():
 
 def test_reminder_counter_survives_meta_merge_to_base():
     """Ключ попадает в base_meta перед сохранением треда (иначе потеряется на диске)."""
-    from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base, persist_tool_usage_notice_state
     from types import SimpleNamespace
+
+    from gc_core.message_policy.tool_usage_notice.state import (
+        merge_tool_usage_notice_meta_to_base,
+        persist_tool_usage_notice_state,
+    )
 
     session_meta: dict = {}
     persist_tool_usage_notice_state(

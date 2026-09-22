@@ -14,7 +14,6 @@ import logging
 import threading
 
 import pytest
-
 from gc_core.tools.subagents.runner import _drain_trace_writes
 
 

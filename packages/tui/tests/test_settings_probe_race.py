@@ -7,15 +7,16 @@ _start_draft_probe, что и Enter/Tab, и обе делят счётчик п�
 а у неё в on_done висит сохранение. Итог без фикса: Enter нажат, файл не
 изменился, молча (гонка предсуществующая, унаследована из develop 444bb20b)."""
 import pytest
+
 pytest.importorskip("textual")
 
 import threading
 from pathlib import Path
 
-from textual.widgets import Input, Static
-from gc_testkit.tui_support import open_settings_section, wait_until
 from form_harness import blocking_probe, ok_probe, recording_probe, settings_connection
+from gc_testkit.tui_support import open_settings_section, wait_until
 from test_settings_screen import _cfg, _fake_probe, _mk_screen, _write_cfg
+from textual.widgets import Input, Static
 
 
 def _probe_ok_fast():
@@ -98,8 +99,8 @@ async def test_autoprobe_survives_enter_absorbed_by_presets(tmp_path):
     реальная клавиша), а не pilot.press — ноль накладных расходов на
     диспетчеризацию, весь запас достаётся собственно проверяемому механизму."""
     from gc_tui import app as app_mod
-    from textual import events
     from gc_tui.screens.settings import SettingsScreen
+    from textual import events
     # Адрес ПУСТОЙ: по канону 2026-08-17 список раскрывается только на пустом поле —
     # а тесту нужен именно раскрытый, чтобы Enter был им поглощён. Раньше сюда годился
     # пресетный адрес, но заполненное поле список больше не поднимает.
@@ -324,8 +325,8 @@ async def test_leaving_field_without_address_keeps_pending_autoprobe(tmp_path):
     с поля адреса не дошёл бы до проверяемого места — его раньше отсёк бы гейт
     «стрелка водила по списку»."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     calls = []
     cfg_file = _write_cfg(tmp_path, url='""')
     app = app_mod.TuiApp(config={})            # ни поля, ни действующего адреса

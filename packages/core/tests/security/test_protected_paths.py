@@ -1,4 +1,4 @@
-from pathlib import Path
+
 from gc_core.security.protected_paths import protected_paths
 
 

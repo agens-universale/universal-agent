@@ -68,7 +68,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from toggle_matrix import ALL_CASES, run_case
 
 #: Эталон снят на origin/develop (e66a1e90) тем же стендом.
@@ -167,9 +166,8 @@ def test_every_live_schema_key_is_covered_or_explained(reference):
     «Не покрыт» и «покрывать нечем» — разные вещи, и различать их обязан
     ``NOT_IN_MATRIX``, а не память того, кто однажды считал.
     """
-    from pydantic import BaseModel
-
     from gc_core.config_modules.root import AppConfig
+    from pydantic import BaseModel
     from test_config_toggles_have_readers import KNOWN_UNREAD
     from toggle_matrix import NOT_IN_MATRIX
 

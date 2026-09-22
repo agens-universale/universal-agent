@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("textual")
 
 from textual.app import App, ComposeResult
@@ -274,8 +275,8 @@ async def test_create_mode_empty_token_submits_without_header():
 async def test_create_mode_empty_url_shows_variant_preset_hint():
     """Minor-6: онбординг (create_mode, поле адреса пустое) — первичный хинт
     пресет-листа отличается от канонного settings-варианта (спека §2.1)."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="", auth_header=None, create_mode=True,
                           presets=default_endpoint_presets())
     app = _harness(ed)
@@ -291,14 +292,14 @@ async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
     Непустой адрес — любой, хоть совпавший с пресетом — список не поднимает, и строка
     называет способ вызвать его вручную. Раскрыли явно (`Alt+↓`) — строка становится
     канонной подсказкой списка."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="https://openrouter.ai/api/v1/chat/completions",
                           auth_header=None, presets=default_endpoint_presets())
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert "Alt+↓ — показать список" == str(ed.query_one(".conn-url-preset-hint").render())
+        assert str(ed.query_one(".conn-url-preset-hint").render()) == "Alt+↓ — показать список"
 
         ed.reload_presets()                    # Alt+↓
         await pilot.pause()
@@ -420,8 +421,8 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
     Как и у соседа выше, саму ловушку тест больше не ловит — она стала недостижимой
     (мутация на ревью 2026-08-18 проходит). Проверяется полнота списка на боевом пути
     раскрытия секции."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
+    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from gc_tui.editors.connection import ConnectionEditor
     async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url) as (pilot, scr):
         ed = scr.query_one(ConnectionEditor)
@@ -534,8 +535,8 @@ async def test_hint_stays_when_cursor_leaves_the_address():
     ловит мельтешение там, где ничего не произошло. `Alt+↓` под свёрнутым списком —
     ярлык способа, а не команда момента, как `Space — переключить` у галки, которая
     тоже работает только со своей позиции. Что нажимать сейчас, отвечает футер."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="https://own-host/v1/chat/completions",
                           auth_header="Bearer x", presets=default_endpoint_presets())
     app = _harness(ed)
@@ -554,8 +555,8 @@ async def test_canon_table_of_list_states():
 
     Врозь эти проверки дают ложное спокойствие: исходный дефект был ровно в том, что
     два состояния из пяти выпадали, а каждое по отдельности выглядело правильным."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     presets = default_endpoint_presets()
 
     # 1. пусто → раскрыт, строка — подсказка списка
@@ -615,8 +616,8 @@ async def test_hint_survives_pick_and_zero_filter():
 
     Именно эти два состояния выпадали из первой редакции правки — их нашло независимое
     ревью, замерив таблицу вместо того, чтобы поверить описанию."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     presets = default_endpoint_presets()
 
     ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
@@ -647,8 +648,8 @@ async def test_clearing_the_address_reopens_the_list():
     свёрнутый список до ухода-возврата или Alt+↓ (живой смок 2026-08-18). Юнит-тесты
     этого не видели структурно: все конструировали редактор с готовым значением,
     а не редактировали поле."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="https://own-host/v1/chat/completions",
                           auth_header="Bearer x", presets=default_endpoint_presets())
     async with _harness(ed).run_test() as pilot:
@@ -675,8 +676,8 @@ async def test_editing_the_address_reopens_the_list_as_a_filter():
     Правильная формулировка — над ПРОЦЕССОМ: список раскрыт, пока значение
     складывается (пусто ИЛИ человек прямо сейчас правит поле), и свёрнут, когда оно
     сложилось (вошли с готовым значением и не трогаем)."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     presets = default_endpoint_presets()
     ed = ConnectionEditor(url_current=presets[1].url, auth_header="Bearer x",
                           presets=presets)
@@ -698,8 +699,8 @@ async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():
     """Набран свой адрес — совпадений нет, и раскрытый фильтром список не имеет права
     запереть ↑/↓ на поле: ходить по нему нечем. Стрелка уводит курсор дальше по форме,
     список сворачивается сам (контракт `FieldListController.move`)."""
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_tui.editors.connection import ConnectionEditor
     ed = ConnectionEditor(url_current="https://own-host/v1/chat/completions",
                           auth_header="Bearer x", presets=default_endpoint_presets())
     async with _harness(ed).run_test() as pilot:

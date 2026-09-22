@@ -1,6 +1,5 @@
 import asyncio
 import copy
-import inspect
 import json
 import logging
 import os
@@ -10,30 +9,44 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from gc_core.bundled_assets import bundled_root
-from gc_core.trace_id import trace_id_from_config
-from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
+from gc_core.config_modules.agent import merge_special_instructions_with_model_steering
 from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
 from gc_core.config_modules.intent_scope import intent_scope_from_config_dict
-from gc_core.execution_workspace import ExecutionWorkspace
-from gc_core.model_router import AliasCircuitOpenError, ModelRouter, SUBAGENT_CONSUMER_PREFIX
-from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
-from gc_core.run_summary_coordinator import RunSummaryCoordinator
-from gc_core.summarize.config import parse_summary_trigger_chars
+from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
-from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
-from gc_core.message_policy.tool_usage_notice.policy import get_thread_memory_registers_from_shared, subagent_thread_memory_bootstrap_text, wrap_thread_memory_technical_user_message
-from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
+from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.intent_log.user_turn import append_user_asks_from_messages, init_subagent_open_turn
+from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
+from gc_core.message_policy.tool_usage_notice.policy import (
+    get_thread_memory_registers_from_shared,
+    subagent_thread_memory_bootstrap_text,
+    wrap_thread_memory_technical_user_message,
+)
+from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
+from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.message_policy.user_stop import cancelled_by_user_output
+from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX, AliasCircuitOpenError, ModelRouter
 from gc_core.run_context import RunContext
-from gc_core.tools.skills.registry import get_skills_registry
+from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
 from gc_core.states import State
+from gc_core.summarize.config import parse_summary_trigger_chars
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, abuild_tools_data
+from gc_core.tools.skills.registry import get_skills_registry
+from gc_core.tools.subagents.active_scope import activate_child_input
+from gc_core.tools.subagents.progress import emit_progress
 from gc_core.tools.subagents.registry import get_subagent_class, resolve_subagent_definitions
+from gc_core.tools.subagents.sidecar import (
+    apersist_subagent_trace,
+    bind_thread_identity,
+    clear_thread_identity,
+)
+from gc_core.trace_id import trace_id_from_config
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
-from gc_core.config_modules.agent import merge_special_instructions_with_model_steering
+from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.utils.local_render_system_prompt import render_system_prompt
@@ -42,16 +55,6 @@ from gc_core.utils.logging_module import (
     generate_run_id,
     release_run_logger,
 )
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
-from gc_core.message_policy.user_stop import cancelled_by_user_output
-from gc_core.tools.subagents.active_scope import activate_child_input
-from gc_core.tools.subagents.progress import emit_progress
-from gc_core.tools.subagents.sidecar import (
-    apersist_subagent_trace,
-    bind_thread_identity,
-    clear_thread_identity,
-)
-from gc_core.utils.aio_compat import await_callback
 
 _log = logging.getLogger(__name__)
 
@@ -967,7 +970,7 @@ class SubagentRunner:
             try:
                 if not os.path.exists(prompt_path):
                     continue
-                with open(prompt_path, "r", encoding="utf-8") as fd:
+                with open(prompt_path, encoding="utf-8") as fd:
                     loaded = fd.read().strip()
                 if loaded:
                     return loaded

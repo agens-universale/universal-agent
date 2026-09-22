@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional
 
 from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport
 
-
 #: Параметры ``initialize`` — ОДИН источник на все локусы.
 #:
 #: Источников было два, и починили только один. В ``_INIT_PAYLOAD`` объявленные
@@ -251,9 +250,9 @@ async def _aget_or_init_session_id(
 __all__ = [
     "MCP_INIT_PARAMS",
     "_MCP_SESSIONS",
-    "forget_session",
-    "_normalize_url",
-    "_atools_list_request",
     "_acall_mcp_tool",
     "_aget_or_init_session_id",
+    "_atools_list_request",
+    "_normalize_url",
+    "forget_session",
 ]

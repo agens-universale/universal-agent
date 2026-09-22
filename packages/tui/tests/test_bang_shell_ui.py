@@ -5,8 +5,8 @@ import pytest
 
 
 def _trace_text(screen) -> str:
-    from textual.widgets import Static
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.widgets import Static
 
     parts: list[str] = []
     for row in screen.query(TraceRow):

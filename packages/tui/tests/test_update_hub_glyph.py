@@ -54,8 +54,8 @@ async def test_hub_glyph_wave_while_startup_check_in_flight(tmp_path):
 @pytest.mark.asyncio
 async def test_section_reuses_startup_verdict_without_network(tmp_path, monkeypatch):
     """Вход в секцию при готовом стартовом вердикте не делает второй сетевой запрос."""
-    from gc_tui import app as app_mod
     from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     calls = []
     monkeypatch.setattr(check_mod, "check_for_update",
                         lambda source, **k: calls.append(source) or CheckResult("current", "abc", "ок"))

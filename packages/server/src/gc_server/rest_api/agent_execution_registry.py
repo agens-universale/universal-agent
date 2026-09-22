@@ -311,7 +311,7 @@ class AgentRunRegistry:
                         dropped = [*in_flight, *_take_tail(executor)]
                         ending = "cancelled"
                     raise
-                except BaseException as e:  # noqa: BLE001
+                except BaseException as e:
                     with self._lock:
                         if run_ref is not None:
                             run_ref.done = True

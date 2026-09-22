@@ -3,10 +3,14 @@ import os
 import tempfile
 import unittest
 
-from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total, message_text_for_summary
-from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_core.intent_log import deserialize_list
+from gc_core.message_format.serialization import (
+    calc_history_chars_for_trigger,
+    calc_messages_chars_total,
+    message_text_for_summary,
+)
 from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta, save_thread_meta
+from gc_testkit.intent_fixtures import intent_user_ask_texts
 
 
 # `unittest.TestCase` НЕ запускает корутинные тесты: метод просто возвращает
@@ -103,7 +107,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(os.path.exists(archived_meta))
 
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
-            with open(data_path, "r", encoding="utf-8") as fd:
+            with open(data_path, encoding="utf-8") as fd:
                 rows = [json.loads(line) for line in fd if line.strip()]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["payload"]["role"], "user")
@@ -212,7 +216,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
-            with open(data_path, "r", encoding="utf-8") as fd:
+            with open(data_path, encoding="utf-8") as fd:
                 rows = [json.loads(line) for line in fd if line.strip()]
             payload_content = rows[0]["payload"]["content"]
             self.assertIn("<original_user_messages>", payload_content)

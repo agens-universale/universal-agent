@@ -1,9 +1,8 @@
 """table_render — markdown-таблица как rich.Text, пригодный для выделения мышью."""
 from __future__ import annotations
 
-from rich.text import Text
-
 from gc_tui.services.table_render import table_to_text
+from rich.text import Text
 
 HEADERS = ["Стратегия", "Принцип"]
 ROWS = [["LRU", "вытесняет давние"], ["LFU", "вытесняет редкие"]]

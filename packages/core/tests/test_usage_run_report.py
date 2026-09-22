@@ -90,8 +90,8 @@ def test_state_exposes_usage_and_last_run_in_memory():
 
 def test_last_run_usage_survives_state_snapshot():
     # last_run_usage (UsageAccount) сериализуется/восстанавливается в session-снапшоте.
-    from gc_core.states import State
     from gc_core.persistence.state_serializer import StateSerializer
+    from gc_core.states import State
     st = State(
         verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
         max_steps=10, system_prompt_id="v1", use_server_subagents=False,

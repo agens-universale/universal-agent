@@ -6,9 +6,9 @@ import pytest
 async def test_trace_row_composes_horizontal_with_two_statics():
     """DOM: TraceRow содержит Horizontal с двумя Static (.trace-prefix + .trace-content)."""
     pytest.importorskip("textual")
+    from gc_tui.widgets.trace_row import TraceRow
     from textual.app import App, ComposeResult
     from textual.widgets import Static
-    from gc_tui.widgets.trace_row import TraceRow
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -32,8 +32,8 @@ async def test_trace_row_kind_class_lands_on_widget():
     на верхней строке, content уезжал вниз → визуальный разрыв между ● и текстом.
     """
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -50,10 +50,10 @@ async def test_trace_row_kind_class_lands_on_widget():
 async def test_trace_row_ctrl_click_emits_open_event_request():
     """Ctrl+клик → OpenEventRequest (общая клик-модель, см. ClickModelMixin)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from textual import events
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import OpenEventRequest
+    from gc_tui.widgets.trace_row import TraceRow
+    from textual import events
+    from textual.app import App, ComposeResult
 
     received: list[int] = []
 
@@ -83,10 +83,10 @@ async def test_trace_row_ctrl_click_emits_open_event_request():
 async def test_trace_row_event_no_zero_does_not_emit():
     """event_no=0 → клик не открывает payload (нет события)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from textual import events
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.messages import OpenEventRequest
+    from gc_tui.widgets.trace_row import TraceRow
+    from textual import events
+    from textual.app import App, ComposeResult
 
     received: list[int] = []
 
@@ -114,8 +114,8 @@ async def test_trace_row_focusable_default_true():
     """Без явного focusable — TraceRow.can_focus == True (дефолт-поведение для
     самостоятельных одно-строчных событий: framework `[meta]`, `? think`, ...)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -131,8 +131,8 @@ async def test_trace_row_focusable_default_true():
 async def test_trace_row_focusable_false_opts_out():
     """focusable=False → can_focus == False (для continuation prose, `* note:`)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:

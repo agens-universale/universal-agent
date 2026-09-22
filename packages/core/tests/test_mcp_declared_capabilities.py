@@ -49,7 +49,7 @@ def test_every_init_source_declares_the_same():
     """
     from gc_core.tools.connect_mcp.client import MCP_INIT_PARAMS
 
-    assert MCP_INIT_PARAMS == _INIT_PAYLOAD["params"], (
+    assert _INIT_PAYLOAD["params"] == MCP_INIT_PARAMS, (
         "параметры initialize разъехались между локусами"
     )
     offenders = sorted(set(MCP_INIT_PARAMS["capabilities"]) & set(_UNIMPLEMENTED))

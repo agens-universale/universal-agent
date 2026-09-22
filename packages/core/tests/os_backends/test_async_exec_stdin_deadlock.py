@@ -20,7 +20,6 @@ import sys
 import time
 
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
 
 #: Ребёнок сначала ЗАЛИВАЕТ stdout, и только потом читает stdin — так и
@@ -60,7 +59,7 @@ async def test_large_stdin_with_flooding_child_does_not_hang(backend, tmp_path):
             ),
             timeout=_OUTER_BUDGET,
         )
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError:
         spent = time.perf_counter() - started
         pytest.fail(
             f"aexec_argv висел больше {spent:.1f}с при таймауте тула "

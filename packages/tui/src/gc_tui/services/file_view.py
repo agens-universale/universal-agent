@@ -230,7 +230,7 @@ class FileViewSettings:
     page_lines: Optional[int] = None
 
     @classmethod
-    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> "FileViewSettings":
+    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> FileViewSettings:
         if not data:
             return cls()
         try:

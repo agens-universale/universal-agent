@@ -14,10 +14,10 @@ def _segs(records):
 @pytest.mark.asyncio
 async def test_preview_renders_trace_widgets_and_header():
     pytest.importorskip("textual")
-    from textual.app import App
-    from textual.widgets import Static
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from textual.app import App
+    from textual.widgets import Static
     result = {}
     records = [_rec({"role": "user", "content": "вопрос-превью", "id": "m1"})]
 
@@ -51,9 +51,9 @@ def _sum(text):
 async def test_preview_summary_marker_collapsed_then_toggles():
     """Маркер сжатия в превью свёрнут по умолчанию; клик раскрывает тело."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.trace_row import SummaryMarker
+    from textual.app import App
     # seg0 [вопрос] сжат → СИНТЕЗ; seg1 (live) [ответ]
     segments = [
         {"index": 0, "messages": [_rec({"role": "user", "content": "вопрос", "id": "m0"})],
@@ -94,8 +94,8 @@ async def test_preview_enter_resumes_even_with_summary():
     """Enter в превью открывает тред (resume=True), даже если есть маркер сжатия:
     маркер не focusable, Enter не перехватывается toggle'ом."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.preview import PreviewScreen
+    from textual.app import App
     result = {}
     segments = [
         {"index": 0, "messages": [_rec({"role": "user", "content": "q", "id": "m0"})],
@@ -120,9 +120,9 @@ async def test_preview_enter_resumes_when_row_focused():
     """Enter резюмит тред даже когда в фокусе focusable-строка (тул/проза):
     приоритетный binding экрана срабатывает раньше on_key строки."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App
     result = {}
     segments = [{"index": 0, "compacted_by": None, "messages": [
         _rec({"type": "function_call", "id": "fc1", "call_id": "c1",
@@ -150,9 +150,9 @@ async def test_preview_mounts_nested_subagent_rows():
     """Превью с sidecar-records показывает вложенные вызовы субагента
     и развёрнутый чек-лист (spec 2026-07-31 §4, канал превью)."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App
     segments = [{"index": 0, "compacted_by": None, "messages": [
         _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
               "name": "subagent_worker", "arguments": '{"task": "x"}'}),
@@ -185,9 +185,9 @@ async def test_preview_mounts_nested_subagent_rows():
 async def test_preview_without_records_unchanged():
     """Без records превью рендерится как раньше (ни одного nested-виджета)."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.preview import PreviewScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App
     segments = [{"index": 0, "compacted_by": None, "messages": [
         _rec({"type": "function_call", "id": "fc1", "call_id": "parent1",
               "name": "subagent_worker", "arguments": '{"task": "x"}'}),
@@ -207,8 +207,8 @@ async def test_preview_without_records_unchanged():
 @pytest.mark.asyncio
 async def test_preview_escape_false():
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.preview import PreviewScreen
+    from textual.app import App
     result = {}
 
     class _A(App):

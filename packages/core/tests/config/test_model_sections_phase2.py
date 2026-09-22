@@ -1,5 +1,4 @@
 import pytest
-
 from gc_core.config_modules.model_registry import LEVEL_FALLBACK
 from gc_core.config_modules.model_sections_validation import validate_model_sections
 from gc_core.config_modules.root import AppConfig

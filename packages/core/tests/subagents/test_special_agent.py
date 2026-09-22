@@ -3,19 +3,17 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from gc_core.config_modules.chat_completions import (
     DEFAULT_SUBAGENT_ROLE_MAX_TOKENS,
     ChatCompletionsLlmConfig,
 )
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents import special_agent as special_agent_module
-from gc_core.tools.subagents.special_agent import SpecialAgent
-from gc_core.tools.subagents import runner as runner_module
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.tools.subagents.special_agent import SpecialAgent
 from gc_testkit import run_coro
 
 

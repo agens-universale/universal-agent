@@ -215,7 +215,7 @@ def test_profile_values_deduplicate_namesake_project_wins(tmp_path, monkeypatch)
     (project_dir / ".gc" / "profiles" / "work.yml").write_text("models: {}\n", encoding="utf-8")
 
     from gc_tui.app import TuiApp
-    from gc_tui.toggles import profile_values, _discovered_profiles
+    from gc_tui.toggles import _discovered_profiles, profile_values
 
     app = TuiApp(config={"profile": ""})
     app._config_path = str(base_dir / "config.yml")
@@ -578,8 +578,8 @@ def test_profiles_command_has_dynamic_picker_wiring():
 @pytest.mark.asyncio
 async def test_arg_picker_dynamic_footer_hint_follows_selection(tmp_path):
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.widgets.arg_picker import ArgPicker
+    from textual.app import App
 
     hints = {"без профиля": "чистый конфиг", "smoke": "default gc · глобальный"}
     picker = ArgPicker([("без профиля", "работать чистым конфигом"), ("smoke", "глобальный")],

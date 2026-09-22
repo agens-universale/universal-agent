@@ -7,9 +7,15 @@ Unit-тесты для path-policy слоя read_guard (Контур 1).
 from __future__ import annotations
 
 import os
-import pytest
 
-from gc_core.security.read_guard import ReadGuardConfig, ReadGuardViolation, check_read_path_allowed, expand_path_placeholders, parse_read_guard_config
+import pytest
+from gc_core.security.read_guard import (
+    ReadGuardConfig,
+    ReadGuardViolation,
+    check_read_path_allowed,
+    expand_path_placeholders,
+    parse_read_guard_config,
+)
 
 
 @pytest.fixture

@@ -65,13 +65,12 @@ def _all_hint_strings():
     (Global Constraints волны B): `model_entry_form` называет обе клавиши своих
     списков, `models_section` — подсказки строк и своего инлайн-пикера,
     `voice_endpoint` — списки адреса, модели и языка голосовой секции."""
-    from gc_tui.editors import (field_list, model_entry_form, models_section,
-                             preset_list, voice_endpoint)
+    from gc_tui.editors import field_list, model_entry_form, models_section, preset_list, voice_endpoint
     out = {}
     for module in (field_list, model_entry_form, models_section, preset_list,
                    voice_endpoint):
         for name in dir(module):
-            if not (name.endswith("_HINT") or name.endswith("_HINT_NO_MATCH")):
+            if not (name.endswith(("_HINT", "_HINT_NO_MATCH"))):
                 continue
             value = getattr(module, name)
             if isinstance(value, str):
@@ -101,7 +100,7 @@ def _model_section_notice_strings():
     out = {}
     for module in (models_section,):
         for name in dir(module):
-            if not (name.startswith("_NOTICE") or name.startswith("_CONFIRM")):
+            if not (name.startswith(("_NOTICE", "_CONFIRM"))):
                 continue
             value = getattr(module, name)
             if isinstance(value, str):
@@ -174,9 +173,8 @@ async def test_main_section_empty_body_keeps_the_menu_exit_under_an_overlay(
     профильное «Esc — к списку»: списка профилей на этом экране нет, обещание вело
     в никуда (M5 ревью MR #80). `is_profile=False` не имеет права выдавать футер с
     хвостом `_EXIT_TO_LIST` ни в одном состоянии."""
-    from test_settings_models_section import (_PROJECT_REGISTRY, _editor,
-                                                        _section_over_layers)
     from gc_tui.editors import models_section as m
+    from test_settings_models_section import _PROJECT_REGISTRY, _editor, _section_over_layers
     async with _section_over_layers(tmp_path, monkeypatch, project=_PROJECT_REGISTRY) \
             as (_pilot, scr, _cfg_file):
         ed = _editor(scr)
@@ -195,8 +193,8 @@ async def test_main_section_empty_body_keeps_the_menu_exit_with_collapsed_blocks
     строки нет (`agent.model` пуст) — `_rows()` пуст и здесь, вопреки снятому
     комментарию «строк нет только у профиля». Хвост выхода обязан остаться «Esc»
     в меню, а не профильным «Esc — к списку» (M5 ревью MR #80)."""
-    from test_settings_models_section import _REGISTRY, _editor, _section
     from gc_tui.editors import models_section as m
+    from test_settings_models_section import _REGISTRY, _editor, _section
     async with _section(tmp_path, _REGISTRY, model='""') as (pilot, scr, _cfg_file):
         ed = _editor(scr)
         for kind in ("entry", "slot", "assign"):
@@ -272,9 +270,9 @@ def test_all_footers_fit_the_two_line_budget():
 @pytest.mark.asyncio
 async def test_wizard_footer_names_tab_by_the_group(tmp_path):
     """Мастер: на «Своём endpoint» футер зовёт в поля, из полей — обратно к режиму."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
     from gc_tui.screens.onboarding import _TAB_TO_FIELDS, _TAB_TO_VARIANTS
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # У «URL» свой пресет-лист (спека 2026-08-05 §3): пустое поле раскрывает его
         # само, и футер этот момент — про клавиши списка, а не про направление Tab
@@ -300,8 +298,8 @@ async def test_wizard_footer_keeps_quiet_about_tab_without_a_second_group(tmp_pa
 async def test_wizard_footer_does_not_promise_space_from_inside_a_field(tmp_path):
     """В поле Space печатает пробел (Input съедает клавишу первым), пометки он там не
     ставит — обещать им выбор значит врать (§6.4)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3),
         # и футер на входе в поле — про клавиши списка, а не про «Enter — выбрать».
@@ -372,8 +370,8 @@ async def test_wizard_model_list_footer_stops_promising_a_pick_without_matches(t
     """Фильтр не оставил строк: стрелки съедены и никуда не двигают, Enter не
     подставляет (`pick_in` отдаёт False) — обещать «выбор модели» и «подставить»
     значит врать. Ввод своего id — штатный путь, а не край."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud", models=["whisper-1"]) as (pilot, scr):
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab", "down", "down")           # → поле «Модель», список раскрыт
@@ -412,8 +410,8 @@ async def test_wizard_connection_footer_when_no_preset_matches(tmp_path):
     Путь до состояния — живой: набрали свой адрес (список свернулся, канон в редакции
     2026-08-18), затем сами позвали список `Alt+↓`. Раньше сюда приводила одна печать,
     но раскрытый пустой список забирал ↑/↓ и обещал Enter то, чего тот не делает."""
-    from textual.widgets import Input
     from form_harness import wizard_connection_step
+    from textual.widgets import Input
     async with wizard_connection_step(tmp_path) as (pilot, scr):
         scr.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
         await pilot.pause()
@@ -466,7 +464,6 @@ async def test_settings_connection_footer_yields_to_the_open_preset_list(tmp_pat
 
     Канон 2026-08-17: заполненный адрес список больше не поднимает, поэтому состояние
     задаётся пустым полем, а не совпадением с пресетом."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
     from gc_tui.editors.connection import ConnectionEditor
     async with settings_connection(tmp_path, url="") as (_pilot, scr):
@@ -484,7 +481,6 @@ async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
     Входим со своим адресом — на непустом поле список свёрнут (канон), — и зовём его
     сами через `Alt+↓`. Печать сюда больше не приводит: без совпадений список
     сворачивается (редакция 2026-08-18)."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
     async with settings_connection(tmp_path,
                                    url="https://my-own-host.internal/v1") as (pilot, scr):
@@ -499,7 +495,6 @@ async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
 async def test_settings_connection_footer_returns_to_the_section_after_esc(tmp_path):
     """Esc свернул список — клавиши снова про секцию: Enter сохраняет, Esc уводит
     в меню. Футер, застрявший на обещаниях списка, врал бы теперь в другую сторону."""
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
     from form_harness import settings_connection
     async with settings_connection(tmp_path, url="") as (pilot, scr):
         await pilot.press("escape")

@@ -2,7 +2,6 @@ import os
 import tempfile
 import unittest
 
-
 from gc_core.config import load_config
 
 
@@ -514,6 +513,8 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
     def test_empty_aux_overlay_does_not_inject_vendor_keys(self):
         """Schema/default ``{}`` не шлёт chat_template_kwargs на OpenAI-like агента."""
+        from types import SimpleNamespace
+
         from gc_core.config import flatten_app_config
         from gc_core.config_modules.chat_completions import (
             auxiliary_llm_from_config_dict,
@@ -521,7 +522,6 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         from gc_core.config_modules.merge import deep_merge
         from gc_core.config_modules.root import AppConfig
         from gc_core.utils.llm_chat_client import _build_chat_completion_payload
-        from types import SimpleNamespace
 
         base = flatten_app_config(AppConfig.model_validate({}))
         merged = deep_merge(
@@ -555,12 +555,13 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
     def test_dsv4_style_agent_thinking_does_not_leak_into_aux_payload(self):
         """DeepSeek-style: aux overlay гасит thinking/reasoning_effort агента."""
+        from types import SimpleNamespace
+
         from gc_core.config import flatten_app_config
         from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
         from gc_core.config_modules.merge import deep_merge
         from gc_core.config_modules.root import AppConfig
         from gc_core.utils.llm_chat_client import _build_chat_completion_payload
-        from types import SimpleNamespace
 
         base = flatten_app_config(AppConfig.model_validate({}))
         merged = deep_merge(

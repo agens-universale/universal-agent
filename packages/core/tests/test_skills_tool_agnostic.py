@@ -8,7 +8,6 @@ mechanism itself: ``skills_list``, ``skills_load``, ``skills_run_script``,
 """
 
 import re
-from pathlib import Path
 
 import pytest
 from gc_testkit.paths import ASSETS

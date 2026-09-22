@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from gc_core.states import SharedStateData, State
 from gc_core.tools import aapply_tool
-from gc_core.tools.subagents.progress import NOOP_SUBAGENT_PROGRESS_SINK, QueueSubagentProgressSink, SubagentProgressEvent, resolve_progress_sink
+from gc_core.tools.subagents.progress import (
+    NOOP_SUBAGENT_PROGRESS_SINK,
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+    resolve_progress_sink,
+)
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit import run_coro
 

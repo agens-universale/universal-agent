@@ -2,13 +2,11 @@ import copy
 import json
 
 import pytest
-
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.schema_optional import apply_openai_strict_parameters
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_append_success_existing_file(tmp_path):
     p = tmp_path / "note.txt"
@@ -196,7 +194,7 @@ def test_append_head_truncated_utf8_still_ok(tmp_path):
     # Fill so that a 2-byte Cyrillic char sits across the sample boundary.
     prefix = b"a" * (APPEND_HEAD_SAMPLE_BYTES - 1)
     # "я" is D1 8F in utf-8 — first byte at last head slot, second beyond sample.
-    rest = "я".encode("utf-8") + b" more text\n"
+    rest = "я".encode() + b" more text\n"
     p = tmp_path / "cut.txt"
     p.write_bytes(prefix + rest)
     res = json.loads(
@@ -216,8 +214,8 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
     BOM in the middle of an existing utf-16 file, corrupting it with
     ZERO WIDTH NO-BREAK SPACE (U+FEFF) between the existing tail and the new chunk.
     """
-    from gc_core.utils.file_text import decode_text_bytes
     from gc_core.tools.fs.write_to_file_tool import WriteToFile
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "u16.txt"
     wres = json.loads(
@@ -289,8 +287,8 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
     ``text.encode(\"utf-8-sig\")`` always prepends EF BB BF, so the append path must
     encode as plain utf-8 (BOM lives only at file offset 0).
     """
-    from gc_core.utils.file_text import decode_text_bytes
     from gc_core.tools.fs.write_to_file_tool import WriteToFile
+    from gc_core.utils.file_text import decode_text_bytes
 
     p = tmp_path / "sig.txt"
     wres = json.loads(

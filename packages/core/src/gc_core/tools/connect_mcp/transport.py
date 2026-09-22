@@ -2,19 +2,16 @@
 Транспортный слой MCP: один запрос — один ответ (синхронно).
 Тип транспорта задаётся в конфиге сервера (transport: http | sse | stdio).
 """
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
 import asyncio
 import json
 import queue
 import threading
 import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import httpx
 
-from gc_core.utils.aio_compat import run_coro_blocking
-from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
-
+from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 
 _SSE_DATA_PREFIX = "data:"
 
@@ -307,11 +304,11 @@ class _LineReader:
     кроссплатформенно — ``selectors`` не работает с pipe на Windows.
     """
 
-    __slots__ = ("_queue", "_thread", "_stream")
+    __slots__ = ("_queue", "_stream", "_thread")
 
     def __init__(self, stream: "Any") -> None:
         self._stream = stream
-        self._queue: "queue.Queue[str | None]" = queue.Queue()
+        self._queue: queue.Queue[str | None] = queue.Queue()
         self._thread = threading.Thread(
             target=self._pump, daemon=True, name="mcp-stdio-reader"
         )

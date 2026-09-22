@@ -1,11 +1,10 @@
 import pytest
-
 from gc_tui.widgets.confirm_banner import (
+    _OPTIONS,
     ConfirmBanner,
     _fmt_field_value,
     _fmt_payload_value,
     _is_payload_label,
-    _OPTIONS,
     choice_for,
 )
 
@@ -96,8 +95,8 @@ def test_fmt_field_value_truncates_long():
 async def test_banner_renders_payload_and_meta_fields(tmp_path):
     """Payload-поле рендерится cb-payload; meta-поля cb-field; пустые пропускаются."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
@@ -123,9 +122,9 @@ async def test_banner_renders_payload_and_meta_fields(tmp_path):
 async def test_banner_long_payload_keeps_options_visible(tmp_path):
     """Длинный multiline payload не выталкивает Y/O/N/T за край баннера."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.widgets import Static
 
     # Много строк + длинные path'ы (как на скрине) — soft-wrap раньше съедал экран.
     long_code = "\n".join(

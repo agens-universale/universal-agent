@@ -11,14 +11,10 @@ via a CapturingFakeBackend that records the raw bytes.
 """
 import base64
 import json
-from types import SimpleNamespace
 
-import pytest
-
+from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
-from gc_core.backends.local import LocalFsBackend
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -156,8 +152,6 @@ def test_decode_failed_for_truly_invalid_base64():
     """
     # Patch validate flag by temporarily overriding b64decode — instead, rely on the
     # fact that our shim uses validate=False just like the base. Verify same behavior.
-    import base64 as _b64
-    import binascii
 
     # b"!!!" contains characters outside the base64 alphabet; with validate=False they
     # are silently ignored, so we confirm shim matches base (both succeed or both fail).
@@ -168,7 +162,8 @@ def test_decode_failed_for_truly_invalid_base64():
     harbor_env = json.loads(t(path="/work/out.bin", data=data))
 
     # Base behavior for same input
-    import tempfile, pathlib
+    import pathlib
+    import tempfile
     with tempfile.TemporaryDirectory() as d:
         p = pathlib.Path(d) / "out.bin"
         base_env = json.loads(_base()(path=str(p), data=data))

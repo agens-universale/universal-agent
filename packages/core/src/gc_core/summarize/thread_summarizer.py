@@ -2,17 +2,25 @@ from typing import Any, Dict, List
 
 from gc_core.config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.message_format import dialog_history as dialog_history
 from gc_core.intent_log import IntentRecord, serialize_for_meta
+from gc_core.message_format import dialog_history as dialog_history
 from gc_core.summarize import memory_suggestions, prompt_loading, summary_llm_steps, summary_message_body
-from gc_core.summarize.summary_validation import FALLBACK_SUMMARY, merge_repaired_summary, missing_section_tags, resolve_after_repair_failure, validate_summary_text
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.summary_logging import log_memory_patch_skipped_multi_batch, log_memory_patch_wm_unchanged
-from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas, parse_memory_deltas, resolve_persistent_state_block, should_attempt_memory_deltas_repair
+from gc_core.summarize.summary_validation import (
+    FALLBACK_SUMMARY,
+    merge_repaired_summary,
+    missing_section_tags,
+    resolve_after_repair_failure,
+    validate_summary_text,
+)
+from gc_core.summarize.working_memory_gateway import (
+    WorkingMemoryDeltas,
+    parse_memory_deltas,
+    resolve_persistent_state_block,
+    should_attempt_memory_deltas_repair,
+)
 from gc_core.utils.llm_chat_client import shorten_for_log
-
-
-
 
 
 class _NullLogger:

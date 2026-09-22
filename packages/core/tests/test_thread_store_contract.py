@@ -25,7 +25,6 @@ AST-гейт на прямые вызовы файлового слоя.
 from typing import Any
 
 import pytest
-
 from gc_core.thread_store_file import FileThreadStore
 from gc_core.thread_store_types import SubagentTraceRecord, ThreadState
 from gc_testkit.memory_thread_store import MemoryThreadStore

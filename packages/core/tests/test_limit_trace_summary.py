@@ -6,11 +6,9 @@ config kill-switch, and no working_memory injection into the prompt.
 import json
 from types import SimpleNamespace
 
-import pytest
-
+from gc_core.states import State
 from gc_core.summarize import limit_trace_summary as lts
 from gc_core.summarize import llm as summary_llm
-from gc_core.states import State
 from gc_testkit import run_coro
 
 
@@ -264,9 +262,9 @@ def test_kill_switch_wired_from_config():
     key is absent from config_dict. Unit tests that set the key by hand
     on a SimpleNamespace mask the bug.
     """
+    from gc_core.config import flatten_app_config
     from gc_core.config_modules.agent import AgentConfig
     from gc_core.config_modules.root import AppConfig
-    from gc_core.config import flatten_app_config
 
     # False case: kill-switch must reach config_dict as False
     app_cfg_off = AppConfig(agent=AgentConfig(limit_trace_summary=False))

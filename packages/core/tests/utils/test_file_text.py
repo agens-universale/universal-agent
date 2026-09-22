@@ -1,14 +1,24 @@
 import hashlib
 
 import pytest
-
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, check_expected_file_sha256, classify_file_content, decode_text_bytes, encode_text_bytes, encode_text_for_append, read_text_for_edit, sha256_hex_of_bytes, sha256_hex_of_file_bytes, try_encode_text_bytes_for_append
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    check_expected_file_sha256,
+    classify_file_content,
+    decode_text_bytes,
+    encode_text_bytes,
+    encode_text_for_append,
+    read_text_for_edit,
+    sha256_hex_of_bytes,
+    sha256_hex_of_file_bytes,
+    try_encode_text_bytes_for_append,
+)
 
 
 def test_classify_utf8_sample_boundary_cyrillic(tmp_path):
     prefix = ("а" * 4095 + "x").encode("utf-8")
     assert len(prefix) == 8191
-    data = prefix + "а".encode("utf-8")
+    data = prefix + "а".encode()
     assert len(data) > BINARY_SAMPLE_BYTES
 
     path = tmp_path / "report.md"
@@ -131,7 +141,7 @@ def test_read_text_for_edit_cp1251_via_canon(tmp_path):
 
 
 def test_decode_text_bytes_utf8_and_bom_round_trip():
-    utf8 = decode_text_bytes("hi\n".encode("utf-8"))
+    utf8 = decode_text_bytes(b"hi\n")
     assert utf8.ok and utf8.encoding_used == "utf-8" and utf8.text == "hi\n"
 
     bom8 = decode_text_bytes(b"\xef\xbb\xbfhi\n")
@@ -161,7 +171,7 @@ def test_decode_text_bytes_nul_and_legacy():
 def test_decode_text_best_effort_utf8_and_cp1251():
     from gc_core.utils.file_text import decode_text_best_effort
 
-    assert decode_text_best_effort("hi\n".encode("utf-8")) == "hi\n"
+    assert decode_text_best_effort(b"hi\n") == "hi\n"
     legacy = (
         "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
         "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"

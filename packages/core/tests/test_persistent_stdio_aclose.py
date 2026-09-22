@@ -23,7 +23,6 @@ import sys
 import time
 
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 
 #: Скрипт-двойник MCP-сервера, который ИГНОРИРУЕТ SIGTERM. Так проверяется

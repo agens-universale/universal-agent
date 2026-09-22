@@ -6,7 +6,6 @@ import pytest
 import yaml
 from gc_testkit.paths import ASSETS
 
-
 PACK_DIR = ASSETS / "skills" / "default-coworker"
 
 EXPECTED_SKILL_IDS = {

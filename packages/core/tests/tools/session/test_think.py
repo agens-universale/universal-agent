@@ -1,8 +1,7 @@
 import json
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
 from gc_core.tools.session.think import Think
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_think_success_single_field():

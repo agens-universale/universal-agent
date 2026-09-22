@@ -11,15 +11,10 @@
 
 import json
 import os
-import sys
-from unittest.mock import patch
 
 import pytest
-
-
 from gc_server.swarm import lifecycle as lc
 from gc_server.swarm import storage as storage
-
 
 # ---------------------------------------------------------------------------
 # _is_pid_alive
@@ -106,9 +101,9 @@ def test_determine_status_non_int_exit_code_failed():
 
 
 def test_final_statuses_contains_expected():
-    assert lc.FINAL_STATUSES == frozenset(
+    assert frozenset(
         {"completed", "failed", "timeout", "unknown_failed"}
-    )
+    ) == lc.FINAL_STATUSES
 
 
 # ---------------------------------------------------------------------------

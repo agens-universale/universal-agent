@@ -1,17 +1,14 @@
 import json
-
-from gc_testkit.helpers.tool_ctx import CallableTool
 import types
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from gc_core.states import State
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.session import session_compact as session_compact_module
-from gc_core.tools.session.session_compact import SessionCompact, TRIGGER_REASON
+from gc_core.tools.session.session_compact import TRIGGER_REASON, SessionCompact
 from gc_testkit import run_coro
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _state(*, backend_api_mode="chat_completions", messages=None):

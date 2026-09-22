@@ -26,7 +26,7 @@ import json
 import os
 import shutil
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Optional
 
 
@@ -38,7 +38,7 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -46,7 +46,7 @@ def _meta_timestamp(meta_path: str) -> Optional[datetime]:
     """Прочитать meta.json и вернуть самый поздний timestamp (updated_at >
     finished_at > created_at). None если не смогли распарсить или файл нечитаем."""
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
@@ -83,7 +83,7 @@ def cleanup_threads(
 
     Возвращает {threads_removed, sandboxes_removed, kept, errors}.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(hours=ttl_hours)
 
     stats = {
@@ -107,7 +107,7 @@ def cleanup_threads(
         if ts is None:
             try:
                 ts = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path), tz=timezone.utc,
+                    os.path.getmtime(entry_path), tz=UTC,
                 )
             except OSError:
                 stats["errors"] += 1
@@ -138,7 +138,7 @@ def cleanup_threads(
             # Чистим ВСЕ песочницы старше TTL по их mtime (не только orphan'ы).
             try:
                 mtime = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path), tz=timezone.utc,
+                    os.path.getmtime(entry_path), tz=UTC,
                 )
             except OSError:
                 stats["errors"] += 1

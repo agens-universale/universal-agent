@@ -2,6 +2,7 @@
 # Проверяем чистую функцию выбора outcome (вынесем её из спадающего фронта).
 from gc_tui.screens.main import resolve_terminal_outcome
 
+
 def test_step_limit_maps_to_stopped_steps():
     assert resolve_terminal_outcome(
         runner_error=None, stop_requested=False, terminal_outcome="step_limit",

@@ -19,8 +19,8 @@ class _FakeRunner:
 @pytest.mark.asyncio
 async def test_refresh_updates_mounted_answer_row(tmp_path):
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     tid = "ref1"
     _write_task(tmp_path, tid)

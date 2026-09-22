@@ -1,7 +1,6 @@
 """SkillPicker — чистая логика фильтра/навигации (без mount/app)."""
 import pytest
 
-
 _SKILLS = [
     {"id": "supercoder:planner"},
     {"id": "supercoder:coder"},

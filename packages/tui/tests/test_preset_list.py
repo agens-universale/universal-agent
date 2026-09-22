@@ -5,11 +5,10 @@ import pytest
 
 pytest.importorskip("textual")
 
+from gc_core.config_modules.endpoint_presets import EndpointPreset
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, Static
-
-from gc_core.config_modules.endpoint_presets import EndpointPreset
 
 _HINT = "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
 

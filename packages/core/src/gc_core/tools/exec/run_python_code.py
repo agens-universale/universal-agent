@@ -1,11 +1,9 @@
-import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.backends.async_protocol import aexec_port
-from gc_core.config_modules.agent import exec_timeout_from_config_dict
-from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict, exec_timeout_from_config_dict
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import effective_command_cwd, moderate_command_execution

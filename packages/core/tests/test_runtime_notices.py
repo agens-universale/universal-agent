@@ -1,18 +1,18 @@
 """Runtime notices: LLM failures → ephemeral Notice list."""
 from __future__ import annotations
-from gc_testkit import as_coro
 
-import json
-from types import SimpleNamespace
-
-import pytest
 import httpx
-
+import pytest
 from gc_core import request_backend_policy as policy
-from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
+from gc_core.runtime_notices import (
+    clear_runtime_notices,
+    collect_runtime_notices,
+    notice_from_llm_failure,
+    push_runtime_notice,
+)
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:

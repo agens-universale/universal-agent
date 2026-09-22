@@ -5,10 +5,8 @@
 """
 import asyncio
 import json
-import threading
 
 import pytest
-
 from gc_core.tools import aapply_tool
 
 

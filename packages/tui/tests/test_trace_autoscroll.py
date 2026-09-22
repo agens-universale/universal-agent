@@ -18,8 +18,8 @@ async def test_at_bottom_true_when_no_overflow(tmp_path):
 @pytest.mark.asyncio
 async def test_autoscroll_skipped_when_scrolled_up(tmp_path):
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -35,8 +35,8 @@ async def test_autoscroll_skipped_when_scrolled_up(tmp_path):
 @pytest.mark.asyncio
 async def test_autoscroll_follows_when_at_bottom(tmp_path):
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -52,8 +52,8 @@ async def test_autoscroll_follows_when_at_bottom(tmp_path):
 @pytest.mark.asyncio
 async def test_user_send_pending_forces_scroll(tmp_path):
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -71,8 +71,8 @@ async def test_thinking_indicator_unhide_does_not_scroll_trace(tmp_path):
     """Индикатор докнут в #indicator-bar (вне скролла), всегда виден — его unhide
     больше НЕ двигает вид #trace (раньше доводил вид до плашки в скролл-потоке)."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -92,8 +92,8 @@ async def test_thinking_indicator_unhide_does_not_scroll_trace(tmp_path):
 async def test_thinking_indicator_unhide_skipped_when_scrolled_up(tmp_path):
     """Разворот скрытого индикатора НЕ дёргает вид, если юзер отскроллен вверх."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -114,8 +114,8 @@ async def test_thinking_indicator_reshow_visible_does_not_scroll(tmp_path):
     """Повторный показ уже видимого индикатора (обычный тик «думаю») не скроллит —
     высота не меняется, вид не дёргаем даже у низа."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -135,8 +135,8 @@ async def test_command_output_forces_scroll(tmp_path):
     """Команда, которая что-то пишет в трейс (неизвестная команда → ошибка),
     форсит скролл вниз, даже если юзер отскроллен вверх — это его действие."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -154,8 +154,8 @@ async def test_command_opening_screen_does_not_scroll(tmp_path):
     """Команда, которая открывает экран (/help) и НЕ пишет в трейс, не дёргает
     скролл — позиция чтения истории сохраняется."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -175,8 +175,8 @@ async def test_user_send_force_scrolls_to_very_bottom(tmp_path):
     до САМОГО низа, чтобы свежий запрос был виден. scroll_end сразу после mount()
     не достаёт (max_scroll_y ещё не учёл новый виджет) — нужен call_after_refresh."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen

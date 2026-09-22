@@ -12,7 +12,6 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
-
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
 _NO_MATCH = "(нет совпадений)"
 

@@ -1,10 +1,10 @@
 """List/by-name walk enumeration + native grep smoke (gate-pass patterns)."""
 import json
 
-from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.tools.fs.list_files import ListFiles
-from gc_core.tools.fs.find_files_by_name import FindFilesByName
+from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
 def test_list_files_walk_envelope(tmp_path):

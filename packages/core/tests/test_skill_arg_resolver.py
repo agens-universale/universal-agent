@@ -1,6 +1,4 @@
-import pytest
-
-from gc_core.tools.skills.skill_arg_resolver import SkillCatalog, Resolved, Failed, resolve_skill_arg, FUZZY_CUTOFF
+from gc_core.tools.skills.skill_arg_resolver import FUZZY_CUTOFF, Failed, Resolved, SkillCatalog, resolve_skill_arg
 
 
 def _catalog():

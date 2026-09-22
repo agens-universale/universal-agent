@@ -21,7 +21,6 @@
 import asyncio
 
 import pytest
-
 from gc_core.mcp_session_owner import (
     current_owner,
     new_owner_token,

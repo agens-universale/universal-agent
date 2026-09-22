@@ -103,14 +103,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.config_modules.env_vars import ensure_project_gc_dir, project_local_config_path
     ensure_project_gc_dir()
 
+    from gc_core import onboarding
     from gc_core.config import (
-        load_config_ex,
+        _bootstrap_user_config,
         apply_cli_overrides,
+        load_config_ex,
         resolve_config_path,
         user_config_path,
-        _bootstrap_user_config,
     )
-    from gc_core import onboarding
 
     onb_write_path = user_config_path()
     onboarding_mode = None

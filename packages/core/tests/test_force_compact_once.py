@@ -1,6 +1,7 @@
 """force_compact_once: один безусловный проход сжатия (без проверки порога)."""
 import importlib
 import types
+
 from gc_testkit import run_coro
 
 

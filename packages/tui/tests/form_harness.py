@@ -167,8 +167,8 @@ async def settings_voice_section(tmp_path, *, mode="cloud", probe=None,
     Реальные слои конфига и каталог данных батарейки подменены на tmp: без этого
     вердикт секции зависел бы от машины (~/.gc/config.local.yml пишет наш же UI)."""
     from gc_tui import app as app_mod
-    from test_settings_voice import CLOUD_CONFIG, _mk_screen
     from gc_tui.services.voice_setup import VoiceStatus
+    from test_settings_voice import CLOUD_CONFIG, _mk_screen
     status = VoiceStatus(
         installed=installed,
         service_alive=installed and mode == "local",
@@ -198,8 +198,8 @@ async def settings_mcp_section(tmp_path, *, servers=()):
     ходит в манифест и в конфиг машины."""
     from gc_tui import app as app_mod
     from gc_tui.services import mcp_manager as mcp_manager_mod
-    from test_settings_screen import _cfg, _mk_screen, _write_cfg
     from gc_tui.services.mcp_manager import McpRow, McpState
+    from test_settings_screen import _cfg, _mk_screen, _write_cfg
     rows = [s if isinstance(s, McpRow) else McpRow(s, wired=False, manual=False)
             for s in servers]
 
@@ -238,8 +238,8 @@ async def mounted_model_editor(tmp_path, *, models):
 
     `tmp_path` — ради единой формы вызова с соседними хелперами; сам харнес
     (`_harness` из test_editors_model) файлов не трогает."""
-    from test_editors_model import _harness
     from gc_tui.editors.model import ModelEditor
+    from test_editors_model import _harness
     ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True,
                      fetch=lambda *a, **k: list(models))
     app = _harness(ed)
@@ -255,9 +255,9 @@ async def wizard_voice_step(tmp_path, *, mode="cloud", installed=False, models=N
     зависит от курсора, а выбор — отдельное действие, и тесты про него разные.
 
     `models` — что отдаст endpoint на запрос списка (None = не достучались)."""
-    from test_onboarding_voice_step import FakeVoice, _screen, _to_voice_step
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
+    from test_onboarding_voice_step import FakeVoice, _screen, _to_voice_step
     keys = [k for k, _t, _d in _VOICE_OPTIONS]
     with _isolated_voice_data(tmp_path):
         app = TuiApp(config={"model": "M"})
@@ -285,9 +285,10 @@ async def wizard_connection_step(tmp_path):
     Работа идёт из `tmp_path`: снимок/сценарий не должен зависеть от того, из
     какого каталога запущен pytest."""
     import os
+
+    from gc_tui.app import TuiApp
     from test_onboarding_screen import _screen
     from test_onboarding_voice_step import FakeVoice
-    from gc_tui.app import TuiApp
     cwd = os.getcwd()
     os.chdir(tmp_path)
     try:

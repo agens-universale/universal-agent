@@ -18,7 +18,6 @@ import logging
 import types
 
 import pytest
-
 from gc_core.aio import AsyncAgent
 
 #: Потолок ожидания в тестах: зависший ход — красный тест, а не вечный набор.

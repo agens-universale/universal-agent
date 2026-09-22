@@ -1,8 +1,7 @@
-import pytest
 from pathlib import Path
 
+import pytest
 import yaml
-
 from gc_core import onboarding_config_writer as w
 
 
@@ -531,6 +530,7 @@ def test_uncomment_template_block_reads_the_tight_comment_form_too():
 
 def _real_template() -> str:
     from pathlib import Path
+
     from gc_core.config import _default_config_path
     return Path(_default_config_path()).read_text(encoding="utf-8")
 
@@ -692,6 +692,7 @@ def test_write_values_extends_a_partially_live_section(tmp_path):
     Второй top-level блок при этом заводить по-прежнему нельзя: PyYAML на дублях не
     ругается и молча берёт последний — юзерский url тихо потерялся бы."""
     import re
+
     import yaml
     from gc_core.config import _default_config_path, validate_config_text
 

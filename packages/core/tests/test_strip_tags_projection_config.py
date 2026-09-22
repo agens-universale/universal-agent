@@ -1,7 +1,6 @@
 """TDD: strip_tags_projection normalize + load_config → snapshot for callers."""
 
 import yaml
-
 from gc_core.config import load_config
 from gc_core.config_modules.strip_tags_projection import (
     StripTagsProjectionConfig,

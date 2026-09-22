@@ -464,9 +464,9 @@ def athread_store(store: Any, *, warn: Optional[Any] = None) -> AsyncThreadStore
 
 __all__ = [
     "ASYNC_CONTRACT_METHODS",
-    "AsyncThreadStore",
     "SLOW_CALL_PROBE_COUNT",
     "SLOW_CALL_WARN_SEC",
+    "AsyncThreadStore",
     "SyncThreadStoreAdapter",
     "ThreadStoreContractError",
     "athread_store",

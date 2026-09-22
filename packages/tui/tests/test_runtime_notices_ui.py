@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import pytest
-
 from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
 from gc_core.startup_notices import Notice
-from gc_tui.services.notices_ui import WARN_GLYPH   # в значке вариационный селектор
+from gc_tui.services.notices_ui import WARN_GLYPH  # в значке вариационный селектор
 
 
 @pytest.mark.asyncio

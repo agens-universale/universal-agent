@@ -3,9 +3,7 @@ import socket
 
 import httpx
 import pytest
-
 from gc_testkit.net_support import tls_failure
-
 from gc_tui.voice import transcriber as tr
 from gc_tui.voice.errors import VoiceError
 from gc_tui.voice_runtime import net as net

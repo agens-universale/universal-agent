@@ -36,8 +36,8 @@ def _write_task(tmp_path, tid):
 async def test_footer_left_empty_state_no_back_no_stop_no_export():
     """Empty state: F-hotkeys chrome; без /mcp, [Esc], /stop, /export, Ctrl+a."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
         rendered = str(pilot.app.query_one("#footer-left", Static).render())
@@ -62,8 +62,8 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
 async def test_footer_left_task_idle_no_stop(tmp_path):
     """Task active, no active_runner → тот же набор команд, /stop НЕТ."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     tid = "idle1"
     _write_task(tmp_path, tid)
@@ -99,8 +99,8 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
     нужно правой колонке (стрелка перехода, сегмент «запрос»). Бейдж
     уведомлений — исключение: он виден всегда."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     class _FakeRunner:
         def is_running(self) -> bool: return True
@@ -134,8 +134,8 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
 async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
     """Когда runner перестаёт is_running() → /stop исчезает в следующий тик."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     class _FakeRunner:
         def __init__(self) -> None:
@@ -172,8 +172,8 @@ async def test_footer_badge_counts_update_notice():
     иначе одно и то же утверждалось бы дважды. Футер такой строки не имеет: без
     счётчика признак исчезает вместе с карточкой при скролле."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
         pilot.app._update_available = True
@@ -191,8 +191,8 @@ async def test_footer_shows_notices_badge_and_buffer_key_together():
     теста ни один прогон не проверял их ВМЕСТЕ. Рефакторинг любой из половин мог
     незаметно вытеснить вторую."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
         pilot.app._update_available = True          # даёт непустой счётчик футера
@@ -214,8 +214,8 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
     Частичный перенос (счётчик наверху, «F4/notices» внизу) читался как два обрывка,
     а точка в начале строки ничего не разделяет (живая приёмка 2026-08-07)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     async with TuiApp().run_test(size=(48, 24)) as pilot:
         pilot.app._update_available = True          # непустой счётчик футера
@@ -299,8 +299,8 @@ def test_footer_left_never_renders_three_rows():
 
     Порядок жертв: подсказка «F4/notices» уходит раньше счётчиков, счётчики —
     раньше команд."""
-    from rich.cells import cell_len
     from gc_tui.services.notices_ui import footer_left_with_badge, format_notices_badge
+    from rich.cells import cell_len
 
     commands = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
     # Бейдж собирает прод (`format_notices_badge`), а не тест руками: склеенное
@@ -325,8 +325,8 @@ def test_footer_left_guard_keeps_stop_key_at_any_width():
     без единственного способа остановить агента — и было хуже, чем на базе, где
     терялся хвост бейджа. Ужимается бейдж; команды — последнее, что снимается
     слева."""
-    from rich.cells import cell_len
     from gc_tui.services.notices_ui import footer_left_with_badge, format_notices_badge
+    from rich.cells import cell_len
 
     commands = "Ctrl+C/stop"
     badge = format_notices_badge(_notices(warnings=4, infos=2))

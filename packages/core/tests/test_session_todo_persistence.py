@@ -60,8 +60,8 @@ def test_session_todo_survives_compaction_via_post_run_heal():
 
     Известный pre-existing разрыв (обрыв рана до heal) — см. память
     compaction-drops-shared-fields; тут пиннится именно нормальный путь."""
-    from gc_core.states import SharedStateData, State
     from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+    from gc_core.states import SharedStateData, State
 
     state = State(
         verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
@@ -87,6 +87,7 @@ def test_session_todo_survives_compaction_payload():
     (поле есть только в этой ветке, поэтому тест живёт отдельно от фикса)."""
     import types
     from unittest.mock import patch
+
     from gc_core.summarize.compaction import arun_summary_compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 

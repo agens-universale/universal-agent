@@ -37,14 +37,12 @@ def _midrun_delivery_rec(skill_id: str = "qa-x") -> dict:
 
 def _count_skill_markers(scr) -> int:
     """Считает [skill]-маркеры в #trace (line-meta-строки с 'загружен')."""
-    from textual.widgets import Static
     texts = [str(w.render()) for w in scr.query("#trace Static")]
     return sum(1 for t in texts if "загружен" in t)
 
 
 def _count_user_replies(scr) -> int:
     """Считает UserReplyContainer в #trace."""
-    from gc_tui.widgets.user_reply import UserReplyContainer
     return len(list(scr.query("#trace UserReplyContainer")))
 
 

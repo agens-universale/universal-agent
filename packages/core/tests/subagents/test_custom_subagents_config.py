@@ -1,9 +1,8 @@
 """Конфиг-ключи agent.subagents_dir / agent.subagents_max_count."""
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
+from pydantic import ValidationError
 
 
 def _flat(agent_extra=None):

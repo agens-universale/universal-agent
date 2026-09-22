@@ -5,15 +5,15 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from gc_core.intent_guard import guard as intent_guard_guard
-from gc_core import processing_responses as pr
 import pytest
+from gc_core import processing_responses as pr
+from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE
 from gc_core.processing_responses import (
+    _split_batch_new_around_finish,
     arun_agent,
     partition_work_then_finish,
-    _split_batch_new_around_finish,
 )
 from gc_core.states import State
 from gc_core.tools.turn.submit_solution import SubmitSolution

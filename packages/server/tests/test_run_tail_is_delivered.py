@@ -18,7 +18,6 @@ import types
 
 import httpx
 import pytest
-
 from gc_server import server
 from gc_server.rest_api import agent_execution_registry as registry_module
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry

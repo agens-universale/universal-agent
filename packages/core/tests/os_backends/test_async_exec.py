@@ -4,15 +4,14 @@
 нельзя не читать — заполненный буфер блокирует запись в дочернем процессе.
 """
 import asyncio
-import pytest
 import sys
 import threading
 import time
 
+import pytest
 from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult
-import shlex
 
 
 async def test_exec_runs_and_captures_output():

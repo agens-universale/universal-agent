@@ -1,8 +1,8 @@
 """Гвозди приёмки /rigor (спека §8): резолвер-матрица, custom-правило, эфемерная
 позиция, smart-гейт, сессионность пары. Живые UI-гейты — в смоуке (см. план §смоук)."""
 import pytest
-from gc_testkit.paths import REPO
 from gc_testkit import run_coro
+from gc_testkit.paths import REPO
 
 
 def _app(tmp_path, yaml_text):
@@ -39,7 +39,7 @@ def test_custom_unreachable_by_stepping(tmp_path):
     позицией. apply_toggle на custom по-прежнему падает ValueError, не трогая
     сессию (см. test_apply_toggle_rejects_custom в test_palette_rigor.py)."""
     pytest.importorskip("textual")
-    from gc_tui.toggles import apply_toggle, next_toggle_value, PRESET_CUSTOM
+    from gc_tui.toggles import PRESET_CUSTOM, apply_toggle, next_toggle_value
     b = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')   # custom с самого начала
 
     for direction in (1, -1):
@@ -55,8 +55,8 @@ def test_custom_unreachable_by_stepping(tmp_path):
 def test_session_pair_not_preset_survives(tmp_path):
     """Сессионность работает для ПАРЫ значений, не для пресета (пресет не хранится)."""
     pytest.importorskip("textual")
-    from gc_tui.session_settings import read_from_meta
     from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.session_settings import read_from_meta
     a = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
     from gc_tui.toggles import apply_toggle
     apply_toggle(a, "rigor", "low")
@@ -97,6 +97,7 @@ def test_smart_gate_counts_failed_and_subagent_calls():
     (Инкремент упавшего проверяется размещением ДО try в process_tool_calls — здесь
     фиксируем гейт-логику guard на прямом значении счётчика.)"""
     from types import SimpleNamespace
+
     from gc_core.intent_guard.guard import FinishGateGuard
     cfg = {"backend_api_mode": "chat_completions",
            "strict_turn_finish_validation": True, "finish_gate_smart": True}
@@ -115,6 +116,7 @@ def test_turn_tool_calls_counter_survives_summary_compaction():
     (сброс — только на границе хода, см.
     `test_state_counter_starts_zero_and_resets_on_flush`)."""
     from types import SimpleNamespace
+
     from gc_core.summarize.compaction import apply_summary_state_patch
 
     state = SimpleNamespace(
@@ -202,6 +204,7 @@ def test_shipped_templates_resolve_to_medium():
     парсим и валидируем как настоящий загрузчик (`flatten_app_config`), без
     файловых side-effect'ов `load_config` (XDG/project-оверлеи не при чём)."""
     from pathlib import Path
+
     import yaml
     from gc_core.config import _default_config_path, flatten_app_config
     from gc_core.config_modules.root import AppConfig
@@ -223,8 +226,8 @@ async def test_help_screen_lists_gate_and_answers_details():
     `/answers` остаются в `/help` всегда, даже когда в подвале скрыты по
     умолчанию."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.help import HelpScreen
+    from textual.app import App
 
     class _A(App):
         def on_mount(self):
@@ -242,8 +245,8 @@ async def test_help_detail_toggles_carry_rigor_setting_cue():
     каталоге читался бы как «выключено»). Родитель /rigor хвоста не несёт.
     Generic по `owning_preset_name` — без хардкода имён."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.help import HelpScreen
+    from textual.app import App
 
     class _A(App):
         def on_mount(self):
@@ -267,6 +270,7 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
     завершитель хода, см. TURN_FINALIZING_TOOLS) — тем же путём идёт и вызов
     сабагента, без спецкейса по имени тула."""
     from types import SimpleNamespace
+
     from gc_core import processing_responses as pr
 
     # Класс исключения берём ОТТУДА, где его ловят. Соседние тесты подменяют

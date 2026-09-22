@@ -19,8 +19,6 @@ import asyncio
 import inspect
 import threading
 
-import pytest
-
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 

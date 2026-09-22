@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import heapq
 import logging
-import os
 import re
 import shlex
 from dataclasses import dataclass

@@ -8,14 +8,13 @@
 """
 
 from __future__ import annotations
-from gc_testkit import as_coro
 
 import json
 from types import SimpleNamespace
 
 from gc_core.states import State
 from gc_core.tools import is_internal_tool_error_output
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _make_state(**overrides):

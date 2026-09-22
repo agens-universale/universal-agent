@@ -8,21 +8,20 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Input, Rule, Static
-from rich.text import Text
 
 from gc_tui.editors.field_list import LIST_CLOSED_HINT
 from gc_tui.editors.models_section import FOOTER_PROFILE_BACK
 from gc_tui.editors.voice_endpoint import _MODEL_RELOAD_HINT, _URL_REQUIRED
+from gc_tui.form_frame import EPHEMERAL, KEEP_IN_VIEW, KEEP_UNTIL_DISMISSED, cap_frame_height, reveal, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from gc_tui.services.probe_presentation import connection_line_text
-from gc_tui.form_frame import (EPHEMERAL, KEEP_IN_VIEW, KEEP_UNTIL_DISMISSED,
-                            cap_frame_height, reveal, reveal_focus)
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
 SECTIONS = ("Подключение", "Модели", "Профили", "MCP-серверы", "Голосовой ввод",
@@ -783,7 +782,7 @@ class SettingsScreen(Screen):
 
     # --- значения для меню (правый столбец, dim) ---
     def _row_value(self, i: int) -> Text:
-        from gc_core.onboarding import display_secret, display_value, env_ref_status, TOKEN_SENTINEL
+        from gc_core.onboarding import TOKEN_SENTINEL, display_secret, display_value, env_ref_status
         v = Text()
         if i == _CONNECTION:
             url = self._raw_value("completions_url")
@@ -798,7 +797,7 @@ class SettingsScreen(Screen):
             else:
                 mode = "Bearer"
             proxy = self._raw_value("proxy")
-            proxy_part = f" · прокси" if proxy else ""
+            proxy_part = " · прокси" if proxy else ""
             v.append(f"{host} · {mode}{proxy_part}", style=DIM)
         elif i == _MODELS:
             # Реестр есть — превью про него («N в реестре · default …»); реестра нет
@@ -1500,6 +1499,7 @@ class SettingsScreen(Screen):
         был потерян: `Path(None)` роняет TypeError, `Path("")` резолвится в cwd и
         объявлял бы запись разрешённой)."""
         from pathlib import Path
+
         from gc_core.config import _default_config_path
         if not target:
             return False
@@ -1592,8 +1592,9 @@ class SettingsScreen(Screen):
         elif section == _MODELS:
             from gc_core.config import _default_config_path
             from gc_core.config_modules.endpoint_presets import endpoint_presets_from_config
-            from gc_tui.editors.models_section import ModelsSectionEditor
             from gc_core.utils.user_text import read_user_text_or_none
+
+            from gc_tui.editors.models_section import ModelsSectionEditor
             endpoint, auth, verify, _m, proxy = self._probe_args_from_config()
             # шаблона нет или он не читается — якорь секции синтезирует сам writer
             template = read_user_text_or_none(_default_config_path()) or ""
@@ -1747,6 +1748,7 @@ class SettingsScreen(Screen):
         «Модель» до поглощения: в пустом реестре он и есть секция, при живом реестре
         — под-форма строки «резервная модель»."""
         from gc_core.model_picker import fetch_models
+
         from gc_tui.editors.model import ModelEditor
         from gc_tui.services.model_list_cache import make_cached_fetch
         # За списком моделей ходим ДЕЙСТВУЮЩИМИ (резолвнутыми) адресом и токеном;
@@ -1998,7 +2000,7 @@ class SettingsScreen(Screen):
         # на строке режима — не забирать фокус вовсе.
         cursor_field = self._voice_cursor_field() or False
         if self._voice_pane == "local":
-            from gc_tui.voice_runtime.wire import local_url    # формат адреса — у владельца wire
+            from gc_tui.voice_runtime.wire import local_url  # формат адреса — у владельца wire
             frame.mount(VoiceEndpointEditor(
                 values={"url": local_url(s.port),
                         "token": _VOICE_LOCAL_TOKEN,
@@ -2896,8 +2898,8 @@ class SettingsScreen(Screen):
             self._set_probe_line(Text(f"{_URL_REQUIRED} — проверка стучится на него",
                                       style=DEEP_DIM))
             return
-        from gc_core.onboarding import _valid_endpoint_url
         from gc_core import config_raw
+        from gc_core.onboarding import _valid_endpoint_url
         if not _valid_endpoint_url(url) and not config_raw.env_refs(url):
             # §2.3 спеки 2026-08-06: пока список URL раскрыт, в поле может лежать
             # ФИЛЬТР, а не адрес — бить пробой по нему вслепую нечестно (та же поправка,
@@ -3084,13 +3086,13 @@ class SettingsScreen(Screen):
         return max(0, widgets[-1].region.width - 2)
 
     def _mode_row_text(self, name: str, selected: bool) -> Text:
-        from gc_tui.toggles import TOGGLES, padded_track, toggle_state, toggle_state_base, PRESET_CUSTOM
+        from gc_tui.toggles import PRESET_CUSTOM, TOGGLES, padded_track, toggle_state, toggle_state_base
         spec = TOGGLES[name]
         current = toggle_state_base(self.app, name)   # секция правит глобал → трек = глобал
         label_w, base_w, extra_w, value_w = self._modes_columns()
         is_child = self._modes_is_child(name)
         head = self._modes_head(name)
-        extra = (True if current == PRESET_CUSTOM else False) if spec.preset_keys else None
+        extra = (current == PRESET_CUSTOM) if spec.preset_keys else None
         track = padded_track(spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w)
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)   # курсор — конвенция меню/«Обновления»
@@ -3174,8 +3176,13 @@ class SettingsScreen(Screen):
         + подсказка ГЛОБАЛЬНОГО состояния. Для строки-пресета в состоянии custom —
         динамический custom-хинт (спека §5)."""
         from gc_tui.toggles import (
-            _fit_value_hint, TOGGLES, toggle_state_base, preset_custom_hint, PRESET_CUSTOM,
-            dynamic_toggle_hint, modes_section_names,
+            PRESET_CUSTOM,
+            TOGGLES,
+            _fit_value_hint,
+            dynamic_toggle_hint,
+            modes_section_names,
+            preset_custom_hint,
+            toggle_state_base,
         )
         names = modes_section_names()
         if not names:
@@ -3333,7 +3340,8 @@ class SettingsScreen(Screen):
         переопределения НЕ трогаем — их перекрытие показывает пометка §6.2."""
         from gc_core import onboarding_config_writer as w
         from gc_core.config import _default_config_path, validate_config_text
-        from gc_tui.toggles import cycle_value, TOGGLES, toggle_state_base, PRESETS, modes_section_names
+
+        from gc_tui.toggles import PRESETS, TOGGLES, cycle_value, modes_section_names, toggle_state_base
         names = modes_section_names()
         name = names[self._modes_idx]
         spec = TOGGLES[name]
@@ -3410,6 +3418,7 @@ class SettingsScreen(Screen):
     # --- секция «Профили» (витрина обоих корней + единое правило записи) ---
     def _profiles_base_path(self):
         from pathlib import Path
+
         from gc_core.config import _default_config_path
         return Path(self._config_path or _default_config_path())
 
@@ -3420,6 +3429,7 @@ class SettingsScreen(Screen):
         «Режимах работы»."""
         import os
         from pathlib import Path
+
         from gc_core.config_modules.profiles import discover_all_refs, profile_roots
         roots = profile_roots(Path(os.getcwd()), self._profiles_base_path())
         grouped = discover_all_refs(roots)
@@ -3622,6 +3632,7 @@ class SettingsScreen(Screen):
         Правило корней живёт в одном месте — `profile_roots` (проектный первым)."""
         import os
         from pathlib import Path
+
         from gc_core.config_modules.profiles import profile_roots
         return profile_roots(Path(os.getcwd()), self._profiles_base_path())[1]
 
@@ -3771,10 +3782,11 @@ class SettingsScreen(Screen):
         мусорный файл `имя`: NTFS читает двоеточие как альтернативный поток и заводит
         под него носитель. Отвергаем на всех платформах: профиль, созданный на Linux,
         едет вместе с проектом, и там же он и ломается."""
-        from gc_core.config_modules.model_registry import RESERVED_WORDS
-        from gc_core.config_modules.profiles import discover_all_refs, profile_roots
         import os
         from pathlib import Path
+
+        from gc_core.config_modules.model_registry import RESERVED_WORDS
+        from gc_core.config_modules.profiles import discover_all_refs, profile_roots
         if not name:
             return "введите имя профиля"
         if "/" in name or "\\" in name or name in (".", ".."):
@@ -5030,8 +5042,8 @@ class SettingsScreen(Screen):
         if r.status == "update":
             self._update_idx = 0        # «Обновить агента» первым, см. §5
         import time
-        from gc_core import app_version
-        from gc_core import upgrade_gate
+
+        from gc_core import app_version, upgrade_gate
         from gc_core.updater.check import record_check_result, update_available_from_state
         src = app_version.install_source()
         installed = src.commit if src else None
@@ -5060,6 +5072,7 @@ class SettingsScreen(Screen):
         if not self._update_awaiting_confirm:
             return
         import os
+
         from gc_core import app_version
         from gc_core.updater.check import extra_args
         from gc_core.updater.runner import build_install_command, install_location_phrase, spawn_detached_update
@@ -5087,6 +5100,7 @@ class SettingsScreen(Screen):
             self._notice("✗ пакетный шаблон не обновляется")
             return
         from pathlib import Path
+
         from gc_core.config import _default_config_path
         try:
             user_text = Path(self._config_path).read_text(encoding="utf-8")
@@ -5788,8 +5802,8 @@ class SettingsScreen(Screen):
             event.stop()
             if not self._writable():
                 return                      # read-only: редактора нет, проверять нечего
-            from gc_core.onboarding import _valid_endpoint_url
             from gc_core import config_raw
+            from gc_core.onboarding import _valid_endpoint_url
             url = self._connection_editor().peek()[0]
             if url and not _valid_endpoint_url(url) and not config_raw.env_refs(url):
                 # §2.3: пока список раскрыт, в поле может лежать ФИЛЬТР, а не адрес —

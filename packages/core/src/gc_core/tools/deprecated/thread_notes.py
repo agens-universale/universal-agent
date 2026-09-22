@@ -71,7 +71,7 @@ class ThreadNotes(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        return f'''Tool name: thread_notes
+        return '''Tool name: thread_notes
 Tool description: Persistent per-thread markdown notes stored in thread meta. Can be read, appended, or rewritten.
 
 Mandatory workflow (use it to avoid contradictions across turns):
@@ -92,7 +92,7 @@ Append safety rule:
 - For action="append", the `content` MUST be ONLY the new delta (not the whole file), otherwise you'll get duplicated sections.
 Write should be rare:
 - For action="write", resend the entire updated notes only when you need a full rewrite/correction.
-Input schema: {{"type":"object","properties":{{"action":{{"type":"string","enum":["read","append","write"]}}, "content":{{"type":"string","description":"Markdown text for append/write"}}}},"required":["action"],"additionalProperties":false}}
+Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["read","append","write"]}, "content":{"type":"string","description":"Markdown text for append/write"}},"required":["action"],"additionalProperties":false}
 
 Usage:
 - action="read": load current notes.
@@ -100,14 +100,14 @@ Usage:
 - action="write": replace notes completely with updated markdown.
 
 Return format (JSON string):
-{{
+{
   "tool":"thread_notes",
   "ok": true|false,
   "action": "read|append|write",
   "length": number,
-  "error": null|{{"type":"...","message":"..."}},
+  "error": null|{"type":"...","message":"..."},
   "notes_md": "..." (only for read; last field)
-}}
+}
 '''
 
     @staticmethod

@@ -88,10 +88,10 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
       - периметр path_policy съезжал со снапшота на живой os.getcwd(), хотя агент мог
         сделать cd внутри сессии.
     """
-    from gc_tui.app import TuiApp
     from gc_core import config as cfg_mod
     from gc_core import thread_store as ts_mod
     from gc_core.config_modules.profiles import ProfileMeta
+    from gc_tui.app import TuiApp
 
     on_disk = {"completions_url": "https://h/v1/chat/completions",
                "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"}

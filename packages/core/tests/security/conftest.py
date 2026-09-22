@@ -1,6 +1,5 @@
 import sys
 import types
-from pathlib import Path
 
 import pytest
 from _pytest.python import Module
@@ -29,7 +28,7 @@ def _stub_packages() -> dict:
     stored_pkg = types.ModuleType("gc_core.tools.session.stored_outputs")
     stored_pkg.__path__ = [str(tools_dir / "session" / "stored_outputs")]
     sys.modules["gc_core.tools.session.stored_outputs"] = stored_pkg
-    setattr(sys.modules["gc_core.tools.session"], "stored_outputs", stored_pkg)
+    sys.modules["gc_core.tools.session"].stored_outputs = stored_pkg
 
     return saved
 

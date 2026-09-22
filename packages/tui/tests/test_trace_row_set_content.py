@@ -1,7 +1,7 @@
 import pytest
+from gc_tui.widgets.trace_row import TraceRow
 from textual.app import App
 from textual.widgets import Static
-from gc_tui.widgets.trace_row import TraceRow
 
 
 @pytest.mark.asyncio

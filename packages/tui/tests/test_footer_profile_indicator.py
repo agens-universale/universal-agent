@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-
 _LONG_NAME = "very-long-profile-name"   # 22 символа
 _CEILING = _LONG_NAME[:13] + "…"        # потолок: 13 символов + «…» = 14 колонок
 _FLOOR = _LONG_NAME[:4] + "…"           # минимум: 4 символа + «…» = 5 колонок
@@ -23,8 +22,8 @@ async def test_footer_profile_name_truncated_to_ceiling_even_on_wide_screen(tmp_
     избытком — длинное имя профиля не должно отжирать футер целиком."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -43,8 +42,8 @@ async def test_footer_profile_name_shrinks_toward_floor_under_width_deficit(tmp_
     здесь ровно до минимума (5 колонок, Task 17), а не снимается сразу целиком."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -65,8 +64,8 @@ async def test_footer_profile_name_dropped_entirely_below_floor_dot_stays(tmp_pa
     целиком (прежнее поведение), точка-индикатор уровня остаётся на месте."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -87,8 +86,8 @@ async def test_footer_dot_present_across_truncation_ladder(tmp_path, monkeypatch
     деградации имени профиля — потолок / сжатие / снятие целиком."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -121,8 +120,8 @@ async def test_footer_dot_present_without_active_profile(tmp_path, monkeypatch):
 async def test_footer_shows_profile_name_before_dot_when_active(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -139,8 +138,8 @@ async def test_footer_dot_color_matches_active_level_from_toggles(tmp_path, monk
     """Цвет точки — ИЗ TOGGLES["level"], не хардкод (light=INK, max=ACCENT)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_tui import palette as p
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m", "level": "light"})
     app._config_path = str(tmp_path / "config.yml")
@@ -162,8 +161,8 @@ async def test_footer_drops_profile_name_first_on_narrow_width_keeps_dot(tmp_pat
     остаётся (§ брифа: «первым снимается имя профиля»)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -183,8 +182,8 @@ async def test_footer_keeps_profile_name_when_width_allows(tmp_path, monkeypatch
     месте, деградация не срабатывает зря."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -209,11 +208,11 @@ async def test_footer_stacks_usage_before_dropping_profile(tmp_path, monkeypatch
     С профилем."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
-    from gc_tui.app import TuiApp
-    from gc_tui.services.usage_meter import compose_adaptive_footer_right
     from gc_core.config_modules.profiles import ProfileRef
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+    from gc_tui.app import TuiApp
+    from gc_tui.services.usage_meter import compose_adaptive_footer_right
+    from rich.cells import cell_len
 
     class _FakeRunner:
         def __init__(self, snapshot):
@@ -311,8 +310,8 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(tmp_
     уровня + новая модель (спека Task 15, пример 1)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -337,9 +336,9 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
     ужато, композиция «профиль + переход с точкой» видна целиком в одной строке."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
-    from gc_core.model_router import ModelRouter
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -368,8 +367,8 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(tmp
     профиля, живой Router уже видит новый."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -392,8 +391,8 @@ async def test_footer_no_arrow_when_future_model_matches_fact(tmp_path, monkeypa
     профиль) — стрелки нет (спека Task 15)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -415,8 +414,8 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
     если раннер ещё не выброшен и пин формально доступен (спека Task 15)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -451,10 +450,10 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(tmp_pa
     целиком, переход остаётся."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
-    from gc_tui.app import TuiApp
-    from gc_core.model_router import ModelRouter
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
+    from rich.cells import cell_len
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -483,10 +482,10 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
     влезает — снимается ВЕСЬ блок за стрелкой, факт (точка + модель) остаётся."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
-    from gc_tui.app import TuiApp
-    from gc_core.model_router import ModelRouter
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
+    from gc_tui.app import TuiApp
+    from rich.cells import cell_len
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -527,12 +526,12 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(tmp_path, mon
     профиль и переход остаются на 1-й — раньше здесь терялось всё."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
+    from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
     from gc_tui.app import TuiApp
     from gc_tui.services.usage_meter import compose_adaptive_footer_right
-    from gc_core.model_router import ModelRouter
-    from gc_core.config_modules.profiles import ProfileRef
-    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+    from rich.cells import cell_len
 
     def _meta(inp, out):
         acc = UsageAccount()
@@ -584,12 +583,12 @@ async def test_footer_two_line_layout_drops_profile_before_transition(tmp_path, 
     перехода (порядок жертв Task 15 не меняется) — стрелка остаётся."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
+    from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
+    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
     from gc_tui.app import TuiApp
     from gc_tui.services.usage_meter import compose_adaptive_footer_right
-    from gc_core.model_router import ModelRouter
-    from gc_core.config_modules.profiles import ProfileRef
-    from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+    from rich.cells import cell_len
 
     def _meta(inp, out):
         acc = UsageAccount()
@@ -640,10 +639,10 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(tmp_p
     без перехода (точка + факт-модель остаются)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
-    from gc_tui.app import TuiApp
     from gc_core.model_router import ModelRouter
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+    from gc_tui.app import TuiApp
+    from rich.cells import cell_len
 
     def _meta(inp, out):
         acc = UsageAccount()
@@ -685,10 +684,10 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(t
     лесенка не уносит его на 2-ю строку зря."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
-    from gc_core.model_router import ModelRouter
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+    from gc_tui.app import TuiApp
 
     def _meta(inp, out):
         acc = UsageAccount()
@@ -757,8 +756,8 @@ def _rows(text: str, width: int) -> int:
 
 def _left_rows_beside(scr, total: int, right_plain: str) -> int:
     """Сколько рядов займёт левая колонка, когда правая забрала своё."""
-    from rich.cells import cell_len
     from gc_tui.services.notices_ui import footer_left_with_badge, format_notices_badge
+    from rich.cells import cell_len
     need = max(cell_len(line) for line in right_plain.split("\n"))
     width = total - need - _FOOTER_CHROME
     if width <= 0:
@@ -782,8 +781,8 @@ def _left_rows_requested(scr, total: int, right_plain: str) -> int:
     """Сколько рядов левая ЗАПРОСИЛА бы при таком варианте правой — то самое
     число, по которому решает лесенка (считается ДО сторожа двух рядов, потому
     что сторож любой запрос кламповал бы до двух)."""
-    from rich.cells import cell_len
     from gc_tui.services.notices_ui import footer_left_rows, format_notices_badge
+    from rich.cells import cell_len
     need = max(cell_len(line) for line in right_plain.split("\n"))
     width = total - need - _FOOTER_CHROME
     if width <= 0:
@@ -809,8 +808,8 @@ def _narrowest_named_variant(scr, cols: int) -> str:
 def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
     """Пин хода «light → max» (переход виден) + опционально usage-сегменты и
     активный профиль — общая обвязка ступенчатых тестов."""
-    from gc_core.model_router import ModelRouter
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_core.model_router import ModelRouter
     snapshot = {"models": {"minimax-m3": {}, "opus-4.8": {}},
                 "slots": {"light": "minimax-m3", "max": "opus-4.8"}}
     pinned = ModelRouter(snapshot, level_provider=lambda: "light")
@@ -818,7 +817,7 @@ def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
     app.active_runner = (_pinned_runner_with_usage("light", pinned, usage) if usage
                          else _pinned_runner("light", pinned))
     monkeypatch.setattr(app, "display_router", lambda: live)
-    monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
+    monkeypatch.setattr(app, "collect_footer_notices", list)
     if profile is not None:
         monkeypatch.setattr(app, "active_profile_ref",
                             lambda: ProfileRef(name=profile, path=Path("x"),
@@ -833,9 +832,9 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(tmp_pat
     цены, а голова (профиль + переход) остаётся на 1-й строке целиком."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
     from gc_tui.app import TuiApp
     from gc_tui.services.usage_meter import compose_adaptive_footer_right
+    from rich.cells import cell_len
 
     app = TuiApp(threads_dir=str(tmp_path / "t"),
                  config={"model": "m", "pricing": _PRICING})
@@ -879,9 +878,9 @@ async def test_footer_moves_left_to_two_rows_before_shrinking_profile(tmp_path, 
     так), а срез имени теряет: бесплатный ход обязан идти раньше платного."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import _PROFILE_NAME_MAX_COLS
+    from rich.cells import cell_len
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -912,9 +911,9 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(tmp_path, monke
     целиком во втором проходе, после того как левая уже разложилась в два ряда."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import _PROFILE_NAME_MIN_COLS
+    from rich.cells import cell_len
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -946,9 +945,9 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(tmp_path, monkeypatch)
     левой — имя ужимается, но не снимается."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from rich.cells import cell_len
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import _PROFILE_NAME_MAX_COLS
+    from rich.cells import cell_len
 
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "m"})
     app._config_path = str(tmp_path / "config.yml")
@@ -1049,8 +1048,8 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(tmp_path, mon
     сторож молчал бы вхолостую)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.profiles import ProfileRef
+    from gc_tui.app import TuiApp
 
     class _UsageOnlyRunner:
         """Только usage-сегменты: хода нет — значит, нет и блока за стрелкой."""
@@ -1065,7 +1064,7 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(tmp_path, mon
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
+        monkeypatch.setattr(app, "collect_footer_notices", list)
         monkeypatch.setattr(app, "active_profile_ref",
                             lambda: ProfileRef(name=_LONG_NAME, path=Path("x"),
                                                root_kind="project"))
@@ -1097,6 +1096,7 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(tmp_pa
     уезжает вниз вместе с ценами и не снимается ни на одной ступени."""
     pytest.importorskip("textual")
     import json
+
     from gc_tui.app import TuiApp
 
     tid = "ctx0000000000000000000000000017a"
@@ -1134,6 +1134,7 @@ async def test_footer_resolves_context_meter_once_per_frame(tmp_path, monkeypatc
     первой."""
     pytest.importorskip("textual")
     import json
+
     from gc_tui.app import TuiApp
 
     tid = "ctx0000000000000000000000000017b"

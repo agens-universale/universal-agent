@@ -24,9 +24,9 @@ import time
 from rich.text import Text
 from textual.widgets import Static
 
-from gc_tui.palette import DEEP_DIM as _DIM, RUN_COLOR as _ACCENT
+from gc_tui.palette import DEEP_DIM as _DIM
+from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.services.duration_format import format_compact_int, format_duration
-
 
 THINKING_PHRASES = [
     "думаю",

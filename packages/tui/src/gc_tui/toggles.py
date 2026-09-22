@@ -165,8 +165,8 @@ _LEVEL_ORDER = {"light": 0, "default": 1, "max": 2}
 
 
 def _profile_roots(app: Any) -> list:
-    from pathlib import Path
     import os
+    from pathlib import Path
 
     from gc_core.config import resolve_config_path
     from gc_core.config_modules.profiles import profile_roots

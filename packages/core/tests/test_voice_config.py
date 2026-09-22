@@ -1,6 +1,5 @@
 """Секция voice: — дефолты, alias verify-ssl, wiring в AppConfig, enabled-критерий."""
 import pytest
-
 from gc_core.config_modules.voice import VoiceConfig, voice_enabled, voice_section_filled
 
 

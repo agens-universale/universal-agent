@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from gc_tui.diff_tui.touched import TouchedJournal
 from gc_core.thread_store import ThreadSession, delete_thread, touched_journal_path
+from gc_tui.diff_tui.touched import TouchedJournal
 
 
 async def test_summary_leaves_touched_journal_intact(tmp_path):

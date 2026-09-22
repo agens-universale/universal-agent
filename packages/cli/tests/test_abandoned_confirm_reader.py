@@ -97,7 +97,7 @@ async def test_an_abandoned_yes_no_prompt_leaves_the_next_line_alone(terminal):
     # не начал читать. Пауза и есть жизненный порядок: без неё следующий
     # читатель успевал раньше брошенного, и тест проходил даже без метки
     # «брошен».
-    os.write(terminal, "ответ-на-второй\n\n".encode("utf-8"))
+    os.write(terminal, "ответ-на-второй\n\n".encode())
     await asyncio.sleep(0.4)
     answer = await asyncio.wait_for(make_cli_ask_human_port()("второй вопрос?"), 5)
 

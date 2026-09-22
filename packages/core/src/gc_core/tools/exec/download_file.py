@@ -2,25 +2,33 @@ import asyncio
 import json
 import os
 from typing import Any, Dict, Optional
-from urllib.parse import urljoin
 
 import httpx
 
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
-from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, normalize_path_for_policy, resolve_tool_context
-from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, validate_url_policy
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.utils.atomic_io import atomic_replace
-from gc_core.utils.async_http import get_async_client
-from gc_core.utils.http_proxy import resolve_proxies
-from contextlib import asynccontextmanager
+from gc_core.security.path_policy import (
+    WriteGuardViolation,
+    audit_policy_decision,
+    check_write_path_allowed,
+    normalize_path_for_policy,
+    resolve_tool_context,
+)
+from gc_core.security.url_policy import enforce_url_policy
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
-    RedirectBlocked as _SharedRedirectBlocked,
-    TooManyRedirects as _TooManyRedirects,
     stream_validating_redirects,
 )
+from gc_core.tools.exec.redirect_policy import (
+    RedirectBlocked as _SharedRedirectBlocked,
+)
+from gc_core.tools.exec.redirect_policy import (
+    TooManyRedirects as _TooManyRedirects,
+)
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.tool_report_paths import tool_report_abspath
 
 _HTML_EXT = ".html"
 
@@ -97,7 +105,7 @@ class DownloadFile(AbstractSimpleTool):
             "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, .json, ...).\n"
         )
 
-    def _result(self, 
+    def _result(self,
         *,
         ok: bool = False,
         path: str = "",

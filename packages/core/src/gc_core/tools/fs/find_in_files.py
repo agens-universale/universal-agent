@@ -20,19 +20,27 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from gc_core.backends.protocol import WalkOutputTooLargeError
 from gc_core.backends.walk_util import WalkEntry
 from gc_core.config_modules.fs_tools import FsFindInFilesConfig, parse_find_in_files_config
-from gc_core.utils.find_in_files_scan_mode import (
-    Needles,
-    PatternMode,
-    classify_scan_pattern,
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
+from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
+from gc_core.security.read_guard import (
+    ReadGuardViolation,
+    _resolve_skills_root,
+    check_read_path_allowed,
+    enforce_read_guard,
+    parse_read_guard_config,
 )
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
+from gc_core.tools.fs.cooperative import LoopYielder
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import (
     BINARY_SAMPLE_BYTES,
     classify_content_from_sample,
     decode_text_bytes,
 )
-from gc_core.utils.fs_size_limits import (
-    fs_find_in_files_max_bytes,
+from gc_core.utils.find_in_files_scan_mode import (
+    Needles,
+    PatternMode,
+    classify_scan_pattern,
 )
 from gc_core.utils.fs_search_walk import (
     HARD_EXCLUDE_NESTED_DOT_DIRS,
@@ -40,19 +48,11 @@ from gc_core.utils.fs_search_walk import (
     hard_exclude_dir_names_for_prompt,
     should_skip_nested_dir_name,
 )
+from gc_core.utils.fs_size_limits import (
+    fs_find_in_files_max_bytes,
+)
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.security.read_guard import (
-    enforce_read_guard,
-    parse_read_guard_config,
-    check_read_path_allowed,
-    ReadGuardViolation,
-    _resolve_skills_root,
-)
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
-from gc_core.tools.fs.cooperative import LoopYielder
 
 # Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
 # recipe exists (grep+find), only the pattern/glob could not be expressed natively.
@@ -1287,10 +1287,7 @@ class FindInFiles(AbstractSimpleTool):
     def _is_excluded_by_call(
         self, dirpath: str, exclude_abs: List[str]
     ) -> bool:
-        for e in exclude_abs:
-            if self._path_is_under(dirpath, e):
-                return True
-        return False
+        return any(self._path_is_under(dirpath, e) for e in exclude_abs)
 
     # ------------------------------------------------------------------
     # breakdown (§3.1)
@@ -2152,7 +2149,7 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     @staticmethod
-    def _claim_slot(shared: _ScanShared, params: "_ScanParams") -> bool:
+    def _claim_slot(shared: _ScanShared, params: _ScanParams) -> bool:
         """Under the lock: may this candidate be opened? Sets stop/stop_reason."""
         if shared.stop:
             return False
@@ -2200,7 +2197,7 @@ class FindInFiles(AbstractSimpleTool):
             shared.stop_reason = "match_limit"
 
     async def _aprocess_candidate(
-        self, item: Tuple[str, int, str, int], shared: _ScanShared, params: "_ScanParams"
+        self, item: Tuple[str, int, str, int], shared: _ScanShared, params: _ScanParams
     ) -> None:
         abs_path, _depth, _rel, fsize = item
         with shared.lock:
@@ -2234,7 +2231,7 @@ class FindInFiles(AbstractSimpleTool):
             self._absorb_file_matches(shared, file_matches, ran_re, params.limit_eff)
 
     async def _ascan_cooperatively(
-        self, candidates: List[Tuple[str, int, str, int]], shared: _ScanShared, params: "_ScanParams"
+        self, candidates: List[Tuple[str, int, str, int]], shared: _ScanShared, params: _ScanParams
     ) -> None:
         """Разбор файлов инлайн, но с уступками loop.
 
@@ -2259,7 +2256,7 @@ class FindInFiles(AbstractSimpleTool):
         self,
         candidates: List[Tuple[str, int, str, int]],
         shared: _ScanShared,
-        params: "_ScanParams",
+        params: _ScanParams,
         workers: int,
     ) -> None:
         """Несколько разборщиков сразу — корутинами, не потоками.

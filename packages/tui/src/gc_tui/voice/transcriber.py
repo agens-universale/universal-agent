@@ -14,7 +14,8 @@ import httpx
 
 from gc_tui.voice.errors import VoiceError
 from gc_tui.voice.recorder import SAMPLE_RATE
-from gc_tui.voice_runtime.net import is_tls_error, post as voice_post, with_system_trust_retry
+from gc_tui.voice_runtime.net import is_tls_error, with_system_trust_retry
+from gc_tui.voice_runtime.net import post as voice_post
 
 
 def transcribe(pcm: bytes, cfg: Dict[str, Any]) -> str:

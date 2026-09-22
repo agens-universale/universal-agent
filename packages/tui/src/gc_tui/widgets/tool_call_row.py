@@ -18,14 +18,11 @@ import time
 from typing import Optional
 
 from rich.text import Text
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
-
-from gc_tui.widgets.click_model import ClickModelMixin
 
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
@@ -33,6 +30,7 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
+from gc_tui.widgets.click_model import ClickModelMixin
 
 # Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
 # RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. on_mount) → плавное

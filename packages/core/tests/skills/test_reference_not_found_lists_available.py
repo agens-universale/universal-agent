@@ -1,7 +1,6 @@
 """При неверном slug ошибка load_reference/load_asset перечисляет доступные —
 чтобы модель само-исправилась, а не гадала имена дальше."""
 import pytest
-
 from gc_core.tools.skills.registry import SkillsRegistry
 
 

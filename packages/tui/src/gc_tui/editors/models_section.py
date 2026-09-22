@@ -33,17 +33,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.model_registry import LEVEL_FALLBACK, LEVELS, connection_parts, resolve_entry_address
+from gc_core.config_modules.model_sections_validation import SUBAGENT_NAMES
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Rule, Static
 
-from gc_core.config_modules.merge import deep_merge
-from gc_core.config_modules.model_registry import (LEVEL_FALLBACK, LEVELS, connection_parts,
-                                           resolve_entry_address)
-from gc_core.config_modules.model_sections_validation import SUBAGENT_NAMES
-from gc_tui.editors.model_entry_form import (CTRL_U_PAIR, ModelEntryForm,
-                                          entry_has_own_connection)
+from gc_tui.editors.model_entry_form import CTRL_U_PAIR, ModelEntryForm, entry_has_own_connection
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
@@ -2179,10 +2177,12 @@ class ModelsSectionEditor(Vertical):
         row = self._row_at_cursor()
         if row is None or row["kind"] != "entry":
             return False                    # резервную модель удалять нечем — она поле
-        from gc_core.config_modules.registry_write import (RegistryWriteError,
-                                                   alias_survives_removal,
-                                                   references_broken_by_removal,
-                                                   references_to)
+        from gc_core.config_modules.registry_write import (
+            RegistryWriteError,
+            alias_survives_removal,
+            references_broken_by_removal,
+            references_to,
+        )
         alias = row["alias"]
         if self._entry_origin(alias) == "base":
             # Отказ СРАЗУ, без confirm-баннера (ревизия владельца по смоку A+B):

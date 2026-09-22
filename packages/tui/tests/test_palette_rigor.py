@@ -52,7 +52,7 @@ def test_nonstandard_pair_shows_custom_step_onto_preset_replaces_it(tmp_path):
     попасть на custom (она не позиция трека, ревизия 4) — цикл идёт от idx 0
     (эффективное вне spec.names) и заменяет пару целиком."""
     pytest.importorskip("textual")
-    from gc_tui.toggles import next_toggle_value, apply_toggle, toggle_state, preset_track_extra
+    from gc_tui.toggles import apply_toggle, next_toggle_value, preset_track_extra, toggle_state
     # глобал СТАНДАРТНЫЙ (medium), сессия накручена в дикую пару on+allow через детальные
     app, _ = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
     app.apply_session_overrides({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"})

@@ -1,5 +1,4 @@
 import pytest
-
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
 from gc_core.tools.schema_optional import (

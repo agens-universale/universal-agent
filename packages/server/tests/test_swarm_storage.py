@@ -7,14 +7,8 @@
 """
 
 import json
-import os
-import sys
-
-import pytest
-
 
 from gc_server.swarm import storage as storage
-
 
 # ---------------------------------------------------------------------------
 # load_swarm_meta / save_swarm_meta

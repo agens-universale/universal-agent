@@ -57,8 +57,8 @@ async def test_f1_help_reachable_from_subscreen(tmp_path):
     """F1 (справка) доступна с любого экрана (тут — с mcp)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.mcp import McpScreen
     from gc_tui.screens.help import HelpScreen
+    from gc_tui.screens.mcp import McpScreen
     async with TuiApp(threads_dir=str(tmp_path), config={"model": "M"}).run_test() as pilot:
         await pilot.app.screen._handle_command("mcp"); await pilot.pause()
         assert isinstance(pilot.app.screen, McpScreen)

@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 from gc_core import agent_executor as agent_executor_module
 from gc_core.run_context import acreate_run_context
-from gc_testkit import run_coro
 
 
 def _config(tmp_path, log_format):

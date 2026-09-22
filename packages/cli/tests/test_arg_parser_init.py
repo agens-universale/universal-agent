@@ -1,6 +1,5 @@
 """TDD-тест: флаг --init-config существует в arg_parser (ренейм с --init)."""
 import sys
-import types
 
 import pytest
 
@@ -13,6 +12,7 @@ def _parse(argv, monkeypatch):
     """
     monkeypatch.setattr(sys, "argv", argv)
     import importlib
+
     from gc_cli import arg_parser as ap_mod
     importlib.reload(ap_mod)
     return ap_mod.run_args
@@ -59,6 +59,7 @@ def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
     """
     monkeypatch.setattr(sys, "argv", ["gc-cli", "-q", "x", "--trace_id", "00123"])
     import importlib
+
     from gc_cli import arg_parser as ap_mod
     importlib.reload(ap_mod)
     assert ap_mod.run_args.trace_id == "00123"     # строка, не 83

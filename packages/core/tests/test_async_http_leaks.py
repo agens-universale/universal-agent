@@ -20,7 +20,6 @@ id» не сработает. Заметнее всего на конфиге п
 import asyncio
 
 import pytest
-
 from gc_core.utils import async_http
 from gc_core.utils.aio_compat import run_coro_blocking
 
@@ -137,7 +136,7 @@ def test_registry_survives_concurrent_loops():
         for _ in range(40):
             try:
                 asyncio.run(_body())
-            except BaseException as exc:  # noqa: BLE001 — нам важен сам факт
+            except BaseException as exc:
                 errors.append(exc)
                 return
 
@@ -223,7 +222,6 @@ def test_shared_sync_client_is_actually_used():
     TLS-рукопожатием.
     """
     import httpx
-
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
     one_shots: list = []

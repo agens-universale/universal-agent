@@ -16,6 +16,7 @@ import zipfile
 from itertools import takewhile
 from pathlib import Path, PurePosixPath
 from typing import Optional, Tuple
+
 # Позволяет запускать файл напрямую: `python recommended_mcp/install.py`.
 # При `python -m recommended_mcp.install` и при import из тестов — no-op.
 if __package__ in (None, ""):
@@ -36,15 +37,23 @@ if __package__ in (None, ""):
     ensure_repo_on_sys_path()
     __package__ = "recommended_mcp"
 
-from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
-from recommended_mcp.runtime.repo_path import repo_root_from
 from gc_core.mcp_runtime.state import save_runtime_state
-from recommended_mcp.runtime.venv import active_pip_python, ensure_mcp_venv, pip_argv, pip_install_argv, pip_install_target, query_installed_version
+
 from recommended_mcp.manifest import (
     MCPEntry,
     load_agent_dep_dir,
     load_manifest,
     load_repo_url,
+)
+from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from recommended_mcp.runtime.repo_path import repo_root_from
+from recommended_mcp.runtime.venv import (
+    active_pip_python,
+    ensure_mcp_venv,
+    pip_argv,
+    pip_install_argv,
+    pip_install_target,
+    query_installed_version,
 )
 
 NODE_VERSION = "18.0.0"
@@ -614,7 +623,7 @@ def _ensure_cached_node(agent_dep_dir: Path) -> dict[str, Path]:
                 f"SHA256 mismatch for {archive_filename}: "
                 f"expected {expected_sha}, got {actual_sha}"
             )
-        print(f"[npx] sha256 verified")
+        print("[npx] sha256 verified")
 
         extracted_top = _extract_archive(archive_path, ext, tmp)
 
@@ -690,7 +699,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Install MCPs from recommended_mcp/config.yml",
     )
-    
+
     parser.add_argument(
         "--config",
         type=str,

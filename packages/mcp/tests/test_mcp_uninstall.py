@@ -14,7 +14,7 @@
 from pathlib import Path
 
 from recommended_mcp import install as inst
-from recommended_mcp.manifest import MCPEntry, InstallSpec
+from recommended_mcp.manifest import InstallSpec, MCPEntry
 
 
 def _wheel_layout(tmp_path: Path, name: str) -> Path:

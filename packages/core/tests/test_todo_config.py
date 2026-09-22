@@ -1,4 +1,9 @@
-from gc_core.config_modules.todo import DEFAULT_TODO_REMINDER_STEPS, TodoConfig, normalize_todo_config, todo_reminder_steps_from_config
+from gc_core.config_modules.todo import (
+    DEFAULT_TODO_REMINDER_STEPS,
+    TodoConfig,
+    normalize_todo_config,
+    todo_reminder_steps_from_config,
+)
 
 
 def test_default_is_10():

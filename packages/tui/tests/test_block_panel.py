@@ -5,11 +5,10 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.app import App, ComposeResult
-from textual.widgets import Static
-
 from gc_tui.messages import CopyBlockRequest
 from gc_tui.widgets.block_panel import DONE_GLYPH, BlockPanel, copy_glyph
+from textual.app import App, ComposeResult
+from textual.widgets import Static
 
 CODE = "def f(x):\n    return x + 1"
 HEADERS = ["Стратегия", "Принцип"]
@@ -208,9 +207,9 @@ async def test_drag_through_block_excludes_header():
 async def test_ctrl_click_on_copy_button_opens_event_not_copy():
     """Находка 4: Ctrl+клик по кнопке ❐ не копирует, а открывает событие —
     спека §2 обещает «Ctrl+клик — без изменений» с любой точки блока."""
+    from gc_tui.messages import OpenEventRequest
     from textual import events
-    from textual.app import App, ComposeResult
-    from gc_tui.messages import CopyBlockRequest, OpenEventRequest
+    from textual.app import App
 
     received: list[int] = []
     copied: list[str] = []

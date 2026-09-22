@@ -6,11 +6,7 @@
 import os
 import sys
 
-import pytest
-
-
-from gc_server.swarm.config import build_swarm_config, _abs_or_empty
-
+from gc_server.swarm.config import _abs_or_empty, build_swarm_config
 
 # ---------------------------------------------------------------------------
 # _abs_or_empty helper

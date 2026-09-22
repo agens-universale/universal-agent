@@ -23,12 +23,10 @@
 ложных тревог.
 """
 import re
-from pathlib import Path
-
-from pydantic import BaseModel
 
 from gc_core.config_modules.root import AppConfig
 from gc_testkit.paths import REPO
+from pydantic import BaseModel
 
 #: Ключи схемы, у которых сегодня нет ни одного читателя.
 #:

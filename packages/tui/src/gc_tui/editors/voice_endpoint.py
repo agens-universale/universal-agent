@@ -14,21 +14,21 @@ from __future__ import annotations
 
 import re
 
+from gc_core.onboarding_fields import URL_EMPTY as _URL_EMPTY
+from gc_core.onboarding_fields import URL_ERROR as _URL_ERROR
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
-from gc_tui.editors.field_list import (FieldListController, LIST_EMPTY, LIST_FAILED,
-                                    LIST_LOADING,
-                                    MODEL_RELOAD_HINT as _MODEL_RELOAD_HINT,
-                                    write_field as _write_field)
+from gc_tui.editors.field_list import LIST_EMPTY, LIST_FAILED, LIST_LOADING, FieldListController
+from gc_tui.editors.field_list import MODEL_RELOAD_HINT as _MODEL_RELOAD_HINT
+from gc_tui.editors.field_list import write_field as _write_field
 from gc_tui.editors.preset_list import PRESET_HINT, preset_list_controller
 from gc_tui.palette import ACCENT, DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
 
-from gc_core.onboarding_fields import URL_EMPTY as _URL_EMPTY, URL_ERROR as _URL_ERROR
 # Имя `LIST_EMPTY` уже занято статусом списка моделей («сервер не вернул моделей»,
 # `field_list`) — та же формула ошибки submit'а (§4.2), но своё имя, иначе объявление
 # здесь молча переопределило бы импортированную константу списка (обе строки

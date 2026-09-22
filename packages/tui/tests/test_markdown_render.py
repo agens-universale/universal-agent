@@ -1,6 +1,9 @@
 """segment_answer: сегментация ответа на прозовые прогоны + code/table-блоки."""
 from gc_tui.services.markdown_render import (
-    Block, build_markdown_table, segment_answer, table_block_to_markdown,
+    Block,
+    build_markdown_table,
+    segment_answer,
+    table_block_to_markdown,
 )
 
 

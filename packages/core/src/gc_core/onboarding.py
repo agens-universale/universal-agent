@@ -610,6 +610,7 @@ def _participant_lines(participants, flagged: bool) -> list[str]:
 def _broken_error_text_and_keys(exc: Exception) -> tuple[str, Any]:
     """Текст ошибки (pydantic-дамп — в читаемом виде) и названные ею ключи."""
     from pydantic import ValidationError as _ValidationError
+
     from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, schema_error_details
     from gc_core.config_origin import error_keys
 
@@ -645,6 +646,7 @@ def _fix_targets(culprits, keys, config_path: str, participants, error_text: str
 def _workaround_lines(config_path: str, active, program: str, base_to_blame: bool) -> list[str]:
     """Обход (без профиля) и, если виновата база, откат к шаблону."""
     import os
+
     from gc_core.config import _default_config_path, user_config_path
 
     def _same_path(a, b) -> bool:

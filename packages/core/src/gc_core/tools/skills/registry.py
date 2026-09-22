@@ -641,7 +641,7 @@ class SkillsRegistry:
             "pack_id": skill.pack_id,
         }
 
-    async def skill_catalog(self) -> "SkillCatalog":
+    async def skill_catalog(self) -> SkillCatalog:
         """Read-only snapshot for the CLI -s resolver (skill_arg_resolver).
 
         Built from the public list_skills(include_all=True); does not expose

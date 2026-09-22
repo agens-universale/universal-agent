@@ -1,11 +1,9 @@
 import json
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.read_file import ReadFile
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 
 CONTENT = "line1\nline2\nline3\nline4\n"
 

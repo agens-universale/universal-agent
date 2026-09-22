@@ -13,13 +13,10 @@ Every other field — including ``permissions`` and ``sha256`` — must match ex
 import json
 import os
 import tempfile
-from types import SimpleNamespace
 
-import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.file_info import FileInfo
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 # ---------------------------------------------------------------------------
 # helpers

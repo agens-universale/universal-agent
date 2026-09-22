@@ -18,16 +18,13 @@
   и ``aclose_all`` из ``finally`` встал на локе прямо на loop.
 """
 import asyncio
+import inspect
 import threading
 import time
 
-import inspect
-
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_core.tools.connect_mcp import stream_client as sc
-
 
 # --- B1: снос сессии закрывает стек здесь же -------------------------------
 

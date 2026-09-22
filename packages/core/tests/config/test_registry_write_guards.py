@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from gc_core.config_modules import registry_write as rw
 from gc_core.config_modules.registry_write import RegistryWriteError
 
@@ -426,7 +425,7 @@ def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog)
     base, _profiles = stack
     marker = tmp_path / "no-such-pointer.txt"          # файла нет
     base.write_text(
-        'profile: "${FILE:%s}"\n' % str(marker).replace("\\", "/"),
+        'profile: "${{FILE:{}}}"\n'.format(str(marker).replace("\\", "/")),
         encoding="utf-8")
 
     with caplog.at_level("WARNING"):
@@ -455,8 +454,7 @@ def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(stack, tm
     marker = tmp_path / "pointer.txt"
     marker.write_text("work", encoding="utf-8")
     base.write_text(
-        'profile: "${FILE:%s}"\nmodels:\n  gc:\n    model: "x"\n'
-        % str(marker).replace("\\", "/"),
+        'profile: "${{FILE:{}}}"\nmodels:\n  gc:\n    model: "x"\n'.format(str(marker).replace("\\", "/")),
         encoding="utf-8")
     (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
 

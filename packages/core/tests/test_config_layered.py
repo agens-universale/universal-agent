@@ -1,15 +1,12 @@
 """Integration-тесты для layered config: <cwd>/.gc/config.yml поверх global config.yml."""
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
-import yaml
-from pydantic import ValidationError
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
+from pydantic import ValidationError
 
 
 def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monkeypatch):

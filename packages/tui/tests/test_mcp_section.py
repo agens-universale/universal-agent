@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("textual")
 
 from gc_tui.services.mcp_manager import McpRow, McpState
@@ -62,9 +63,9 @@ async def test_section_frame_hugs_content():
 
 
 async def test_section_worker_fills_statuses():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     states = {"office": McpState(True, "0.3.1", None),
               "playwright": McpState(False, None, None)}
     app = app_mod.TuiApp(config={})
@@ -80,9 +81,9 @@ async def test_section_worker_fills_statuses():
 
 
 async def test_toggle_unwires_connected():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -95,10 +96,10 @@ async def test_toggle_unwires_connected():
 
 
 async def test_toggle_wires_installed_disabled():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
     app = app_mod.TuiApp(config={})
@@ -111,10 +112,10 @@ async def test_toggle_wires_installed_disabled():
 
 
 async def test_toggle_noop_when_not_installed():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -141,10 +142,10 @@ def test_toggle_noop_before_status_arrives():
 
 
 async def test_enter_installs_not_installed():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("playwright", wired=False, manual=False)]
     mgr = FakeManager(rows, {"playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -162,10 +163,10 @@ async def test_enter_installs_not_installed():
 
 
 async def test_ctrl_d_confirm_then_remove():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
     app = app_mod.TuiApp(config={})
@@ -184,10 +185,10 @@ async def test_ctrl_d_confirm_then_remove():
 
 
 async def test_ctrl_d_on_not_installed_is_noop():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("playwright", wired=False, manual=False)]
     mgr = FakeManager(rows, {"playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -213,10 +214,10 @@ def test_ctrl_d_noop_before_status_arrives():
 
 
 async def test_ctrl_d_esc_cancels_without_remove():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
     app = app_mod.TuiApp(config={})
@@ -235,9 +236,9 @@ async def test_ctrl_d_esc_cancels_without_remove():
 
 
 async def test_action_rows_visibility():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -253,9 +254,9 @@ async def test_action_rows_visibility():
 
 
 async def test_move_reaches_action_rows():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     # office wired + update available → ⟳; playwright не установлен → ⤓
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"),
                                 "playwright": McpState(False, None, None)})
@@ -280,9 +281,9 @@ async def test_move_reaches_action_rows():
 async def test_selected_class_follows_cursor():
     """Регресс: строка курсора не подсвечивалась фоном — _refresh_rows обновлял только
     текст, не класс `selected` (см. .mcp-row-managed.selected в styles.tcss)."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -301,9 +302,9 @@ async def test_selected_class_follows_cursor():
 async def test_selected_class_follows_action_cursor():
     """Курсор на строке-действии — тоже с классом `selected` (то же правило CSS,
     .mcp-action-row.selected); управляемая строка при этом теряет класс."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -325,9 +326,9 @@ async def test_selected_class_follows_action_cursor():
 async def test_action_rows_updated_in_place_on_move():
     """Минор: move() обновляет строки-действия НА МЕСТЕ (те же виджеты), не пересоздаёт
     remove+mount — иначе при частых move возможно накопление (async-remove)."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -345,9 +346,9 @@ async def test_action_rows_updated_in_place_on_move():
 
 
 async def test_run_action_installs_missing():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -367,10 +368,10 @@ async def test_run_action_installs_missing():
 
 
 async def test_run_action_updates_all():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("office", wired=True, manual=False),
             McpRow("ddg", wired=True, manual=False)]
     mgr = FakeManager(rows, {"office": McpState(True, "0.3.1", "0.4.0"),
@@ -395,10 +396,10 @@ async def test_update_all_row_shows_for_connected_without_updates():
     """A/§4: ↻ «Обновить все подключённые» видна, когда есть подключённые, даже без
     обнаруженных обновлений (source-рецепты, update=None) — идемпотентная пересборка;
     счётчик «N обновлений» не показывается, когда их нет."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     from textual.widgets import Static
     rows = [McpRow("office", wired=True, manual=False),
             McpRow("ddg", wired=True, manual=False)]
@@ -422,9 +423,9 @@ async def test_update_all_row_shows_for_connected_without_updates():
 
 
 async def test_ctrl_u_updates_current():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -442,9 +443,9 @@ async def test_ctrl_u_updates_current():
 
 
 async def test_ctrl_u_noop_on_not_installed_and_action_row():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -465,9 +466,9 @@ async def test_ctrl_u_noop_on_not_installed_and_action_row():
 
 async def test_reload_keeps_cursor_after_action_row_op():
     """После операции со строки-действия _idx не выходит за границу управляемых."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -485,9 +486,9 @@ async def test_reload_keeps_cursor_after_action_row_op():
 async def test_confirm_gate_blocks_other_actions():
     """Пока висит confirm-баннер, повторный begin_enter/begin_update/toggle/request_remove
     не исполняются и не сбрасывают уже открытый confirm."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
-    from gc_testkit.tui_support import wait_until
     mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None),
                                 "playwright": McpState(False, None, None)})
     app = app_mod.TuiApp(config={})
@@ -553,10 +554,10 @@ async def test_mcp_descriptions_align_across_statuses():
 
 
 async def test_enter_noop_when_already_installed():
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
-    from gc_testkit.tui_support import wait_until
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
     app = app_mod.TuiApp(config={})

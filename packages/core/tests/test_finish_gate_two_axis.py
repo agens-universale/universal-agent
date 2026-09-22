@@ -1,30 +1,25 @@
 """E2E finish gate — регрессия §1.2 SPEC (две оси, fix_report без повтора ask_human)."""
 
 import importlib
-from gc_testkit import as_coro
 import json
 import logging
 import sys
 import types
-from pathlib import Path
 from types import SimpleNamespace
 
-import importlib
-
-from gc_core.intent_guard import guard as intent_guard_guard
 import pytest
-
+from gc_core.intent_guard import guard as intent_guard_guard
+from gc_core.intent_guard.feedback import build_finish_gate_feedback
+from gc_core.intent_guard.guard import FinishGateGuard
+from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.intent_log import append_tool_aggregated
+from gc_testkit import as_coro, run_coro
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,
     intent_user_ask_texts_from_jsonl,
     seed_state_intent,
 )
-from gc_core.intent_log import append_tool_aggregated
-from gc_core.intent_guard.feedback import build_finish_gate_feedback
-from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
 
 _trace_digest_tests = importlib.import_module("test_intent_guard_trace_digest")
 _ask_human_scenario_messages = _trace_digest_tests._ask_human_scenario_messages

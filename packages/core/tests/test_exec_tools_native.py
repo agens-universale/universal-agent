@@ -38,8 +38,6 @@ import asyncio
 import json
 import time
 
-import pytest
-
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_testkit.helpers.tool_ctx import local_ctx

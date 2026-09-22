@@ -1,6 +1,6 @@
-from pathlib import Path
-from recommended_mcp.manifest import load_manifest, resolve_manifest_path
+
 from gc_testkit.paths import RECIPES
+from recommended_mcp.manifest import load_manifest, resolve_manifest_path
 
 
 def test_manifest_carries_descriptions():
@@ -12,7 +12,7 @@ def test_manifest_carries_descriptions():
 
 
 def test_office_description_lists_powerpoint():
-    from pathlib import Path
+
     from recommended_mcp.manifest import load_manifest, resolve_manifest_path
     root = RECIPES
     entries = {e.name: e.description for e in load_manifest(resolve_manifest_path(root, None))}

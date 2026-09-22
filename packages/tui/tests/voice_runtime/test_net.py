@@ -7,7 +7,6 @@ import pytest
 # `requests.exceptions.SSLError`: форму, которой на этом пути не бывает с
 # переезда ядра на httpx, — и проверяли ветку, которой нет.
 from gc_testkit.net_support import tls_failure
-
 from gc_tui.voice_runtime import net as net
 
 

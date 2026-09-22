@@ -14,10 +14,8 @@
 ``trust_env=False`` при этом всё ещё значим: у httpx он отключает env-прокси и
 CA из окружения, а их мы передаём явно (см. ``resolve_proxies``).
 """
-import os
 
 import httpx
-
 from gc_core.utils.http_session import NO_NETRC_SESSION
 
 

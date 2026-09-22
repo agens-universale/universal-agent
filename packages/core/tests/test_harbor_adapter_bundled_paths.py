@@ -1,11 +1,12 @@
 # tests/test_harbor_adapter_bundled_paths.py
 # Requires the `harbor` framework (dependency-group `test`).
-import importlib.util, os, sys
+import importlib.util
+import os
+import sys
 from pathlib import Path
 
 import pytest
-
-from gc_testkit.paths import HARBOR, REPO
+from gc_testkit.paths import HARBOR
 
 _TEST_URL = "http://test-backend/v1/chat/completions"
 

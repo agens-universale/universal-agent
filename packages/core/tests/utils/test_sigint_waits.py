@@ -10,7 +10,6 @@ import signal
 import threading
 
 import pytest
-
 from gc_core.utils.sigint_waits import intercept_sigint
 
 pytestmark = pytest.mark.skipif(

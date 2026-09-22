@@ -32,7 +32,6 @@ import sys
 import time
 
 import pytest
-
 from gc_core.mcp_session_owner import use_owner
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_testkit.paths import package_src_dirs

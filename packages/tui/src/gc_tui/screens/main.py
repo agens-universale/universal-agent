@@ -9,10 +9,15 @@ import threading
 import time
 import uuid
 from collections import namedtuple
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
+from gc_core.intent_log.record import ACTION_USER_ASK
+from gc_core.intent_log.serialize import deserialize_list
+from gc_core.runtime_notices import collect_unread_runtime_notices
+from rich.cells import cell_len
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -21,31 +26,35 @@ from textual.screen import Screen
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
-from gc_core.intent_log.record import ACTION_USER_ASK
-from gc_core.intent_log.serialize import deserialize_list
-from gc_core.runtime_notices import collect_unread_runtime_notices
+from gc_tui import branding
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import CopyBlockRequest
 from gc_tui.models import TaskCursor
-from rich.cells import cell_len
-from rich.text import Text
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import INK as _INK
+from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
+from gc_tui.services.export import export_thread
+from gc_tui.services.git_info import current_branch
 from gc_tui.services.notices_ui import (
     footer_left_rows,
     footer_left_with_badge,
     format_notices_badge,
 )
-from gc_tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
-from gc_tui.services.clipboard_ops import copy_out
-from gc_tui.services.export import export_thread
 from gc_tui.services.path_display import truncate_path
-from gc_tui.services.git_info import current_branch
+from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import BUSY_MESSAGE, heartbeat, release, try_acquire
+from gc_tui.services.session_title import (
+    LAST_ACTUAL_MIN,
+    display_name,
+    normalize_prompt_title,
+    should_update_task,
+    task_title,
+)
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.subagent_progress import (
     SubagentProgressConsumer,
@@ -59,6 +68,7 @@ from gc_tui.services.subagent_sidecar_mapper import (
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
 )
+from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
 from gc_tui.services.trace_mapper import coerce_args, collect_skipped_call_ids, map_message
 from gc_tui.services.trace_render import (
     LINE_INTERMEDIATE_CLASS,
@@ -68,7 +78,8 @@ from gc_tui.services.trace_render import (
     NESTED_USER_PREFIX,
     build_compaction_label,
 )
-from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+from gc_tui.services.usage_meter import compose_adaptive_footer_right, usage_segments
+from gc_tui.services.voice_pill import render_pill
 from gc_tui.session_settings import read_breaker_from_meta, read_from_meta
 from gc_tui.toggles import (
     PROFILE_NONE_VALUE,
@@ -89,17 +100,6 @@ from gc_tui.widgets.thinking_indicator import (
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
-from gc_tui import branding
-from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
-from gc_tui.services.session_title import (
-    LAST_ACTUAL_MIN,
-    display_name,
-    normalize_prompt_title,
-    should_update_task,
-    task_title,
-)
-from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
-from gc_tui.services.voice_pill import render_pill
 
 _log = logging.getLogger(__name__)
 
@@ -302,10 +302,10 @@ class TraceScreen(Screen):
         # list of (event_no, main_static, note_widget_or_None)
         # spec 2026-05-26 (code-block-highlight): теперь храним СПИСОК виджетов
         # предыдущей submit_solution (multi-widget рендер: prose + code-panels).
-        self._submit_solution_widgets: list[tuple[list[Widget], Optional["TraceRow"]]] = []
+        self._submit_solution_widgets: list[tuple[list[Widget], Optional[TraceRow]]] = []
         # Mapping event_no → summary-body TraceRow (скрыт; раскрывается при фокусе маркера).
-        self._summary_body_widgets: dict[int, "TraceRow"] = {}
-        self._summary_marker_widgets: dict[int, "TraceRow"] = {}
+        self._summary_body_widgets: dict[int, TraceRow] = {}
+        self._summary_marker_widgets: dict[int, TraceRow] = {}
         # Phase 5: ask_human banner state
         self._ask_human_banner = None  # type: Optional[AskHumanBanner]
         self._ask_human_call_id: Optional[str] = None
@@ -321,7 +321,7 @@ class TraceScreen(Screen):
         # Ответ → stdin child, без parent pending / user-строки в data_*.
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
-        self._pending_user_widgets: dict[str, "UserReplyContainer"] = {}
+        self._pending_user_widgets: dict[str, UserReplyContainer] = {}
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -444,7 +444,7 @@ class TraceScreen(Screen):
                 yield Static(_FOOTER_LEFT, id="footer-left", markup=False)
                 yield Static(self._compose_footer_right(), id="footer-right", markup=False)
 
-    def _compose_header_segments(self) -> "tuple[str, str]":
+    def _compose_header_segments(self) -> tuple[str, str]:
         """Return (left_text, right_text) for header.
 
         Свежий экран (нет активной задачи):
@@ -563,14 +563,14 @@ class TraceScreen(Screen):
         что у `_footer_model_name`."""
         return self._level_color(self._footer_live_level())
 
-    def _footer_profile_name(self) -> "str | None":
+    def _footer_profile_name(self) -> str | None:
         """Имя активного профиля для футера, или None — тот же источник, что
         `/config`/`/status` (`app.active_profile_ref`)."""
         ref_fn = getattr(self.app, "active_profile_ref", None)
         ref = ref_fn() if callable(ref_fn) else None
         return ref.name if ref is not None else None
 
-    def _footer_pinned_resolution(self) -> "tuple[str, str, str] | None":
+    def _footer_pinned_resolution(self) -> tuple[str, str, str] | None:
         """(уровень, цвет, имя модели) ХОДА, зафиксированного на пине (спека
         Task 15) — «факт», на чём реально идут запросы, а не живой резолв.
 
@@ -606,7 +606,7 @@ class TraceScreen(Screen):
             return None
         return (level, self._level_color(level), model)
 
-    def _footer_head_snapshot(self) -> "_FooterHeadSnapshot":
+    def _footer_head_snapshot(self) -> _FooterHeadSnapshot:
         """Снимок футер-головы — один резолв на отрисовку футера.
 
         `profile`/`level_color`/`model` — «факт»: то, на чём реально идёт
@@ -633,9 +633,9 @@ class TraceScreen(Screen):
 
     def _footer_head(self, *, with_profile: bool,
                       profile_name_cols: int = _PROFILE_NAME_MAX_COLS,
-                      snapshot: "_FooterHeadSnapshot | None" = None,
+                      snapshot: _FooterHeadSnapshot | None = None,
                       with_transition: bool = True,
-                      meter: "Text | None | object" = _UNRESOLVED) -> "Text":
+                      meter: Text | object | None = _UNRESOLVED) -> Text:
         """head = [профиль ] ● модель[ → [● ]модель][ · контекст]. Точка —
         жирная, цвет уровня, сама и есть разделитель перед моделью (спека
         Task 8). Переход «сейчас → станет» (спека Task 15) — только посреди
@@ -679,7 +679,7 @@ class TraceScreen(Screen):
             head.append_text(meter)
         return head
 
-    def _compose_footer_right(self) -> "Text":
+    def _compose_footer_right(self) -> Text:
         """Правый край футера: [профиль ]● модель[ → …] · контекст [+ цены вниз].
 
         Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
@@ -736,9 +736,9 @@ class TraceScreen(Screen):
         left_commands = self._footer_left_commands()
         left_badge = format_notices_badge(self._collect_footer_notices())
 
-        def build(profile_cols: "int | None", layout_width: int,
+        def build(profile_cols: int | None, layout_width: int,
                   *, with_transition: bool = True,
-                  with_request: bool = True, with_prices: bool = True) -> "Text":
+                  with_request: bool = True, with_prices: bool = True) -> Text:
             head = self._footer_head(with_profile=profile_cols is not None,
                                       profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
                                       snapshot=snapshot, with_transition=with_transition,
@@ -749,7 +749,7 @@ class TraceScreen(Screen):
                 return head
             return compose_adaptive_footer_right(head, request, session, layout_width)
 
-        def width_of(result: "Text") -> int:
+        def width_of(result: Text) -> int:
             return max(cell_len(line) for line in result.plain.split("\n"))
 
         # Пол левой колонки. Обычный `_FOOTER_LEFT` — список F-подсказок: его не жаль
@@ -759,7 +759,7 @@ class TraceScreen(Screen):
         # жертвует дальше правая колонка, а не левая.
         left_floor = 0 if left_commands == _FOOTER_LEFT else cell_len(left_commands)
 
-        def fits(result: "Text", allowed_left_rows: int) -> bool:
+        def fits(result: Text, allowed_left_rows: int) -> bool:
             lines = result.plain.split("\n")
             need = width_of(result)
             if len(lines) > 2 or need > available:
@@ -845,7 +845,7 @@ class TraceScreen(Screen):
         лесенка `_compose_footer_right` по числу её рядов."""
         return max(10, self._footer_total_width() - _FOOTER_CHROME_COLS)
 
-    def _usage_segments(self) -> "tuple[Text | None, Text | None]":
+    def _usage_segments(self) -> tuple[Text | None, Text | None]:
         """Раздельные сегменты («запрос», «сессия») для адаптивной вёрстки, или
         (None, None) если показывать нечего.
 
@@ -870,7 +870,7 @@ class TraceScreen(Screen):
             cfg.get("completions_url"),
         )
 
-    def _context_meter(self) -> "Text | None":
+    def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
         cfg = getattr(self.app, "_config", None) or {}
         if str(cfg.get("backend_api_mode")) != "chat_completions":
@@ -898,7 +898,7 @@ class TraceScreen(Screen):
             return None
         return render_context_meter(chars, threshold)
 
-    def _session_status_word(self) -> "Optional[str]":
+    def _session_status_word(self) -> Optional[str]:
         """Сырое слово статуса сессии (без скобок): asking/running/completed/
         stopped/failed — или None, если исход НЕ записан (старая сессия / прогон
         не дошёл до чистого финиша). Единый источник для бейджа трейса (в скобках),
@@ -927,7 +927,7 @@ class TraceScreen(Screen):
                 return "failed"
         return None   # исход неизвестен — не выдумываем «stopped»
 
-    def _task_status_badge(self) -> "Optional[str]":
+    def _task_status_badge(self) -> Optional[str]:
         word = self._session_status_word()
         return f"[{word}]" if word else None
 
@@ -1735,8 +1735,8 @@ class TraceScreen(Screen):
         sink = getattr(self.app, "_stream_sink", None)
         if sink is None:
             return
-        from gc_tui.services.stream_sink import format_stream_block, format_reasoning_line
         from gc_tui.services.markdown_render import render_prose
+        from gc_tui.services.stream_sink import format_reasoning_line, format_stream_block
         self._update_stick_state()
         think, answer = sink.snapshot()
         if self._stream_answer_row is not None:
@@ -2061,7 +2061,7 @@ class TraceScreen(Screen):
             return
         self._update_terminal_title()
 
-    def _session_last_prompt(self) -> "Optional[str]":
+    def _session_last_prompt(self) -> Optional[str]:
         """Последний user-промпт активной сессии из стора (для заголовка при resume).
 
         Source of truth — meta.user_intent_log (переживает суммаризацию; user_ask-
@@ -2186,10 +2186,10 @@ class TraceScreen(Screen):
                 self._trace_mount(w, scroll=False)
 
             # Submit_solution comment как note — после всех виджетов.
-            note_widget: Optional["TraceRow"] = None
+            note_widget: Optional[TraceRow] = None
             if isinstance(ev.full_payload, dict) and ev.full_payload.get("_submit_comment"):
-                from gc_tui.widgets.trace_row import TraceRow
                 from gc_tui.services.trace_render import note_text
+                from gc_tui.widgets.trace_row import TraceRow
                 note_widget = TraceRow(
                     prefix="* ",
                     content=note_text(ev.full_payload["_submit_comment"]),
@@ -2233,6 +2233,7 @@ class TraceScreen(Screen):
             # Канон spec 2026-07-31 §2 — строки собирает общий билдер
             # (он же у read-only канала), здесь только монтируем.
             from gc_core.tools.subagents.progress import todo_items_from_arguments
+
             from gc_tui.services.todo_render import build_todo_block
             items = todo_items_from_arguments(
                 (ev.full_payload or {}).get("arguments"))
@@ -2566,8 +2567,8 @@ class TraceScreen(Screen):
         **_kw,
     ) -> None:
         """Баннер ask_human от child: только UI, без строки в parent jsonl/трейсе."""
-        from gc_tui.widgets.ask_human_banner import AskHumanBanner
         from gc_tui.state import AskHumanState
+        from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
         if self._ask_human_banner is not None:
             self._unmount_ask_human_banner()
@@ -2602,7 +2603,7 @@ class TraceScreen(Screen):
             parent_row.resume()
         self._unmount_ask_human_banner()
 
-    
+
     def _diff_thread_identity(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """(threads_dir, system_id, thread_id) текущей сессии для DiffService."""
         threads_dir = getattr(self.app, "_threads_dir", None)
@@ -2883,7 +2884,7 @@ class TraceScreen(Screen):
             "client_id": client_id,
             "content": display_text,
             "wire_content": wire_content,
-            "ts_utc_iso": datetime.now(timezone.utc).isoformat(),
+            "ts_utc_iso": datetime.now(UTC).isoformat(),
             "status": "pending",
         }
         existing = (self._store.get_task_meta(tid).get("tui") or {}).get(
@@ -3292,10 +3293,12 @@ class TraceScreen(Screen):
             # F3: при freeze не монтируем/не красим стрим-виджеты (mount/switch/
             # set_content дрожали бы экран под выделением). Контент догонит после MouseUp.
             if _thinking_phase and sink is not None and sink.has_content() and not _frozen:
-                from gc_tui.services.stream_sink import (
-                    format_stream_block, format_reasoning_line, select_stream_render,
-                )
                 from gc_tui.services.markdown_render import render_prose
+                from gc_tui.services.stream_sink import (
+                    format_reasoning_line,
+                    format_stream_block,
+                    select_stream_render,
+                )
                 from gc_tui.widgets.stream_block import StreamBlock
                 think, answer = sink.snapshot()
                 _cfg = getattr(self.app, "_config", None) or {}
@@ -3492,7 +3495,7 @@ class TraceScreen(Screen):
         cfg = getattr(self.app, "_config", None) or {}
         return bool(cfg.get("mcp-servers"))
 
-    def _compose_card_lines(self, mcp_line: "Optional[str]") -> Text:
+    def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
         """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
 
             ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
@@ -3561,7 +3564,7 @@ class TraceScreen(Screen):
         self._refresh_notices_card(mcp_line=None)
         self._maybe_toast_warnings()
 
-    def _refresh_notices_card(self, *, mcp_line: "Optional[str]" = None) -> None:
+    def _refresh_notices_card(self, *, mcp_line: Optional[str] = None) -> None:
         """Обновить правую колонку карточки: MCP + счётчик уведомлений + готовность."""
         if self._mcp_status_row is None:
             return
@@ -3934,9 +3937,7 @@ class TraceScreen(Screen):
         # тексте: `inp.text = ""` в командах стоит ДО исполнения, а Changed от
         # него доставляется ПОСЛЕ — когда отказ уже показан, и пустое изменение
         # гасило его в момент появления (живой смок владельца 2026-09-04).
-        if self._esc_confirm_kind is not None:
-            self._clear_footer_hint()
-        elif self._footer_refusal_active and event.text_area.text:
+        if self._esc_confirm_kind is not None or (self._footer_refusal_active and event.text_area.text):
             self._clear_footer_hint()
         # Сброс history-navigation state при user-правке input.
         # Программные правки из _history_prev/_next запоминают последний text;
@@ -4611,10 +4612,13 @@ class TraceScreen(Screen):
     def _build_attachment_technical(self, text: str) -> Optional[str]:
         """Технический футер для @-вложений в тексте (резолв на сабмите).
         None — если в тексте нет существующих @-путей."""
-        from gc_tui.services.file_index import (
-            extract_at_mentions, resolve_attachment, build_attachment_footer,
-        )
         from gc_core.message_policy.user_message_policy import wrap_technical_user_content
+
+        from gc_tui.services.file_index import (
+            build_attachment_footer,
+            extract_at_mentions,
+            resolve_attachment,
+        )
         root = self._project_root()
         resolved = []
         for rel in extract_at_mentions(text):
@@ -4653,8 +4657,8 @@ class TraceScreen(Screen):
 
     def _cmd_view(self, arg: str) -> None:
         """`/view <path>` → FileViewerScreen (ошибки тоже на этом экране)."""
-        from gc_tui.services.file_view import FileViewSettings
         from gc_tui.screens.file_view import FileViewerScreen
+        from gc_tui.services.file_view import FileViewSettings
 
         cfg = self.app.screen_config()
         store = getattr(self.app, "view_positions", None)
@@ -5727,7 +5731,7 @@ class TraceScreen(Screen):
                 kind_class="line-error",
             )
             return
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         if fmt == "log-txt":
             self._export_log_txt(tid, stamp)
             return
@@ -5952,7 +5956,7 @@ class TraceScreen(Screen):
         kind_class: str,
         event_no: int = 0,
         focusable: bool = True,
-    ) -> "TraceRow":
+    ) -> TraceRow:
         """Смонтировать строку трассы через TraceRow (Horizontal prefix + content).
 
         focusable=True (дефолт) — для самостоятельных одно-строчных событий.

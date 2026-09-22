@@ -1,10 +1,13 @@
 """agent.model_steering → special_instructions merge."""
 
 import pytest
-from pydantic import ValidationError
-
-from gc_core.config_modules.agent import AgentConfig, merge_special_instructions_with_model_steering, resolve_model_steering_text
+from gc_core.config_modules.agent import (
+    AgentConfig,
+    merge_special_instructions_with_model_steering,
+    resolve_model_steering_text,
+)
 from gc_core.utils.local_render_system_prompt import render_system_prompt
+from pydantic import ValidationError
 
 
 def test_agent_config_accepts_model_steering_string():

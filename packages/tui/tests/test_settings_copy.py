@@ -1,14 +1,14 @@
 """Ctrl+C на экране настроек: выделение копируется, пустое выделение — no-op
 (приложение НЕ выходит в терминал)."""
 import pytest
-
 from gc_testkit.tui_support import wait_until
+
 pytest.importorskip("textual")
 
 
 async def test_ctrl_c_copies_selection_on_settings(tmp_path, monkeypatch):
-    from gc_core import app_version
     import gc_tui.app as app_mod
+    from gc_core import app_version
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
@@ -32,8 +32,8 @@ async def test_ctrl_c_copies_selection_on_settings(tmp_path, monkeypatch):
 
 
 async def test_ctrl_c_no_selection_is_noop_on_settings(tmp_path, monkeypatch):
-    from gc_core import app_version
     import gc_tui.app as app_mod
+    from gc_core import app_version
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))

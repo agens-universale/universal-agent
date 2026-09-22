@@ -393,7 +393,7 @@ def check_discard_updates_the_count(store: Any) -> None:
     removed = store.discard_message(SYS, tid, "m2")
 
     if not removed:
-        _fail("discard_message не удалил существующее сообщение", f"id=m2")
+        _fail("discard_message не удалил существующее сообщение", "id=m2")
     after = len(store.load_messages(SYS, tid))
     if after != before - 1:
         _fail(

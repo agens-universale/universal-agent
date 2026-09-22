@@ -11,16 +11,12 @@
 
 import json
 import os
-import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
 from gc_server.swarm import runner as runner
 from gc_server.swarm import storage as storage
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
@@ -88,7 +84,7 @@ def test_compute_deadline_returns_iso_format():
 
 
 def test_compute_deadline_in_future():
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     result = runner._compute_deadline_iso(60)
     parsed = datetime.fromisoformat(result)
     delta = (parsed - before).total_seconds()

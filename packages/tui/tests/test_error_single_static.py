@@ -5,9 +5,9 @@ import pytest
 @pytest.mark.asyncio
 async def test_command_error_is_single_static(tmp_path):
     pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
     from textual.containers import Horizontal
     from textual.widgets import Static
-    from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:

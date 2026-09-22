@@ -7,9 +7,9 @@ import pytest
 @pytest.mark.asyncio
 async def test_paste_collapse_shows_footer_hint():
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
+    from textual.widgets import Static
     async with TuiApp().run_test() as pilot:
         inp = pilot.app.screen.query_one("#cmdinput", CommandTextArea)
         inp._handle_paste("a\n" * 4 + "a")          # 5 строк → сворачивается
@@ -38,8 +38,8 @@ async def test_footer_refusal_yields_to_the_next_keystroke():
     возвращает футеру актуальные команды — не ждать 5 секунд (живой смок
     владельца 2026-09-04, то же правило, что у esc-confirm)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         scr._show_footer_refusal("✗ не сохранено: причина")
@@ -55,8 +55,8 @@ async def test_footer_refusal_yields_to_a_running_task():
     """Запущенный прогон вытесняет подсказку: футер обязан показать
     «Ctrl+C/stop», а не дожёвывать 5-секундный отказ."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     class _Runner:
         def is_running(self):
@@ -81,9 +81,9 @@ async def test_footer_refusal_survives_the_deferred_input_clear():
     2026-09-04: подсказка «не сохранено» не появлялась вовсе); первая же
     человеческая печать — гасит."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
+    from textual.widgets import Static
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         inp = scr.query_one("#cmdinput", CommandTextArea)
@@ -105,8 +105,8 @@ async def test_ordinary_hint_after_a_refusal_keeps_its_own_canon():
     «гасить печатью» принадлежит отказу, а не залипшему флагу — иначе
     paste-hint исчезал бы от первой же буквы."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         scr._show_footer_refusal("✗ не сохранено: причина")
@@ -124,8 +124,8 @@ async def test_refusal_raised_during_a_run_survives_the_poll_tick():
     прогон, НАЧАВШИЙСЯ после постановки (ревью 2026-09-04, находка 1 — иначе
     5 секунд не читались никогда именно там, где отказы и жмут)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     class _Runner:
         def is_running(self):

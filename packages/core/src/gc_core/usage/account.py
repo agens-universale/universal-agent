@@ -87,7 +87,7 @@ def category_for_request_label(request_label: str | None) -> str:
 
 
 def _empty_bucket() -> Dict[str, Any]:
-    bucket: Dict[str, Any] = {field: 0 for field in _FIELDS}
+    bucket: Dict[str, Any] = dict.fromkeys(_FIELDS, 0)
     bucket[MONEY_FIELD] = {}
     return bucket
 
@@ -148,7 +148,7 @@ class UsageAccount:
         bucket["calls"] += 1
         bucket["missing_usage_calls"] += 1
 
-    def merge(self, other: "UsageAccount", as_category: Optional[str] = None) -> None:
+    def merge(self, other: UsageAccount, as_category: Optional[str] = None) -> None:
         """Влить чужой счёт. ``as_category`` — свернуть все категории other в одну
         (используется для субагентов: их вклад → категория ``subagent`` родителя)."""
         if not isinstance(other, UsageAccount):
@@ -161,7 +161,7 @@ class UsageAccount:
             for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
                 dst_money[cur] = dst_money.get(cur, 0.0) + _num(amount)
 
-    def delta_from(self, baseline: "UsageAccount") -> "UsageAccount":
+    def delta_from(self, baseline: UsageAccount) -> UsageAccount:
         """Новый аккаунт = self − baseline (по полям, не ниже 0).
 
         Используется для usage именно текущего прогона при resume треда, где
@@ -193,7 +193,7 @@ class UsageAccount:
         return out
 
     def totals(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {field: 0 for field in _FIELDS}
+        out: Dict[str, Any] = dict.fromkeys(_FIELDS, 0)
         money: Dict[str, float] = {}
         for bucket in self.by_category.values():
             for field in _FIELDS:
@@ -218,7 +218,7 @@ class UsageAccount:
         return {"by_category": out}
 
     @classmethod
-    def from_meta(cls, raw: Any) -> "UsageAccount":
+    def from_meta(cls, raw: Any) -> UsageAccount:
         if not isinstance(raw, dict):
             return cls()
         by_category = raw.get("by_category")

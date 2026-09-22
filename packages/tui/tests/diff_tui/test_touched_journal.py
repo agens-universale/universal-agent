@@ -4,10 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-from gc_tui.diff_tui.touched import TouchedJournal
 from gc_core.thread_store import touched_journal_path
+from gc_tui.diff_tui.touched import TouchedJournal
 
 
 def test_path_helper_matches_data_meta_suffix(tmp_path):

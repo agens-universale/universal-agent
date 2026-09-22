@@ -1,16 +1,16 @@
 import importlib
 import sys
 import types
-from pathlib import Path
-
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
-from gc_core.message_policy.user_message_policy import build_invalid_tool_call_feedback_message
-from gc_core.states import State
 from types import SimpleNamespace
+
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_ERROR_MESSAGE,
+    build_invalid_tool_call_feedback_message,
+)
+from gc_core.states import State
 from gc_core.utils.convertations import sanitize_messages_for_chat_completions
+from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
-from gc_testkit import as_coro
 
 
 def teardown_module(_module) -> None:

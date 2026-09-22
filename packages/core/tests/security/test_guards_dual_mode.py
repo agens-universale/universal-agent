@@ -7,7 +7,6 @@ import inspect
 import json
 
 import pytest
-
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.url_policy import enforce_url_policy
 

@@ -44,10 +44,10 @@ def _wire_fake_voice(screen, rec, transcribe):
 @pytest.mark.asyncio
 async def test_ctrl_t_records_enter_inserts(monkeypatch):
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
+    from textual.containers import Horizontal
+    from textual.widgets import Static
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)
     app = TuiApp(config={"model": "M", "voice": dict(VOICE_CFG)})

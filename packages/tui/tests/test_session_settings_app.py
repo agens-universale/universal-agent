@@ -164,8 +164,8 @@ def test_effective_gate_matrix_global_x_override(tmp_path, global_val, override,
 
 
 def test_apply_session_overrides_applies_pair(tmp_path):
-    from gc_tui.session_settings import read_from_meta
     from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.session_settings import read_from_meta
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
     app.apply_session_overrides({

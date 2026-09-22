@@ -146,7 +146,7 @@ def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
 
         resolve_subagent_definitions(config_dict)
         records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
-    except Exception:  # noqa: BLE001 — уведомления не должны ронять старт
+    except Exception:
         return []
 
     out: List[Notice] = []
@@ -280,7 +280,7 @@ def render_notices_for_cli(notices: List[Notice]) -> str:
     return "\n".join(f"{glyph.get(n.level, '·')} {n.message}" for n in notices)
 
 
-def warning_toasts(notices: List[Notice], *, cap: int = 3) -> "Tuple[List[str], Optional[str], frozenset]":
+def warning_toasts(notices: List[Notice], *, cap: int = 3) -> Tuple[List[str], Optional[str], frozenset]:
     """Warning-уведомления для тоста при старте: до `cap` сообщений + сводный «+N ещё»
     (info НЕ тостим — только карточка/notices). Третий элемент — frozenset warning-кодов
     для сравнения «набор изменился» (тост показываем только on-change, см. вызывающего)."""

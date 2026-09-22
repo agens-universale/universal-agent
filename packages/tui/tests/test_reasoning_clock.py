@@ -162,11 +162,17 @@ def test_start_idempotent():
 
 
 def test_cognitive_tools_membership():
-    from gc_core.constants.tool_names import SESSION_THINK_TOOL_NAME, SESSION_MEMORY_TOOL_NAME, PROJECT_MEMORY_TOOL_NAME, READ_USER_INTENT_LOG_NAME, READ_STORED_TOOL_OUTPUT_NAME
-    assert COGNITIVE_TOOLS == frozenset({
+    from gc_core.constants.tool_names import (
+        PROJECT_MEMORY_TOOL_NAME,
+        READ_STORED_TOOL_OUTPUT_NAME,
+        READ_USER_INTENT_LOG_NAME,
+        SESSION_MEMORY_TOOL_NAME,
+        SESSION_THINK_TOOL_NAME,
+    )
+    assert frozenset({
         SESSION_THINK_TOOL_NAME, SESSION_MEMORY_TOOL_NAME, PROJECT_MEMORY_TOOL_NAME,
         READ_USER_INTENT_LOG_NAME, READ_STORED_TOOL_OUTPUT_NAME,
-    })
+    }) == COGNITIVE_TOOLS
     # fs/exec/mcp — НЕ когнитивные
     assert "fs_write_file" not in COGNITIVE_TOOLS
     assert "exec_command" not in COGNITIVE_TOOLS

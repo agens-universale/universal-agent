@@ -8,7 +8,6 @@ from gc_core.summarize.llm import (
 )
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 
-
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
 
 <Example 1>

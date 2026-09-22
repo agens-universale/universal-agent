@@ -1,18 +1,14 @@
 """UserReplyContainer — реплика пользователя с band-фоном и 2px teal кромкой слева."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from rich.text import Text
-from typing import Optional
-
 from textual.message import Message
 from textual.widget import Widget
 
-from gc_tui.widgets.click_model import ClickModelMixin
-
 from gc_tui.palette import ERR as _ERR_RED
-
+from gc_tui.widgets.click_model import ClickModelMixin
 
 _State = Literal["normal", "pending", "failed"]
 

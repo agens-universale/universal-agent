@@ -1,11 +1,9 @@
 import json
 
 from gc_core.tools.fs.file_info import FileInfo
-from gc_core.tools.fs.read_file import ReadFile, DEFAULT_READ_FILE_MAX_BYTES
+from gc_core.tools.fs.read_file import DEFAULT_READ_FILE_MAX_BYTES, ReadFile
 from gc_core.utils.file_text import sha256_hex_of_bytes
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
-
 
 _CHAR_PAGING_KEYS = (
     "char_offset",

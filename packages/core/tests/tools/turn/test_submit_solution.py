@@ -1,8 +1,7 @@
 import json
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 VALID_TYPES = (
     "full_solution",

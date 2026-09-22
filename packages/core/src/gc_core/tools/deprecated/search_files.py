@@ -1,18 +1,25 @@
-import json
 import bisect
 import functools
+import json
 import os
 import re
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
+from gc_core.security.read_guard import (
+    ReadGuardViolation,
+    _resolve_skills_root,
+    check_read_path_allowed,
+    enforce_read_guard,
+    parse_read_guard_config,
+)
+from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.file_text import decode_text_best_effort, decode_text_bytes
+from gc_core.utils.fs_size_limits import check_file_size, fs_read_max_bytes
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.utils.fs_size_limits import check_file_size, fs_read_max_bytes
-from gc_core.utils.file_text import decode_text_best_effort, decode_text_bytes
-from gc_core.tools.fs.agent_hidden import is_agent_hidden
-from gc_core.security.read_guard import enforce_read_guard, parse_read_guard_config, check_read_path_allowed, ReadGuardViolation, _resolve_skills_root
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
 
 
 class SearchFiles(AbstractSimpleTool):
@@ -250,7 +257,7 @@ Search for error logs in Rust source files:
         try:
             compiled_regex = re.compile(regex, re.DOTALL | re.MULTILINE)
         except re.error as e:
-            raise ValueError(f"Invalid regex pattern '{regex}': {str(e)}")
+            raise ValueError(f"Invalid regex pattern '{regex}': {e!s}")
 
         literal_hints = self._extract_literals(regex)
         if literal_hints and not any(hint in text for hint in literal_hints):
@@ -284,7 +291,7 @@ Search for error logs in Rust source files:
             )
         return results
 
-    def _result(self, 
+    def _result(self,
         *,
         path: str,
         regex: str,

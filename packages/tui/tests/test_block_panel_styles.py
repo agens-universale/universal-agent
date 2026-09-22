@@ -5,10 +5,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static
-
-from gc_tui.app import TuiApp
 from gc_tui.widgets.block_panel import BlockPanel
+from textual.widgets import Static
 
 LONG_LINE = "result = calculate_comprehensive_statistical_significance(alpha, beta, gamma, delta)"
 

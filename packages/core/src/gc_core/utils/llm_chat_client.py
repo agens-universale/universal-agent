@@ -7,17 +7,15 @@ from typing import Any, Dict, List, Optional
 from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
 from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.usage.account import category_for_request_label
+from gc_core.usage.context import usage_scope
 from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
-    backend_override_value,
     acreate_call_headers,
+    backend_override_value,
     resolve_network_params,
 )
-from gc_core.usage.account import category_for_request_label
-from gc_core.usage.context import usage_scope
-from gc_core.usage.account import category_for_request_label
-from gc_core.usage.context import usage_scope
 
 # РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
 # «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице

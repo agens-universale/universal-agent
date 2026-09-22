@@ -6,9 +6,8 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
+from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_testkit import run_coro
@@ -143,7 +142,7 @@ def test_no_pending_finishes_normally(monkeypatch):
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
-        get_pending_messages=lambda: [],
+        get_pending_messages=list,
     ))
 
     assert result == _expected_finish_return()
@@ -250,5 +249,5 @@ def test_pending_empty_queue_does_not_begin_turn(monkeypatch):
     calls: list = []
     monkeypatch.setattr(pr, "begin_turn_main_trace", lambda *a: calls.append(a))
 
-    assert pr._pickup_pending_as_new_turn(lambda: [], _make_state(), _make_ctx()) is None
+    assert pr._pickup_pending_as_new_turn(list, _make_state(), _make_ctx()) is None
     assert calls == []

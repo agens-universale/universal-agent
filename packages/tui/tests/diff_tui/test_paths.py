@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 
 import pytest
-
 from gc_tui.diff_tui import paths
 from gc_tui.diff_tui.paths import canonical_path_key, in_tracking_perimeter, is_trackable_path, orig_key
 

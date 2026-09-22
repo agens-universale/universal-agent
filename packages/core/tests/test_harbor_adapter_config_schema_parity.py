@@ -9,17 +9,16 @@ KeyError. Building on top of ``flatten_app_config(AppConfig())`` makes that impo
 Layering under test: schema defaults < bench defaults < profile overrides < runtime.
 """
 import sys
-from pathlib import Path
 
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig, resolve_paths
+from gc_testkit.paths import HARBOR
 
-from gc_testkit.paths import HARBOR, REPO
 _HARBOR_DIR = HARBOR
 if str(_HARBOR_DIR) not in sys.path:
     sys.path.insert(0, str(_HARBOR_DIR))
 
-from adapters.gc_cli_config import build_gc_cli_config  # noqa: E402
+from adapters.gc_cli_config import build_gc_cli_config
 from gc_testkit.paths import ASSETS
 
 _PROMPTS = ASSETS / "prompts"

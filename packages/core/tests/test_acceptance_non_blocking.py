@@ -5,16 +5,15 @@
 ходит в сеть и исполняет тулы.
 """
 import asyncio
-import pytest
 import json
 import os
 import subprocess
 import sys
 import time
 
+import pytest
 from gc_core.aio import AsyncAgent
 from gc_testkit.paths import package_src_dirs
-
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
@@ -148,17 +147,17 @@ import asyncio, json, sys
 from gc_core.aio import AsyncAgent
 
 async def main():
-    agent = await AsyncAgent.create({
+    agent = await AsyncAgent.create({{
         "backend_api_mode": "chat_completions",
         "completions_url": "http://acceptance.invalid/v1/chat/completions",
         "model": "acceptance-model",
-        "threads_data_path": %(threads)r,
-        "logs_dump_dir": %(logs)r,
+        "threads_data_path": {threads!r},
+        "logs_dump_dir": {logs!r},
         "save_logs": False,
-        "launch_root": %(root)r,
+        "launch_root": {root!r},
         "backend_request_timeout_sec": 60,
         "max_steps": 1,
-    })
+    }})
     await agent.aclose()
 
 try:
@@ -167,11 +166,11 @@ except Exception:
     pass    # цель теста — импорты, а не успешность сборки контекста
 leaked = [m for m in ("gc_cli", "gc_tui", "gc_server") if m in sys.modules]
 print(json.dumps(leaked))
-""" % {
-        "threads": str(tmp_path / "threads"),
-        "logs": str(tmp_path / "logs"),
-        "root": str(tmp_path),
-    }
+""".format(
+        threads=str(tmp_path / "threads"),
+        logs=str(tmp_path / "logs"),
+        root=str(tmp_path),
+    )
 
     # PYTHONPATH исходников: без него дочерний процесс берёт УСТАНОВЛЕННУЮ копию
     # gc_core, а не ту, которую гоняет набор, — и меряет чужое дерево. Здесь это

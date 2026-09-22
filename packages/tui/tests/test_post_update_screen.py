@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("textual")
 from textual.widgets import Static
 
@@ -13,8 +14,8 @@ def _states(monkeypatch, updates: dict):
     Заодно гасит пункт голосового движка: он смотрит в РЕАЛЬНЫЙ state.json машины, и на
     стенде с отставшей установкой всплыл бы сам — сдвинул бы индексы строк, а на Enter
     запустил бы настоящую переустановку speaches прямо из тестов."""
-    from recommended_mcp.runtime import cli as cli
     from gc_tui.voice_runtime import state as voice_state
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(voice_state, "load_state", lambda: None)
     monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], None))
     monkeypatch.setattr(cli, "installed_state",
@@ -23,8 +24,10 @@ def _states(monkeypatch, updates: dict):
 
 
 async def test_post_update_lists_checkboxes(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
@@ -42,8 +45,10 @@ async def test_post_update_lists_checkboxes(monkeypatch):
 async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
     """MCP подключены, но их версии совпадают с манифестом новой версии агента →
     пункт не предлагаем (как с config.yml: нечего делать — нечего показывать)."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {})                       # ни у кого нет обновления
@@ -58,8 +63,10 @@ async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
 
 async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
     """В строке — только серверы, которым правда есть что обновить."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {"office": "0.3.1"})      # обновление только у office
@@ -73,8 +80,10 @@ async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
 
 
 async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     app = app_mod.TuiApp(config={})
@@ -103,8 +112,10 @@ def _voice(monkeypatch, *, installed: str | None, pin: str = "v0.9.0"):
 
 async def test_post_update_offers_voice_engine_when_behind(monkeypatch):
     """Движок обновляется только отсюда: `gc-voice install` руками никто не гоняет."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _voice(monkeypatch, installed="v0.8.3")
@@ -118,8 +129,10 @@ async def test_post_update_offers_voice_engine_when_behind(monkeypatch):
 
 
 async def test_post_update_hides_voice_when_at_pin_or_absent(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     app = app_mod.TuiApp(config={})
@@ -135,9 +148,11 @@ async def test_post_update_hides_voice_when_at_pin_or_absent(monkeypatch):
 
 
 async def test_post_update_enter_updates_voice_engine(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_core import config_sync, upgrade_gate
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
     from gc_tui.services import voice_setup
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: None)
@@ -156,8 +171,10 @@ async def test_post_update_enter_updates_voice_engine(monkeypatch):
 
 
 async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_core import config_sync, upgrade_gate
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {"office": "0.3.1"})
@@ -181,8 +198,10 @@ async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
 
 
 async def test_post_update_enter_installs_marked_and_stamps_once(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_core import config_sync, upgrade_gate
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office", "ddg"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     _states(monkeypatch, {"office": "0.3.1", "ddg": "0.2.0"})
@@ -212,8 +231,10 @@ async def test_post_update_enter_installs_marked_and_stamps_once(monkeypatch):
 
 
 async def test_post_update_esc_stamps_without_executing(monkeypatch):
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_core import upgrade_gate; from gc_tui import app as app_mod
+    from gc_core import config_sync, upgrade_gate
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     installed = []
@@ -235,8 +256,10 @@ async def test_post_update_esc_stamps_without_executing(monkeypatch):
 async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
     """Обновлять нечего → блок «Осталось обновить» не показываем вовсе (ни подзаголовка,
     ни «всё уже актуально»), футер честный: отмечать нечего."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     _states(monkeypatch, {})                       # у MCP тоже нечего обновлять
@@ -254,8 +277,10 @@ async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
 
 async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
     """Есть что обновить → подзаголовок «Осталось обновить:» и полный футер."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     app = app_mod.TuiApp(config={})
@@ -270,8 +295,10 @@ async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
 
 async def test_post_update_equal_version_title_is_plain(monkeypatch):
     """Номер версии не изменился → просто «Агент обновлён», без «до актуальной версии»."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
 
     class _SameVer:
         old_version = "0.0.1"; new_version = "0.0.1"
@@ -289,8 +316,10 @@ async def test_post_update_equal_version_title_is_plain(monkeypatch):
 
 async def test_post_update_title_always_carries_version(monkeypatch):
     """Версия видна всегда: сдвига не было → «Агент обновлён · v0.0.1»."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
 
     class _SameVer:
         old_version = "0.0.1"; new_version = "0.0.1"
@@ -308,8 +337,10 @@ async def test_post_update_title_always_carries_version(monkeypatch):
 
 async def test_post_update_title_divider_only_when_there_is_work(monkeypatch):
     """Линия под заголовком отделяет заголовок ОТ блока — без блока она не висит."""
-    from recommended_mcp.runtime import cli as cli; from gc_core import config_sync; from gc_tui import app as app_mod
+    from gc_core import config_sync
+    from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: False)
     app = app_mod.TuiApp(config={})

@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import os
 import tempfile
-import yaml
 
+import yaml
 from gc_core.config import load_config
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.utils import connect_backend
-
-from transport_fakes import install_transport
 from gc_testkit import run_coro
+from transport_fakes import install_transport
 
 
 def test_backend_config_proxy_default_none():

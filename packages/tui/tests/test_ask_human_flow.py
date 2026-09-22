@@ -1,7 +1,7 @@
 """ask_human flow: detection → banner mount → user answer → banner unmount."""
 import json
-import pytest
 
+import pytest
 from gc_testkit.tui_fixtures.stub_executor import StubExecutor
 
 
@@ -210,9 +210,9 @@ async def test_ask_human_esc_clean_stops(tmp_path):
     - tui_state.ask_human_state сброшен в None.
     - app.active_runner = None (clean-restart pattern)."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_fixtures.stub_executor import StubExecutor
     from gc_tui.app import TuiApp
     from gc_tui.widgets.ask_human_banner import AskHumanBanner
-    from gc_testkit.tui_fixtures.stub_executor import StubExecutor
 
     tid = "ah_esc"
     fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow")
@@ -342,9 +342,9 @@ async def test_ask_human_esc_with_text_clears_input_first(tmp_path):
 async def test_ask_human_body_renders_markdown():
     """Баннер монтирует блок-виджеты: markdown отрисован, без маркера-реплики `●`."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.widgets.ask_human_banner import AskHumanBanner
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.app import App
 
     class _A(App):
         def compose(self):
@@ -366,9 +366,9 @@ async def test_ask_human_body_renders_markdown():
 async def test_ask_human_table_renders():
     """Таблица в вопросе ask_human → виджет .table-block."""
     pytest.importorskip("textual")
-    from textual.app import App
-    from gc_tui.widgets.block_panel import BlockPanel
     from gc_tui.widgets.ask_human_banner import AskHumanBanner
+    from gc_tui.widgets.block_panel import BlockPanel
+    from textual.app import App
 
     q = "Сравни:\n\n| A | B |\n|---|---|\n| 1 | 2 |"
 

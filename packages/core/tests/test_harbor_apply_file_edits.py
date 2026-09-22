@@ -10,13 +10,11 @@ variants). Any divergence on any case fails the suite.
 """
 import hashlib
 import json
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 
 CONTENT = "alpha\nbeta\nalpha\ngamma\n"
 CONTENT_SHA = hashlib.sha256(CONTENT.encode("utf-8")).hexdigest()

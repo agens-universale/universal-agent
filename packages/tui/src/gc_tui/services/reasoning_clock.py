@@ -16,7 +16,13 @@ from __future__ import annotations
 
 import time
 
-from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME, READ_USER_INTENT_LOG_NAME, SESSION_MEMORY_TOOL_NAME, SESSION_THINK_TOOL_NAME
+from gc_core.constants.tool_names import (
+    PROJECT_MEMORY_TOOL_NAME,
+    READ_STORED_TOOL_OUTPUT_NAME,
+    READ_USER_INTENT_LOG_NAME,
+    SESSION_MEMORY_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
+)
 
 # Когнитивные тулы — «свой ум» (мысль/память/свой контекст), НЕ действия/внешний мир.
 # ev.tool_name = tool_id(wire); эти имена tool_id пропускает как есть → совпадают

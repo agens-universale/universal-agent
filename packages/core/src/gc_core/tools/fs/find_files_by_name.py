@@ -13,17 +13,18 @@ from gc_core.config_modules.fs_tools import (
     FsFindFilesByNameConfig,
     parse_find_files_by_name_config,
 )
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
+from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
 from gc_core.security.read_guard import (
     ReadGuardViolation,
+    _resolve_skills_root,
     check_read_path_allowed,
     enforce_read_guard,
     parse_read_guard_config,
-    _resolve_skills_root,
 )
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
+from gc_core.tools.fs.cooperative import LoopYielder
 from gc_core.tools.schema_optional import coalesce_optional_string
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 from gc_core.utils.fs_search_walk import (
@@ -34,7 +35,6 @@ from gc_core.utils.fs_search_walk import (
 )
 from gc_core.utils.glob_to_regex import glob_to_regex
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.tools.fs.cooperative import LoopYielder
 
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 

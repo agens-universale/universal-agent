@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 
 
 def _state() -> State:

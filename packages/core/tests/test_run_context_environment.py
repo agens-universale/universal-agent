@@ -1,6 +1,5 @@
-from gc_core.run_context import RunContext, acreate_run_context
-
 from gc_core.backends.local import LocalFsBackend
+from gc_core.run_context import RunContext, acreate_run_context
 
 
 def test_runcontext_has_environment_and_os_backend_fields():

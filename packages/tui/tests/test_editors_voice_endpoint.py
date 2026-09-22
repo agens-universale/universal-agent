@@ -3,10 +3,9 @@ import pytest
 
 pytest.importorskip("textual")
 
+from gc_tui.widgets.paste_input import PasteInput
 from textual.app import App, ComposeResult
 from textual.widgets import Input, Static
-
-from gc_tui.widgets.paste_input import PasteInput
 
 
 def _harness(editor):
@@ -256,12 +255,7 @@ async def test_lang_list_opens_with_hint_then_all_codes():
 # Эталон: коды `whisper.tokenizer.LANGUAGES` модели large-v3 (99 базовых + `yue`).
 # Списком, а не «сам с собой»: сверка длины пропажу кода не ловит, а faster-whisper
 # в венве агента не стоит, чтобы взять его из зависимости.
-WHISPER_LANGUAGE_CODES = frozenset("""
-af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr gl gu ha
-haw he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt lv mg mi mk ml mn mr
-ms mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk sl sn so sq sr su sv sw ta te tg
-th tk tl tr tt uk ur uz vi yi yo yue zh
-""".split())
+WHISPER_LANGUAGE_CODES = frozenset(["af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy", "da", "de", "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru", "sa", "sd", "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "yue", "zh"])
 
 
 def test_whisper_reference_set_is_the_large_v3_alphabet():

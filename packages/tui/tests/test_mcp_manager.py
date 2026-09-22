@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("textual")
 
 from gc_tui.services.mcp_manager import McpManager, McpRow

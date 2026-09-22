@@ -39,7 +39,7 @@ class _RetryPolicy:
         for attempt in range(1, self.max_attempts + 1):
             try:
                 return await func(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_exc = exc
                 if not self._retriable(attempt, exc):
                     logger.log(

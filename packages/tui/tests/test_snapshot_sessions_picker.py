@@ -1,6 +1,6 @@
 """/sessions picker — каноничный вид с 7 фикстурными задачами (новый дизайн Spec 1)."""
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -9,7 +9,7 @@ pytest.importorskip("pytest_textual_snapshot")
 
 
 # Фиксированный "сейчас" для стабильности snapshot'а
-_FIXED_NOW = datetime(2026, 5, 22, 14, 0, 0, tzinfo=timezone.utc)
+_FIXED_NOW = datetime(2026, 5, 22, 14, 0, 0, tzinfo=UTC)
 
 
 def _fixed_rel(iso_utc, **_):

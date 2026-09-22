@@ -4,15 +4,13 @@
 import json
 
 import pytest
-
-from gc_testkit import run_coro
-
 from gc_core.tools import aapply_tool
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
     parse_and_validate_tool_arguments,
 )
+from gc_testkit import run_coro
 
 SPEC = {
     "type": "function",

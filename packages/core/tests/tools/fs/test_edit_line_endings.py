@@ -2,11 +2,9 @@
 import json
 
 import pytest
-
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.edit_line_endings import collect_literal_matches, resolve_edit_line_endings
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 CRLF_TEXT = "def a():\r\n    return 1\r\n\r\ndef b():\r\n    return 2\r\n"

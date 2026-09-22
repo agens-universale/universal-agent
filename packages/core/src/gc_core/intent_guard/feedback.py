@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from gc_core.intent_guard.validation_result import ValidationResult
 
-
 _TRACE_GAPS_TITLE = "Trace gaps:"
 _ADDITIONALLY_TITLE = "Additionally:"
 _CONFLICTS_TITLE = "Notes (conflicts):"

@@ -47,9 +47,12 @@ import yaml
 
 from gc_core import config_raw
 from gc_core import onboarding_config_writer as ocw
-from gc_core.config_modules.layers import (prospective_registry, stack_documents,
-                                   validate_config_text_with_sections,
-                                   validate_profile_text_with_sections)
+from gc_core.config_modules.layers import (
+    prospective_registry,
+    stack_documents,
+    validate_config_text_with_sections,
+    validate_profile_text_with_sections,
+)
 from gc_core.config_modules.model_registry import LEVELS
 from gc_core.config_modules.profiles import validate_profile_text
 from gc_core.config_origin import error_origins
@@ -700,11 +703,11 @@ __all__ = [
     "RegistryWriteError",
     "RemovalReport",
     "apply_registry_ops",
-    "references_to",
     "needs_default_slot",
     "references_broken_by_removal",
-    "upsert_model",
+    "references_to",
     "remove_model",
-    "write_slot",
+    "upsert_model",
     "write_assign",
+    "write_slot",
 ]

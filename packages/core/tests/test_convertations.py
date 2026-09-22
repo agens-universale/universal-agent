@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from gc_core.utils.convertations import output_chat_completion_to_response, get_output_list
+from gc_core.utils.convertations import get_output_list, output_chat_completion_to_response
 
 
 def _base_payload():

@@ -5,11 +5,9 @@ Bug 2: Skill-реплика на resume показывается как [!] fail
 Bug 3: CSS: отсутствует .skill-marker в styles.tcss (отступ под маркером).
 """
 import json
-from pathlib import Path
 
 import pytest
 from gc_testkit.paths import TUI_PKG
-
 
 # ---------------------------------------------------------------------------
 # Bug 1: дублирование user-reply для skill-сообщений
@@ -201,7 +199,6 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
 
 def test_skill_marker_css_rule_exists():
     """styles.tcss содержит правило .skill-marker."""
-    from pathlib import Path
     import re
 
     tcss = TUI_PKG / "styles.tcss"

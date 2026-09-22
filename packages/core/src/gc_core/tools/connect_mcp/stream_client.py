@@ -1,29 +1,25 @@
 from __future__ import annotations
 
-from datetime import timedelta
-
-from typing import Any, Dict, List, Optional, Tuple, Union
-
 import asyncio
-import os
 import logging
+import os
 import weakref
+from datetime import timedelta
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlsplit, urlunsplit
-
-from gc_core.utils.url_addr import is_loopback
 
 import httpx
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamable_http_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
 
-from gc_core.utils.aio_compat import run_coro_blocking
-from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.transport import _resolve_command
+from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
+from gc_core.utils.url_addr import is_loopback
 
 #: Логгер модуля: сюда уходит предупреждение о нарушенном инварианте
 #: «сессия закрывается в той же задаче, где открыта».

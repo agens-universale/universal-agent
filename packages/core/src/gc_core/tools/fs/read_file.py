@@ -1,17 +1,19 @@
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from typing import Any, Dict, Optional
 import json
+from typing import Any, Dict, Optional
 
-from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.read_guard import enforce_read_guard
 from gc_core.tools.schema_optional import coalesce_optional_string
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import decode_text_bytes, sha256_hex_of_bytes
 from gc_core.utils.fs_size_limits import (
     DEFAULT_FS_READ_MAX_BYTES as DEFAULT_READ_FILE_MAX_BYTES,  # noqa: F401  # re-export для тестов
+)
+from gc_core.utils.fs_size_limits import (
     check_file_size,
     fs_read_max_bytes,
 )
+from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
 def _read_arg_error(offset, limit) -> "tuple[str, str] | None":

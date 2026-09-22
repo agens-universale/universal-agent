@@ -1,8 +1,6 @@
 """trace_mapper: function_call/output, правила извлечения главного аргумента (§3)."""
 import json
 
-import pytest
-
 from gc_tui.services.trace_mapper import map_message
 
 

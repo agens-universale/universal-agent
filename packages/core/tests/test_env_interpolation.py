@@ -2,7 +2,6 @@ import logging
 import os as _os
 
 import pytest
-
 from gc_core.config_modules.env_interpolation import resolve_env_only, resolve_env_placeholders
 
 

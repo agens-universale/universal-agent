@@ -4,8 +4,16 @@ import json
 import logging
 from typing import Any
 
-from gc_core.intent_scope.agent_logging import log_intent_scope_delta_appended, log_intent_scope_skipped, log_intent_scope_summary_done
-from gc_core.config_modules.intent_scope import intent_scope_active, intent_scope_tool_record, intent_scope_tool_store_flags
+from gc_core.config_modules.intent_scope import (
+    intent_scope_active,
+    intent_scope_tool_record,
+    intent_scope_tool_store_flags,
+)
+from gc_core.intent_scope.agent_logging import (
+    log_intent_scope_delta_appended,
+    log_intent_scope_skipped,
+    log_intent_scope_summary_done,
+)
 from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
 from gc_core.intent_scope.summarizer import asummarize_tool_intent_line, build_fallback_aggregated_content

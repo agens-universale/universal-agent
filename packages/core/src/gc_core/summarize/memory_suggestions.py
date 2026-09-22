@@ -4,10 +4,13 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from gc_core.bundled_assets import bundled_root
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.prompt_loading import load_memory_patch_replace_prompt
-from gc_core.summarize.working_memory_gateway import MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL, build_memory_deltas_format_repair_messages
-from gc_core.bundled_assets import bundled_root
+from gc_core.summarize.working_memory_gateway import (
+    MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
+    build_memory_deltas_format_repair_messages,
+)
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())

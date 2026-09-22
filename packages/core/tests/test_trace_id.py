@@ -1,6 +1,11 @@
 import pytest
-
-from gc_core.trace_id import MAX_TRACE_ID_LEN, normalize_trace_id, trace_header_name, trace_id_from_config, trace_id_slug
+from gc_core.trace_id import (
+    MAX_TRACE_ID_LEN,
+    normalize_trace_id,
+    trace_header_name,
+    trace_id_from_config,
+    trace_id_slug,
+)
 
 
 class TestNormalizeTraceId:

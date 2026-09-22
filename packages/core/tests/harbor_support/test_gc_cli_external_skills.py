@@ -1,8 +1,8 @@
 """Native registration of harbor-injected task skills without host mirroring."""
 import sys
-from pathlib import Path
 
 from gc_testkit.paths import HARBOR, REPO
+
 _REPO = REPO
 
 # Expose `adapters/` (inside ./harbor) and `src/` for the adapter import. Append, do
@@ -14,7 +14,7 @@ for p in (str(HARBOR), str(_REPO / "src")):
     if p not in sys.path:
         sys.path.append(p)
 
-from adapters.gc_cli_external import GcCliExternal  # noqa: E402
+from adapters.gc_cli_external import GcCliExternal
 
 
 def test_apply_injected_skills_uses_container_path():

@@ -7,7 +7,6 @@
 import logging
 
 import pytest
-
 from gc_core.tools.subagents.selection import subagents_allowlist, subagents_allowlist_ordered, subagents_enabled
 
 BUILTIN = {

@@ -16,7 +16,6 @@ import threading
 import types
 
 import pytest
-
 from gc_tui.services.agent_runner import AgentRunner
 
 _WAIT_SEC = 10.0

@@ -1,5 +1,4 @@
 """Tests for long-memory backup/restore via gc_state."""
-from pathlib import Path
 
 from gc_core.project_memory import storage
 from gc_core.tools.project.project_memory import backup_path

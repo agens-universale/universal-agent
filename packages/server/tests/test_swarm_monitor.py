@@ -8,17 +8,10 @@
 - start_in_background + stop.
 """
 
-import os
-import sys
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-
-from gc_server.swarm import monitor as monitor_mod
 from gc_server.swarm.monitor import SwarmMonitor
-
 
 # ---------------------------------------------------------------------------
 # Active set API

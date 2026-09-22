@@ -9,14 +9,22 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-
 from gc_core.onboarding_config_writer import write_values as _write_values
+
 from gc_tui.voice_runtime.net import with_system_trust_retry
-from gc_tui.voice_runtime.service import make_silence_wav, port_alive as _port_alive
-from gc_tui.voice_runtime.state import available_update as _available_update, load_state as _load_state
+from gc_tui.voice_runtime.service import make_silence_wav
+from gc_tui.voice_runtime.service import port_alive as _port_alive
+from gc_tui.voice_runtime.state import available_update as _available_update
+from gc_tui.voice_runtime.state import load_state as _load_state
 from gc_tui.voice_runtime.wire import (
-    base_config_raw, managed_language as _managed_language,
-    unwire_voice as _unwire_managed, wire_voice,
+    base_config_raw,
+    wire_voice,
+)
+from gc_tui.voice_runtime.wire import (
+    managed_language as _managed_language,
+)
+from gc_tui.voice_runtime.wire import (
+    unwire_voice as _unwire_managed,
 )
 
 
@@ -135,7 +143,7 @@ def update_local(config: dict, echo=print) -> bool:
     Порт и модель берём прежние: их выбирал человек, и смена версии движка — не повод
     молча вернуть дефолты."""
     from gc_tui.voice_runtime.autostart import ensure_voice_service
-    from gc_tui.voice_runtime.cli import _stop_service   # приватная, как в remove_local ниже
+    from gc_tui.voice_runtime.cli import _stop_service  # приватная, как в remove_local ниже
     from gc_tui.voice_runtime.install import VoiceInstallError, install
 
     state = _load_state()

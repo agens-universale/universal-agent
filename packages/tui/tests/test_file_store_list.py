@@ -1,9 +1,6 @@
 """FileTaskStore.list_tasks + get_task_meta — поверх существующего thread_store."""
 import json
-import os
 from pathlib import Path
-
-import pytest
 
 from gc_tui.services.stores.file_store import FileTaskStore
 

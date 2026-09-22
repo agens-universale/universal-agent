@@ -1,13 +1,10 @@
 """Tests for deprecated tools.deprecated.memory_files.MemoryFiles"""
 
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 
-import pytest
-
-from gc_core.tools.deprecated.memory_files import MemoryFiles, _DEFAULT_MAX_FILE_CHARS, _DEFAULT_MAX_FILES
-
+from gc_core.tools.deprecated.memory_files import _DEFAULT_MAX_FILE_CHARS, _DEFAULT_MAX_FILES, MemoryFiles
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 # ---------------------------------------------------------------------------
 # Helpers

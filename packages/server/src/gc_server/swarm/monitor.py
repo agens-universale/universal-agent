@@ -14,7 +14,6 @@ from typing import Optional, Set
 
 import gc_server.swarm.lifecycle as lifecycle
 
-
 logger = logging.getLogger(__name__)
 
 

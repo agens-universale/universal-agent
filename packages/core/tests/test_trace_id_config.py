@@ -1,8 +1,7 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
+from pydantic import ValidationError
 
 
 def _app(raw: dict) -> AppConfig:

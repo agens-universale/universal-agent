@@ -32,7 +32,7 @@ def _load_limit_summary_prompt() -> str:
     global _prompt_cache
     if _prompt_cache is not None:
         return _prompt_cache
-    with open(_PROMPT_PATH, "r", encoding="utf-8") as fd:
+    with open(_PROMPT_PATH, encoding="utf-8") as fd:
         text = fd.read().strip()
     if not text:
         raise ValueError(f"Limit trace summary prompt is empty: {_PROMPT_PATH}")

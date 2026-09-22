@@ -3,9 +3,9 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static
-from gc_testkit.tui_support import open_settings_section, settings_section_index, wait_until
 from form_harness import recording_probe, settings_connection, settings_mcp_section, settings_voice_section
+from gc_testkit.tui_support import open_settings_section, settings_section_index, wait_until
+from textual.widgets import Static
 
 
 def _cfg():
@@ -150,8 +150,8 @@ async def test_settings_enter_opens_section_and_esc_returns():
 
 
 async def test_settings_ctrl_pgup_pgdn_switch_sections():
-    from gc_tui.screens.settings import _MCP, _MODES, _UPDATE, _VOICE
     from gc_tui import app as app_mod
+    from gc_tui.screens.settings import _MCP, _MODES, _UPDATE, _VOICE
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         app.push_screen(_mk_screen())
@@ -238,6 +238,7 @@ async def test_open_section_picks_up_default_changed_by_other_window(tmp_path):
     экрана и повторного /settings."""
     import os
     import time
+
     from gc_tui import app as app_mod
     cfg_file = _write_cfg(tmp_path, model='"old-model"')
     app = app_mod.TuiApp(config={"model": "placeholder"})
@@ -365,6 +366,7 @@ async def test_config_stack_texts_follows_the_project_layer_when_it_conflicts_wi
     Набор отслеживаемых файлов обязан следить за ПОБЕДИВШИМ профилем, а не за именем
     из сырого документа базы: иначе кэш следит не за тем файлом вовсе."""
     from pathlib import Path
+
     from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -470,9 +472,9 @@ async def test_settings_esc_without_enter_changes_nothing(tmp_path):
 
 
 async def test_settings_readonly_when_target_is_bundled_template():
+    from gc_core.config import _default_config_path
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    from gc_core.config import _default_config_path
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         app.push_screen(SettingsScreen(config=_cfg(), config_path=_default_config_path(),
@@ -488,9 +490,9 @@ async def test_settings_readonly_when_target_is_bundled_template():
 
 async def test_settings_enter_in_readonly_section_does_not_crash():
     """Enter в read-only секции не должен ронять приложение."""
+    from gc_core.config import _default_config_path
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    from gc_core.config import _default_config_path
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         scr = SettingsScreen(config=_cfg(), config_path=_default_config_path(),
@@ -510,8 +512,8 @@ async def test_settings_enter_in_readonly_section_does_not_crash():
 
 async def test_update_section_shows_version_and_sync_row(tmp_path, monkeypatch):
     from gc_core import app_version
-    from gc_tui import app as app_mod
     from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "agent_version", lambda: "0.3.0")
     monkeypatch.setattr(app_version, "install_source", lambda _read=None: app_version.InstallSource(
@@ -657,8 +659,8 @@ async def test_space_on_galka_toggles_no_auth_and_freezes_token(tmp_path):
     cfg_file = _write_cfg(tmp_path, auth='"Bearer old-token"')
     cfg = _loaded(cfg_file)
     from gc_tui import app as app_mod
-    from textual.widgets import Input
     from gc_tui.editors.connection import ConnectionEditor
+    from textual.widgets import Input
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
@@ -685,8 +687,8 @@ async def test_space_off_galka_types_space_and_does_not_toggle(tmp_path):
     cfg_file = _write_cfg(tmp_path, auth='"Bearer old-token"')
     cfg = _loaded(cfg_file)
     from gc_tui import app as app_mod
-    from textual.widgets import Input
     from gc_tui.editors.connection import ConnectionEditor
+    from textual.widgets import Input
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
@@ -712,8 +714,8 @@ async def test_connection_section_esc_collapses_presets_enter_substitutes(tmp_pa
     повторный вход на адрес раскрывает список заново; Enter подставляет url
     выделенного пресета; список уже свёрнут — следующий Enter обычный submit (не
     падает на повторном mount тех же id)."""
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     from textual.widgets import Input
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: ""\n', encoding="utf-8")
@@ -873,8 +875,8 @@ async def test_esc_with_presets_closed_exits_section_as_before(tmp_path):
 async def test_mcp_section_mounts_editor(tmp_path, monkeypatch):
     """Секция MCP монтирует полноценный McpSectionEditor (не заглушку-мост)."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.mcp_section import McpSectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: [])
@@ -897,8 +899,8 @@ async def test_mcp_confirm_banner_blocks_section_switch(tmp_path, monkeypatch):
     _switch_section→_render_view молча уничтожит редактор и _pending без confirm/cancel).
     Ранний гейт секции MCP глотает всё, кроме enter (→ confirm) и escape (→ cancel)."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.mcp_section import McpSectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
@@ -1069,7 +1071,7 @@ async def test_report_survives_the_next_key_and_closes_on_escape(tmp_path):
     ТОЛЬКО на него (из секции уводит следующий), футер на это время обещает
     ровно закрытие. Различается природа, а не длина текста."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen, _UPDATE
+    from gc_tui.screens.settings import _UPDATE, SettingsScreen
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('agent:\n  model: "m"\n', encoding="utf-8")
     app = app_mod.TuiApp(config=_cfg())
@@ -1112,7 +1114,7 @@ async def test_a_reply_replaces_the_report_and_clears_its_promise(tmp_path):
     хвоста; реальный путь — «обновить config.yml» дважды: второй раз отвечает
     репликой «уже актуален»)."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen, _UPDATE
+    from gc_tui.screens.settings import _UPDATE, SettingsScreen
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('agent:\n  model: "m"\n', encoding="utf-8")
     app = app_mod.TuiApp(config=_cfg())
@@ -1140,9 +1142,9 @@ async def test_a_reply_replaces_the_report_and_clears_its_promise(tmp_path):
 
 async def test_flash_ok_mounts_band_with_glyph(tmp_path):
     """Флэш успеха — плашка с классом set-flash-ok и ведущим ✓."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from textual.widgets import Static
-    from gc_tui import app as app_mod
 
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
@@ -1161,9 +1163,9 @@ async def test_flash_ok_mounts_band_with_glyph(tmp_path):
 
 async def test_flash_warn_mounts_band_with_warn_glyph(tmp_path):
     """Флэш-предупреждение — класс set-flash-warn и ведущий ⚠."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from textual.widgets import Static
-    from gc_tui import app as app_mod
 
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
@@ -1183,9 +1185,9 @@ async def test_flash_warn_mounts_band_with_warn_glyph(tmp_path):
 async def test_apply_model_writes_and_returns_to_hub(tmp_path, monkeypatch):
     """T6: apply секции «Модель» → model в файле, возврат в хаб (без #set-current)."""
     from gc_core import model_picker
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    from gc_testkit.tui_support import wait_until
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         "backend:\n  completions_url: \"http://host/v1\"\nagent:\n  model: \"old-model\"\n",
@@ -1209,8 +1211,8 @@ async def test_apply_model_writes_and_returns_to_hub(tmp_path, monkeypatch):
         open_settings_section(scr, "Модели")
         await pilot.pause()
         assert not scr.query(".set-current")          # v2: строка «Текущая» удалена
-        from textual.widgets import Input
         from gc_tui.editors.model import ModelEditor
+        from textual.widgets import Input
         await wait_until(pilot, lambda: scr.query_one(ModelEditor).models_loaded, "models loaded")
         await pilot.press("down")                       # T9: fetch=[] + active → псевдо-список
         await pilot.pause()                             # [old-model] [вписать вручную…] — на неё
@@ -1252,8 +1254,8 @@ async def test_esc_from_editor_section_clears_editor_and_restores_menu(tmp_path)
     """Регресс бага 2: корень редактора несёт onb-dyn, а не set-dyn — при Esc не
     удалялся (мусор вверху + меню внизу). Теперь чистим все дети фрейма."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text("backend:\n  completions_url: \"http://x/v1\"\n", encoding="utf-8")
     app = app_mod.TuiApp(config=_cfg())
@@ -1280,8 +1282,8 @@ async def test_editor_section_frame_hugs_content(tmp_path):
     """Регресс бага 1: редактор — Vertical (дефолт height:1fr) растягивал рамку.
     height:auto → рамка обнимает контент (адрес+токен+варианты), не весь экран."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text("backend:\n  completions_url: \"http://x/v1\"\n", encoding="utf-8")
     app = app_mod.TuiApp(config=_cfg())
@@ -1314,9 +1316,9 @@ async def test_hub_glyphs_ok_after_config_probe():
 
 
 async def test_hub_glyphs_bang_on_network_unknown():
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
     res = ProbeResult("unknown", None, None, 5000, "нет соединения (timeout)",
                       offline=True)   # сетевой отказ — реальная проба всегда метит его так
     app = app_mod.TuiApp(config=_cfg())
@@ -1404,10 +1406,10 @@ async def test_open_connection_autoruns_differential_probe(tmp_path):
     """Вход в «Подключение» сам запускает differential-проверку (как Ctrl+Space):
     контроль без токена, затем повтор с токеном — полный вердикт сразу,
     без ручной клавиши. Проверяем сам факт вызовов probe_fn."""
+    from gc_testkit.tui_support import wait_until
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
 
     calls = []
 
@@ -1458,9 +1460,9 @@ async def _open_addr_with_probe(app, pilot, tmp_path, probe_result, url="https:/
 async def test_rejected_token_saves_without_force(tmp_path, monkeypatch):
     """Токен отклонён, сервер доступен → Enter СОХРАНЯЕТ сразу (оба ключа), флэш warn.
     Никакого второго Enter / «сохранить как есть»."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_tui import app as app_mod
 
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: "http://old/v1/chat/completions"\n'
@@ -1568,8 +1570,8 @@ async def test_draft_probe_no_auth_choice_probes_without_old_token(tmp_path):
     """M1: выбор «без авторизации» проверяется БЕЗ старого токена из конфига — probe
     получает auth=None, а не «Bearer old» (иначе проверяется не то, что сохранится)."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         "backend:\n"
@@ -1690,9 +1692,9 @@ async def test_model_dirty_state_toggles_on_move(tmp_path, monkeypatch):
 async def test_ctrl_space_in_readonly_section_does_not_crash():
     """C1: ручная проверка в read-only секции (пакетный шаблон) не должна ронять приложение —
     редактора нет, значит и проверять нечего."""
+    from gc_core.config import _default_config_path
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
-    from gc_core.config import _default_config_path
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
         scr = SettingsScreen(config=_cfg(), config_path=_default_config_path(),
@@ -1781,8 +1783,8 @@ async def test_draft_probe_no_auth_401_shows_requires_auth_hint(tmp_path):
     """M6: draft-probe без авторизации (auth=None) + сервер вернул 401 → текст
     «сервер требует авторизацию», а не «токен отклонён» (токена и не было)."""
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         "backend:\n"
@@ -1978,7 +1980,8 @@ async def test_draft_probe_worker_exception_resolves_as_unknown(tmp_path, monkey
 async def test_update_menu_glyph_arrow_when_available(tmp_path, monkeypatch):
     """Меню «Обновление» ещё не открывали (_update_check_result is None) — глиф
     зеркалит персист-флаг app._update_available, найденный авто-чеком при старте."""
-    from gc_core import app_version; from gc_tui import app as app_mod
+    from gc_core import app_version
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
     monkeypatch.setattr(app_version, "install_source",
                         lambda _read=None: app_version.InstallSource("https://x/y", "master", "old", False))
@@ -2002,8 +2005,8 @@ async def test_delete_key_in_mcp_section_reaches_screen(tmp_path, monkeypatch):
     статусы пакетов приходят фоновым воркером, как в реальном приложении.
     """
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import SettingsScreen
     from gc_tui.editors.mcp_section import McpSectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     from recommended_mcp.runtime import cli as cli
     monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
@@ -2167,8 +2170,8 @@ async def test_bearer_without_token_hints_instead_of_nothing_changed(tmp_path):
     original = cfg_file.read_text(encoding="utf-8")
     cfg = _loaded(cfg_file)
     from gc_tui import app as app_mod
-    from textual.widgets import Static
     from gc_tui.editors.connection import ConnectionEditor
+    from textual.widgets import Static
     app = app_mod.TuiApp(config=cfg)
     async with app.run_test() as pilot:
         scr = await _open_settings(app, pilot, cfg_file, cfg)
@@ -2502,9 +2505,9 @@ def test_sections_composition_merged():
                           "Голосовой ввод", "Режимы работы", "Обновление")
     assert (s._CONNECTION == 0 and s._MODELS == 1 and s._PROFILES == 2 and s._MCP == 3
             and s._VOICE == 4 and s._MODES == 5 and s._UPDATE == 6)
-    assert s._EDITOR_SECTIONS == {s._CONNECTION}
-    assert s._PROBE_SECTIONS == {s._CONNECTION}
-    assert s._WRITE_GATED_SECTIONS == {s._CONNECTION, s._MODELS}
+    assert {s._CONNECTION} == s._EDITOR_SECTIONS
+    assert {s._CONNECTION} == s._PROBE_SECTIONS
+    assert {s._CONNECTION, s._MODELS} == s._WRITE_GATED_SECTIONS
 
 
 def test_sections_order_contains_modes():
@@ -3092,9 +3095,9 @@ async def test_modes_row_hides_session_override_note_when_narrow(tmp_path):
 
 
 async def test_connection_section_mounts_connection_editor(tmp_path):
-    from gc_tui.screens.settings import SettingsScreen
-    from gc_tui.editors.connection import ConnectionEditor
     from gc_tui import app as app_mod
+    from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: "http://h/v1/chat/completions"\n'
                         '  chat_completion_headers:\n    Authorization: ""\n', encoding="utf-8")
@@ -3390,9 +3393,9 @@ async def test_connection_glyph_is_about_server_and_token_not_the_model(tmp_path
     «!» с пометкой «сервер недоступен СЕЙЧАС» — при живом сервере и рабочем токене.
 
     Глиф «Подключения» отвечает за сервер и токен; про модель краснеет своя строка."""
-    from gc_tui.screens.settings import SettingsScreen, _CONNECTION
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.screens.settings import _CONNECTION, SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
     app = app_mod.TuiApp(config=_cfg())
@@ -3423,9 +3426,9 @@ async def test_connection_glyph_not_green_when_server_demands_a_token(tmp_path):
     нерабочий, агент на нём не поедет. Хаб обязан это показать: раньше правило
     «токена нет → решает только достижимость» ставило зелёную галочку рядом с
     секцией, которая честно писала «⚠ сервер требует авторизацию (401)»."""
-    from gc_tui.screens.settings import SettingsScreen, _CONNECTION
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.screens.settings import _CONNECTION, SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text('backend:\n  completions_url: "http://h/v1"\n', encoding="utf-8")
     app = app_mod.TuiApp(config=_cfg())
@@ -3449,8 +3452,8 @@ async def test_connection_footer_names_the_clear_key_on_the_token_field(tmp_path
     адресе. Симметрично и «Ctrl+U — очистить» — только на токене и только когда
     есть что стирать. Клавиши на разных полях, в одной строке не встречаются,
     так что бюджету ширины ничего не грозит."""
-    from gc_tui.screens.settings import SettingsScreen, _CONNECTION
     from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
     cfg_file = _write_cfg(tmp_path)          # с сохранённым токеном — иначе стирать нечего
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
@@ -3632,8 +3635,8 @@ async def test_hub_judges_the_token_on_the_real_route():
     """Публичный справочник моделей (OpenRouter) отвечает и без токена — вердикта о
     токене в нём нет. Хаб догоняет differential-пробой по chat/completions, иначе он
     рисует «✓» ровно там, где секция пишет «✗ токен отклонён»."""
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.services.settings_probe import ProbeResult
     auth = _auth_probe_returning(ProbeResult("rejected", 401, None, 5, "токен отклонён (401)"))
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
@@ -3646,8 +3649,8 @@ async def test_hub_judges_the_token_on_the_real_route():
 
 async def test_hub_shows_the_accepted_token_green():
     """Тот же путь с принятым токеном: сервер требует авторизацию, наш токен проходит."""
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.services.settings_probe import ProbeResult
     auth = _auth_probe_returning(
         ProbeResult("rejected", 401, None, 5, "токен отклонён (401)"),   # control без токена
         ProbeResult("ok", 200, None, 5, "доступен"),                     # повтор с токеном
@@ -3661,8 +3664,8 @@ async def test_hub_shows_the_accepted_token_green():
 async def test_hub_does_not_recheck_a_verdict_that_is_already_certain():
     """Справочник ответил 401 — токен отклонён достоверно, второй заход был бы
     лишним запросом. Догоняем только неизвестность, а не всё подряд."""
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.services.settings_probe import ProbeResult
     auth = _auth_probe_returning(ProbeResult("ok", 200, None, 5, "доступен"))
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
@@ -3675,8 +3678,8 @@ async def test_hub_does_not_recheck_a_verdict_that_is_already_certain():
 async def test_hub_does_not_recheck_when_the_probe_already_used_the_real_route():
     """Справочника нет (gigacode: /config отдаёт 401), и проба сама ушла на
     chat/completions — её «ок» уже про реальный маршрут. Догонять нечего."""
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.services.settings_probe import ProbeResult
     auth = _auth_probe_returning(ProbeResult("ok", 200, None, 5, "доступен"))
     app = app_mod.TuiApp(config=_cfg())
     async with app.run_test() as pilot:
@@ -3689,8 +3692,8 @@ async def test_hub_does_not_recheck_when_the_probe_already_used_the_real_route()
 async def test_hub_says_nothing_about_a_token_it_could_not_check():
     """Догон сорвался (сеть моргнула ровно на нём): утверждать про токен нечего —
     «—», а не «✓» и не «!». Молчать честнее, чем гадать."""
-    from gc_tui.services.settings_probe import ProbeResult
     from gc_tui import app as app_mod
+    from gc_tui.services.settings_probe import ProbeResult
 
     def failing_auth(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
         return ProbeResult("unknown", None, None, 5, "нет соединения (timeout)", offline=True)

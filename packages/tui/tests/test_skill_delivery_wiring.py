@@ -1,5 +1,6 @@
 import pytest
 
+
 def _as_coro(fn):
     """Обернуть синхронный двойник в корутину."""
     async def _wrapped(*a, **kw):
@@ -11,9 +12,9 @@ def _as_coro(fn):
 @pytest.mark.asyncio
 async def test_consume_pending_prefix_injects_delivery(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(
@@ -51,9 +52,9 @@ async def test_consume_pending_prefix_passthrough_without_skill(tmp_path):
 async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
     """Во время run'а: /skill <id> шлёт add_message с инжектнутой доставкой."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(
@@ -98,10 +99,10 @@ async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
 async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
     """inline /skill <id> <prompt>: wire содержит DELIVERY, дисплей — чистый промпт."""
     pytest.importorskip("textual")
+    from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
     from gc_tui.app import TuiApp
     from gc_tui.widgets.user_reply import UserReplyContainer
-    from gc_core.tools.skills import skill_delivery as sd
-    from gc_core.tools.skills import registry as sreg
 
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(

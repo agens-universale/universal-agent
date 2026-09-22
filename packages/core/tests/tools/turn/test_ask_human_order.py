@@ -9,7 +9,6 @@
 import json
 
 import pytest
-
 from gc_core.tools.turn.ask_human import AskHuman
 from gc_testkit.helpers.tool_ctx import local_ctx
 

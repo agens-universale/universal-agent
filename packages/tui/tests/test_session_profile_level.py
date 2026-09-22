@@ -15,8 +15,8 @@ pytest.importorskip("textual")
 from gc_core.config import load_config_ex
 from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
 from gc_tui.app import TuiApp
-from gc_tui.session_settings import SESSION_KEYS, read_breaker_from_meta
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.session_settings import SESSION_KEYS, read_breaker_from_meta
 
 
 def _write_yaml(path: Path, body: dict) -> Path:

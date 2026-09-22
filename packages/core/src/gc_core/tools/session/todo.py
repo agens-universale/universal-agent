@@ -20,7 +20,7 @@ def _todo_statuses():
 
 def _counts(items: List[Dict[str, str]]) -> Dict[str, int]:
     statuses = _todo_statuses()
-    tally = {s: 0 for s in statuses}
+    tally = dict.fromkeys(statuses, 0)
     for i in items:
         s = i["status"]
         if s in tally:

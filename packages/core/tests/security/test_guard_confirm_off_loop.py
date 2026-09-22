@@ -10,10 +10,8 @@ import ast
 import pathlib
 
 import pytest
-
 from gc_core.security import (
     command_guard,
-    command_moderation,
     path_policy,
     read_guard,
     url_policy,

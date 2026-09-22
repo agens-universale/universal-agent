@@ -7,13 +7,12 @@ import pytest
 
 pytest.importorskip("textual")
 
+from gc_tui.messages import OpenEventRequest, OpenToolCallDetailRequest
+from gc_tui.widgets.tool_call_row import ToolCallRow
+from gc_tui.widgets.trace_row import TraceRow
+from gc_tui.widgets.user_reply import UserReplyContainer
 from textual import events
 from textual.app import App, ComposeResult
-
-from gc_tui.messages import OpenEventRequest, OpenToolCallDetailRequest
-from gc_tui.widgets.trace_row import TraceRow
-from gc_tui.widgets.tool_call_row import ToolCallRow
-from gc_tui.widgets.user_reply import UserReplyContainer
 
 
 def _click(widget, *, ctrl=False, chain=1):

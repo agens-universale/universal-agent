@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from gc_core.tools import (
     INTERNAL_TOOL_ERROR,
     WrongFunctionArgumentsException,

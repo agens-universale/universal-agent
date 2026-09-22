@@ -1,24 +1,29 @@
 """TuiApp — Textual application."""
 from __future__ import annotations
 
-import os
 import threading
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
+from gc_core.runtime_notices import (
+    collect_runtime_notices,
+    collect_unread_runtime_notices,
+    push_runtime_notice,
+    register_runtime_notices_listener,
+    unregister_runtime_notices_listener,
+)
+from gc_core.startup_notices import Notice, collect_startup_notices
+from gc_core.tools.registry import all_builtin_tool_names
 from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from gc_core.runtime_notices import collect_runtime_notices, collect_unread_runtime_notices, push_runtime_notice, register_runtime_notices_listener, unregister_runtime_notices_listener
-from gc_core.startup_notices import Notice, collect_startup_notices
-from gc_tui.services.voice_notices import voice_notices
 from gc_tui import branding, palette
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.stream_sink import StreamSink
-from gc_core.tools.registry import all_builtin_tool_names
+from gc_tui.services.voice_notices import voice_notices
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
 
@@ -292,8 +297,8 @@ class TuiApp(App):
         (check_for_update/record_check_result/upgrade_gate.read_state/install_source),
         запуск в фоновом воркер-треде — сеть не блокирует старт TUI, ошибки тихи."""
         import time
-        from gc_core import upgrade_gate
-        from gc_core import app_version
+
+        from gc_core import app_version, upgrade_gate
         from gc_core.updater.check import check_for_update, record_check_result
 
         config = self._config or {}
@@ -498,6 +503,7 @@ class TuiApp(App):
         указатель из файла."""
         from gc_core.config import apply_cli_overrides
         from gc_core.thread_store import resolve_threads_dir
+
         from gc_tui.runtime_config import carry_over_runtime_fields
         cfg = self._load_base_config()
         apply_cli_overrides(cfg)
@@ -641,7 +647,8 @@ class TuiApp(App):
         cached = self._session_profile_cache
         if cached is not None and cached[0] == key:
             return cached[1]
-        from gc_core.config import load_config_ex, apply_cli_overrides
+        from gc_core.config import apply_cli_overrides, load_config_ex
+
         from gc_tui.runtime_config import carry_over_runtime_fields
         try:
             cfg, meta = load_config_ex(self._config_path, profile_override=name)
@@ -852,11 +859,12 @@ class TuiApp(App):
         Единая точка резолва — `config_modules.profiles.find_active_ref`."""
         import os
         from pathlib import Path
+
         from gc_core.config_modules.profiles import find_active_ref
         name = self.effective_config().get("profile") or None
         return find_active_ref(name, Path(os.getcwd()), Path(self._config_path or ""))
 
-    def display_router(self) -> "ModelRouter":
+    def display_router(self) -> ModelRouter:
         """Дешёвый Router для витрин (палитра `/level`/`/profiles`, футер — спека
         §12.1/§12.2): резолвит из `effective_config()` БЕЗ сборки executor —
         `resolve()`/`resolve_level()` не ходят в транспорт, только читают снимок
@@ -1113,6 +1121,7 @@ class TuiApp(App):
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import build_auth_connector, cli_forces_legacy_model
         from gc_core.run_context import acreate_run_context
+
         from gc_tui.services.mcp_progress import McpProgress
         cfg = self.effective_config()
         cfg["console_trace"] = False
@@ -1127,7 +1136,7 @@ class TuiApp(App):
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
         self._mcp_progress = progress
-        from gc_tui.services.stream_pump import StreamPump, STREAM_REFRESH_MS
+        from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
         self._stream_pump = StreamPump(
             self._stream_sink,
             signal=lambda: self.call_from_thread(self._stream_signal),
@@ -1299,7 +1308,7 @@ class TuiApp(App):
         from gc_tui.screens.notices import NoticesScreen
         return isinstance(self.screen, (TraceScreen, NoticesScreen))
 
-    def check_action(self, action: str, parameters: "tuple[object, ...]") -> bool:
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
         """Гейт app-биндингов: Textual спрашивает его перед применением привязки и на
         False пропускает клавишу дальше — в `on_key` активного экрана.
 

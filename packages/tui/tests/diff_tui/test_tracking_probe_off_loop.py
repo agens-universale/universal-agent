@@ -10,11 +10,9 @@ loop это не касалось. После перехода на async-only �
 подменён, а вот «проба исполнилась не на loop-потоке» — это ровно тот
 инвариант, который был нарушен.
 """
-import asyncio
 import threading
 
 import pytest
-
 from gc_tui.diff_tui import tracking as tr
 
 

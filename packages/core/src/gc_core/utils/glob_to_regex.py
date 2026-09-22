@@ -1,5 +1,6 @@
 import re
 
+
 def glob_to_regex(glob_pattern: str) -> str:
     """
     Convert a glob pattern to a regular expression.

@@ -1,8 +1,9 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 import sys
 import types
 from types import SimpleNamespace
+
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _stub_optional_web_parsers() -> None:
@@ -27,8 +28,8 @@ def _stub_optional_web_parsers() -> None:
 
 _stub_optional_web_parsers()
 
-from gc_core.processing_responses import aprocess_tool_calls
 from gc_core.persistence.state_repository import StateRepository
+from gc_core.processing_responses import aprocess_tool_calls
 from gc_core.states import State
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
@@ -94,7 +95,7 @@ def test_wrap_long_output_stores_and_returns_envelope():
     _assert_pagination_metadata(payload, expect_truncated=True)
     assert payload["returned_chars"] == 5
     assert payload["total_chars"] == 10
-    assert payload["total_bytes"] == len("abcdefghij".encode("utf-8"))
+    assert payload["total_bytes"] == len(b"abcdefghij")
     assert len(state.tool_call_outputs_store) == 1
     output_ref = payload["output_ref"]
     assert state.tool_call_outputs_store.contains(output_ref)

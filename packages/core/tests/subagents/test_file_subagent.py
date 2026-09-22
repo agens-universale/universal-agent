@@ -2,9 +2,8 @@
 import asyncio
 
 import pytest
-
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
-from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES, FileDefinedSubagent, BoundFileSubagent
+from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES, BoundFileSubagent, FileDefinedSubagent
 
 REQUIRED = (
     "turn_finish",
@@ -63,7 +62,7 @@ class TestRequiredTools:
         ) == []
 
     def test_required_set_is_exact(self):
-        assert REQUIRED_TOOL_NAMES == set(REQUIRED)
+        assert set(REQUIRED) == REQUIRED_TOOL_NAMES
 
 
 class TestSpecification:

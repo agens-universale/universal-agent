@@ -10,8 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from gc_core.mcp_runtime.paths import mcp_env_root
-from gc_core.mcp_runtime.paths import mcp_python_executable
+from gc_core.mcp_runtime.paths import mcp_env_root, mcp_python_executable
 
 
 class McpVenvError(RuntimeError):

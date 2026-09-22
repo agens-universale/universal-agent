@@ -16,10 +16,8 @@
 """
 import json
 import threading
-from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.tools.skills.registry import get_skills_registry

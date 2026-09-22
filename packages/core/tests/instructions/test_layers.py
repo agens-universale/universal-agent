@@ -1,5 +1,6 @@
 from pathlib import Path
-from gc_core.instructions.layers import instruction_layer_specs, instruction_file_paths
+
+from gc_core.instructions.layers import instruction_file_paths, instruction_layer_specs
 
 
 def test_specs_ordered_L1_to_L3(tmp_path, monkeypatch):

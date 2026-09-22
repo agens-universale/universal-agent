@@ -18,7 +18,6 @@ import threading
 import time
 
 import pytest
-
 from gc_core.security import path_policy
 from gc_core.security.confirm_port import (
     CONFIRM_ALLOW_ONCE,

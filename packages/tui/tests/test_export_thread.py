@@ -142,7 +142,7 @@ def test_txt_call_output_pairing_and_full_content():
 
 
 def test_txt_technical_user_message_labeled():
-    from gc_core.message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_TECHNICAL
+    from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, wrap_technical_user_content
     records = [_env(1, "t", {
         "role": "user", "id": "m_t",
         "content": wrap_technical_user_content("служебная заметка",

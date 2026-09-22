@@ -17,13 +17,12 @@ import pytest
 pytest.importorskip("textual")
 
 import yaml
-from textual.app import App, ComposeResult
-from textual.widgets import Input, Static
-
 from gc_core.config import _default_config_path
 from gc_core.config_modules.endpoint_presets import EndpointPreset
 from gc_core.model_picker import ModelInfo
 from gc_tui.services.settings_probe import ProbeResult
+from textual.app import App, ComposeResult
+from textual.widgets import Input, Static
 
 
 def _harness(editor):

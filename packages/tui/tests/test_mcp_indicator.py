@@ -115,9 +115,9 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
     """После MCP-settle карточка несёт статус MCP + строку «⚠ N · /notices» (формат B,
     учтён упавший MCP) + одну «готов»; трейс чистый (нет блока «Уведомления»)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.services.mcp_progress import McpProgress
+    from textual.widgets import Static
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
                  config={"model": "M", "mcp-servers": {"office": {}}})
     _stub_factory(app)

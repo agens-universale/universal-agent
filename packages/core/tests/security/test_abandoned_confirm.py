@@ -12,7 +12,6 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.security import confirm_port
 from gc_core.security.permission_store import PermissionStore
 

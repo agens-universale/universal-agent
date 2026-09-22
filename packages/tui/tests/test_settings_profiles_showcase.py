@@ -9,9 +9,8 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static
-
 from gc_testkit.tui_support import open_settings_section
+from textual.widgets import Static
 
 
 def _fake_probe(result=None):
@@ -613,10 +612,10 @@ async def test_voice_override_line_stands_above_both_modes(tmp_path, monkeypatch
     получит адрес профиля. Стоя ПОД вариантами, строка прилипала к соседнему и
     читалась как его свойство (живой смок владельца 2026-08-26): курсор на
     «Локальном сервисе» — предупреждение про чужой, казалось бы, адрес."""
-    from gc_tui import app as app_mod
     from gc_testkit.tui_support import open_settings_section
-    from test_settings_voice import CLOUD, FakeVoiceSetup
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+    from test_settings_voice import CLOUD, FakeVoiceSetup
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -651,8 +650,8 @@ async def test_voice_override_line_stands_above_both_modes(tmp_path, monkeypatch
 # --- /config: шапка профиль/уровень/модель + путь файла профиля ---
 
 async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypatch):
-    from gc_tui.screens.config import ConfigScreen
     from gc_tui import app as app_mod
+    from gc_tui.screens.config import ConfigScreen
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -694,6 +693,7 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
     все четыре — `/status` для того и зовут, когда не понимают, чем идёт работа.
     """
     import json
+
     from gc_tui import app as app_mod
     from gc_tui.screens.viewer import ViewerScreen
     project_dir = tmp_path / "project"
@@ -784,8 +784,8 @@ class _FakeMcp:
 
 
 async def test_onboarding_screen_shows_warning_when_profile_active(tmp_path):
-    from gc_tui.screens.onboarding import OnboardingScreen
     from gc_tui import app as app_mod
+    from gc_tui.screens.onboarding import OnboardingScreen
     app = app_mod.TuiApp(config={"profile": "work"})
     async with app.run_test() as pilot:
         scr = OnboardingScreen(config={"profile": "work"}, config_path=str(tmp_path / "config.yml"),
@@ -799,9 +799,9 @@ async def test_onboarding_screen_shows_warning_when_profile_active(tmp_path):
 
 async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(tmp_path):
     """Реестр лежит в файле, который мастер и правит, — плашке нечего сказать."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.css.query import NoMatches
-    from gc_tui import app as app_mod
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text("models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
                         encoding="utf-8")
@@ -817,9 +817,9 @@ async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(tmp_
 
 
 async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):
+    from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.css.query import NoMatches
-    from gc_tui import app as app_mod
     app = app_mod.TuiApp(config={"model": "x"})
     async with app.run_test() as pilot:
         scr = OnboardingScreen(config={"model": "x"}, config_path=str(tmp_path / "config.yml"),
@@ -836,8 +836,8 @@ async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):
 def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
     """Профиль выбран прямо базовым `profile:` (не сессией) на самом первом старте
     (`tui.main()`) — notice тоже обязан всплыть (Concern из отчёта Task 11)."""
-    from gc_tui import app as app_mod
     from gc_core import runtime_notices
+    from gc_tui import app as app_mod
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -983,8 +983,8 @@ async def test_profiles_section_refuses_to_write_into_packaged_template(tmp_path
     не запускали): базой стал пакетный config.default.yml — ни активация профиля,
     ни деактивация не смеют его править. Тот же guard, что у «Режимов работы»
     (`_modes_apply`), но по ЦЕЛИ записи: у профилей она бывает проектной."""
-    from gc_tui import app as app_mod
     from gc_core import config as config_mod
+    from gc_tui import app as app_mod
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1019,8 +1019,8 @@ async def test_profiles_render_reads_each_profile_file_once(tmp_path, monkeypatc
     refresh строк и refresh подсказки. Кэш прохода: каждый файл читается ровно
     раз на кадр — и всё равно перечитывается на следующем кадре и на нажатии
     (правка профиля извне обязана быть видна сразу)."""
-    from gc_tui import app as app_mod
     from gc_core.config_modules import profiles as profiles_mod
+    from gc_tui import app as app_mod
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()

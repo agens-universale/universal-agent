@@ -1,5 +1,5 @@
 """os_ops: macOS/Linux/Windows адаптер."""
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from gc_tui.services import os_ops
 from gc_tui.services.os_ops import read_clipboard

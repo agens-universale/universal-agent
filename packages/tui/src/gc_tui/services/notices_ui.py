@@ -3,9 +3,8 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from rich.text import Text
-
 from gc_core.startup_notices import Notice
+from rich.text import Text
 
 # Значки уровней — ЕДИНЫЙ источник для бейджа (футер/карточка//sessions) и экрана
 # уведомлений. БЕЗ вариационного селектора и всегда с пробелом перед числом.

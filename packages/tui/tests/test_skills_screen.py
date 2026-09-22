@@ -11,9 +11,9 @@ _SKILLS = [
 @pytest.mark.asyncio
 async def test_rows_show_id_type_path():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.screens.skills import SkillsScreen
+    from textual.containers import VerticalScroll
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -81,10 +81,10 @@ async def test_filter_narrows_by_id_and_path():
 @pytest.mark.asyncio
 async def test_enter_opens_skill_viewer(monkeypatch):
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.skills import SkillsScreen
     from gc_tui.screens.viewer import ViewerScreen
+    from textual.widgets import Static
 
     class _Reg:
         async def load_skill_detail(self, sid):
@@ -108,10 +108,10 @@ async def test_enter_opens_skill_viewer(monkeypatch):
 @pytest.mark.asyncio
 async def test_two_line_card_structure_and_count():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.skills import SkillsScreen
+    from textual.containers import VerticalScroll
+    from textual.widgets import Static
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()
@@ -144,9 +144,9 @@ async def test_filter_by_type_label():
 @pytest.mark.asyncio
 async def test_skills_list_fills_screen_height():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.screens.skills import SkillsScreen
+    from textual.containers import VerticalScroll
     async with TuiApp().run_test(size=(80, 30)) as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
         await pilot.pause()

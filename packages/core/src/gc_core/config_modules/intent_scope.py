@@ -24,7 +24,7 @@ class IntentScopeToolConfig(BaseModel):
     store_output: bool = True
 
     @model_validator(mode="after")
-    def _validate_store_flags(self) -> "IntentScopeToolConfig":
+    def _validate_store_flags(self) -> IntentScopeToolConfig:
         if self.record == "raw" and not self.store_arguments and not self.store_output:
             raise ValueError(
                 "intent_scope.tools.* raw config requires at least one of "

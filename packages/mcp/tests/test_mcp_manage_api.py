@@ -7,7 +7,7 @@ def test_wire_unknown_name_returns_false(monkeypatch):
 
 
 def test_wire_known_name_calls_wire_one(monkeypatch):
-    class E:  # noqa: D401 - fake manifest entry
+    class E:
         name = "office"
     calls = {}
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([E()], "root"))
@@ -34,7 +34,7 @@ def test_remove_delegates_to_cmd_remove(monkeypatch):
 def test_installed_state_not_installed(monkeypatch):
     class E:
         name = "office"
-        class install:  # noqa: N801
+        class install:
             type = "source"
             package = None
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([E()], "root"))
@@ -48,7 +48,7 @@ def test_installed_state_installed_with_version(monkeypatch):
     class E:
         name = "office"
         path = "recommended_mcp/office"
-        class install:  # noqa: N801
+        class install:
             type = "pypi"
             package = "office-mcp==0.3.1"
     monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([E()], "root"))
@@ -71,7 +71,7 @@ def test_manual_server_names_reads_runtime_key():
 def _pypi_entry(package):
     class E:
         name = "x"
-        class install:  # noqa: N801
+        class install:
             type = "pypi"
     E.install.package = package
     return E
@@ -87,7 +87,7 @@ def test_available_update_pin_equals_installed_is_none():
 
 def test_available_update_source_type_is_none():
     class E:
-        class install:  # noqa: N801
+        class install:
             type = "source"
             package = None
     assert cli._available_update(E, "0.1.0") is None

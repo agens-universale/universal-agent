@@ -72,11 +72,7 @@ def is_trackable_path(
 ) -> bool:
     if not in_tracking_perimeter(path, launch_root, extra_paths=extra_paths):
         return False
-    if is_protected_from_tracking(
-        path, launch_root, protected_extra=protected_extra
-    ):
-        return False
-    return True
+    return not is_protected_from_tracking(path, launch_root, protected_extra=protected_extra)
 
 
 def canonical_path_key(

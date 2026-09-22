@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
-from gc_core.utils.stream_assembler import (  # noqa: F401 — публичные имена фасада
+from gc_core.utils.stream_assembler import (
     BackendStreamError,
     OnDelta,
     StreamAssembler,

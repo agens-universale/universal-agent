@@ -1,7 +1,11 @@
 import json
 
 from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK
-from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages, init_subagent_open_turn
+from gc_core.intent_log.user_turn import (
+    append_user_ask_deduped,
+    append_user_asks_from_messages,
+    init_subagent_open_turn,
+)
 from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 from gc_core.persistence.state_serializer import StateSerializer

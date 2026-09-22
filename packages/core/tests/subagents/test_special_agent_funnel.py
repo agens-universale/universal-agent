@@ -13,7 +13,6 @@ judges/memory_compaction), с заголовками из ``acreate_call_headers
 вынесены в конфиг.
 """
 import asyncio
-from gc_testkit import as_coro
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -31,7 +30,7 @@ from gc_core.tools.subagents.special_agent import SpecialAgent
 from gc_core.usage.account import CATEGORY_SUBAGENT, UsageAccount
 from gc_core.usage.context import current_usage_context
 from gc_core.utils import llm_chat_client
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _resolved(**overrides) -> ResolvedModel:

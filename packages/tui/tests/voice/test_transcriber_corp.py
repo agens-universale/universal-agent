@@ -1,9 +1,8 @@
 # tests/voice/test_transcriber_corp.py
 """Корп-сеть: TLS-перехват облачного STT лечится системным трастом (retry)."""
 from gc_testkit.net_support import tls_failure
-
-from gc_tui.voice_runtime import net as net
 from gc_tui.voice.transcriber import transcribe
+from gc_tui.voice_runtime import net as net
 
 CFG = {"provider": "openai", "url": "https://stt.corp/v1/audio/transcriptions",
        "token": "t", "model": "m"}

@@ -3,9 +3,8 @@
 CLI/server/swarm ходят не-стримом независимо от cfg["stream"] — флаг TUI-only.
 """
 from gc_core.utils import connect_backend as cb
-
-from transport_fakes import install_transport
 from gc_testkit import run_coro
+from transport_fakes import install_transport
 
 
 def test_no_on_delta_sends_non_stream_payload(monkeypatch):

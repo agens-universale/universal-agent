@@ -25,8 +25,8 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
     """При уведомлениях в КАРТОЧКЕ строка «⚠ N · F4/notices» (формат B); в трейсе
     НЕТ блока-заголовка «Уведомления» — детали только на экране /notices."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
     cfg = {"model": "M", "stop_tools": ["bogus1"],
            "deprecated_keys_used": ["backend.stream"]}
     async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
@@ -139,8 +139,9 @@ async def test_auto_check_updates_main_card_when_other_screen_on_top(tmp_path, m
     всю сессию."""
     pytest.importorskip("textual")
     import time as time_mod
-    from gc_core.updater import source as source_mod
+
     from gc_core.updater import check as check_mod
+    from gc_core.updater import source as source_mod
     from gc_core.updater.check import CheckResult
     from gc_core.updater.source import UpdateSource
     from gc_tui.app import TuiApp

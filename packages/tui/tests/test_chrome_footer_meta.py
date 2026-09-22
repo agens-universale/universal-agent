@@ -1,5 +1,4 @@
 import pytest
-from textual.widgets import Static
 
 
 @pytest.mark.asyncio
@@ -31,8 +30,8 @@ async def test_footer_right_shows_model(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_footer_right_model_meter_sep_compact(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from rich.text import Text
     from gc_tui.app import TuiApp
+    from rich.text import Text
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:

@@ -3,10 +3,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gc_core.intent_log import ACTION_USER_ASK, append_user_ask, flush
 from gc_core.intent_guard import guard as intent_guard_guard_module
 from gc_core.intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
 from gc_core.intent_guard.validation_result import ValidationResult
+from gc_core.intent_log import ACTION_USER_ASK, append_user_ask, flush
 from gc_testkit import run_coro
 
 

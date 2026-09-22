@@ -28,7 +28,7 @@ _original_stdin: Optional[object] = None  # реальный stdin, захвач
 class QueueStdin(io.TextIOBase):
     """File-like; .readline() блокирующе читает строку из queue."""
 
-    def __init__(self, q: "queue.Queue[str]") -> None:
+    def __init__(self, q: queue.Queue[str]) -> None:
         super().__init__()
         self._q = q
         self._closed = False
@@ -72,7 +72,7 @@ def _install_proxy() -> None:
 
 
 @contextmanager
-def redirect_stdin(q: "queue.Queue[str]") -> Iterator[None]:
+def redirect_stdin(q: queue.Queue[str]) -> Iterator[None]:
     """На время блока назначает ТЕКУЩЕМУ потоку QueueStdin(q) как источник input().
 
     Не свапает глобальный sys.stdin (ставит один раз потоко-aware прокси) —

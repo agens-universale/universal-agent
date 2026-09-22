@@ -1,15 +1,16 @@
 import importlib
+import json
 import logging
 import os
 import sys
 import tempfile
 import types
 import unittest
-import json
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
 from gc_testkit.paths import module_dir
 
 
@@ -369,10 +370,10 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(result, "ok")
 
-            from gc_testkit.intent_fixtures import intent_user_ask_texts
             from gc_core.intent_log import deserialize_list
+            from gc_testkit.intent_fixtures import intent_user_ask_texts
 
-            with open(meta_path, "r", encoding="utf-8") as fd:
+            with open(meta_path, encoding="utf-8") as fd:
                 saved_meta = json.load(fd)
             self.assertEqual(
                 intent_user_ask_texts(

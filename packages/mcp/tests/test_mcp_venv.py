@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from recommended_mcp.runtime import venv as venv_mod
 
-
 # --- _python_runs: health-check интерпретатора ---
 
 def test_python_runs_true_for_real_interpreter():

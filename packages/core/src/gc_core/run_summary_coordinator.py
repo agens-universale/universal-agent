@@ -12,6 +12,7 @@ from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     history_exceeds_summary_trigger,
@@ -22,7 +23,6 @@ from gc_core.summarize.summary_logging import (
     log_compaction_failed,
     log_pre_run_max_rounds,
 )
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 from gc_core.thread_store import make_message_key
 
 if TYPE_CHECKING:

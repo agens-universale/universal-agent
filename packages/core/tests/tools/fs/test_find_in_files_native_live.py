@@ -15,12 +15,11 @@ import asyncio
 import json
 
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
-from gc_testkit.helpers.tool_ctx import with_local_ctx
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.utils.native_fs_search import arun_native_grep
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
+from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
 def _host_caps():

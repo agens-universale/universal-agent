@@ -14,11 +14,10 @@ import pytest
 pytest.importorskip("textual")
 
 import yaml
-from textual.widgets import Input, Static
-
 from form_harness import _rgb, _value_color
 from gc_testkit.tui_support import open_settings_section, wait_until
-from test_settings_screen import _cfg, _loaded, _mk_screen
+from test_settings_screen import _loaded, _mk_screen
+from textual.widgets import Input, Static
 
 _SECTION = "Модели"
 
@@ -112,8 +111,8 @@ async def _section(tmp_path, body: str = "", *, models=("test-model",),
     from unittest import mock
 
     from gc_core import model_picker
-    from gc_tui import app as app_mod
     from gc_core.model_picker import ModelInfo
+    from gc_tui import app as app_mod
 
     cfg_file = _write_cfg(tmp_path, body, model=model)
     cfg = _loaded(cfg_file)
@@ -137,8 +136,8 @@ def test_models_section_replaces_the_legacy_one_and_leaves_the_save_machine():
     from gc_tui.screens import settings as s
     assert s.SECTIONS[1] == "Модели"
     assert s._MODELS == 1
-    assert s._EDITOR_SECTIONS == {s._CONNECTION}
-    assert s._PROBE_SECTIONS == {s._CONNECTION}
+    assert {s._CONNECTION} == s._EDITOR_SECTIONS
+    assert {s._CONNECTION} == s._PROBE_SECTIONS
 
 
 async def test_hub_preview_counts_registry_entries_and_names_the_default(tmp_path):
@@ -327,7 +326,7 @@ async def test_a_write_failure_past_the_slot_picker_closes_it_and_refocuses(
         assert "не сохранено" in _notice(scr)
         focused = scr.app.focused
         assert focused is not None and focused.id and focused.id.startswith("mef-"), (
-            "фокус не вернулся в форму: %r" % focused)
+            "фокус не вернулся в форму: {!r}".format(focused))
         assert cfg_file.read_bytes() == before
 
 
@@ -652,7 +651,6 @@ async def test_reserve_save_returns_to_the_registry_list(tmp_path):
     """Под-форма резервной открыта ИЗ списка — сохранение возвращает туда же (Esc
     поднимает на уровень, Enter не имеет права поднимать на два). Пустое состояние —
     это сама секция, и запись из неё по-прежнему уводит в хаб."""
-    from gc_tui.editors.model import ModelEditor
     async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
             as (pilot, scr, cfg_file):
         ed = _editor(scr)
@@ -704,7 +702,6 @@ async def test_reserve_save_under_the_env_banner_still_returns_to_the_list(tmp_p
 async def test_empty_state_save_returns_to_the_hub(tmp_path):
     """Прежнее поведение легаси-секции сохранено: запись из пустого состояния
     завершает работу с секцией (возврат в хаб + флэш)."""
-    from gc_tui.editors.model import ModelEditor
     async with _section(tmp_path, models=("test-model", "other-model")) as (pilot, scr, cfg_file):
         await _wait_legacy_list(pilot, scr)
         await pilot.press("down")
@@ -720,7 +717,7 @@ async def test_env_ref_confirm_is_answerable_from_the_models_section(tmp_path):
     перезаписи. Секция вышла из save-машины, но подтверждение осталось её — иначе
     баннер висел бы неотвечаемым: Enter не подтверждал бы, Esc уводил бы в меню."""
     import os
-    from gc_tui.editors.model import ModelEditor
+
     os.environ["GC_TEST_MODEL_REF"] = "test-model"
     try:
         async with _section(tmp_path, models=("test-model", "other-model"),
@@ -776,6 +773,7 @@ async def test_new_entry_after_env_confirm_cancels_it(tmp_path):
     ${ENV:VAR} затирается, черновик формы гибнет, а человека выбрасывает в хаб — и
     записи реестра не появляется вовсе."""
     import os
+
     from gc_tui.editors.model_entry_form import ModelEntryForm
     os.environ["GC_TEST_MODEL_REF"] = "test-model"
     try:
@@ -999,7 +997,6 @@ async def test_ctrl_u_still_falls_through_with_no_form(tmp_path):
 async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
     """Строка «резервная модель» открывает под-форму `ModelEditor` и правит
     `agent.model`; хинт говорит ВЕРДИКТ («не работает»), а не «база наследования»."""
-    from gc_tui.editors.model import ModelEditor
     async with _section(tmp_path, _REGISTRY, models=("test-model", "other-model")) \
             as (pilot, scr, cfg_file):
         assert "не работает при живом реестре" in _texts(scr)
@@ -1061,7 +1058,6 @@ async def test_section_never_shows_the_dirty_marker(tmp_path):
 async def test_read_only_config_refuses_the_section(tmp_path, monkeypatch):
     """Гейт записи — по ЦЕЛИ (`_target_writable`): запуск на пакетном шаблоне не
     показывает редактор вовсе."""
-    from gc_core.config import _default_config_path
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
         monkeypatch.setattr("gc_core.config._default_config_path", lambda: str(cfg_file))
         open_settings_section(scr, _SECTION)
@@ -2425,7 +2421,6 @@ async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registr
     Для под-вида профиля тот же класс лжи закрыт осознанно, основная секция
     симметричной правки не получила."""
     from gc_tui import app as app_mod
-    from gc_tui.editors import models_section as m
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(_flat('"test-model"') + 'profile: "work"\n', encoding="utf-8")
@@ -2473,10 +2468,10 @@ async def _section_over_layers(tmp_path, monkeypatch, *, body: str = "",
     from unittest import mock
 
     from gc_core import model_picker
-    from gc_tui import app as app_mod
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import EnvVars
     from gc_core.model_picker import ModelInfo
+    from gc_tui import app as app_mod
 
     gc_home = tmp_path / "gc_home"
     gc_home.mkdir()

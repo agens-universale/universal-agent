@@ -9,9 +9,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from gc_testkit.paths import ASSETS
+from gc_testkit.paths import ASSETS, PACKAGE_SRC_DIRS
+from gc_testkit.paths import REPO as PROJECT_ROOT
 
-from gc_testkit.paths import PACKAGE_SRC_DIRS, REPO as PROJECT_ROOT
 SKILL_DIR = ASSETS / "skills" / "skill-creator"
 
 
@@ -77,7 +77,7 @@ def _sample_skill() -> tuple[Path, str]:
     consistent with the script regardless of flat-vs-pack layout.
     """
     sys.path.insert(0, str(SKILL_DIR / "scripts"))
-    import package_skill as _ps  # noqa: E402
+    import package_skill as _ps
 
     for cand in sorted((ASSETS / "skills").glob("**/SKILL.md")):
         skill_dir = cand.parent
@@ -399,9 +399,9 @@ def test_package_skill_cleanup_permission_error_does_not_block(tmp_path, monkeyp
     import importlib
     if "package_skill" in sys.modules:
         importlib.reload(sys.modules["package_skill"])
-    import package_skill as ps
-
     import shutil as _shutil
+
+    import package_skill as ps
     original_rmtree = _shutil.rmtree
 
     def fake_rmtree(path, *args, **kwargs):

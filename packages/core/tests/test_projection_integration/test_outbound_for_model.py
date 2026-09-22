@@ -14,6 +14,7 @@ from gc_core.message_format.serialization import (
     message_raw_payload_chars_for_trigger,
 )
 from gc_core.message_projection import project_assistant_text
+from gc_testkit import run_coro
 
 from .conftest import (
     DIRTY_THINK,
@@ -21,7 +22,6 @@ from .conftest import (
     dirty_canonical_history,
     make_ctx_state,
 )
-from gc_testkit import run_coro
 
 
 def _assistant_contents(outbound_messages: list[dict]) -> list[str]:

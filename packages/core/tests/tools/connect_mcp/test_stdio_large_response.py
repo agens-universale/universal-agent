@@ -17,7 +17,6 @@ import json
 import sys
 
 import pytest
-
 from gc_core.tools.connect_mcp import transport
 
 # Одной строкой, длиннее 64 КиБ: столько инструментов и отдаёт болтливый сервер.

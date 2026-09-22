@@ -4,14 +4,6 @@ import json
 from typing import Any, Dict, List, Optional
 
 from gc_core.security.path_policy import enforce_write_guard
-from gc_core.utils.file_text import (
-    check_expected_file_sha256,
-    decode_text_bytes,
-    is_valid_sha256_hex,
-    sha256_hex_of_bytes,
-    try_encode_text_bytes,
-)
-from gc_core.utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 from gc_core.tools.fs.edit_line_endings import (
     collect_literal_matches,
     line_ending_change_refused_error,
@@ -21,7 +13,16 @@ from gc_core.tools.fs.edit_line_endings import (
 from gc_core.tools.fs.edit_suggestions import build_edit_miss_suggestions
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.file_text import (
+    check_expected_file_sha256,
+    decode_text_bytes,
+    is_valid_sha256_hex,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
+from gc_core.utils.fs_size_limits import check_file_size, fs_mutate_max_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
+
 
 class _LoadError:
     def __init__(self, message: str, error: Dict[str, Any]) -> None:
@@ -38,7 +39,7 @@ class _EditBatch:
         self.edits_would_apply = 0
         self.total_would_replace = 0
         self.any_eol_adapted = False
-        self.failure: "tuple[int, str, Dict[str, Any] | None] | None" = None
+        self.failure: tuple[int, str, Dict[str, Any] | None] | None = None
 
 
 def _batch_arg_error(edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256) -> "tuple[str, Dict[str, Any]] | None":
@@ -224,7 +225,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
 
-    def _result(self, 
+    def _result(self,
         *,
         path: str,
         ok: bool,

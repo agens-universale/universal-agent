@@ -1,6 +1,6 @@
-from gc_core.states import SharedStateData
 from gc_core.persistence.schema import serialize_shared_block
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.states import SharedStateData
 
 
 def test_confirm_rules_round_trips_through_meta():

@@ -10,7 +10,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
 _PRICING = {"enabled": True, "input": 100, "output": 200, "currency": "₽",

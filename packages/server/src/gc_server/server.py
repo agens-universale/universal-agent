@@ -1,19 +1,17 @@
 import asyncio
 import json
+import logging
 import os
 import threading
 from typing import Any, Dict, Optional
-import logging
 
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-
-from gc_core.run_context import acreate_run_context
 from gc_core.agent_executor import AgentExecutor
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.config import build_auth_connector, cli_forces_legacy_model
+from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import (
     load_thread_messages,
     load_thread_meta,
@@ -21,11 +19,13 @@ from gc_core.thread_store import (
     sanitize_system_id,
     validate_thread_id,
 )
+from gc_core.trace_id import normalize_trace_id
+from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
 from gc_server.rest_api.server_config import build_agent_config_for_server, load_server_config
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
 from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup, register_swarm_cleanup_on_startup
-from gc_core.trace_id import normalize_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,11 @@ logger = logging.getLogger(__name__)
 # если swarm не импортируется — считаем, что он выключен.
 _SWARM_MODULES_AVAILABLE = True
 try:
-    from gc_server.swarm.config import build_swarm_config
-    from gc_server.swarm.monitor import SwarmMonitor
     from gc_server.swarm import lifecycle as swarm_lifecycle
     from gc_server.swarm import runner as swarm_runner
     from gc_server.swarm import storage as swarm_storage
+    from gc_server.swarm.config import build_swarm_config
+    from gc_server.swarm.monitor import SwarmMonitor
 except (ModuleNotFoundError, ImportError) as e:
     _SWARM_MODULES_AVAILABLE = False
     logger.warning("swarm disabled due to import error: %r", e)
@@ -101,7 +101,7 @@ async def _startup_swarm_monitor() -> None:
     """
     Инициализировать фоновый монитор сворм-процессов, если режим включён.
     """
-    global _swarm_monitor  # noqa: PLW0603
+    global _swarm_monitor
 
     if not SWARM_CONFIG.get("enabled"):
         return
@@ -189,13 +189,13 @@ async def _shutdown_swarm_processes() -> None:
                         },
                         swarm_meta_patch={
                             "status": "unknown_failed",
-                            "finished_at": swarm_storage._utc_now_iso(),  # noqa: SLF001
+                            "finished_at": swarm_storage._utc_now_iso(),
                             "error_type": "server_shutdown",
                             "error_message": "Killed during server shutdown",
                             "sandbox_status": "completed",
                         },
                     )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("shutdown: failed to update meta for %s", swarm_id)
 
         monitor.unregister_active(swarm_id)
@@ -556,7 +556,7 @@ async def get_thread_logs(system: str, task_id: str):
 
     try:
         threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(
             status_code=500,
             detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
@@ -587,7 +587,7 @@ async def get_all_thread_logs():
     """
     try:
         threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(
             status_code=500,
             detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
@@ -602,7 +602,7 @@ async def get_all_thread_logs():
     for name in names:
         meta_path = os.path.join(threads_dir, name)
         try:
-            with open(meta_path, "r", encoding="utf-8") as f:
+            with open(meta_path, encoding="utf-8") as f:
                 meta = json.load(f)
         except Exception:
             continue
@@ -773,7 +773,7 @@ async def swarm_run(request: Request):
                 payload=payload,
                 trace_id=trace_id,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail={"status": "error", "reason": f"swarm_start_failed: {e!r}"},

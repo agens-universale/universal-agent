@@ -1,6 +1,6 @@
-from gc_core.tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved
-from gc_core.tools.skills.skills_policy import render_skills_catalog
 from gc_core.tools.skills.registry import SkillsRegistry
+from gc_core.tools.skills.skill_arg_resolver import Resolved, resolve_skill_arg
+from gc_core.tools.skills.skills_policy import render_skills_catalog
 
 
 async def test_codebase_pack_bootstrap_mapped():

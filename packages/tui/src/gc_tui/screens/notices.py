@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import List
 
+from gc_core.runtime_notices import mark_runtime_notices_seen
+from gc_core.startup_notices import Notice
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -10,8 +12,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_core.startup_notices import Notice
-from gc_core.runtime_notices import mark_runtime_notices_seen
 from gc_tui import palette
 from gc_tui.services import notices_ui
 

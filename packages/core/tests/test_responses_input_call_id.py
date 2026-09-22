@@ -1,5 +1,7 @@
 from types import SimpleNamespace
+
 from gc_core.utils.connect_backend import create_call_data_responses
+
 
 def test_responses_input_strips_extra_call_id_from_message_items():
     state = SimpleNamespace(default_model="m", tools=[], call_metadata={},

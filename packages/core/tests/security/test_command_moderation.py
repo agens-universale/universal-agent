@@ -3,10 +3,23 @@ import os
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, make_block_error, DANGEROUS_VERDICT, JudgeResult, JudgeUnavailable, ModerationContext, SAFE_VERDICT, build_judge_payload, decide_command_execution, effective_command_cwd, load_command_judge_prompt, moderate_command_execution, validate_judge_result
-from gc_core.security.path_policy import WriteGuardConfig, ToolSecurityContext
 from gc_core.security import command_moderation as command_moderation
+from gc_core.security.command_moderation import (
+    DANGEROUS_VERDICT,
+    NO_WORKAROUND_NOTICE,
+    SAFE_VERDICT,
+    JudgeResult,
+    JudgeUnavailable,
+    ModerationContext,
+    build_judge_payload,
+    decide_command_execution,
+    effective_command_cwd,
+    load_command_judge_prompt,
+    make_block_error,
+    moderate_command_execution,
+    validate_judge_result,
+)
+from gc_core.security.path_policy import ToolSecurityContext, WriteGuardConfig
 from gc_testkit.paths import ASSETS
 
 
@@ -419,7 +432,7 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
 
 
 def test_build_judge_payload_includes_denied_examples():
-    from gc_core.security.command_moderation import build_judge_payload, ModerationContext
+    from gc_core.security.command_moderation import ModerationContext, build_judge_payload
     ctx = ModerationContext(
         tool_name="exec_command",
         launch_root="/work",
@@ -443,6 +456,7 @@ def test_load_config_maps_denied_examples(tmp_path):
 
 def test_judge_prompt_documents_denied_examples_and_flag():
     from pathlib import Path
+
     from gc_core import config_modules
     src = Path(config_modules.__file__).resolve().parents[1]
     text = (ASSETS / "prompts" / "security" / "command_judge_system.md").read_text(encoding="utf-8")

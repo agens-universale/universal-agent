@@ -1,6 +1,7 @@
 """Tests for all_builtin_tool_names in registry."""
 
 import sys
+
 import pytest
 
 

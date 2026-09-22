@@ -1,8 +1,7 @@
 import pytest
-
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
-from gc_core.model_router import CONSUMERS, ModelRouter, ResolvedModel, SUBAGENT_CONSUMER_PREFIX
+from gc_core.model_router import CONSUMERS, SUBAGENT_CONSUMER_PREFIX, ModelRouter, ResolvedModel
 
 
 def _snapshot(raw: dict) -> dict:

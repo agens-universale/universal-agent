@@ -3,10 +3,9 @@ import pytest
 
 pytest.importorskip("textual")
 
+from gc_core.model_picker import ModelInfo
 from textual.app import App, ComposeResult
 from textual.widgets import Input
-
-from gc_core.model_picker import ModelInfo
 
 
 def _options(ed) -> list:
@@ -339,8 +338,8 @@ async def test_focus_stays_in_the_field_across_moves():
 async def test_model_warn_banner_shown_when_only_current_is_non_tool_capable():
     """Task 1 review (Minor): легенда ⚠ должна учитывать и «текущую» — если действующая
     модель единственная не-tool-capable, баннер всё равно обязан появиться."""
-    from gc_tui.editors.model import ModelEditor
     from gc_core.onboarding_fields import MODEL_WARN
+    from gc_tui.editors.model import ModelEditor
     ed = ModelEditor(current="bad-model", endpoint="http://x", auth=None, verify=True,
                      fetch=lambda *a, **k: _models(), active="bad-model")
     app = _harness(ed)
@@ -564,8 +563,8 @@ async def test_reload_asks_the_server_again(tmp_path):
     """Перечитывание — настоящий поход на сервер: раскрывать у этого списка нечего
     (свёртывания у него нет вовсе, §9.1), и появившаяся на сервере модель обязана
     доехать до строк."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = [_M("a/one")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         assert not any("b/two" in r for r in _row_texts(ed))
@@ -579,8 +578,8 @@ async def test_reload_mounts_the_list_when_the_server_revives(tmp_path):
     """Сервер молчал — на экране одинокое поле в рамке (форма «сервер не отдал»);
     ожил — перечитывание собирает форму со списком. Это тот самый случай, ради
     которого клавиша и заведена."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = []
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         assert not ed.has_models and not _row_texts(ed)   # предусловие: списка нет
@@ -595,8 +594,8 @@ async def test_reload_mounts_the_list_when_the_server_revives(tmp_path):
 async def test_reload_keeps_the_mark(tmp_path):
     """§7.1: пометка переезжает только явным действием — перечитывание её не трогает,
     иначе ● молча уедет и обещание Enter в футере мигнёт."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = [_M("a/one"), _M("b/two")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         assert ed.mark() == "a/one"                # пометили строку под курсором
@@ -613,8 +612,8 @@ async def test_reload_keeps_the_typed_filter(tmp_path):
     """Набранное в поле — фильтр (§3.2.6), и перечитывание его не теряет: список и
     поле обязаны показывать одно и то же (канон `voice_endpoint.ModelListController.
     reload`)."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = [_M("a/one"), _M("b/two")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         ed.query_one(f"#{ed._input_id}", Input).value = "b/"
@@ -632,8 +631,8 @@ async def test_reload_keeps_what_was_typed_while_the_server_is_silent(tmp_path):
     гасит `on_input_changed`). Правило донора «фильтр — то, что разошлось с
     baseline»: здесь baseline и есть само значение, значит фильтра нет, а набранное
     обязано пережить второе молчание сервера."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = []
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         field = ed.query_one(f"#{ed._input_id}", Input)
@@ -651,8 +650,8 @@ async def test_a_stale_answer_does_not_remount_over_a_fresh_list(tmp_path):
     """Generation-guard. `exclusive=True` уже бегущий ПОТОК не останавливает (Textual
     этого не умеет), и без поколения ответ прошлой загрузки перемонтировал бы список
     поверх свежего."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = [_M("a/one")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         stale_gen = ed._gen                        # поколение уже осевшей загрузки
@@ -671,8 +670,8 @@ async def test_reload_keeps_the_row_under_the_cursor(tmp_path):
     права молча вернуть его на якорь: секция перестала бы читаться «изменено», а Enter
     не сохранил бы ничего. Канон — `_reselect_idx` пути фильтрации («клэмп молча
     подменял бы модель»)."""
-    from gc_testkit.tui_support import wait_until
     from form_harness import mounted_model_editor
+    from gc_testkit.tui_support import wait_until
     models = [_M("a/one"), _M("b/two")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         ed.move(1)                                 # с a/one на b/two
@@ -716,7 +715,6 @@ async def test_no_manual_row_in_the_list(tmp_path):
     можно прямо в нём (смок владельца 2026-08-04)."""
     pytest.importorskip("textual")
     from form_harness import mounted_model_editor
-
     from gc_core.model_picker import ModelInfo
     models = [ModelInfo(id="a/one", tool_capable=True), ModelInfo(id="b/two", tool_capable=True)]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
@@ -730,9 +728,8 @@ async def test_typed_name_still_reaches_submit_without_the_manual_row(tmp_path):
     строки-посредника."""
     pytest.importorskip("textual")
     from form_harness import mounted_model_editor
-    from textual.widgets import Input
-
     from gc_core.model_picker import ModelInfo
+    from textual.widgets import Input
     models = [ModelInfo(id="a/one", tool_capable=True), ModelInfo(id="b/two", tool_capable=True)]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         ed.query_one("#onb-model", Input).value = "my/own-model"

@@ -1,8 +1,6 @@
 import logging
 import os
 
-import pytest
-
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars

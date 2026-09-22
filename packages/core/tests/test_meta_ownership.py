@@ -1,5 +1,10 @@
 """meta.runtime helpers (ownership constants + merge)."""
-from gc_core.persistence.meta_ownership import RUNTIME_FLAG_NAMES, merge_runtime_into_meta, resolve_runtime_flag_name, runtime_section
+from gc_core.persistence.meta_ownership import (
+    RUNTIME_FLAG_NAMES,
+    merge_runtime_into_meta,
+    resolve_runtime_flag_name,
+    runtime_section,
+)
 
 
 def test_resolve_runtime_flag_name():
@@ -26,6 +31,6 @@ def test_merge_runtime_into_meta():
 def test_runtime_section():
     assert runtime_section({"runtime": {"summarizing": True}}) == {"summarizing": True}
     assert runtime_section({}) == {}
-    assert RUNTIME_FLAG_NAMES == frozenset(
+    assert frozenset(
         {"summarizing", "finalizing", "finish_gate_checking"}
-    )
+    ) == RUNTIME_FLAG_NAMES

@@ -167,6 +167,7 @@ async def test_live_owner_answer_goes_to_stdin(tmp_path):
 async def test_replay_banner_answer_starts_new_turn(tmp_path):
     pytest.importorskip("textual")
     import uuid
+
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
@@ -191,6 +192,7 @@ async def test_replay_banner_answer_starts_new_turn(tmp_path):
 async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
     pytest.importorskip("textual")
     import uuid
+
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})

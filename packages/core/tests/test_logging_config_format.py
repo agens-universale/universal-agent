@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.logging_config import LoggingConfig, RedactSecretsConfig
+from pydantic import ValidationError
 
 
 def test_defaults_preserve_main():

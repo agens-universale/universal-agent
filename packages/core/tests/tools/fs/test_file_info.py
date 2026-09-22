@@ -2,9 +2,8 @@ import json
 
 from gc_core.tools.fs.file_info import FileInfo
 from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, sha256_hex_of_bytes, sha256_hex_of_file_bytes
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_file_info_missing_path(tmp_path):
     missing = tmp_path / "nope.txt"
@@ -57,7 +56,7 @@ def test_file_info_crlf_hash_is_raw_bytes(tmp_path):
 
 def test_file_info_large_utf8_markdown_not_binary(tmp_path):
     prefix = ("а" * 4095 + "x").encode("utf-8")
-    data = prefix + "а".encode("utf-8") + b"\n" * 340
+    data = prefix + "а".encode() + b"\n" * 340
     path = tmp_path / "report.md"
     path.write_bytes(data)
     assert len(data) > BINARY_SAMPLE_BYTES

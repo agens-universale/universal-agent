@@ -2,16 +2,24 @@ import copy
 import json
 
 import pytest
-
-from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
-from gc_core.tools.schema_optional import OPTIONAL_EMPTY_AS_OMIT_HINT, OPTIONAL_OMIT_HINT, apply_openai_strict_object, apply_openai_strict_parameters, augment_optional_property_descriptions, normalize_optional_empty_as_omit, parameters_schema_for_local_validation, resolve_optional_property_keys
+from gc_core.tools.schema_optional import (
+    OPTIONAL_EMPTY_AS_OMIT_HINT,
+    OPTIONAL_OMIT_HINT,
+    apply_openai_strict_object,
+    apply_openai_strict_parameters,
+    augment_optional_property_descriptions,
+    normalize_optional_empty_as_omit,
+    parameters_schema_for_local_validation,
+    resolve_optional_property_keys,
+)
 from gc_core.tools.skills.skills_tools import SkillsListTool
+from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
 
 # Optional string fields that must receive augment hints in tool_description specs.
 _OPTIONAL_STRING_FIELDS = (

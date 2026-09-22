@@ -1,7 +1,5 @@
 """Каждый Input с id обязан быть перечислен в CSS — иначе Textual рисует дефолтную
 рамку глифами, которых нет в консольных шрифтах (баг поля «Прокси», смок 2026-08-02)."""
-from pathlib import Path
-from gc_testkit.paths import TUI_PKG
 
 # Путь — из gc_testkit.paths: исходники TUI лежат в packages/tui/src/gc_tui,
 # и арифметика уровней от __file__ здесь уже ломалась.

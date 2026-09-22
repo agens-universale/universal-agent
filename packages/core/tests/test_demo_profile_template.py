@@ -12,15 +12,13 @@
   схемой (покрыто первым пунктом), плюс token-примеры демонстрируют обе
   семантики своего токена (значение vs `token: ""`).
 """
-from pathlib import Path
-from gc_testkit.paths import REPO
 
 import pytest
 import yaml
-
 from gc_core.config_modules.model_sections_validation import _SUBAGENT_NAMES
 from gc_core.config_modules.profiles import load_profile_document
 from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
+from gc_testkit.paths import REPO
 
 DEMO_PROFILE_PATH = REPO / "demo_profile.yml"
 

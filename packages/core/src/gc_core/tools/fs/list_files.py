@@ -1,23 +1,24 @@
-import json
 import functools
+import json
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from gc_core.backends.protocol import WalkOutputTooLargeError
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
+from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
+from gc_core.security.read_guard import (
+    ReadGuardViolation,
+    _resolve_skills_root,
+    check_read_path_allowed,
+    enforce_read_guard,
+    parse_read_guard_config,
+)
+from gc_core.tools.fs.agent_hidden import is_agent_hidden
+from gc_core.tools.fs.cooperative import LoopYielder
+from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.glob_to_regex import compile_glob
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.security.read_guard import (
-    enforce_read_guard,
-    parse_read_guard_config,
-    check_read_path_allowed,
-    ReadGuardViolation,
-    _resolve_skills_root,
-)
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
-from gc_core.tools.fs.agent_hidden import is_agent_hidden
-from gc_core.tools.fs.cooperative import LoopYielder
 
 
 def _glob_matcher(glob: Optional[str]):
@@ -371,7 +372,7 @@ Examples:
         except PermissionError:
             raise PermissionError(f"Permission denied: cannot list contents of '{root_path}'")
         except Exception as e:
-            raise RuntimeError(f"Failed to list directory '{root_path}': {str(e)}")
+            raise RuntimeError(f"Failed to list directory '{root_path}': {e!s}")
 
     @staticmethod
     def _passes_file_matcher(file_matcher, filepath: str, root_path: str) -> bool:

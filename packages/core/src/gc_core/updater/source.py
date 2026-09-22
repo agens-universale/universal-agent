@@ -19,7 +19,7 @@ class UpdateSource(NamedTuple):
 
 
 def resolved_source(
-    _source: Callable[[], Optional["app_version.InstallSource"]] = app_version.install_source,
+    _source: Callable[[], Optional[app_version.InstallSource]] = app_version.install_source,
 ) -> Optional[UpdateSource]:
     src = _source()
     if src is None or src.editable or not src.url:

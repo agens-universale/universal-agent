@@ -1,4 +1,4 @@
-from gc_core.utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion
+from gc_core.utils.chat_completions_stream import assemble_streamed_completion, iter_sse_data_lines
 
 # Realistic OpenAI-compatible stream: reasoning_content, content, a fragmented
 # tool call, finish_reason, and usage in the final chunk.
@@ -18,7 +18,7 @@ _LINES = [
 def test_iter_sse_data_lines_skips_done_and_blanks():
     payloads = list(iter_sse_data_lines(_LINES))
     assert payloads[0].startswith('{"id":"c1"')
-    assert all(p != "[DONE]" and p != "" for p in payloads)
+    assert all(p not in {"[DONE]", ""} for p in payloads)
     assert len(payloads) == 7
 
 

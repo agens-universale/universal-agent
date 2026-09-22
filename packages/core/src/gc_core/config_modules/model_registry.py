@@ -193,7 +193,7 @@ class ModelEntry(BaseModel):
     backend: BackendConfig | None = None
 
     @model_validator(mode="after")
-    def _validate_no_duplicate_settings(self) -> "ModelEntry":
+    def _validate_no_duplicate_settings(self) -> ModelEntry:
         if (
             self.token is not None
             and self.backend is not None
@@ -229,7 +229,7 @@ class ModelEntry(BaseModel):
         )
 
     @model_validator(mode="after")
-    def _validate_connection_pair(self) -> "ModelEntry":
+    def _validate_connection_pair(self) -> ModelEntry:
         """§2: своё подключение задаётся ЦЕЛИКОМ. Адрес и токен принадлежат одному
         провайдеру: половина пары либо уносит общий ключ на чужой хост (свой адрес без
         токена), либо уезжает вслед за сменой общего адреса (свой токен без адреса).

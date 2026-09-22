@@ -15,7 +15,6 @@ stream-сессии не закрывались, владение не сним�
 import asyncio
 
 import pytest
-
 from gc_core import agent_executor as ae
 
 

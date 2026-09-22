@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from gc_core.config_modules.model_registry import LEVELS, LEVEL_FALLBACK
+from gc_core.config_modules.model_registry import LEVEL_FALLBACK, LEVELS
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
 # префиксный consumer id, не перечислимый статически здесь (канонический реестр имён
@@ -69,7 +69,7 @@ class AliasCircuitOpenError(RuntimeError):
     чтобы вызывающий код мог построить честное сообщение об ошибке без похода
     в реестр повторно."""
 
-    def __init__(self, resolved: "ResolvedModel", reason: str) -> None:
+    def __init__(self, resolved: ResolvedModel, reason: str) -> None:
         self.resolved = resolved
         self.alias = resolved.alias
         self.reason = reason
@@ -96,7 +96,7 @@ class CircuitBreaker:
         return dict(self._tripped)
 
     @classmethod
-    def restore(cls, snapshot: dict) -> "CircuitBreaker":
+    def restore(cls, snapshot: dict) -> CircuitBreaker:
         breaker = cls()
         breaker._tripped = dict(snapshot or {})
         return breaker
@@ -126,9 +126,9 @@ class ModelRouter:
         self,
         config_snapshot: dict,
         level_provider: Callable[[], str],
-        breaker: "CircuitBreaker | None" = None,
+        breaker: CircuitBreaker | None = None,
         force_legacy: bool = False,
-        unbound_override: "ResolvedModel | None" = None,
+        unbound_override: ResolvedModel | None = None,
     ) -> None:
         """``unbound_override`` — явный канал «во что резолвится этот Router, если
         потребитель НЕ имеет assign-привязки» (используется дочерним Router'ом
@@ -172,7 +172,7 @@ class ModelRouter:
         резолвов, а не этот флаг)."""
         return self._unbound_override is not None
 
-    def with_override(self, override: "ResolvedModel | None") -> "ModelRouter":
+    def with_override(self, override: ResolvedModel | None) -> ModelRouter:
         """Клон Router'а с другим ``unbound_override`` — тот же снимок конфига,
         level_provider и breaker (спека §8: деградация субагента на активную
         модель без пересборки снимка/уровня, см. ``SubagentRunner``)."""

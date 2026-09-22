@@ -6,8 +6,6 @@ test_file_subagent). Здесь всё деградирует до варнин�
 """
 import logging
 
-import pytest
-
 from gc_core.tools.subagents.custom.file_definitions import discover_subagent_definitions
 
 BUILTIN = {"subagent_worker", "subagent_coder"}

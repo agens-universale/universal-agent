@@ -40,7 +40,7 @@ def _hex_to_rgb(h: str) -> tuple[int, int, int]:
 
 
 def _rgb_to_hex(c: tuple[int, int, int]) -> str:
-    return "#%02X%02X%02X" % c
+    return "#{:02X}{:02X}{:02X}".format(*c)
 
 
 def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:

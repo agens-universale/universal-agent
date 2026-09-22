@@ -33,8 +33,13 @@ import json
 import threading
 
 import pytest
-
 from gc_core.tools import aapply_tool
+
+# Тул уехал в tools/deprecated/ вместе с переработкой FS-поиска (PR #86):
+# на смену ему пришли fs_find_in_files / fs_find_files_by_name. Контракт
+# «инлайн на loop» проверяем и для него — он всё ещё зарегистрирован.
+from gc_core.tools.deprecated.search_files import SearchFiles
+from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.file_info import FileInfo
@@ -43,15 +48,8 @@ from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-# Тул уехал в tools/deprecated/ вместе с переработкой FS-поиска (PR #86):
-# на смену ему пришли fs_find_in_files / fs_find_files_by_name. Контракт
-# «инлайн на loop» проверяем и для него — он всё ещё зарегистрирован.
-from gc_core.tools.deprecated.search_files import SearchFiles
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
-from gc_core.tools.turn.intermediate_reply import IntermediateReply
-from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_core.tools.project.project_memory import ProjectMemory
-from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
     ReadStoredToolOutput,
@@ -65,6 +63,8 @@ from gc_core.tools.skills.skills_tools import (
     LoadSkillTool,
     SkillsListTool,
 )
+from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit.helpers.tool_ctx import local_ctx
 
 #: Тул → как его собрать без реального окружения. Тело всё равно подменяется

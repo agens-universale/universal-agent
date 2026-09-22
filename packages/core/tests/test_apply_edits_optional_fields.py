@@ -2,7 +2,6 @@
 # (ensure_real_tools_package), so an in-function import binds a different class object than
 # the one parse_and_validate_tool_arguments raises → pytest.raises would miss it.
 import pytest
-
 from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 

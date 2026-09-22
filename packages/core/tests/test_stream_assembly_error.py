@@ -5,8 +5,7 @@ gigacode/vLLM может вернуть HTTP 200 + SSE-событие ошибк
 сборка пустая → downstream «Unknown finish reason» (маскировка реальной причины).
 Теперь error-событие поднимается с сообщением провайдера."""
 import pytest
-
-from gc_core.utils.chat_completions_stream import assemble_streamed_completion, BackendStreamError
+from gc_core.utils.chat_completions_stream import BackendStreamError, assemble_streamed_completion
 
 
 def test_sse_error_event_is_surfaced():

@@ -9,11 +9,13 @@ Protected paths injection: build_judge_payload добавляет поле never
 """
 import json
 
-import pytest
-
 from gc_core.security import command_moderation as cm
-from gc_core.security.command_moderation import ModerationContext, build_judge_payload, decide_command_execution, moderate_command_execution
-
+from gc_core.security.command_moderation import (
+    ModerationContext,
+    build_judge_payload,
+    decide_command_execution,
+    moderate_command_execution,
+)
 
 # ---------------------------------------------------------------------------
 # C1 Часть 2: judge-unavailable → confirm-порт
@@ -91,7 +93,7 @@ def test_judge_unavailable_no_ctx_still_blocks(monkeypatch):
 
 def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
     """build_judge_payload добавляет never_touch_paths из protected_paths."""
-    from pathlib import Path
+
     from gc_core.security.protected_paths import ProtectedSet
 
     instr = tmp_path / "instructions.md"

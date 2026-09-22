@@ -6,23 +6,25 @@ import os
 import re
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urljoin
 
 import httpx
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
-from gc_core.utils.async_http import get_async_client
-from gc_core.utils.http_proxy import resolve_proxies
-import asyncio
+from gc_core.security.path_policy import resolve_tool_context
+from gc_core.security.url_policy import enforce_url_policy
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
-    RedirectBlocked as _SharedRedirectBlocked,
-    TooManyRedirects as _TooManyRedirects,
     fetch_validating_redirects,
 )
-from gc_core.security.path_policy import resolve_tool_context
+from gc_core.tools.exec.redirect_policy import (
+    RedirectBlocked as _SharedRedirectBlocked,
+)
+from gc_core.tools.exec.redirect_policy import (
+    TooManyRedirects as _TooManyRedirects,
+)
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -171,7 +173,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
         # а для LRU нужен OrderedDict. Если тип не совпадает — пересобираем.
         if not isinstance(cache, OrderedDict):
             cache = OrderedDict(cache if isinstance(cache, dict) else {})
-            setattr(shared, "fetch_url_cache", cache)
+            shared.fetch_url_cache = cache
         return cache
 
     @staticmethod
@@ -325,9 +327,7 @@ class SimpleFetchUrl(AbstractSimpleTool):
             "application/x-7z-compressed",
         ):
             return True
-        if ct.startswith("application/"):
-            return True
-        return False
+        return bool(ct.startswith("application/"))
 
     @staticmethod
     def _is_text_like_content_type(content_type: str) -> bool:

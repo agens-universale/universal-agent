@@ -14,8 +14,8 @@ event loop. Клиент, созданный на одном loop и переи�
 from __future__ import annotations
 
 import asyncio
-import threading
 import ssl
+import threading
 import weakref
 from typing import Any, Optional, Union
 
@@ -183,7 +183,7 @@ def _purge_dead_locked() -> None:
 #: Значение — ``(weakref на loop, счётчик)``: голого ``id`` мало по той же
 #: причине, что и у ``_clients`` — id переиспользуются между последовательными
 #: ``asyncio.run``, и новый loop унаследовал бы чужой счётчик.
-_holders: dict[int, tuple["weakref.ref", int]] = {}
+_holders: dict[int, tuple[weakref.ref, int]] = {}
 
 
 def _holder_count(loop) -> int:
@@ -253,8 +253,8 @@ async def aclose_clients() -> None:
 
 
 __all__ = [
-    "acquire_clients",
     "aclose_clients",
+    "acquire_clients",
     "build_ssl_context",
     "get_async_client",
     "mounts_from_proxies",

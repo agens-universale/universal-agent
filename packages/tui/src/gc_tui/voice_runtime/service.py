@@ -7,7 +7,6 @@ import socket
 import wave
 from pathlib import Path
 
-
 from recommended_mcp.manifest import RunSpec
 
 from gc_tui.voice_runtime.state import VoiceState

@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from recommended_mcp.process_supervisor import (
-    build_command_argv, is_pid_alive, read_pid, remove_pid, terminate_pid, write_pid,
+    build_command_argv,
+    is_pid_alive,
+    read_pid,
+    remove_pid,
+    terminate_pid,
+    write_pid,
 )
 
 from gc_tui.voice_runtime.fs import force_rmtree
@@ -19,7 +24,11 @@ from gc_tui.voice_runtime.leases import clear_agent_owned, live_leases
 from gc_tui.voice_runtime.paths import voice_pids_dir
 from gc_tui.voice_runtime.service import build_run_spec, port_alive
 from gc_tui.voice_runtime.state import (
-    DEFAULT_MODEL, DEFAULT_PORT, available_update, clear_state, load_state,
+    DEFAULT_MODEL,
+    DEFAULT_PORT,
+    available_update,
+    clear_state,
+    load_state,
 )
 from gc_tui.voice_runtime.wire import base_config_raw, managed_voice, unwire_voice
 

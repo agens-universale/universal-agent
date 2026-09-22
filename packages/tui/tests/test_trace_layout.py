@@ -88,8 +88,8 @@ async def test_agent_prose_first_block_has_bullet_prefix():
 async def test_tool_call_row_has_two_column_layout():
     """ToolCallRow содержит Horizontal с prefix (отступ-индент + статус-глиф, без '|-') и content."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -113,8 +113,8 @@ async def test_long_tool_args_wrap_inside_content_column():
     Проверяем структурно: prefix-Static и content-Static — отдельные виджеты,
     значит wrap content не выходит за границы своей колонки (rendering Textual'а)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     long_args = "command='" + ("very_long_path/" * 20) + "x.py'"
 
@@ -163,9 +163,9 @@ async def test_todo_row_has_air_above_and_no_double_gap():
     разделение через margin-top следующего элемента), и ровно одной — не двумя."""
     pytest.importorskip("textual")
     import json
+
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
-    from gc_tui.widgets.trace_row import TraceRow
 
     def call_ev(no, name, args):
         return TraceEvent(

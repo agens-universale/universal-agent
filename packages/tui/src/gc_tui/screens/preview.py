@@ -49,8 +49,7 @@ class PreviewScreen(Screen[bool]):
                 id="preview-footer", markup=False)
 
     def on_mount(self) -> None:
-        from gc_tui.services.trace_render import (
-            merge_nested_readonly, render_segments_readonly)
+        from gc_tui.services.trace_render import merge_nested_readonly, render_segments_readonly
         trace = self.query_one("#trace", VerticalScroll)
         calls = render_segments_readonly(trace, self._segments)
         if self._subagent_records:

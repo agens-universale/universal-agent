@@ -26,16 +26,17 @@ for _key in list(sys.modules.keys()):
 # The adapter is not part of src/; import it as harbor does at runtime
 # (`--agent-import-path adapters.gc_cli_external:GcCliExternal`), so its own
 # `from adapters.gc_cli_config import ...` resolves the same way here.
-from gc_testkit.paths import HARBOR, REPO
+from gc_testkit.paths import HARBOR
+
 _HARBOR = HARBOR
 sys.path.insert(0, str(_HARBOR))
 
-from adapters.gc_cli_external import (  # noqa: E402
+from adapters.gc_cli_external import (
     GcCliExternal,
     _messages_to_steps,
     _stringify_content,
 )
-from harbor.models.agent.context import AgentContext  # noqa: E402
+from harbor.models.agent.context import AgentContext
 
 
 def test_roles_map_to_atif_sources_with_sequential_ids():

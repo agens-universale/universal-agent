@@ -1,6 +1,7 @@
 """Poller записывает meta.tui.last_compact_msg_count на завершении сжатия
 (спадающий фронт runtime.summarizing True→False) — baseline для антиспама /compact."""
 import json
+
 import pytest
 
 

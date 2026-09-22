@@ -3,7 +3,6 @@
 fallback — mirrors system/summary prompt loading so non-editable installs (Harbor
 image) can point at the bundled prompt instead of fail-opening the gate."""
 import pytest
-
 from gc_core.intent_guard.final_report_consistency import DEFAULT_INTENT_GUARD_PROMPT_PATH, _load_guard_prompt
 
 

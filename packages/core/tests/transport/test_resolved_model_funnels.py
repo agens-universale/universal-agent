@@ -7,18 +7,18 @@
 """
 import json
 import logging
-from gc_testkit import as_coro, run_coro
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from gc_core.model_router import ResolvedModel
 from gc_core.utils import llm_chat_client
 from gc_core.utils.connect_backend import (
-    create_call_data_completions,
-    create_call_data_responses,
     acreate_call_headers,
     build_call_headers,
+    create_call_data_completions,
+    create_call_data_responses,
 )
+from gc_testkit import as_coro, run_coro
 
 
 def _canonical_once(processing_module, *args, **kwargs):
@@ -907,7 +907,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkey
         logger=None,
     )
 
-    _canonical_once(processing_module, 
+    _canonical_once(processing_module,
         [{"role": "user", "content": "hi"}], _state(default_model="legacy-model"), ctx)
 
     assert captured["retry_embedded_choice_errors"] is False

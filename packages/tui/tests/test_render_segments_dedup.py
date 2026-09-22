@@ -7,7 +7,6 @@
 разный — это render-счётчик, не identity)."""
 import pytest
 
-
 _DUP = "m_dup"
 
 
@@ -87,10 +86,10 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
 @pytest.mark.asyncio
 async def test_readonly_render_segments_dedupes_preserved_reply():
     pytest.importorskip("textual")
-    from textual.app import App
-    from textual.containers import VerticalScroll
     from gc_tui.services.trace_render import render_segments_readonly
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from textual.app import App
+    from textual.containers import VerticalScroll
 
     class _A(App):
         def compose(self):

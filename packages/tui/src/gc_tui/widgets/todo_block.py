@@ -47,8 +47,7 @@ class TodoBlock(ClickModelMixin, Widget):
         return list(self._rows)
 
     def compose(self) -> ComposeResult:
-        for row in self._rows:
-            yield row
+        yield from self._rows
 
     def _open_request(self) -> Optional[Message]:
         if not self._event_no:

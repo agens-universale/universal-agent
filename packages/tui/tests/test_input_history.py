@@ -1,6 +1,5 @@
 """InputHistory — per-project история input-реплик (JSONL)."""
 import json
-import pytest
 
 
 def test_load_missing_file_size_zero(tmp_path):

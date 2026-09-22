@@ -24,7 +24,6 @@ from __future__ import annotations
 import tomllib
 
 import pytest
-
 from gc_testkit.paths import VENDOR
 
 #: Манифесты вендоренных MCP-серверов. Каталог сканируется, а не перечисляется:

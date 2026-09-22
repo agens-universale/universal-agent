@@ -12,7 +12,6 @@
 """
 
 import pytest
-
 from gc_core.backends import capabilities as capabilities
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import CapabilitiesNotWarmedError

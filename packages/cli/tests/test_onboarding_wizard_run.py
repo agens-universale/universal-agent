@@ -1,8 +1,6 @@
 import yaml
-
-from gc_core import onboarding
-from gc_core import onboarding_config_writer
 from gc_cli import onboarding_wizard as wz
+from gc_core import onboarding, onboarding_config_writer
 
 
 class _FakeMcp:

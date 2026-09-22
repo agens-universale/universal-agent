@@ -8,9 +8,9 @@ pyproject.toml соответствующего проекта в external/ — 
 import tomllib
 from pathlib import Path
 
-from recommended_mcp.manifest import load_manifest
 from gc_testkit.paths import RECIPES
 from recommended_mcp.install import _vendor_candidates
+from recommended_mcp.manifest import load_manifest
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,8 +40,8 @@ def test_source_mcp_versions_match_pyproject():
 
 def test_available_update_for_source_uses_manifest_version():
     """source-MCP: установлена 0.2.0, в манифесте (новый релиз) 0.3.0 → есть обновление."""
-    from recommended_mcp.runtime.cli import _available_update
     from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime.cli import _available_update
     entry = MCPEntry(name="office", description="", path=Path("./office"),
                      install=InstallSpec(type="source", source=Path("../external/office-mcp"),
                                          dist="office-mcp", version="0.3.0"))
@@ -52,8 +52,8 @@ def test_available_update_for_source_uses_manifest_version():
 
 def test_available_update_none_without_manifest_version():
     """Рецепт без version (напр. npx) — признака нет, а не ложное «обновление»."""
-    from recommended_mcp.runtime.cli import _available_update
     from recommended_mcp.manifest import InstallSpec, MCPEntry
+    from recommended_mcp.runtime.cli import _available_update
     entry = MCPEntry(name="browser_playwright", description="", path=Path("./b"),
                      install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
     assert _available_update(entry, "1.0.0") is None

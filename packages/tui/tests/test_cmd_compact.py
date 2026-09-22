@@ -4,6 +4,7 @@
 сообщений выросло с момента последнего сжатия (meta.tui.last_compact_msg_count).
 """
 import json
+
 import pytest
 
 
@@ -95,6 +96,7 @@ async def test_compact_resets_thinking_timer(tmp_path):
     прошлого хода (баг: показывало (40с) вместо (0с))."""
     pytest.importorskip("textual")
     import time
+
     from gc_tui.app import TuiApp
     tid = "cmp00000000000000000000000000006a"
     _write_task(tmp_path, tid, n_messages=3, last_compact=1)

@@ -103,8 +103,8 @@ async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
     from unittest import mock
 
     from gc_core import model_picker
-    from gc_tui import app as app_mod
     from gc_core.model_picker import ModelInfo
+    from gc_tui import app as app_mod
     from test_settings_models_section import _SECTION, _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
@@ -185,8 +185,8 @@ async def test_delete_confirm_banner_is_pulled_into_view(tmp_path):
     from unittest import mock
 
     from gc_core import model_picker
-    from gc_tui import app as app_mod
     from gc_core.model_picker import ModelInfo
+    from gc_tui import app as app_mod
     from test_settings_models_section import _SECTION, _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
@@ -259,9 +259,9 @@ async def test_env_overwrite_confirm_is_pulled_into_view(tmp_path):
 
 async def test_profile_name_prompt_is_pulled_into_view(tmp_path):
     """Поле ввода имени профиля — тот же канон: печатать вслепую нельзя."""
+    from gc_tui import app as app_mod
     from test_settings_models_section import _write_cfg
     from test_settings_screen import _loaded, _mk_screen
-    from gc_tui import app as app_mod
 
     registry = "models:\n" + "".join(
         f"  m{i}:\n    model: \"vendor/model-{i}\"\n" for i in range(12))
@@ -306,9 +306,9 @@ async def test_post_update_footer_survives_overflowing_card(monkeypatch):
     поэтому окно берём совсем тесное: дефект тут спит, пока экран просторный, — ровно
     как спал на `/settings`, пока волна не сделала секции высокими."""
     from gc_core import config_sync
-    from recommended_mcp.runtime import cli as cli
     from gc_tui import app as app_mod
     from gc_tui.screens.post_update import PostUpdateScreen
+    from recommended_mcp.runtime import cli as cli
 
     class _Upg:
         old_version = "0.3.0"
@@ -343,8 +343,8 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
     from unittest import mock
 
     from gc_core import model_picker
-    from gc_tui import app as app_mod
     from gc_core.model_picker import ModelInfo
+    from gc_tui import app as app_mod
     from test_settings_models_section import _SECTION, _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
@@ -472,8 +472,8 @@ async def test_voice_remove_confirm_is_pulled_into_view(tmp_path):
     (замерено: scroll_y=29, вопрос на y=-12) — ровно тот дефект, что уже чинили
     у списка моделей и у подтверждения перезаписи ${ENV:VAR}. Секция пришла из
     develop, где потолка рамки ещё не существовало."""
-    from test_settings_voice import LOCAL_OUTDATED, _mk_screen, _open_voice
     from gc_tui.app import TuiApp
+    from test_settings_voice import LOCAL_OUTDATED, _mk_screen, _open_voice
     app = TuiApp(config={"model": "M"})
     async with app.run_test(size=(80, 16)) as pilot:
         scr, _fake = _mk_screen(tmp_path, LOCAL_OUTDATED)

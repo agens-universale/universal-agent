@@ -10,12 +10,11 @@ A2 — полнота шаблона: каждый листовой путь с�
 from pathlib import Path
 
 import yaml
-
 from gc_core.config import _default_config_path, flatten_app_config
 from gc_core.config_modules.model_sections_validation import validate_model_sections
 from gc_core.config_modules.root import AppConfig
-from gc_testkit.paths import REPO
 from gc_core.model_router import ModelRouter
+from gc_testkit.paths import REPO
 
 # dotted-пути, где шаблон НАМЕРЕННО отличается от кодового дефолта:
 # сентинелы онбординга и preset-значения шаблона. Пополнять только осознанно.

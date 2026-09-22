@@ -1,8 +1,6 @@
 """Фильтр набора тулов дочернего рана (allow/stop из определения сабагента)."""
 import logging
 
-import pytest
-
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, apply_subagent_tools_filter
 
 REQUIRED = (

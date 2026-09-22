@@ -298,8 +298,8 @@ async def _prefilter(backend, **overrides):
 
 from gc_core.utils.find_in_files_scan_mode import Needles
 from gc_core.utils.native_fs_search import (
-    build_prefilter_command,
     anative_prefilter_candidates,
+    build_prefilter_command,
     prefilter_terms,
 )
 

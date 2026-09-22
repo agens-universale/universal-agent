@@ -7,8 +7,8 @@ from unittest.mock import patch
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import agent_summary_slice_mode, hint_section_tags, slice_summary
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
-from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit import run_coro
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 class CompactionSummarySliceTest(unittest.TestCase):

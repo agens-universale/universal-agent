@@ -9,12 +9,11 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import arequest_auxiliary_completion_text
-
 from gc_core.config_modules.project_memory import (
     DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
     project_memory_from_config_dict,
 )
+from gc_core.summarize.llm import arequest_auxiliary_completion_text
 
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
@@ -83,7 +82,7 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             request_label="project_memory_compaction",
             consumer="memory_compaction",
         )
-    except Exception as exc:  # noqa: BLE001 — caller wants explicit ok=false, not exception.
+    except Exception as exc:
         return CompactionResult(
             ok=False, text="", error_type="backend_error", error_message=str(exc)
         )

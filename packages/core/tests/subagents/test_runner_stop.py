@@ -2,10 +2,9 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from gc_core.states import State, SharedStateData
-from gc_core.tools.subagents import runner as runner_module
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
 
 

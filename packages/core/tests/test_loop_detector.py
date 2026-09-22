@@ -1,7 +1,6 @@
 """Приёмка loop detector: fingerprint, пороги, observe/flush/clear, wiring."""
 
 from __future__ import annotations
-from gc_testkit import as_coro
 
 import json
 from types import SimpleNamespace
@@ -23,7 +22,7 @@ from gc_core.loop_detector.detector import (
     observe,
     resolve_thresholds,
 )
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -660,8 +659,9 @@ def test_process_tool_calls_unknown_streak_does_not_emit_loop_notice(monkeypatch
 
 
 def test_compaction_clears_loop_window():
-    from gc_core.summarize.compaction import arun_summary_compaction
     from unittest.mock import patch
+
+    from gc_core.summarize.compaction import arun_summary_compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
     state = SimpleNamespace(
@@ -718,11 +718,11 @@ def test_compaction_clears_loop_window():
 
 
 def test_accepted_turn_finish_clears_window(monkeypatch):
+    from gc_core import processing_responses as pr
     from gc_core.intent_guard import guard as intent_guard_guard
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.processing_responses import arun_agent
     from gc_core.states import State
-    from gc_core import processing_responses as pr
 
     monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
@@ -847,14 +847,14 @@ def test_empty_pickup_does_not_clear_window(monkeypatch):
         loop_detector_window=["fp"],
         loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
     )
-    assert pr._pickup_pending_as_new_turn(lambda: [], state, SimpleNamespace(logger=None)) is None
+    assert pr._pickup_pending_as_new_turn(list, state, SimpleNamespace(logger=None)) is None
     assert state.loop_detector_window == ["fp"]
     assert state.loop_detector_pending == [{"tool": "fs_read_file", "args": {}}]
 
 
 def test_finish_gate_reject_keeps_window(monkeypatch):
-    from gc_core.intent_guard import guard as intent_guard_guard
     from gc_core import processing_responses as pr
+    from gc_core.intent_guard import guard as intent_guard_guard
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.states import State
 
@@ -940,34 +940,34 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
 
 
 def test_profiles_hang_on_listed_tools_not_on_write_exec_finish():
-    from gc_core.tools.fs.read_file import ReadFile
-    from gc_core.tools.fs.list_files import ListFiles
-    from gc_core.tools.fs.file_info import FileInfo
-    from gc_core.tools.fs.find_in_files import FindInFiles
-    from gc_core.tools.fs.find_files_by_name import FindFilesByName
-    from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
-    from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
-    from gc_core.tools.session.think import Think
-    from gc_core.tools.session.working_memory import WorkingMemory
-    from gc_core.tools.session.todo import SessionTodo
-    from gc_core.tools.project.project_memory import ProjectMemory
     from gc_core.tools.exec.calculator import Calculator
+    from gc_core.tools.fs.file_info import FileInfo
+    from gc_core.tools.fs.find_files_by_name import FindFilesByName
+    from gc_core.tools.fs.find_in_files import FindInFiles
+    from gc_core.tools.fs.list_files import ListFiles
+    from gc_core.tools.fs.read_file import ReadFile
+    from gc_core.tools.project.project_memory import ProjectMemory
+    from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+    from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
+    from gc_core.tools.session.think import Think
+    from gc_core.tools.session.todo import SessionTodo
+    from gc_core.tools.session.working_memory import WorkingMemory
     try:
         from gc_core.tools.exec.fetch_url import FetchUrl
     except ModuleNotFoundError:
         from gc_core.tools.exec.simple_fetch_url import FetchUrl
-    from gc_core.tools.skills.skills_tools import (
-        SkillsListTool,
-        LoadSkillTool,
-        LoadReferenceTool,
-        LoadAssetTool,
-        RunSkillScriptTool,
-    )
-    from gc_core.tools.fs.write_to_file_tool import WriteToFile
-    from gc_core.tools.turn.submit_solution import SubmitSolution
-    from gc_core.tools.turn.ask_human import AskHuman
     from gc_core.tools.exec.execute_command import ExecuteCommand
+    from gc_core.tools.fs.write_to_file_tool import WriteToFile
     from gc_core.tools.session.session_compact import SessionCompact
+    from gc_core.tools.skills.skills_tools import (
+        LoadAssetTool,
+        LoadReferenceTool,
+        LoadSkillTool,
+        RunSkillScriptTool,
+        SkillsListTool,
+    )
+    from gc_core.tools.turn.ask_human import AskHuman
+    from gc_core.tools.turn.submit_solution import SubmitSolution
 
     for cls in (
         ReadFile,
@@ -999,9 +999,9 @@ def test_profiles_hang_on_listed_tools_not_on_write_exec_finish():
 
 
 def test_config_flatten_wires_loop_detector():
+    from gc_core.config import flatten_app_config
     from gc_core.config_modules.agent import AgentConfig, LoopDetectorConfig
     from gc_core.config_modules.root import AppConfig
-    from gc_core.config import flatten_app_config
 
     cd_on = flatten_app_config(AppConfig(agent=AgentConfig()))
     assert cd_on["loop_detector"] == {"enabled": True}

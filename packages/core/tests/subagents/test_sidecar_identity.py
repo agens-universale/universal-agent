@@ -4,7 +4,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity, resolve_sidecar_identity
 
@@ -125,8 +124,8 @@ class TestChildCtxCopiesThreadIdentity:
     @pytest.mark.asyncio
     async def test_build_child_ctx_copies_identity_without_sink(self, tmp_path):
         from gc_core.states import SharedStateData, State
-        from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         state = State(
             verbose=False,
@@ -193,8 +192,8 @@ class TestChildCtxCopiesThreadIdentity:
 async def _child_ctx_of_parent_with(tmp_path, *, threads_dir: str):
     """Настоящий `_build_child_ctx` над родителем с заданным каталогом тредов."""
     from gc_core.states import SharedStateData, State
-    from gc_testkit.helpers.tool_ctx import local_ctx
     from gc_core.tools.subagents.runner import SubagentRunner
+    from gc_testkit.helpers.tool_ctx import local_ctx
 
     state = State(
         verbose=False,

@@ -1,14 +1,13 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.project_memory.compaction import CompactionResult
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.registry import get_builtin_tools_data
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 @pytest.fixture(autouse=True)

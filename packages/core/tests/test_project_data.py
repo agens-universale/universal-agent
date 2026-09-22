@@ -3,7 +3,6 @@ import stat
 import sys
 
 import pytest
-
 from gc_core.utils.project_data import get_project_data
 
 

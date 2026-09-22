@@ -34,6 +34,7 @@ def test_allow_returns_true_without_judge(monkeypatch):
 
 def test_judge_accept_returns_true(monkeypatch):
     from types import SimpleNamespace
+
     from gc_core.intent_guard import text_answer_judge as taj
     async def _judge(ctx, state, text):
         return SimpleNamespace(action="accept")
@@ -42,8 +43,8 @@ def test_judge_accept_returns_true(monkeypatch):
 
 
 def test_judge_reject_returns_false(monkeypatch):
-    from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.intent_guard import text_answer_judge as taj
+    from gc_core.intent_guard.validation_result import ValidationResult
     _rej = ValidationResult(ok=False, action="continue_work", trace_ok=False, report_ok=True,
                             trace_gaps=["more work needed"], missing_requirements=[],
                             report_mismatches=[], conflicts=[], feedback_for_agent="", coverage_score=0.0)
@@ -81,8 +82,9 @@ def test_no_key_returns_false_without_judge(monkeypatch):
 
 def test_judge_gate_on_calls_judge(monkeypatch):
     """(a) gate=on (strict=True) + judge → судья зовётся."""
-    from gc_core.intent_guard import text_answer_judge as taj
     from types import SimpleNamespace
+
+    from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
     async def _judge(ctx, state, text):
         judged["n"] += 1
@@ -96,8 +98,9 @@ def test_judge_gate_off_still_calls_judge(monkeypatch):
     """(b) gate=off (strict=False) + judge → судья ВСЁ РАВНО зовётся (/gate не
     должен молча деградировать judge в deny; было: FinishGateGuard.enabled склеивал
     strict_turn_finish_validation с backend_api_mode)."""
-    from gc_core.intent_guard import text_answer_judge as taj
     from types import SimpleNamespace
+
+    from gc_core.intent_guard import text_answer_judge as taj
     judged = {"n": 0}
     async def _judge(ctx, state, text):
         judged["n"] += 1
@@ -208,6 +211,7 @@ def test_run_agent_allow_returns_text():
 def test_run_agent_judge_accept_returns_text(monkeypatch):
     """judge + accept: текст возвращается (gate включён, судья замокан)."""
     from types import SimpleNamespace
+
     from gc_core import processing_responses as pr
     from gc_core.intent_guard import text_answer_judge as taj
     async def _judge(ctx, state, text):

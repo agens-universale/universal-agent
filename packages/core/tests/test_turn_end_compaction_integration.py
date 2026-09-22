@@ -7,18 +7,17 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
 from gc_core import run_summary_coordinator as rsc
-from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
+from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.states import State
 from gc_core.summarize.compaction import apply_summary_state_patch
-from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit import run_coro
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 

@@ -26,12 +26,8 @@ from typing import (
     List,
     Literal,
     NamedTuple,
-    Optional,
-    Protocol,
-    Sequence,
     Set,
     TypedDict,
-    runtime_checkable,
 )
 
 #: Ключ идемпотентности одного сообщения. Формат задаёт

@@ -1,6 +1,11 @@
 import unittest
 
-from gc_core.intent_guard.feedback import QUESTION_CONTINUE_HINT, TEXT_ANSWER_REJECT_TOOL_HINT, build_finish_gate_feedback, build_text_answer_reject_feedback
+from gc_core.intent_guard.feedback import (
+    QUESTION_CONTINUE_HINT,
+    TEXT_ANSWER_REJECT_TOOL_HINT,
+    build_finish_gate_feedback,
+    build_text_answer_reject_feedback,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 
 

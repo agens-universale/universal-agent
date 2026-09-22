@@ -6,7 +6,6 @@ import pytest
 
 pytest.importorskip("textual")
 
-from gc_core.model_picker import ModelInfo
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.services.settings_probe import ProbeResult
 
@@ -155,8 +154,8 @@ def test_token_accepted_says_nothing_about_a_public_models_route():
     """Справочник моделей ответил 200 — но он бывает публичным (OpenRouter), и о
     токене это не говорит ничего. Прежний глиф хаба читал такой ответ как «токен
     в порядке» и расходился со строкой секции."""
-    from gc_tui.services.probe_presentation import token_accepted
     from gc_core.model_picker import ModelInfo
+    from gc_tui.services.probe_presentation import token_accepted
     r = ProbeResult("ok", 200, [ModelInfo(id="m")], 10, "доступен")
     assert token_accepted(r, has_token=True) is None
 
@@ -183,8 +182,8 @@ def test_token_accepted_when_there_is_no_token_at_all():
     сервер осмысленно, авторизация не требуется; 401 — требуется, а предъявить
     нечего; иное — утверждать не о чем. Ответ справочника и тут не в счёт: он
     отвечает без токена всем, а chat/completions может его требовать."""
-    from gc_tui.services.probe_presentation import token_accepted
     from gc_core.model_picker import ModelInfo
+    from gc_tui.services.probe_presentation import token_accepted
     ok = ProbeResult("ok", 200, None, 10, "доступен")
     needs = ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
     weird = ProbeResult("unknown", 500, None, 5, "сервер ответил 500")

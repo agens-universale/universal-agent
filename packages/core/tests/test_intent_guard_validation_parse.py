@@ -1,7 +1,11 @@
 import json
 import unittest
 
-from gc_core.intent_guard.validation_result import expected_action_for_axes, fail_open_validation_result, parse_validator_response
+from gc_core.intent_guard.validation_result import (
+    expected_action_for_axes,
+    fail_open_validation_result,
+    parse_validator_response,
+)
 
 
 def _raw(**overrides: object) -> str:

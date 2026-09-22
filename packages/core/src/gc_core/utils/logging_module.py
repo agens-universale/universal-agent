@@ -5,7 +5,7 @@ import os
 import sys
 import time
 import uuid
-from typing import Tuple, Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from gc_core.trace_id import trace_id_from_config, trace_id_slug
 
@@ -59,7 +59,7 @@ class JsonlFormatter(logging.Formatter):
         self._redactor = redactor
 
     def format(self, record: logging.LogRecord) -> str:
-        dt = datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc)
+        dt = datetime.datetime.fromtimestamp(record.created, datetime.UTC)
         ts = dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(record.msecs):03d}Z"
         payload: Dict[str, Any] = {
             "ts": ts,
@@ -325,14 +325,14 @@ def release_run_logger(logger: Any) -> None:
 
 
 __all__ = [
-    "create_run_logger",
-    "release_run_logger",
     "FlushFileHandler",
     "JsonlFormatter",
-    "RunContextFilter",
     "RedactingTextFormatter",
+    "RunContextFilter",
     "build_run_log_paths",
+    "create_run_logger",
     "generate_run_id",
-    "resolve_log_level",
     "human_console_enabled",
+    "release_run_logger",
+    "resolve_log_level",
 ]

@@ -19,16 +19,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from gc_core.thread_store_base import ThreadStoreBase
-from gc_core.thread_store_types import (
-    MessageKey,
-    SubagentTraceRecord,
-    ThreadState,
-)
 from gc_core.thread_store import (
     append_new_thread_messages,
-    archive_and_replace_thread_files,
     append_subagent_trace_record,
+    archive_and_replace_thread_files,
     discard_message_by_id,
     ensure_threads_dir,
     load_thread_messages,
@@ -38,6 +32,12 @@ from gc_core.thread_store import (
     reset_thread_files,
     save_thread_meta,
     update_runtime_meta,
+)
+from gc_core.thread_store_base import ThreadStoreBase
+from gc_core.thread_store_types import (
+    MessageKey,
+    SubagentTraceRecord,
+    ThreadState,
 )
 
 

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 
-
 def _manifest_errors():
     from recommended_mcp.manifest import ManifestError
 

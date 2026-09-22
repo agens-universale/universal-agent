@@ -217,9 +217,9 @@ async def test_entering_settings_section_picks_up_other_window_default(tmp_path)
     """Вход в секцию /settings при уже открытом экране подхватывает чужую правку
     глобала (дизайн 2026-07-21 §4: свежесть в двух точках — открытие Settings и
     вход в секцию). _sync_config_from_app зовёт reload_config_if_changed явно."""
+    from gc_testkit.tui_support import open_settings_section
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
-    from gc_testkit.tui_support import open_settings_section
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")

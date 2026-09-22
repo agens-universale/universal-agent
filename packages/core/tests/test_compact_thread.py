@@ -1,11 +1,10 @@
 """compact_thread: грузит тред + форс-сжатие через координатор."""
 import types
 
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_file import FileThreadStore
-
 from gc_core import agent_executor as ae
 from gc_core import manual_compaction as mc
+from gc_core.thread_store_async import athread_store
+from gc_core.thread_store_file import FileThreadStore
 from gc_testkit import run_coro
 
 
@@ -166,7 +165,6 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
 
 def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
     """После /compact live-state (что читает футер) должен отражать summary."""
-    from gc_core.usage.account import UsageAccount
 
     class _Coord:
         def __init__(self, **kw): self.state = kw["state"]

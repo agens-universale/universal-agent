@@ -3,8 +3,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
-                                    STEP_VOICE)
+from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS, STEP_MCP, STEP_VOICE
 
 
 class FakeVoice:
@@ -557,8 +556,8 @@ async def test_voice_cloud_fields_are_framed_editor(monkeypatch):
     списком её рисует группа: «URL» (пресеты адреса, спека 2026-08-05 §3) и «Модель»
     (список с сервера) — в группе, у «Токена» (списка нет вовсе) рамка своя (§3.1)."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+    from textual.widgets import Input
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -627,8 +626,8 @@ async def test_voice_cloud_invalid_url_error_inside_editor(monkeypatch):
     """Невалидный URL: шаг не продвигается, ошибка — ВНУТРИ редактора (канон
     EndpointEditor), а не подменяет заголовок шага в #onb-body."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input, Static
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+    from textual.widgets import Input, Static
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -643,7 +642,7 @@ async def test_voice_cloud_invalid_url_error_inside_editor(monkeypatch):
         assert screen._step_id() == STEP_VOICE                      # остались на шаге
         ed = screen.query_one(VoiceEndpointEditor)
         assert any("http" in str(w.render()) for w in ed.query(".onb-warn"))
-        assert "Голосовой ввод" == str(screen.query_one("#onb-body", Static).render())
+        assert str(screen.query_one("#onb-body", Static).render()) == "Голосовой ввод"
 
 
 @pytest.mark.asyncio
@@ -654,6 +653,7 @@ async def test_service_start_does_not_block_wizard_finish(monkeypatch, tmp_path)
     toast приложения, не виджеты уже размонтированного мастера."""
     import threading
     import time
+
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import autostart as autostart
     app = TuiApp(config={"model": "M"})
@@ -707,7 +707,6 @@ def _voice_editor(screen):
 
 
 def _model_rows(screen):
-    from textual.widgets import Static
     return [str(w.render()) for w in screen.query(".voice-model-row") if w.display]
 
 
@@ -877,8 +876,8 @@ async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highl
     список НЕ раскрывает (канон форм 2026-08-17: пресет-лист раскрыт, только пока
     значение складывается), а Alt+↓ раскрывает его ЦЕЛИКОМ, курсор — на СОВПАВШЕМ
     пресете. Тот же канон, что у адреса «Подключения»."""
-    from gc_tui.app import TuiApp
     from gc_core.config_modules.voice_endpoint_presets import DEFAULT_VOICE_ENDPOINT_PRESETS
+    from gc_tui.app import TuiApp
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -901,9 +900,9 @@ async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highl
 async def test_enter_on_a_foreign_url_preset_substitutes_and_clears_the_model():
     """Enter по ЧУЖОМУ пресету — реальным путём через `on_key` экрана (не напрямую
     через редактор): URL подставлен, «Модель» стёрта (спека §4.1), список свёрнут."""
+    from gc_core.config_modules.voice_endpoint_presets import DEFAULT_VOICE_ENDPOINT_PRESETS
     from gc_tui.app import TuiApp
     from textual.widgets import Input
-    from gc_core.config_modules.voice_endpoint_presets import DEFAULT_VOICE_ENDPOINT_PRESETS
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -1074,8 +1073,8 @@ async def test_marking_keeps_the_fields_and_what_was_typed():
 async def test_shift_tab_is_symmetric_to_tab(tmp_path):
     """Shift+Tab — предыдущая группа, симметрично Tab, и тоже перехвачен: без явной
     ветки он остался бы живым focus_previous и увёл бы фокус мимо ленты (спека §4.2.7)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         await pilot.press("shift+tab")
         await pilot.pause()
@@ -1091,8 +1090,8 @@ async def test_shift_tab_is_symmetric_to_tab(tmp_path):
 async def test_tab_moves_between_groups(tmp_path):
     """Tab уводит из вариантов в поля и обратно — на ту строку, где курсор оставили:
     позиция каждой группы помнится своя (спека §4.2.1)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # У «URL» свой пресет-лист (спека 2026-08-05 §3), и на пустом поле он раскрыт
         # сам — стрелка тогда уходит списку, а не курсору формы (свой сценарий, см.
@@ -1126,8 +1125,8 @@ async def test_arrows_in_fields_do_not_move_variants(tmp_path):
     """Стоя в поле, стрелка двигает по полям, а не по строкам режима (спека §4.2.5):
     раньше экран перехватывал стрелки всегда, и из поля ими было не выйти иначе как
     сменив вариант под собой."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3)
         # и первая же стрелка уходит ему, а не курсору формы (см. test_tab_moves_between_groups).
@@ -1162,8 +1161,8 @@ async def test_tab_is_swallowed_when_no_second_group(tmp_path):
 async def test_tab_collapses_open_list_before_leaving(tmp_path):
     """Tab при раскрытом списке сначала сворачивает его, потом уводит в другую группу —
     чтобы список не остался висеть за спиной (спека §4.2.4)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # Без адреса список не раскрывается вовсе (идти некуда) — задаём его.
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
@@ -1187,8 +1186,8 @@ async def test_cursor_in_fields_leaves_no_highlighted_variant(tmp_path):
     иначе на экране две подсветки сразу (строка И фокус-рамка поля). ▸ при этом
     остаётся — он маркер владельца показанных полей, а не курсора (канон /settings,
     `_render_voice`: «подсветка строго по курсору ленты, ▸ живёт по владельцу панели»)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам на пустом поле (спека
         # 2026-08-05 §3), и Tab тащит за собой чужую асинхронность (монтаж строк
@@ -1223,8 +1222,8 @@ async def test_marking_does_not_reopen_a_list_shut_by_escape(tmp_path):
     Клавиша здесь Enter, а не Space: Space, пока фокус в поле, забирает себе сам Input —
     он печатает пробел, и раскрытие списка на печать это канон (`reopen_for_typing`),
     а не побочка."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab")                           # в поля
@@ -1291,8 +1290,8 @@ async def test_returning_to_the_step_starts_in_the_variants_group(tmp_path):
     """Уход со шага и возврат начинают с группы вариантов: поля пересобраны и фокуса не
     держат, а курсор, оставшийся в полях с прошлого визита, обещал бы движение по ним от
     пустого места (стрелка прыгала бы в поле, которого никто не выбирал)."""
-    from textual.widgets import Input
     from form_harness import wizard_voice_step
+    from textual.widgets import Input
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         await pilot.press("space")                         # ● «Свой endpoint»
         await pilot.press("tab")                           # курсор → в поля
@@ -1502,8 +1501,7 @@ async def _goto_voice_step(pilot, screen):
     """Как _to_voice_step, но ставит актуальный номер шага (STEP_VOICE): тот хелпер
     завязан на нумерацию ДО объединения шагов «Адрес»/«Авторизация» в «Подключение»
     и чинится отдельной задачей плана — здесь его не трогаем."""
-    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
-                                    STEP_VOICE)
+    from gc_tui.screens.onboarding import STEP_VOICE
     await pilot.pause()
     screen._values["completions_url"] = "http://h:1/v1/chat/completions"
     screen._values["Authorization"] = ""
@@ -1530,6 +1528,7 @@ def _write_cloud_config(tmp_path, *, url: str, token: str, model: str) -> str:
     — гарантированно валиден и, в отличие от self._config, не слит с managed-слоем и
     не резолвит ${ENV:...} (источник _voice_raw_cloud)."""
     from pathlib import Path
+
     from gc_core import onboarding_config_writer as w
     from gc_core.config import _default_config_path, validate_config_text
     template = Path(_default_config_path())
@@ -1549,11 +1548,11 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
     Источник полей — РЕАЛЬНЫЙ файл (_voice_raw_cloud читает config_path, не
     self._config, см. task-7-report.md «Раунд фиксов 1», находка 2), поэтому конфиг
     для этого теста — не только in-memory словарь, но и файл на диске."""
-    from gc_tui.app import TuiApp
-    from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
-    from textual.widgets import Input
     from gc_core.onboarding import display_secret
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
+    from gc_tui.services.voice_setup import VoiceStatus
+    from textual.widgets import Input
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1588,8 +1587,8 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
     одна и та же маска на соседних экранах вела бы себя по-разному. Пустое поле само
     по себе значит «оставить как было», поэтому убрать секрет было нечем."""
     from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_tui.services.voice_setup import VoiceStatus
+    from textual.widgets import Input
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1630,8 +1629,8 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
 async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
     """То же самое для локального сервиса: курсор встаёт на «Локальный сервис»."""
     from gc_tui.app import TuiApp
-    from gc_tui.services.voice_setup import VoiceStatus
     from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
+    from gc_tui.services.voice_setup import VoiceStatus
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice(installed=True)
@@ -1654,10 +1653,10 @@ async def test_prefill_reads_raw_document_not_merged_config(tmp_path, monkeypatc
     префилл обязан показать файл, а не память (task-7-report.md, находка 2):
     иначе managed-заглушка локальной батарейки читалась бы как облачный секрет, а
     url/model на коммите запекались бы в файл уже раскрытыми литералами."""
+    from gc_core.onboarding import display_secret
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
     from textual.widgets import Input
-    from gc_core.onboarding import display_secret
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1691,9 +1690,8 @@ async def test_voice_step_prefill_noop_when_nothing_configured(tmp_path, monkeyp
     тест: все прочие тесты файла подсовывают FakeVoice без status_cheap и
     попадают в except Exception раньше, чем доходят до mode == "off"."""
     from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import STEP_VOICE
     from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
-                                    STEP_VOICE)
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1744,8 +1742,8 @@ async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypa
     подменяет уже рабочий облачный провайдер локальным сервисом — регресс из
     Task 7 (_voice_advance брал вариант под курсором, а тот по умолчанию нулевой)."""
     from gc_tui.app import TuiApp
-    from gc_tui.services.voice_setup import VoiceStatus
     from gc_tui.screens.onboarding import STEP_CONFIRM
+    from gc_tui.services.voice_setup import VoiceStatus
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1777,6 +1775,7 @@ async def test_commit_cloud_empty_token_keeps_saved_secret(tmp_path, monkeypatch
     Идём РЕАЛЬНЫМ путём записи (_commit_config → файл на диске), а не проверкой
     _voice_choice — тот тест слома не увидел (task-7-report.md, находка 1)."""
     from pathlib import Path
+
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
     _isolate_voice_state(monkeypatch, tmp_path)
@@ -1816,9 +1815,9 @@ async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(tmp_path,
     такт», что и пометка: вернуть курсор на «Свой endpoint», раскрыть поля, не
     продвигаться дальше (task-7-report.md, находка 6)."""
     from gc_tui.app import TuiApp
-    from gc_tui.services.voice_setup import VoiceStatus
-    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
+    from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
+    from gc_tui.services.voice_setup import VoiceStatus
     _isolate_voice_state(monkeypatch, tmp_path)
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
@@ -1883,6 +1882,7 @@ async def test_voice_cloud_draft_token_does_not_leak_saved_secret(tmp_path, monk
     к прошлому Critical — коммит без подстановки стирал бы сохранённый токен
     (см. test_commit_cloud_empty_token_keeps_saved_secret, находка 1 раунда 1)."""
     from pathlib import Path
+
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import VoiceStatus
     from textual.widgets import Input

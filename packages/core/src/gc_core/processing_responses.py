@@ -1,6 +1,6 @@
 import asyncio
-import inspect
 import gc
+import inspect
 import json
 import time
 from types import SimpleNamespace
@@ -11,81 +11,102 @@ from gc_core.config_modules.strip_tags_projection import (
     persist_reasoning_content_from_config,
     projection_tags_from_config,
 )
-from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, SESSION_TODO_TOOL_NAME, TURN_FINALIZING_TOOLS
-from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
+from gc_core.constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    FINISH_TOOL_NAME,
+    INTERMEDIATE_REPLY_TOOL_NAME,
+    SESSION_COMPACT_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
+    TURN_FINALIZING_TOOLS,
+)
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
-from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
+from gc_core.intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
+    get_function_call_output_text,
+)
+from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
+from gc_core.loop_detector.detector import clear as clear_loop_detector
+
 # Детектор зацикливания приехал с develop синхронным. Оставлен как есть: его
 # наблюдатели — работа с памятью на микросекундах, нативной async-формы у них нет
 # (правило ветки: «есть нативная форма — идём через неё; формы нет, работа
 # короткая — инлайн на loop»).
 from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
-from gc_core.loop_detector.detector import clear as clear_loop_detector
-from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
-from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import arequest_chat_completions_with_policy
+from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
+from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.tools import (
-    aapply_tool,
     WrongFunctionArgumentsException,
+    aapply_tool,
     is_internal_tool_error_output,
     is_unknown_tool_output,
 )
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
-from gc_core.tools.subagents.progress import brief_args_summary, emit_progress, extract_intermediate_prose, parse_tool_result_status, todo_items_from_arguments
-from gc_core.tools.subagents.sidecar import apersist_subagent_trace
-from gc_core.model_router import AliasCircuitOpenError
-from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.utils.connect_backend import (
-    NO_BACKEND_OVERRIDE,
-    backend_override_value,
-    acreate_call_headers,
-    aresolve_auth_token,
-    resolve_network_params,
+from gc_core.tools.subagents.progress import (
+    brief_args_summary,
+    emit_progress,
+    extract_intermediate_prose,
+    parse_tool_result_status,
+    todo_items_from_arguments,
 )
-from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
-from gc_core.utils.logging_module import human_console_enabled
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import (
     is_auth_error,
     is_context_overflow_error,
     is_model_unavailable_error,
 )
+from gc_core.utils.connect_backend import (
+    NO_BACKEND_OVERRIDE,
+    acreate_call_headers,
+    aresolve_auth_token,
+    backend_override_value,
+    resolve_network_params,
+)
+from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
+from gc_core.utils.logging_module import human_console_enabled
 
 # Переполнение контекста → force-компакция + повтор запроса; лимит на случай,
 # когда даже после сжатия история всё ещё не влезает (единичное огромное сообщение).
 _MAX_CONTEXT_OVERFLOW_RETRIES = 3
-from gc_core.utils.connect_backend import create_call_data_responses as create_call_data
-from gc_core.utils.connect_backend import create_call_data_completions
-from gc_core.utils.convertations import output_chat_completion_to_response, sanitize_messages_for_chat_completions
-from gc_core.utils.format_messages import format_message_responses
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from gc_core.states import State
-from gc_core.turn_boundary import begin_turn
-from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
-from gc_core.usage.account import UsageAccount
-from gc_core.usage.context import usage_scope
-from typing import List, Dict, Union, Tuple, Any, Callable, Optional
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
+from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_ERROR_MESSAGE,
+    TECHNICAL_TYPE_TECHNICAL,
+    build_invalid_tool_call_feedback_message,
+    wrap_technical_user_content,
+)
+from gc_core.states import State
+from gc_core.turn_boundary import begin_turn
+from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
+from gc_core.usage.account import UsageAccount
+from gc_core.usage.context import usage_scope
 from gc_core.utils.backend_errors import (
     FINISH_KIND_LENGTH,
     classify_finish_kind,
     finish_blocks_final,
     finish_prevents_text_final,
 )
-from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
-
-import logging
+from gc_core.utils.connect_backend import create_call_data_completions
+from gc_core.utils.connect_backend import create_call_data_responses as create_call_data
+from gc_core.utils.convertations import output_chat_completion_to_response, sanitize_messages_for_chat_completions
+from gc_core.utils.format_messages import format_message_responses
+from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 _fallback_logger = logging.getLogger(__name__)
 
@@ -621,10 +642,7 @@ def _batch_has_pending_function_calls(messages: List[Dict]) -> bool:
     Иначе лимит между «модель уже вернула tools» и process_tool_calls даёт
     orphan call без output и теряет заявленную работу (sidecar/диск/summary).
     """
-    for message in messages or []:
-        if message.get("type") == "function_call":
-            return True
-    return False
+    return any(message.get("type") == "function_call" for message in messages or [])
 
 
 def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
@@ -1222,7 +1240,7 @@ _NO_RETURN = object()
 class _Outcome:
     """Итог обработки одного режима: новые messages, либо результат прогона, либо рестарт цикла."""
 
-    __slots__ = ("messages", "result", "restart", "completed_step", "mode")
+    __slots__ = ("completed_step", "messages", "mode", "restart", "result")
 
     def __init__(self, messages=None, *, result=_NO_RETURN, restart=False, completed_step=False):
         self.messages = messages

@@ -8,15 +8,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Iterable, Optional
 
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+)
+from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
+
 from gc_tui.diff_tui import git_ops
 from gc_tui.diff_tui.mode import resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
-from gc_core.backends.protocol import (
-    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
-)
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
 

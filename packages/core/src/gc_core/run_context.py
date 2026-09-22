@@ -3,24 +3,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
+from gc_core.backends.factory import resolve_os_backend
+from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, auxiliary_llm_from_config_dict
-from gc_core.utils.prod_auth import AuthConnector
-from gc_core.utils.logging_module import create_run_logger
-from gc_core.utils.logging_module import generate_run_id
-from gc_core.tools import abuild_tools_data
-from gc_core.mcp_session_owner import new_owner_token, use_owner
-from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
+from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
     build_execution_workspace,
 )
-from gc_core.backends.factory import resolve_os_backend
-from gc_core.backends.protocol import FsBackend
-from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
-from gc_core.trace_id import trace_id_from_config, trace_header_name
+from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.tools import abuild_tools_data
+from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.trace_id import trace_header_name, trace_id_from_config
+from gc_core.utils.logging_module import create_run_logger, generate_run_id
+from gc_core.utils.prod_auth import AuthConnector
 
 
 @dataclass

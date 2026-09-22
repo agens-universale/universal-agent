@@ -1,8 +1,6 @@
 """ToolCallRow — один виджет, который мутирует от running к ok/err."""
 import pytest
-
 from gc_tui.palette import TOOL_NAME
-
 
 _TOOL_NAME_HEX = TOOL_NAME[1:].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
 
@@ -10,8 +8,8 @@ _TOOL_NAME_HEX = TOOL_NAME[1:].lower()  # '#XXXXXX' → 'xxxxxx' для substrin
 @pytest.mark.asyncio
 async def test_tool_call_row_initial_state():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -31,8 +29,8 @@ async def test_tool_call_row_initial_state():
 @pytest.mark.asyncio
 async def test_tool_call_row_mutate_to_ok():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -53,8 +51,8 @@ async def test_tool_call_row_mutate_to_ok():
 @pytest.mark.asyncio
 async def test_tool_call_row_mutate_to_error():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -75,9 +73,9 @@ async def test_tool_call_row_mutate_to_error():
 @pytest.mark.asyncio
 async def test_tool_call_row_error_text_is_dim():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.palette import DIM, ERR
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -103,8 +101,8 @@ async def test_tool_call_row_error_text_is_dim():
 async def test_tool_call_row_brackets_in_args_not_interpreted_as_markup():
     """Args containing [brackets] must render literally (Content not str)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -133,8 +131,8 @@ def test_tool_call_row_exposes_call_id():
 @pytest.mark.asyncio
 async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -156,9 +154,9 @@ async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
 async def test_tool_call_row_ok_state_uses_styled_text():
     """OK: prefix содержит зелёный span с глифом ✓; content — dim args."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from rich.text import Text
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from rich.text import Text
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -182,9 +180,9 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
     """Имя тула (без скобок) красится palette.TOOL_NAME — primary-сигнал в строке;
     скобки/args/путь — DIM (один общий тон обвеса)."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
-    from rich.text import Text
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from rich.text import Text
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -211,8 +209,8 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
 @pytest.mark.asyncio
 async def test_tool_call_row_set_result_twice_overwrites():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -236,9 +234,8 @@ async def test_tool_call_row_set_result_twice_overwrites():
 @pytest.mark.asyncio
 async def test_ctrl_click_posts_open_tool_call_detail_request():
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.widgets.tool_call_row import ToolCallRow
-    from gc_tui.messages import OpenToolCallDetailRequest
+    from textual import events
 
     captured: list = []
 
@@ -271,9 +268,9 @@ async def test_focus_does_not_render_event_number_prefix():
     выделению/копированию. Фокус теперь показывается фоном (:focus background).
     Регрессия: на фокусе `[N]` не должен появляться ни до, ни после."""
     pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App, ComposeResult
     from textual.widgets import Static
-    from gc_tui.widgets.tool_call_row import ToolCallRow
 
     class _App(App):
         AUTO_FOCUS = None
@@ -303,8 +300,8 @@ async def test_focus_handler_has_focus_after_super():
     has_focus останется False внутри subclass-handler-а — этот тест упадёт.
     """
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.app import App, ComposeResult
 
     captured = {"has_focus_after_super": None}
 
@@ -327,6 +324,7 @@ async def test_focus_handler_has_focus_after_super():
 
 def test_running_row_shows_elapsed_seconds():
     import time
+
     from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="subagent_planner", args_summary="task=x")
     row._start_monotonic = time.monotonic() - 47.0
@@ -337,6 +335,7 @@ def test_running_row_shows_elapsed_seconds():
 
 def test_running_row_elapsed_same_for_any_tool():
     import time
+
     from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c2", tool_name="read_file", args_summary="path=a")
     row._start_monotonic = time.monotonic() - 3.0
@@ -345,6 +344,7 @@ def test_running_row_elapsed_same_for_any_tool():
 
 def test_running_row_elapsed_minutes_format():
     import time
+
     from gc_tui.widgets.tool_call_row import ToolCallRow
     row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
     row._start_monotonic = time.monotonic() - 125  # 2м 5с
@@ -468,9 +468,10 @@ def test_refresh_running_elapsed_noop_after_completion():
 async def test_poll_active_ticks_running_rows():
     pytest.importorskip("textual")
     import time
-    from textual.containers import VerticalScroll
+
     from gc_tui.app import TuiApp
     from gc_tui.widgets.tool_call_row import ToolCallRow
+    from textual.containers import VerticalScroll
     class _LiveRunner:  # без живого run инвариант поллинга финализирует строку
         def is_running(self) -> bool:
             return True

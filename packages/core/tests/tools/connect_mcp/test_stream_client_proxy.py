@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from gc_core.tools.connect_mcp.stream_client import _is_loopback_url, _make_stream_http_client, _trust_env_for_url
 
 

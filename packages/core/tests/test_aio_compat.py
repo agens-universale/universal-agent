@@ -7,7 +7,6 @@ import asyncio
 import threading
 
 import pytest
-
 from gc_core.utils.aio_compat import run_coro_blocking
 
 

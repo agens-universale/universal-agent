@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-
 from gc_tui.services import terminal_caps
 from gc_tui.services.terminal_caps import supports_font_fallback
 from gc_tui.widgets.block_panel import COPY_GLYPH_RICH, COPY_GLYPH_SAFE, copy_glyph
@@ -82,9 +81,8 @@ def test_both_glyphs_are_single_column():
 @pytest.mark.asyncio
 async def test_button_shows_glyph_for_current_terminal(tui_app_factory):
     """Виджет берёт глиф через copy_glyph(), а не фиксированную константу."""
-    from textual.widgets import Static
-
     from gc_tui.widgets.block_panel import BlockPanel
+    from textual.widgets import Static
 
     app = tui_app_factory(BlockPanel.for_code("x = 1", "python", event_no=1))
     async with app.run_test(size=(60, 12)):

@@ -18,7 +18,6 @@ def test_skill_has_source_field():
 from pathlib import Path
 
 import pytest
-
 from gc_core.tools.skills.registry import SkillsRegistry
 
 

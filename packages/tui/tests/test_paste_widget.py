@@ -107,8 +107,8 @@ async def test_bracketed_paste_collapses_without_raw_duplicate():
     сворачивается в плашку и НЕ дублируется сырым текстом. Регресс: _on_paste без
     prevent_default → базовый TextArea._on_paste тоже вставлял event.text."""
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
+    from textual import events
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp.post_message(events.Paste(BIG5))
@@ -122,8 +122,8 @@ async def test_bracketed_paste_collapses_without_raw_duplicate():
 async def test_bracketed_paste_small_inserted_once():
     """Маленькая bracketed-вставка попадает в буфер РОВНО один раз (не дублируется)."""
     pytest.importorskip("textual")
-    from textual import events
     from gc_tui.app import TuiApp
+    from textual import events
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
         inp.post_message(events.Paste("short"))
@@ -202,9 +202,9 @@ async def test_ctrl_v_pastes_when_focus_on_trace(tmp_path, monkeypatch):
     """Кликнули трейс во время run → фокус не в инпуте; Ctrl+V всё равно вставляет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.services import os_ops as os_ops
     from gc_tui.widgets.command_input import CommandTextArea
     from gc_tui.widgets.trace_row import TraceRow
-    from gc_tui.services import os_ops as os_ops
 
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из трейса")
 

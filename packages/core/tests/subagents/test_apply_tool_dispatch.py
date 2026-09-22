@@ -5,9 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from gc_core.states import State, SharedStateData
-from gc_core.tools import aapply_tool, WrongFunctionArgumentsException
+from gc_core.states import SharedStateData, State
+from gc_core.tools import WrongFunctionArgumentsException, aapply_tool
 
 
 def _make_state():

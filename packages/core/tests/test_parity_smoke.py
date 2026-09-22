@@ -12,16 +12,14 @@
   доказательство эквивалентности, которое план объявлял целью Задачи 1.
 
 """
-import asyncio
 
-from gc_core.agent_executor import AgentExecutor
 import pytest
-
+from gc_core.agent_executor import AgentExecutor
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
-    judge_accept,
     install,
+    judge_accept,
     parity_config,
     run_thread_dump,
 )

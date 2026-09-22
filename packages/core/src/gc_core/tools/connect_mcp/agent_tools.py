@@ -10,7 +10,7 @@ from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.schema_optional import apply_openai_strict_object
-from gc_core.trace_id import trace_id_from_config, trace_header_name
+from gc_core.trace_id import trace_header_name, trace_id_from_config
 
 logger = logging.getLogger(__name__)
 

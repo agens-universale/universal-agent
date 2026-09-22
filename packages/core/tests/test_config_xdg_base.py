@@ -1,10 +1,8 @@
 """GC_CONFIG_DIR/config.yml as a base tier between --config and the package default."""
 
 import os
-from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 
@@ -166,4 +164,4 @@ def test_relative_paths_resolve_from_xdg_dir(
     )
     cfg = load_config()
     # config_dir == winning base dir (the xdg dir), like --config semantics.
-    assert cfg["agent_md_path"] == str((env_with_config_dir / "foo.md"))
+    assert cfg["agent_md_path"] == str(env_with_config_dir / "foo.md")

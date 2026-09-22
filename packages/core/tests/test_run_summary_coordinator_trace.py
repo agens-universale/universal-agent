@@ -7,10 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from gc_core import run_summary_coordinator as rsc
-from gc_core.summarize import summary_logging as summary_logging
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_core.summarize import summary_logging as summary_logging
 from gc_testkit import run_coro
 
 

@@ -4,9 +4,9 @@ import pytest
 @pytest.mark.asyncio
 async def test_help_header_and_hotkeys():
     pytest.importorskip("textual")
+    from gc_tui.screens.help import HelpScreen
     from textual.app import App
     from textual.widgets import Static
-    from gc_tui.screens.help import HelpScreen
 
     class _A(App):
         def on_mount(self):
@@ -91,8 +91,8 @@ async def test_help_header_and_hotkeys():
 async def test_help_rows_zebra_striping():
     """Строки help чередуют фон: нечётные — с классом help-row-alt, чётные — без."""
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.help import HelpScreen
+    from textual.app import App
     from textual.containers import Horizontal
 
     class _A(App):
@@ -111,9 +111,9 @@ async def test_help_rows_zebra_striping():
 async def test_help_trace_not_focusable():
     """Список help не фокусируется → нет зелёной focus-рамки (#trace:focus outline)."""
     pytest.importorskip("textual")
+    from gc_tui.screens.help import HelpScreen
     from textual.app import App
     from textual.containers import VerticalScroll
-    from gc_tui.screens.help import HelpScreen
 
     class _A(App):
         def on_mount(self):
@@ -129,10 +129,10 @@ async def test_help_trace_not_focusable():
 async def test_help_columns_cmd_then_desc():
     """В строке слева команда/клавиша, сразу справа пояснение (не через весь экран)."""
     pytest.importorskip("textual")
+    from gc_tui.screens.help import HelpScreen
     from textual.app import App
     from textual.containers import Horizontal
     from textual.widgets import Static
-    from gc_tui.screens.help import HelpScreen
 
     class _A(App):
         def on_mount(self):

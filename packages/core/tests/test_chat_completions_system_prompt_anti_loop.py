@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+
 from gc_testkit.paths import ASSETS
 
 ORCHESTRATOR_PROMPT_PATH = ASSETS / "prompts" / "chat_completions_system_prompt.md"

@@ -15,7 +15,6 @@ import pytest
 import yaml
 from gc_testkit.paths import ASSETS
 
-
 PACK_DIR = ASSETS / "skills" / "supercoder"
 
 EXPECTED_SKILL_IDS = {

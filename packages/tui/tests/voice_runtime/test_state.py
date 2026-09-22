@@ -1,10 +1,15 @@
 """VoiceState: json round-trip, дефолт None, устойчивость к битому файлу."""
-import json
 
 from gc_tui.voice_runtime import paths as vpaths
 from gc_tui.voice_runtime.state import (
-    DEFAULT_MODEL, DEFAULT_PORT, SPEACHES_PIN, VoiceState,
-    clear_state, current_model_short, load_state, save_state,
+    DEFAULT_MODEL,
+    DEFAULT_PORT,
+    SPEACHES_PIN,
+    VoiceState,
+    clear_state,
+    current_model_short,
+    load_state,
+    save_state,
 )
 
 

@@ -78,9 +78,9 @@ async def _mouse_click(pilot, row, *, ctrl: bool = False) -> None:
 async def test_confirm_banner_y_answers_allow_remember(tmp_path):
     """«y» при активном баннере: submit_confirm_reply("allow_remember"), баннер снят."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner()
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -521,9 +521,9 @@ async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(tmp_pat
     """/init-стиль: _confirm_active=True, runner.is_running()==False.
     Ctrl+C → cancel_confirm вызван, баннер снят, run НЕ остановлен (не было живого)."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner(running=False)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -557,9 +557,9 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(tmp_path):
     """live-agent: _confirm_active=True, runner.is_running()==True.
     Ctrl+C → cancel_confirm вызван, баннер снят, раннер остановлен."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner(running=True)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
@@ -592,9 +592,9 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(tmp_path):
 async def test_reset_render_state_clears_confirm_banner(tmp_path):
     """Backstop: _reset_render_state при _confirm_active=True → баннер снят, cancel вызван."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner(running=False)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",

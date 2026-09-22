@@ -5,7 +5,7 @@ import os
 import shlex
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable, Iterable, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Optional, Sequence
 
 from gc_core.backends.capture import CapturedStream, captured_stream_from_text
 from gc_core.backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries

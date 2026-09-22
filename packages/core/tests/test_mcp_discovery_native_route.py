@@ -18,8 +18,6 @@
 import asyncio
 import threading
 
-import pytest
-
 from gc_core.tools.connect_mcp import registry as reg
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
 from gc_core.tools.connect_mcp.execute_on import (

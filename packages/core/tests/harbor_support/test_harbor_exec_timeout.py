@@ -8,10 +8,9 @@ import json
 import threading
 
 import pytest
-
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.harbor import HarborBackend
 from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_testkit.harbor_fakes import bind_os_backend
 
 
 class RaisingEnv:
@@ -101,7 +100,7 @@ async def test_harbor_backend_timeout_from_runtime_error(loop_in_thread):
 
 async def test_harbor_backend_timeout_from_asyncio_timeout_error(loop_in_thread):
     """Bare TimeoutError / asyncio.TimeoutError also maps to timed_out=True."""
-    result = await _backend(asyncio.TimeoutError(), loop_in_thread).aexec("true", timeout=300)
+    result = await _backend(TimeoutError(), loop_in_thread).aexec("true", timeout=300)
 
     assert result.timed_out is True
     assert result.return_code is None

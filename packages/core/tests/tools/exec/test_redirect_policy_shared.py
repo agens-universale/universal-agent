@@ -15,8 +15,6 @@
 import json
 
 import httpx
-import pytest
-
 from gc_core.tools.exec.download_file import DownloadFile
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
@@ -51,7 +49,7 @@ def _redirecting(monkeypatch, module, visited: list):
             return httpx.Response(200, content=b"SECRET")
         return httpx.Response(302, headers={"Location": FORBIDDEN})
 
-    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+    factory = lambda **kw: httpx.AsyncClient(
         transport=httpx.MockTransport(_dispatch)
     )
     monkeypatch.setattr(async_http, "get_async_client", factory)
@@ -123,8 +121,7 @@ def test_all_three_share_one_redirect_loop():
     """Копий правила быть не должно: две расходятся молча, третья дырявая."""
     import inspect
 
-    from gc_core.tools.exec import download_file, fetch_url, simple_fetch_url
-    from gc_core.tools.exec import redirect_policy
+    from gc_core.tools.exec import download_file, fetch_url, redirect_policy, simple_fetch_url
 
     for module in (fetch_url, simple_fetch_url, download_file):
         src = inspect.getsource(module)
@@ -179,7 +176,7 @@ def _looping(monkeypatch, module, hops: int):
             302, headers={"Location": f"https://example.com/hop{seen['n']}"}
         )
 
-    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+    factory = lambda **kw: httpx.AsyncClient(
         transport=httpx.MockTransport(_dispatch)
     )
     monkeypatch.setattr(async_http, "get_async_client", factory)

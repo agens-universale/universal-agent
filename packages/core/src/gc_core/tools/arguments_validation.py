@@ -6,7 +6,11 @@ from typing import Any, Dict, Type
 from jsonschema import Draft7Validator
 
 from gc_core.tools.connect_mcp.validation import _validate_tool_arguments
-from gc_core.tools.schema_optional import normalize_optional_empty_as_omit, parameters_schema_for_local_validation, resolve_optional_property_keys
+from gc_core.tools.schema_optional import (
+    normalize_optional_empty_as_omit,
+    parameters_schema_for_local_validation,
+    resolve_optional_property_keys,
+)
 
 
 def resolve_tool_arguments_feedback_hint(
@@ -28,7 +32,7 @@ def resolve_tool_arguments_feedback_hint(
             parsed_args=parsed_args,
             _message=message,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     if hint is None:
         return None
@@ -229,7 +233,7 @@ def _decode_double_encoded(value: str, subschema: Dict[str, Any]) -> Any:
         return None  # строка валидна как есть — не трогаем
     try:
         decoded = json.loads(value)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     if not isinstance(decoded, (dict, list)):
         return None
@@ -395,7 +399,7 @@ def _parse_arguments_object(arguments: Any, reject, *, allow_empty: bool) -> Any
         reject(message="аргументы инструмента пустые, ожидается валидный JSON-объект")
     try:
         return json.loads(arg_str)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         reject(message=f"некорректный JSON: {e}")
 
 
@@ -415,7 +419,7 @@ def _recover_arguments(tool_name: str, parsed_args: Dict[str, Any], params_schem
         candidate = coerced
         try:
             _validate_tool_arguments(tool_name, validation_schema, candidate)
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         return candidate
     return None
@@ -464,7 +468,7 @@ def parse_and_validate_tool_arguments(
     validation_schema = parameters_schema_for_local_validation(params_schema)
     try:
         _validate_tool_arguments(tool_name, validation_schema, parsed_args)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         recovered_args = _recover_arguments(tool_name, parsed_args, params_schema, validation_schema)
         if recovered_args is not None:
             parsed_args = recovered_args

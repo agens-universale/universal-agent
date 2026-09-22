@@ -11,9 +11,7 @@
 и обязательно дёргают ``tool_fabric`` — то есть делают то же, что диспетчер
 в ``tools/__init__.py`` делает на каждый вызов.
 """
-import pytest
-
-from gc_core.tools.connect_mcp import agent_tools, api
+from gc_core.tools.connect_mcp import agent_tools
 from gc_core.tools.connect_mcp.agent_tools import (
     MCPToolWrapper,
     aget_mcp_tools_data_for_config,

@@ -55,7 +55,7 @@ def pollable_stdin_fd() -> int | None:
         return None
     try:
         fd = sys.stdin.fileno()
-    except Exception:  # noqa: BLE001 — подменённый stdin без fileno
+    except Exception:
         return None
     return fd if isinstance(fd, int) and fd >= 0 else None
 

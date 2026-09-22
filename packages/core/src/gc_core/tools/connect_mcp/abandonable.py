@@ -23,9 +23,9 @@ import asyncio
 import contextvars
 import logging
 import threading
+from typing import Any, Callable
 
 from gc_core.mcp_session_owner import copy_context_for_thread
-from typing import Any, Callable
 
 #: Одновременных блокирующих дискавери. Больше смысла нет: они ждут сеть, а не
 #: считают. До переезда границы не было вовсе — поток на каждый сервер.
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 #: Как потоку спросить, не бросили ли вызов, ради которого он работает. Вне
 #: `run_abandonable_in` — «нет».
-_ABANDONED: "contextvars.ContextVar[Callable[[], bool]]" = contextvars.ContextVar(
+_ABANDONED: contextvars.ContextVar[Callable[[], bool]] = contextvars.ContextVar(
     "gc_call_abandoned", default=lambda: False
 )
 
@@ -56,7 +56,7 @@ def current_call_abandoned() -> bool:
 
 
 async def run_abandonable_in(
-    slots: "threading.BoundedSemaphore",
+    slots: threading.BoundedSemaphore,
     fn: Callable[..., Any],
     /,
     *args: Any,
@@ -118,7 +118,7 @@ async def run_abandonable_in(
         if _on_abandoned is not None and _abandoned():
             try:
                 _on_abandoned()
-            except BaseException:  # noqa: BLE001 — уборку не роняем
+            except BaseException:
                 logger.debug("abandoned cleanup failed", exc_info=True)
 
     def _target() -> None:
@@ -134,7 +134,7 @@ async def run_abandonable_in(
                 return
             try:
                 result = ctx_snapshot.run(_marked)
-            except BaseException as exc:  # noqa: BLE001 — переносим как есть
+            except BaseException as exc:
                 _deliver(future.set_exception, exc)
             else:
                 _deliver(future.set_result, result)

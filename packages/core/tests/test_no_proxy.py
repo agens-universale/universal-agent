@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.utils.no_proxy import should_bypass_proxies
 
 #: Пары «URL × список NO_PROXY», покрывающие все ветки матчинга.

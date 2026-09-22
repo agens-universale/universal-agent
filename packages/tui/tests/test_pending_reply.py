@@ -236,7 +236,6 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 async def test_error_shown_resets_between_runs(tmp_path):
     """Две ошибки подряд → две error-line в trace (флаг сбрасывается)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
 
     call = {"n": 0}

@@ -1,13 +1,20 @@
 import types
 
-from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
-from gc_core.message_format.dialog_history import build_history_text, group_into_turns, message_text_limited, split_turns_into_char_batches, trim_history_to_max_dialogue_chars, trim_original_user_messages_to_max_chars
-from gc_core.summarize.compaction import apply_summary_state_patch
-from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
-from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
+from gc_core.message_format.dialog_history import (
+    build_history_text,
+    group_into_turns,
+    message_text_limited,
+    split_turns_into_char_batches,
+    trim_history_to_max_dialogue_chars,
+    trim_original_user_messages_to_max_chars,
+)
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
-from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_core.summarize.compaction import apply_summary_state_patch
+from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
+from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
 
 
 def _patch_chat_completion(monkeypatch, fake):

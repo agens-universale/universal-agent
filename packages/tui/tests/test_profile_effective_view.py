@@ -15,17 +15,15 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static
-
-from gc_core.config_modules.model_registry import LEVELS
 from form_harness import _rgb, _row_style_set, _value_color
+from gc_core.config_modules.model_registry import LEVELS
 from gc_testkit.tui_support import wait_until
-from test_profile_editor import _fill_entry
-from test_profiles_crud import (_flash, _notice, _profiles_screen,
-                                          _put_cursor, _write)
 from gc_tui.editors import models_section as m
 from gc_tui.editors.models_section import value_style
 from gc_tui.palette import DEEP_DIM, DIM, INK
+from test_profile_editor import _fill_entry
+from test_profiles_crud import _flash, _notice, _profiles_screen, _put_cursor, _write
+from textual.widgets import Static
 
 _BASE_URL = "http://base-host/v1/chat/completions"
 _MERGED_URL = "http://merged-host/v1/chat/completions"
@@ -160,8 +158,8 @@ async def _profile_view(tmp_path, monkeypatch, *, profile: str | None = None,
     `exist_ok` — страж §11 открывает ДВЕ конфигурации подряд в одном tmp_path:
     их пара и есть его предмет, и разводить их по тестам значило бы разорвать
     сравнение."""
-    from gc_tui import app as app_mod
     from gc_core.config_modules.profiles import PROFILE_SKELETON
+    from gc_tui import app as app_mod
     project = tmp_path / "project"
     project.mkdir(exist_ok=True)
     monkeypatch.chdir(project)
@@ -548,8 +546,9 @@ async def test_creating_an_entry_named_like_a_base_one_is_refused(
     две строки под одним алиасом читались бы как одна.
 
     Обещать переопределение отказ не смеет — такой двери больше нет."""
-    from textual.widgets import Input, Static as _Static
     from gc_tui.editors.model_entry_form import ModelEntryForm
+    from textual.widgets import Input
+    from textual.widgets import Static as _Static
     async with _profile_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         before = _profile_path(tmp_path).read_bytes()
         await pilot.press("n")
@@ -974,7 +973,6 @@ def test_the_writer_leaves_exactly_the_empty_anchor_the_showcase_must_ignore():
     """Связь стража с реальностью: `slots: {}` — не выдуманная форма файла, а
     ровно то, что остаётся после снятия последнего ключа секции."""
     import yaml
-
     from gc_core import onboarding_config_writer as ocw
     text = ocw.remove_mapping_entry('slots:\n  light: "flash"\n', "slots", "light")
     assert yaml.safe_load(text) == {"slots": {}}
@@ -1070,8 +1068,8 @@ async def test_v_typed_into_a_form_field_stays_in_the_field(tmp_path, monkeypatc
     форма — не список), а `not isinstance(focused, Input)` рядом с ним защитный
     (финальное ревью: мутация его снятия не краснит ни одного стража). Страж
     останется честным, если гейты поменяются местами."""
-    from textual.widgets import Input
     from gc_tui.editors.model_entry_form import ModelEntryForm
+    from textual.widgets import Input
     async with _profile_view(tmp_path, monkeypatch) as (pilot, scr, _ed):
         await pilot.press("n")
         await pilot.pause()
@@ -1509,8 +1507,8 @@ async def _write_literal_token_entry(pilot, scr):
     """Запись с собственной парой и ЛИТЕРАЛЬНЫМ токеном — путём человека (n → поля
     → Enter). Пара целиком: половину без адреса отвергло бы правило §2, и до
     предмета стража дело бы не дошло."""
-    from textual.widgets import Input
     from gc_tui.editors.model_entry_form import ModelEntryForm
+    from textual.widgets import Input
     await pilot.press("n")
     await pilot.pause()
     form = scr.query(ModelEntryForm).last()

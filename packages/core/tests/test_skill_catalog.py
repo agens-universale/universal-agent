@@ -1,11 +1,11 @@
-from gc_core.tools.skills.skill_arg_resolver import resolve_skill_arg, Resolved
+from gc_core.tools.skills.skill_arg_resolver import Resolved, resolve_skill_arg
 
 
 async def test_skill_catalog_shape_on_real_pack():
     # Import inside the test: test_skill_creator.py pops and reloads tools.*
     # modules; a module-level SkillCatalog would be a stale class object.
-    from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
     from gc_core.tools.skills.registry import SkillsRegistry
+    from gc_core.tools.skills.skill_arg_resolver import SkillCatalog
 
     cat = await SkillsRegistry().skill_catalog()
     assert isinstance(cat, SkillCatalog)

@@ -1,6 +1,7 @@
 import hashlib
 from uuid import uuid4
 
+
 def generate_msg_id_sha256(prefix):
     guid = str(uuid4())
     hash_obj = hashlib.sha256(guid.encode('utf-8'))

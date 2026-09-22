@@ -6,19 +6,19 @@ model_picker, mcp_runtime.cli. Логика сбора — как в плоск�
 меняется только презентация."""
 from __future__ import annotations
 
+from gc_core import onboarding
+from gc_core import onboarding_fields as _of
+from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
-from rich.text import Text
 
-from gc_core import onboarding
-from gc_core import onboarding_fields as _of
 from gc_tui import branding
-from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 from gc_tui.form_frame import cap_frame_height, reveal
+from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 
 # Именованные шаги мастера. Состав статичен, но шаг адресуется ИМЕНЕМ, а не
 # номером: числовые сравнения врали бы при любой правке состава.
@@ -171,6 +171,7 @@ class OnboardingScreen(Screen):
         self._review_all = review_all
         self._on_commit = on_commit
         from gc_core.model_picker import fetch_models
+
         from gc_tui.services.model_list_cache import make_cached_fetch
         self._fetch = make_cached_fetch(fetch or fetch_models)
         if mcp is None:
@@ -538,8 +539,9 @@ class OnboardingScreen(Screen):
         body = self.query_one("#onb-frame", Vertical)
         step = self._step_id()
         if step == STEP_CONNECTION:
-            from gc_tui.editors.connection import ConnectionEditor
             from gc_core.config_modules.endpoint_presets import endpoint_presets_from_config
+
+            from gc_tui.editors.connection import ConnectionEditor
             # Поля показывают СЫРОЕ значение файла, не self._config (он уже резолвнут
             # ${ENV:...}/${FILE:...}) — см. _raw_conn.
             raw = self._raw_conn()
@@ -1138,9 +1140,10 @@ class OnboardingScreen(Screen):
         заодно и подтверждение, что связка рабочая. `url_presets` — тот же список
         пресетов СТТ-адресов (спека 2026-08-05 §3), что у /settings: поле «URL»
         получает свой раскрывающийся список ровно тем же путём, что «Модель»."""
-        from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
-        from gc_core.onboarding import display_secret
         from gc_core.config_modules.voice_endpoint_presets import voice_endpoint_presets_from_config
+        from gc_core.onboarding import display_secret
+
+        from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
         # Сохранённый токен не подставляем (секрет), но и молчать нельзя — маска в
         # placeholder, пустое поле значит «оставить сохранённый» (канон /settings).
         raw_token = self._voice_raw_cloud().get("token")
@@ -1525,6 +1528,7 @@ class OnboardingScreen(Screen):
 
         def _work() -> None:
             from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+
             from gc_tui.services.settings_probe import ProbeResult
             probe_url = resolve_env_placeholders(url)
             probe_auth = resolve_env_placeholders(auth) if auth else auth

@@ -4,12 +4,12 @@ import logging
 import os
 from typing import Any, List
 
-from gc_core.intent_scope.agent_logging import log_intent_scope_summary_done, log_intent_scope_summary_start
+from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.intent_scope import IntentScopeConfig
 from gc_core.intent_log.serialize import deserialize_list, records_to_jsonl_lines
+from gc_core.intent_scope.agent_logging import log_intent_scope_summary_done, log_intent_scope_summary_start
 from gc_core.message_format.dialog_history import truncate_text
 from gc_core.summarize.llm import arequest_summary_text
-from gc_core.bundled_assets import bundled_root
 from gc_core.utils.user_text import read_user_text
 
 _logger = logging.getLogger(__name__)

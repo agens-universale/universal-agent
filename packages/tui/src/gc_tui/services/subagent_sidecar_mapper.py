@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 from gc_core.tools.subagents.progress import brief_args_summary, parse_tool_result_status
+
 from gc_tui.models import TraceEvent
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
