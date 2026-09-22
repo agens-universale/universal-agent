@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -99,6 +100,8 @@ from gc_tui.services.session_title import (
 )
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.voice_pill import render_pill
+
+_log = logging.getLogger(__name__)
 
 
 def resolve_terminal_outcome(*, runner_error, stop_requested, terminal_outcome):
@@ -325,6 +328,16 @@ class TraceScreen(Screen):
         self._skill_picker = None  # type: Optional["SkillPicker"]
         self._arg_picker = None  # type: Optional["ArgPicker"]
         self._file_picker = None  # FilePicker | None
+        # Сеанс файлового пикера: индекс путей собирается один раз; достроенный
+        # сбрасывается при закрытии пикера, ещё строящийся переживает закрытие и
+        # подхватывается следующим сеансом (см. _close_file_picker). _file_query —
+        # последний запрошенный query (None = пикер не нужен). Опоздавший результат
+        # фонового поиска отбрасывается по паре «тот же объект индекса + тот же
+        # query»: сам по себе объект индекса сеансы НЕ различает.
+        self._path_index = None          # file_index.PathIndex | None
+        self._file_query: Optional[str] = None
+        self._file_shown_query: Optional[str] = None   # для какого query показан список
+        self._file_search_worker = None  # textual.worker.Worker | None
         self._skills_cache: Optional[list[dict]] = None
         # После Tab-completion в skill picker гасим один Changed-цикл, чтобы
         # on_text_area_changed не переоткрыл только что закрытый picker.
@@ -3711,6 +3724,16 @@ class TraceScreen(Screen):
                 event.stop()
                 event.prevent_default()
                 return
+
+            # Поиск файлов в полёте, пикер ещё не показан: Esc отменяет сеанс — иначе
+            # результат открыл бы пикер уже после «отмены». Стоит до очистки текста:
+            # отмена поиска локальнее, чем «стереть набранное».
+            if self._file_query is not None and self._file_shown_query != self._file_query:
+                self._close_file_picker()
+                event.stop()
+                event.prevent_default()
+                return
+
             # 2-й Esc в окне 2s — выполнить отложенный action.
             if self._esc_confirm_kind is not None:
                 kind = self._esc_confirm_kind
@@ -3931,8 +3954,7 @@ class TraceScreen(Screen):
                 self._close_skill_picker()
             if self._arg_picker is not None:
                 self._close_arg_picker()
-            if self._file_picker is not None:
-                self._close_file_picker()
+            self._close_file_picker()
             if self._palette is None:
                 self._open_palette(prefix=val[1:])
             else:
@@ -3947,8 +3969,7 @@ class TraceScreen(Screen):
                 self._close_skill_picker()
             if self._arg_picker is not None:
                 self._close_arg_picker()
-            if self._file_picker is not None:
-                self._close_file_picker()
+            self._close_file_picker()
             if self._palette is None:
                 self._open_palette(prefix="")
             else:
@@ -3960,6 +3981,7 @@ class TraceScreen(Screen):
             first, _, rest = val.partition(" ")
             cmd = first[1:]
             if cmd == "skill":
+                self._close_file_picker()   # ушли из файлового ввода: поиск в полёте больше не нужен
                 # /skill <валидный_id> <текст> → скилл зафиксирован, дальше промпт:
                 # закрываем picker (его фильтр по 'id текст' бессмыслен).
                 if self._skills_cache is None:
@@ -3987,6 +4009,7 @@ class TraceScreen(Screen):
             cmd_obj = self._registry.lookup(cmd)
             if cmd_obj is not None and (cmd_obj.arg_options
                                         or cmd_obj.arg_options_provider is not None):
+                self._close_file_picker()   # ушли из файлового ввода: поиск в полёте больше не нужен
                 if self._suppress_picker_reopen:
                     self._suppress_picker_reopen = False
                     return
@@ -4042,8 +4065,7 @@ class TraceScreen(Screen):
             _, query = seg
             self._show_file_picker(query=query)
             return
-        if self._file_picker is not None:
-            self._close_file_picker()
+        self._close_file_picker()
 
         # Иначе: все закрыты.
         if self._palette is not None:
@@ -4054,6 +4076,8 @@ class TraceScreen(Screen):
             self._close_arg_picker()
 
     _MIN_TRACE_WITH_OVERLAY = 3   # минимум строк трейса видно при открытом оверлее
+    _FILE_SEARCH_NOTICE_DELAY = 0.3   # сек: после них пикер показывает «ищу по проекту…»
+    _FILE_LISTING_LIMIT = 100   # строк в листинге папки; остальное — «допишите часть имени»
 
     def _open_overlay_widget(self):
         """Открытый input-оверлей (палитра/skill/arg/file-picker) или None."""
@@ -4135,35 +4159,122 @@ class TraceScreen(Screen):
         """Корень обзора @-аттача = текущий cwd проекта (корень FS-тулов агента)."""
         return self._current_cwd()
 
-    def _file_picker_entries(self, query: str) -> list:
-        """Entries для file-picker: query с хвостовым '/' — листинг каталога,
-        иначе fuzzy-поиск по корню проекта."""
-        from gc_tui.services.file_index import fuzzy_search, list_dir
-        root = self._project_root()
-        return (list_dir(root, query[:-1]) if query.endswith("/")
-                else fuzzy_search(root, query))
-
     def _show_file_picker(self, *, query: str) -> None:
-        """Открыть/обновить файловый пикер; совпадений нет → скрыть.
+        """Открыть/обновить файловый пикер по query.
+
+        Листинг одной папки (пустой query, хвостовой '/') — дешёвое чтение диска,
+        показываем сразу. Поиск по проекту — только в фоновом потоке: сборка
+        индекса на большом проекте занимает секунды, в UI-потоке это фриз всего
+        приложения (и Ctrl-C в том числе). Результат применяет
+        _on_file_search_done, если ввод за это время не ушёл дальше."""
+        from gc_tui.services.file_index import PathIndex, list_dir, names_existing_dir
+        root = self._project_root()
+        if (self._file_query is None and self._path_index is not None
+                and self._path_index.built):
+            # Новый сеанс: индекс прошлого сеанса достроился уже после его закрытия.
+            self._path_index = None
+        self._file_query = query
+        if not query or query.endswith("/"):
+            entries = list_dir(root, query[:-1])
+            self._apply_file_entries(entries[:self._FILE_LISTING_LIMIT], truncated=False,
+                                      total=len(entries))
+            return
+        index = self._path_index
+        if index is None or index.root != root:
+            index = self._path_index = PathIndex(root)
+
+        def _work() -> None:
+            entries: Optional[list] = None
+            try:
+                index.build()
+                # Пока ждали сборку, ввод мог уйти дальше: фильтровать устаревший
+                # запрос незачем — иначе после сборки каждый накопившийся поиск
+                # гонял бы полный фильтр, а Enter всё это время ждал бы. Чтение двух
+                # полей экрана из потока безопасно. Лишний фильтр безвреден: его
+                # результат отбросит обработчик. Пропуск безвреден ТОЛЬКО потому,
+                # что каждый _show_file_picker с поисковым запросом запускает свой
+                # поток: у последнего ввода всегда есть поток, который посчитает.
+                # Не запускать поток «если запрос не изменился» нельзя — Enter
+                # остался бы ждать результата, которого никто не принесёт.
+                if index is self._path_index and query == self._file_query:
+                    entries = index.search(query)
+            except Exception:
+                # Наружу нельзя: run_worker(exit_on_error=True) уронил бы весь TUI.
+                _log.warning("file search failed: root=%s query=%r", index.root, query,
+                             exc_info=True)
+                entries = []
+            # Подсказка «поиск неполный» не нужна, если запрос называет существующую
+            # папку: человек уже уточнил путь, а её прямых детей search дочитывает с
+            # диска целиком (совпадения по подстроке в других папках при этом могли
+            # в обрезанный индекс не попасть — осознанно: вечная подсказка на огромном
+            # проекте хуже). Проверка диска — здесь, в фоновом потоке, не в UI.
+            self.app.call_from_thread(
+                self._on_file_search_done, index, query, entries,
+                index.truncated and not names_existing_dir(index.root, query))
+
+        self._file_search_worker = self.run_worker(_work, thread=True, name="file-search")
+        self.set_timer(self._FILE_SEARCH_NOTICE_DELAY,
+                       lambda: self._show_file_search_pending(index, query))
+
+    def _on_file_search_done(self, index, query: str, entries: Optional[list], truncated: bool) -> None:
+        if entries is None or index is not self._path_index or query != self._file_query:
+            return  # не считали (устарел ещё в потоке) / сеанс сменился / ввод ушёл дальше
+        self._apply_file_entries(entries, truncated=truncated)
+
+    def _show_file_search_pending(self, index, query: str) -> None:
+        """Поиск идёт дольше порога — показать «ищу по проекту…» вместо списка.
+        Без этого долгая первая сборка индекса выглядит как «ничего не сработало»."""
+        if index is not self._path_index or query != self._file_query:
+            return  # сеанс закончился или ввод ушёл дальше
+        if self._file_shown_query == query:
+            return  # результат уже на экране
+        self._apply_file_entries([], truncated=False, searching=True)
+
+    def _apply_file_entries(self, entries: list, *, truncated: bool, searching: bool = False,
+                            total: Optional[int] = None) -> None:
+        """Совпадений нет → скрыть.
 
         Пустой ящик «(нет совпадений)» не показываем: выбрать из него нечего,
         а информация «не нашлось» видна по отсутствию списка. Пикер сам
-        возвращается, как только fuzzy снова что-то находит (состояния
-        пересчитываются на каждый Changed)."""
-        entries = self._file_picker_entries(query)
-        if not entries:
+        возвращается, как только поиск снова что-то находит (состояния
+        пересчитываются на каждый Changed). Индекс при этом НЕ сбрасываем —
+        сеанс пикера продолжается, опечатка не должна стоить пересборки.
+
+        Исключение — обрезанный индекс (truncated): пустой ящик с подсказкой
+        показываем. Файла может не быть в индексе, и молчащий пикер читался бы
+        как «такого файла нет».
+
+        Режим searching (долгий фоновый поиск ещё не вернулся): показываем
+        строку «ищу по проекту…» вместо прежнего списка. Это не список для
+        текущего запроса — _file_shown_query НЕ обновляем, иначе Tab/Enter
+        достроили бы путь по строке-заглушке (_complete_file_picker сверяет
+        _file_shown_query с _file_query)."""
+        if not searching:
+            # На обоих путях вызова _file_query уже равен применяемому запросу.
+            self._file_shown_query = self._file_query
+        if not entries and not truncated and not searching:
             if self._file_picker is not None:
-                self._close_file_picker()
+                self._file_picker.remove()
+                self._file_picker = None
             return
         if self._file_picker is None:
             from gc_tui.widgets.file_picker import FilePicker
-            picker = FilePicker(entries)
+            picker = FilePicker(entries, truncated=truncated, searching=searching, total=total)
             self._file_picker = picker
             self._mount_input_overlay(picker)
         else:
-            self._file_picker.set_entries(entries)
+            self._file_picker.set_entries(entries, truncated=truncated, searching=searching,
+                                           total=total)
 
     def _close_file_picker(self) -> None:
+        # Конец сеанса: результат поиска в полёте устарел.
+        self._file_query = None
+        self._file_shown_query = None
+        # Достроенный индекс сбрасываем: следующий «@» соберёт заново (появятся
+        # файлы, созданные агентом). Ещё строящийся оставляем — свежее некуда, а
+        # сброс запустил бы вторую сборку параллельно первой (её не остановить).
+        if self._path_index is not None and self._path_index.built:
+            self._path_index = None
         if self._file_picker is None:
             return
         self._file_picker.remove()
@@ -4177,6 +4288,10 @@ class TraceScreen(Screen):
         @-сегмент под курсором (→ '@path'). Папка → drill-in (пикер
         остаётся); файл → путь (+' ' у @-ветки) и закрыть."""
         if self._file_picker is None:
+            return
+        if self._file_shown_query != self._file_query:
+            # Поиск по новому вводу ещё в полёте, на экране список для ПРЕЖНЕГО
+            # запроса: достройка по нему подменила бы набранное чужим путём.
             return
         entry = self._file_picker.selected_entry()
         if entry is None:
@@ -4250,6 +4365,15 @@ class TraceScreen(Screen):
             elif text.startswith("/"):
                 # Пустой результат фильтра — выполнить ввод как обычную команду.
                 await self._handle_command(text[1:])
+            return
+
+        # Поиск файлов в полёте: Enter игнорируется, что бы ни было на экране
+        # (прежний список, «ищу по проекту…» или ещё ничего) — как и Tab. Иначе ушло
+        # бы сообщение с недописанным «@…», а вложение молча потерялось. Нажатие не
+        # запоминаем: достраивать путь по списку, которого человек ещё не видел,
+        # хуже лишнего Enter. Выход — Esc, после неё Enter отправляет набранное как есть.
+        if (self._file_query is not None and self._file_shown_query != self._file_query
+                and self._arg_picker is None and self._palette is None):
             return
 
         # File picker открыт → Enter достраивает путь (не сабмитит сообщение).

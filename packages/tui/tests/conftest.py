@@ -137,6 +137,16 @@ def _isolate_model_list_cache():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_slow_git_memo():
+    """`gc_tui.services.file_index` помнит корни, где git не уложился в таймаут,
+    в модульном dict — иначе таймаут из одного теста отключал бы git соседям."""
+    from gc_tui.services import file_index
+    file_index._slow_git_roots.clear()
+    yield
+    file_index._slow_git_roots.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_network_model_fetch(monkeypatch):
     """По умолчанию TUI-тесты не ходят в сеть за списком моделей.
 
