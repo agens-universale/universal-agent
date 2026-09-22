@@ -45,6 +45,10 @@ dev = [
     "httpie>=3.2.4",
     "pytest-rerunfailures>=16.4",
     { include-group = "test" },
+    # Инструменты гейта качества едут с обычным `uv sync`: хуки pre-commit и
+    # scripts/lint.sh зовут их из этого окружения. Сам хук ставится отдельно —
+    # `uv run pre-commit install`, один раз на клон (см. CONTRIBUTING.md).
+    { include-group = "lint" },
 ]
 lint = [
     "complexipy>=4",
@@ -59,6 +63,7 @@ lint = [
     # CPD/Duplications у Sonar). Остальные правила pylint выключены: их роль
     # играет ruff. Настройки — [tool.pylint.*] ниже.
     "pylint>=3.3",
+    # Мёртвый код (scripts/dead_code_check.py) — аналог S1144/S1763 у Sonar.
     "vulture>=2.14",
 ]
 test = [

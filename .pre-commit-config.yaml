@@ -1,7 +1,7 @@
 # Первая линия качества: те же проверки, что гоняет CI (scripts/lint.sh).
 #
 # Формат понимают и pre-commit, и prek — prek быстрее и не требует Python.
-# Установка: `uv sync --group lint && uv run --group lint pre-commit install`
+# Установка: `uv sync && uv run pre-commit install`
 # (или `uvx prek install`). Подробности — docs/code-quality.md.
 #
 # Все хуки `repo: local` + `language: system` и запускаются через

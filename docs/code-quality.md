@@ -20,8 +20,8 @@ pre-commit со всеми хуками из `.pre-commit-config.yaml`:
 ## Как поставить
 
 ```
-uv sync --group lint
-uv run --group lint pre-commit install     # или: uvx prek install
+uv sync                                   # инструменты проверок входят в группу dev
+uv run pre-commit install                 # или: uvx prek install
 ```
 
 Ставятся два хука: `pre-commit` (всё, кроме дублирования) и `pre-push`
@@ -220,7 +220,7 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 дословно:
 
 ```yaml
-- run: uv sync --group lint
+- run: uv sync
 - run: scripts/lint.sh
 ```
 

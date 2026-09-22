@@ -1193,20 +1193,26 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "complexipy" },
     { name = "fastapi" },
     { name = "gc-testkit" },
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "httpie" },
     { name = "office-mcp" },
+    { name = "pre-commit" },
+    { name = "pre-commit-hooks" },
     { name = "psutil" },
     { name = "pygments" },
+    { name = "pylint" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-rerunfailures" },
     { name = "pytest-textual-snapshot" },
     { name = "rich" },
+    { name = "ruff" },
     { name = "textual" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "vulture" },
 ]
 lint = [
     { name = "complexipy" },
@@ -1243,20 +1249,26 @@ provides-extras = ["all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "complexipy", specifier = ">=4" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "gc-testkit", editable = "packages/testkit" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "httpie", specifier = ">=3.2.4" },
     { name = "office-mcp", editable = "packages/mcp/external/vendor/office-mcp" },
+    { name = "pre-commit", specifier = ">=4" },
+    { name = "pre-commit-hooks", specifier = ">=5" },
     { name = "psutil", specifier = ">=5.9,<7" },
     { name = "pygments", specifier = ">=2.13" },
+    { name = "pylint", specifier = ">=3.3" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-rerunfailures", specifier = ">=16.4" },
     { name = "pytest-textual-snapshot", specifier = ">=1.0,<1.1" },
     { name = "rich", specifier = ">=13" },
+    { name = "ruff", specifier = ">=0.14" },
     { name = "textual", specifier = ">=0.55" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
+    { name = "vulture", specifier = ">=2.14" },
 ]
 lint = [
     { name = "complexipy", specifier = ">=4" },
