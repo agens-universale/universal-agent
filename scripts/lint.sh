@@ -1,26 +1,28 @@
 #!/usr/bin/env bash
-# Локальный аналог проверок Sonar для gc-core (см. [tool.ruff] в pyproject.toml).
-#   scripts/lint.sh            — весь gc-core
-#   scripts/lint.sh <paths...> — только указанные файлы/каталоги
-# Нужна dev-группа lint: `uv sync --group lint`.
+# Единая точка проверок качества — для человека и для CI.
+#
+#   scripts/lint.sh              — весь репозиторий (как в CI)
+#   scripts/lint.sh <пути...>    — только указанные файлы/каталоги
+#
+# Внутри — pre-commit со всеми хуками из .pre-commit-config.yaml: гигиена,
+# ruff (линт + формат), complexipy (S3776) и scripts/sonar_like_check.py.
+# Раньше этот скрипт звал инструменты сам и проверял ТОЛЬКО gc-core; теперь
+# область — весь репозиторий, а список проверок один и тот же у всех.
+#
+# Нужна группа lint: `uv sync --group lint`.
+# Если в системе есть prek (та же конфигурация, быстрее и без Python), можно
+# взять его: GC_LINT_RUNNER=prek scripts/lint.sh
 set -u
 cd "$(dirname "$0")/.."
-TARGETS=("$@")
-if [ ${#TARGETS[@]} -eq 0 ]; then
-  TARGETS=(packages/core/src/gc_core packages/core/assets/skills/skill-creator/scripts)
+
+RUNNER="${GC_LINT_RUNNER:-pre-commit}"
+if [ "$RUNNER" = "prek" ]; then
+  RUN=(prek run)
+else
+  RUN=(uv run --group lint pre-commit run)
 fi
-rc=0
-echo "== ruff (мелкие правила Sonar)"
-uv run --group lint ruff check "${TARGETS[@]}" || rc=1
-echo "== complexipy (cognitive complexity > 15)"
-# --failed печатает только нарушения, но всегда выходит с 0; код возврата даёт --quiet.
-# tools/deprecated — мёртвый код (не импортируется), из проверки сложности исключён.
-CX_FILES=()
-while IFS= read -r f; do CX_FILES+=("$f"); done < <(
-  find "${TARGETS[@]}" -name '*.py' -not -path '*/deprecated/*' -not -path '*/.venv/*' | sort
-)
-uv run --group lint complexipy "${CX_FILES[@]}" --max-complexity-allowed 15 --failed --color no
-uv run --group lint complexipy "${CX_FILES[@]}" --max-complexity-allowed 15 --quiet || rc=1
-echo "== sonar_like_check (дубли литералов, regex-подсказки)"
-uv run python scripts/sonar_like_check.py "${TARGETS[@]}" || rc=1
-exit $rc
+
+if [ $# -eq 0 ]; then
+  exec "${RUN[@]}" --all-files --show-diff-on-failure
+fi
+exec "${RUN[@]}" --files "$@"

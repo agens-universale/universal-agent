@@ -37,6 +37,8 @@ dmypy.json
 .pyre/
 .pytype/
 .ruff_cache/
+# кэш complexipy: пересобирается на каждом прогоне, в гит не едет
+.complexipy_cache/
 
 # Testing
 .pytest_cache/
@@ -135,4 +137,3 @@ docs/tui/
 docs/2026-06-23-corp-mirror-config-overlay.md
 docs/CHANGES-vs-master.md
 snapshot_report.html
-

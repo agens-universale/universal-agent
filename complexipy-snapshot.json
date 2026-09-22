@@ -1,0 +1,646 @@
+[
+  {
+    "path": "packages/tui/src/gc_tui/__init__.py",
+    "file_name": "__init__.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 35
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/app.py",
+    "file_name": "app.py",
+    "functions": [
+      {
+        "name": "TuiApp::get_runner",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/diff_tui/service.py",
+    "file_name": "service.py",
+    "functions": [
+      {
+        "name": "DiffService::approve_all",
+        "complexity": 26
+      },
+      {
+        "name": "DiffService::undo_all",
+        "complexity": 29
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/diff_tui/tracking.py",
+    "file_name": "tracking.py",
+    "functions": [
+      {
+        "name": "TrackingFsBackend::_atrack_shell_delta",
+        "complexity": 19
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/editors/model_entry_form.py",
+    "file_name": "model_entry_form.py",
+    "functions": [
+      {
+        "name": "ModelEntryForm::submit",
+        "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/editors/models_section.py",
+    "file_name": "models_section.py",
+    "functions": [
+      {
+        "name": "ModelsSectionEditor::footer_text",
+        "complexity": 22
+      },
+      {
+        "name": "ModelsSectionEditor::_refresh_picker_rows",
+        "complexity": 24
+      },
+      {
+        "name": "ModelsSectionEditor::_block_preview",
+        "complexity": 33
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/config.py",
+    "file_name": "config.py",
+    "functions": [
+      {
+        "name": "_filter_config_by_key",
+        "complexity": 21
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/diff.py",
+    "file_name": "diff.py",
+    "functions": [
+      {
+        "name": "DiffScreen::on_key",
+        "complexity": 18
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/main.py",
+    "file_name": "main.py",
+    "functions": [
+      {
+        "name": "TraceScreen::_session_status_word",
+        "complexity": 16
+      },
+      {
+        "name": "TraceScreen::_complete_file_picker",
+        "complexity": 17
+      },
+      {
+        "name": "TraceScreen::_cmd_stop",
+        "complexity": 18
+      },
+      {
+        "name": "TraceScreen::_render_segments",
+        "complexity": 18
+      },
+      {
+        "name": "TraceScreen::_dispatch_command",
+        "complexity": 30
+      },
+      {
+        "name": "TraceScreen::_compose_footer_right",
+        "complexity": 33
+      },
+      {
+        "name": "TraceScreen::_mount_failed_from_meta",
+        "complexity": 39
+      },
+      {
+        "name": "TraceScreen::on_command_text_area_submitted",
+        "complexity": 80
+      },
+      {
+        "name": "TraceScreen::on_text_area_changed",
+        "complexity": 100
+      },
+      {
+        "name": "TraceScreen::_render_event",
+        "complexity": 102
+      },
+      {
+        "name": "TraceScreen::_poll_active",
+        "complexity": 126
+      },
+      {
+        "name": "TraceScreen::on_key",
+        "complexity": 142
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/mcp.py",
+    "file_name": "mcp.py",
+    "functions": [
+      {
+        "name": "ServerCard::_append_body",
+        "complexity": 20
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/onboarding.py",
+    "file_name": "onboarding.py",
+    "functions": [
+      {
+        "name": "OnboardingScreen::_auto_probe",
+        "complexity": 16
+      },
+      {
+        "name": "OnboardingScreen::_voice_advance",
+        "complexity": 17
+      },
+      {
+        "name": "OnboardingScreen::_footer_text",
+        "complexity": 33
+      },
+      {
+        "name": "OnboardingScreen::_mount_step_body",
+        "complexity": 80
+      },
+      {
+        "name": "OnboardingScreen::on_key",
+        "complexity": 112
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/post_update.py",
+    "file_name": "post_update.py",
+    "functions": [
+      {
+        "name": "PostUpdateScreen::_execute",
+        "complexity": 23
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/sessions.py",
+    "file_name": "sessions.py",
+    "functions": [
+      {
+        "name": "SessionsScreen::on_key",
+        "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/settings.py",
+    "file_name": "settings.py",
+    "functions": [
+      {
+        "name": "SettingsScreen::_mount_update_section",
+        "complexity": 16
+      },
+      {
+        "name": "SettingsScreen::_rename_profile",
+        "complexity": 19
+      },
+      {
+        "name": "SettingsScreen::_route_registry_editor",
+        "complexity": 20
+      },
+      {
+        "name": "SettingsScreen::_profile_row_text",
+        "complexity": 26
+      },
+      {
+        "name": "SettingsScreen::_do_save",
+        "complexity": 27
+      },
+      {
+        "name": "SettingsScreen::_voice_footer_text",
+        "complexity": 28
+      },
+      {
+        "name": "SettingsScreen::_footer_text",
+        "complexity": 36
+      },
+      {
+        "name": "SettingsScreen::_row_value",
+        "complexity": 41
+      },
+      {
+        "name": "SettingsScreen::_menu_glyph",
+        "complexity": 55
+      },
+      {
+        "name": "SettingsScreen::on_key",
+        "complexity": 290
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/screens/skills.py",
+    "file_name": "skills.py",
+    "functions": [
+      {
+        "name": "SkillsScreen::on_key",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/agent_runner.py",
+    "file_name": "agent_runner.py",
+    "functions": [
+      {
+        "name": "AgentRunner::make_tui_confirm",
+        "complexity": 25
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/export.py",
+    "file_name": "export.py",
+    "functions": [
+      {
+        "name": "_render_record",
+        "complexity": 21
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/file_index.py",
+    "file_name": "file_index.py",
+    "functions": [
+      {
+        "name": "_stream_bounded",
+        "complexity": 19
+      },
+      {
+        "name": "parse_at_segment",
+        "complexity": 19
+      },
+      {
+        "name": "_all_paths",
+        "complexity": 20
+      },
+      {
+        "name": "_simple_gitignore_dirs",
+        "complexity": 25
+      },
+      {
+        "name": "_walk_paths",
+        "complexity": 31
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/file_view.py",
+    "file_name": "file_view.py",
+    "functions": [
+      {
+        "name": "pygments_highlight_map",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/json_payload.py",
+    "file_name": "json_payload.py",
+    "functions": [
+      {
+        "name": "unfold_payload",
+        "complexity": 21
+      },
+      {
+        "name": "_parse_truncated_json",
+        "complexity": 26
+      },
+      {
+        "name": "render_unfolded",
+        "complexity": 26
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/markdown_render.py",
+    "file_name": "markdown_render.py",
+    "functions": [
+      {
+        "name": "segment_answer",
+        "complexity": 23
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/settings_probe.py",
+    "file_name": "settings_probe.py",
+    "functions": [
+      {
+        "name": "interpret_auth",
+        "complexity": 18
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/stores/file_store.py",
+    "file_name": "file_store.py",
+    "functions": [
+      {
+        "name": "FileTaskStore::tail_events",
+        "complexity": 18
+      },
+      {
+        "name": "FileTaskStore::read_segments",
+        "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/subagent_progress.py",
+    "file_name": "subagent_progress.py",
+    "functions": [
+      {
+        "name": "plan_progress_actions",
+        "complexity": 16
+      },
+      {
+        "name": "SubagentProgressConsumer::apply_drained",
+        "complexity": 38
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/subagent_sidecar_mapper.py",
+    "file_name": "subagent_sidecar_mapper.py",
+    "functions": [
+      {
+        "name": "apply_sidecar_nested_actions",
+        "complexity": 20
+      },
+      {
+        "name": "plan_sidecar_nested_actions",
+        "complexity": 45
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/tool_preview.py",
+    "file_name": "tool_preview.py",
+    "functions": [
+      {
+        "name": "unwrap_tool_output_dict",
+        "complexity": 25
+      },
+      {
+        "name": "_try_parse_truncated_json",
+        "complexity": 39
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/trace_mapper.py",
+    "file_name": "trace_mapper.py",
+    "functions": [
+      {
+        "name": "_arg_summary",
+        "complexity": 27
+      },
+      {
+        "name": "_summarize_output",
+        "complexity": 29
+      },
+      {
+        "name": "map_message",
+        "complexity": 129
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/services/trace_render.py",
+    "file_name": "trace_render.py",
+    "functions": [
+      {
+        "name": "render_segments_readonly",
+        "complexity": 21
+      },
+      {
+        "name": "_dispatch_readonly",
+        "complexity": 43
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/voice/recorder.py",
+    "file_name": "recorder.py",
+    "functions": [
+      {
+        "name": "MicRecorder::analyse",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/widgets/command_palette.py",
+    "file_name": "command_palette.py",
+    "functions": [
+      {
+        "name": "CommandPalette::_format_toggle_row",
+        "complexity": 24
+      },
+      {
+        "name": "CommandPalette::_filtered",
+        "complexity": 32
+      }
+    ]
+  },
+  {
+    "path": "packages/tui/src/gc_tui/widgets/thinking_indicator.py",
+    "file_name": "thinking_indicator.py",
+    "functions": [
+      {
+        "name": "ThinkingIndicator::_render_text",
+        "complexity": 36
+      }
+    ]
+  },
+  {
+    "path": "packages/server/src/gc_server/cleanup_threads.py",
+    "file_name": "cleanup_threads.py",
+    "functions": [
+      {
+        "name": "cleanup_threads",
+        "complexity": 28
+      }
+    ]
+  },
+  {
+    "path": "packages/server/src/gc_server/rest_api/agent_execution_registry.py",
+    "file_name": "agent_execution_registry.py",
+    "functions": [
+      {
+        "name": "AgentRunRegistry::astart_if_absent",
+        "complexity": 23
+      }
+    ]
+  },
+  {
+    "path": "packages/server/src/gc_server/server.py",
+    "file_name": "server.py",
+    "functions": [
+      {
+        "name": "get_all_thread_logs",
+        "complexity": 17
+      },
+      {
+        "name": "events_webhook",
+        "complexity": 19
+      },
+      {
+        "name": "swarm_run",
+        "complexity": 20
+      },
+      {
+        "name": "_shutdown_swarm_processes",
+        "complexity": 27
+      }
+    ]
+  },
+  {
+    "path": "packages/server/src/gc_server/swarm/cleanup.py",
+    "file_name": "cleanup.py",
+    "functions": [
+      {
+        "name": "cleanup_threads",
+        "complexity": 37
+      }
+    ]
+  },
+  {
+    "path": "packages/server/src/gc_server/swarm/lifecycle.py",
+    "file_name": "lifecycle.py",
+    "functions": [
+      {
+        "name": "check_and_finalize",
+        "complexity": 18
+      },
+      {
+        "name": "_enforce_resource_limits",
+        "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "packages/server/src/gc_server/swarm/runner.py",
+    "file_name": "runner.py",
+    "functions": [
+      {
+        "name": "start_swarm_process",
+        "complexity": 16
+      },
+      {
+        "name": "_materialize_runtime_config",
+        "complexity": 22
+      }
+    ]
+  },
+  {
+    "path": "packages/mcp/src/recommended_mcp/autostart.py",
+    "file_name": "autostart.py",
+    "functions": [
+      {
+        "name": "ensure_daemons_for_agent",
+        "complexity": 20
+      }
+    ]
+  },
+  {
+    "path": "packages/mcp/src/recommended_mcp/install.py",
+    "file_name": "install.py",
+    "functions": [
+      {
+        "name": "_dist_name",
+        "complexity": 20
+      }
+    ]
+  },
+  {
+    "path": "packages/mcp/src/recommended_mcp/manifest.py",
+    "file_name": "manifest.py",
+    "functions": [
+      {
+        "name": "_parse_entry",
+        "complexity": 37
+      }
+    ]
+  },
+  {
+    "path": "packages/mcp/src/recommended_mcp/process_supervisor.py",
+    "file_name": "process_supervisor.py",
+    "functions": [
+      {
+        "name": "RunSupervisor::wait_until_signal",
+        "complexity": 16
+      },
+      {
+        "name": "terminate_pid",
+        "complexity": 19
+      }
+    ]
+  },
+  {
+    "path": "packages/mcp/src/recommended_mcp/runtime/cli.py",
+    "file_name": "cli.py",
+    "functions": [
+      {
+        "name": "_cmd_remove",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "packages/testkit/src/gc_testkit/import_health.py",
+    "file_name": "import_health.py",
+    "functions": [
+      {
+        "name": "check_missing_names",
+        "complexity": 20
+      },
+      {
+        "name": "check_dotted_binds",
+        "complexity": 28
+      },
+      {
+        "name": "_module_bindings",
+        "complexity": 65
+      }
+    ]
+  },
+  {
+    "path": "packages/testkit/src/gc_testkit/module_literals.py",
+    "file_name": "module_literals.py",
+    "functions": [
+      {
+        "name": "_top_level_names",
+        "complexity": 16
+      },
+      {
+        "name": "main",
+        "complexity": 29
+      },
+      {
+        "name": "collect",
+        "complexity": 145
+      }
+    ]
+  }
+]
