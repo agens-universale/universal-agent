@@ -1152,11 +1152,15 @@ async def test_typing_during_index_build_starts_no_new_threads(tmp_path, monkeyp
 
     (tmp_path / "qqtarget.py").write_text("x", encoding="utf-8")
     release = threading.Event()
+    build_entered = threading.Event()
+    builders = []
     real_build = file_index.PathIndex.build
     real_search = file_index.PathIndex.search
     searched = []
 
     def slow_build(self):
+        builders.append(threading.current_thread())
+        build_entered.set()
         release.wait(timeout=5)
         return real_build(self)
 
@@ -1175,11 +1179,14 @@ async def test_typing_during_index_build_starts_no_new_threads(tmp_path, monkeyp
         inp.insert("@q")                                 # первая поисковая буква — поток сеанса
         await pilot.pause()
         search = scr._file_search
-        before = set(threading.enumerate())
         for ch in "qtar":
             inp.insert(ch)
             await pilot.pause()
-        assert set(threading.enumerate()) - before == set()
+        assert build_entered.wait(5)
+        # Считает один поток: сборку ждёт только поток сеанса, а не поток на каждую букву.
+        # Разность threading.enumerate() тут не годится: на Windows pilot.pause() сам
+        # заводит потоки executor'а (textual/_win_sleep.py).
+        assert [t.name for t in builders] == ["file-search"]
         assert scr._file_search is search
         release.set()
         await settled(search)
