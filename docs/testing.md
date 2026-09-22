@@ -103,19 +103,9 @@ test_project_data_backend import FakeSandboxBackend`): pytest кладёт ка�
 запускающего. Десять таких подмен так и жили, пока реэкспорт в `mcp_runtime.paths`
 не убрали и они не упали громко.
 
-## Локальный аналог Sonar
+## Проверки качества
 
-Замечания Sonar для gc-core можно ловить до пуша:
-
-```
-uv sync --group lint
-scripts/lint.sh                      # весь gc-core
-scripts/lint.sh packages/core/src/gc_core/tools/fs   # точечно
-```
-
-Что внутри: `ruff` с правилами из отчёта Sonar (неиспользуемые параметры и
-переменные, лишние классы в `except`, вложенные `if`, лимит 13 параметров,
-`verify=False`), `complexipy` для cognitive complexity с порогом 15 (тот же
-алгоритм, что у Sonar) и `scripts/sonar_like_check.py` для дублей строковых
-литералов (S1192) и regex-подсказок (`\w`, `\d`, ленивый квантификатор).
-Набор правил живёт в `[tool.ruff]` в корневом `pyproject.toml`.
+Линтер, форматтер, порог когнитивной сложности и локальный аналог правил
+Sonar живут в одном гейте — `scripts/lint.sh` (внутри pre-commit). Как
+поставить хуки, что и где проверяется и как глушить находки — в
+[docs/code-quality.md](code-quality.md).
