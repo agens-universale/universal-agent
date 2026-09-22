@@ -96,4 +96,4 @@ def test_a_cold_read_refuses_instead_of_probing(monkeypatch):
     backend = LocalFsBackend()
 
     with pytest.raises(CapabilitiesNotWarmedError):
-        backend.grep_include
+        _ = backend.grep_include

@@ -95,7 +95,7 @@ class RunContext:
     mcp_session_owner: str = ""
 
 
-async def acreate_run_context(
+async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
     config_dict: Dict[str, Any],
     *,
     auth_connector: Optional[AuthConnector] = None,
@@ -350,7 +350,7 @@ def _prepare_run_context(
     )
 
 
-def _finish_run_context(
+def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
     config_dict: Dict[str, Any],
     prep: "_RunContextPrep",
     tools: tuple,

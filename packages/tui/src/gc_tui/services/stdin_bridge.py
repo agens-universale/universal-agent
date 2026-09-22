@@ -16,6 +16,11 @@ mouse/key-escapes) → ask_human виснет.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import queue
+
 import io
 import sys
 import threading

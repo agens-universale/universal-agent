@@ -201,7 +201,6 @@ class FakeBackend:
         pass  # dict-modeled fs: dirs are implicit
 
     async def listdir(self, p):
-        base = p.rstrip("/") + "/"
         names = {}
         for rel, is_d in await self.walk(p):
             if "/" not in rel:

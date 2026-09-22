@@ -16,8 +16,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from rich.table import Table
 
 from gc_tui.palette import ACCENT as _ACC
 from gc_tui.palette import CODE as _CODE

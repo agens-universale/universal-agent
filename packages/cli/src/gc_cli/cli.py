@@ -527,9 +527,8 @@ async def arun_cli() -> int:
         if auto_mcp:
             shutdown_mcp_daemons()
     formatted = format_json_for_display(response)
-    if human_console_enabled(config_dict):
-        if formatted:
-            print(formatted)
+    if human_console_enabled(config_dict) and formatted:
+        print(formatted)
     if formatted:
         ctx.logger.info(
             "final_answer",

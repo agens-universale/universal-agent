@@ -626,7 +626,7 @@ class ModelsSectionEditor(Vertical):
     * confirm-баннер удаления.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         self,
         *,
         target,

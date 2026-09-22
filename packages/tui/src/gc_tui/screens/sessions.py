@@ -135,9 +135,12 @@ class SessionsScreen(Screen):
         f = self._filter.lower()
         out: list = []
         for t in self._all_tasks():
-            if self._branch_filter == "current" and self._current_branch is not None:
-                if (t.tui_meta or {}).get("branch") != self._current_branch:
-                    continue
+            if (
+                self._branch_filter == "current"
+                and self._current_branch is not None
+                and (t.tui_meta or {}).get("branch") != self._current_branch
+            ):
+                continue
             if (
                 f
                 and f not in (t.thread_id or "").lower()

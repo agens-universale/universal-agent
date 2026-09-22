@@ -260,7 +260,7 @@ def _finalize_with_resource_violation(
 
 def _enforce_resource_limits(
     threads_dir: str,
-    sandbox_root_dir: str,
+    sandbox_root_dir: str,  # noqa: ARG001  # часть контракта: подпись менять нельзя
     swarm_id: str,
     meta: Dict[str, Any],
     swarm_meta: Dict[str, Any],

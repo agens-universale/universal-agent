@@ -1482,7 +1482,7 @@ class FindInFiles(AbstractSimpleTool):
                 rel = os.path.basename(abs_n)
             yield WalkEntry(rel or ".", False)
 
-    async def _try_native_grep_directory(
+    async def _try_native_grep_directory(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         self,
         *,
         path: str,
@@ -1670,7 +1670,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
     # ------------------------------------------------------------------
-    async def _search_directory(
+    async def _search_directory(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         self,
         path: str,
         compiled: re.Pattern,
@@ -2330,7 +2330,7 @@ class FindInFiles(AbstractSimpleTool):
             payload["top_level_dirs_shown"] = len(top)
             payload["top_level_dirs_total"] = total
 
-    def _build_response(
+    def _build_response(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         self,
         *,
         matches: List[Dict[str, Any]],

@@ -295,7 +295,7 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
         # на всю сессию по неизвестной причине нельзя.
         status_code = exc.status_code
-    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):
+    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):  # noqa: SIM103  # ветка с обоснованием в цепочке elif
         # Только транспортные сбои (таймаут, обрыв, DNS), а не любой сбой
         # клиента: от битого url или лишних редиректов предохранитель гасил бы
         # алиас на всю сессию, хотя модель жива. У httpx это ровно

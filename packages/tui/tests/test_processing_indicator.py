@@ -8,9 +8,7 @@ import pytest
 
 def _write_task(tmp_path, tid):
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        '{{"thread_id":"{}","status":"running","updated_at":"2026-06-23T12:00:00+00:00","messages_count":1}}'.format(
-            tid
-        ),
+        f'{{"thread_id":"{tid}","status":"running","updated_at":"2026-06-23T12:00:00+00:00","messages_count":1}}',
         encoding="utf-8",
     )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")

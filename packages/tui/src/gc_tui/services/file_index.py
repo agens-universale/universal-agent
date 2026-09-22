@@ -340,7 +340,7 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         if os.name == "nt":
             # Полный путь: по одному имени Windows ищет exe сначала рядом с
             # приложением и в текущем каталоге — а это может быть открытый проект.
-            taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+            taskkill = os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
             subprocess.run([taskkill, "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=5)
         else:
             os.killpg(proc.pid, signal.SIGKILL)

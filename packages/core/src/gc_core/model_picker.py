@@ -200,7 +200,7 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
     import urllib.error
     import urllib.request
 
-    ctx = None if verify else ssl._create_unverified_context()
+    ctx = None if verify else ssl._create_unverified_context()  # noqa: S323  # NOSONAR: verify:false из конфига — осознанный opt-in, см. docs/code-quality.md
     req = _request(url, headers)
     try:
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:

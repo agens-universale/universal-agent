@@ -37,12 +37,10 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Dict, List
 
-from gc_core.thread_store_base import CONTRACT_METHODS
+#: Одиннадцать методов контракта — реэкспорт из ядра для наборов-конформансов.
+from gc_core.thread_store_base import CONTRACT_METHODS as CONTRACT_METHODS
 
 SYS = "cli"
-
-#: Одиннадцать методов контракта.
-CONTRACT_METHODS = CONTRACT_METHODS
 
 #: Шесть полей записи трассы. Форма замкнутая: её пишет и читает только ядро.
 TRACE_FIELDS = frozenset({"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"})

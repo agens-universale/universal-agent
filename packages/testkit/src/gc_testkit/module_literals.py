@@ -169,15 +169,21 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                 idx = DOTTED_TARGET_CALLS.get(name)
                 if idx is not None and len(node.args) > idx:
                     a = node.args[idx]
-                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
-                        if _looks_like_our_module(a.value, ours):
-                            refs.append(Ref(rel, node.lineno, name, a.value))
+                    if (
+                        isinstance(a, ast.Constant)
+                        and isinstance(a.value, str)
+                        and _looks_like_our_module(a.value, ours)
+                    ):
+                        refs.append(Ref(rel, node.lineno, name, a.value))
                 # 2) фильтры выселения: startswith("tools.")
                 if name == "startswith" and node.args:
                     a = node.args[0]
-                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
-                        if _looks_like_our_module(a.value, ours):
-                            refs.append(Ref(rel, node.lineno, "prefix", a.value))
+                    if (
+                        isinstance(a, ast.Constant)
+                        and isinstance(a.value, str)
+                        and _looks_like_our_module(a.value, ours)
+                    ):
+                        refs.append(Ref(rel, node.lineno, "prefix", a.value))
             # 3) sys.modules["literal"] — чтение, запись, удаление
             if isinstance(node, ast.Subscript):
                 v = node.value
@@ -281,11 +287,15 @@ def collect(paths: list[Path], ours: set[str]) -> list[Ref]:
                         refs.append(Ref(rel, elt.lineno, "sys_modules", elt.value))
 
             # 5) "literal" in sys.modules
-            if isinstance(node, ast.Compare) and isinstance(node.left, ast.Constant):
-                if isinstance(node.left.value, str) and _looks_like_our_module(node.left.value, ours):
-                    for cmp_ in node.comparators:
-                        if isinstance(cmp_, ast.Attribute) and cmp_.attr == "modules":
-                            refs.append(Ref(rel, node.lineno, "sys_modules", node.left.value))
+            if (
+                isinstance(node, ast.Compare)
+                and isinstance(node.left, ast.Constant)
+                and isinstance(node.left.value, str)
+                and _looks_like_our_module(node.left.value, ours)
+            ):
+                for cmp_ in node.comparators:
+                    if isinstance(cmp_, ast.Attribute) and cmp_.attr == "modules":
+                        refs.append(Ref(rel, node.lineno, "sys_modules", node.left.value))
     return refs
 
 

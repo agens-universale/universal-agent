@@ -120,7 +120,7 @@ class SearchFiles(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = """Tool name: fs_search_files  
+        description = """Tool name: fs_search_files
 Tool description: Searches for a regex pattern in file contents (not for listing files by name). regex is required; does not list files by glob/name alone.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "Directory to search recursively, or a single file."}, "regex": {"type": "string", "description": "Required. Regex matched against the whole file (DOTALL+MULTILINE: patterns may span newlines; '.' matches newline; '^'/'$' are line boundaries). Keep patterns bounded."}, "file_pattern": {"type": "string", "description": "Optional glob to narrow which files are content-searched (e.g., \'*.py\'). Always pair with regex — not a standalone name listing."}, "offset": {"type": "integer", "description": "1-based index of the first match to return."}, \"limit\": {\"type\": \"integer\", \"description\": \"Max matches returned for this page.\"}, \"encoding\": {\"type\": \"string\", \"description\": \"Optional text encoding (e.g. cp1251, koi8-r, utf-16-le). Omit for UTF-8 default.\"}}, \"required\": [\"path\", \"regex\"], \"additionalProperties\": false}
 
@@ -164,7 +164,7 @@ Find all function definitions in Python files:
  "regex": "def\\s+\\w+\\s*\\(",
  "file_pattern": "*.py"
 }
-   
+
 Search one known file (no shell grep):
 {
  "path": "/home/user/project/tests/test_foo.py",
@@ -279,7 +279,7 @@ Search for error logs in Rust source files:
             )
         return results
 
-    def _result(
+    def _result(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         self,
         *,
         path: str,

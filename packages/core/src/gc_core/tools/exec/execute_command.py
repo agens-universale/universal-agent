@@ -160,7 +160,7 @@ Usage:
 
 Important Usage Rules:
 1. Directory Verification:
-   - If the command will create new directories or files, be shure the parent directory exists and is the correct location. 
+   - If the command will create new directories or files, be shure the parent directory exists and is the correct location.
    - For example, before running "mkdir foo/bar", first use tool `list_files` to check that "foo" exists and is the intended parent directory.
 2. Command Execution:
    - Always quote file paths that contain spaces with double quotes (e.g., cd "path with spaces/file.txt")

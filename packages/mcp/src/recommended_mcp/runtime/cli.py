@@ -143,7 +143,7 @@ def descriptions(config: Optional[str] = None) -> dict:
     return {e.name: e.description for e in entries}
 
 
-def wired_names(config: Optional[str] = None) -> list:
+def wired_names(config: Optional[str] = None) -> list:  # noqa: ARG001  # часть контракта: подпись менять нельзя
     """Имена MCP, уже подключённых в конфиге (быстро, без subprocess) — для онбординга:
     отметить как установленные и не предлагать заново."""
     from recommended_mcp.runtime import wiring
@@ -174,7 +174,7 @@ def unwire(name: str) -> bool:
     return wiring.unwire(name)
 
 
-def remove(name: str, config: Optional[str] = None, keep_package: bool = False) -> int:
+def remove(name: str, config: Optional[str] = None, keep_package: bool = False) -> int:  # noqa: ARG001  # часть контракта: подпись менять нельзя
     """Отключить + деинсталл пакета MCP из venv (обёртка _cmd_remove)."""
     return _cmd_remove(name, keep_package)
 

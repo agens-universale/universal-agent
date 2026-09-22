@@ -653,7 +653,7 @@ def test_shallowest_paths_memory_is_bounded():
     sel = _ShallowestPaths(1000)
     biggest = 0
     for i in range(200_000):
-        sel.add("d%d/" % (i % 7) * (i % 5) + "f%d.txt" % i)
+        sel.add(f"d{i % 7}/" * (i % 5) + f"f{i}.txt")
         if i % 5000 == 0:
             biggest = max(biggest, len(sel))
     assert biggest <= 1000
@@ -755,7 +755,7 @@ def test_shallowest_paths_equals_stable_sort_prefix_on_random_inputs():
         paths = []
         for k in range(count):
             depth = rnd.randint(0, 5)
-            paths.append("/".join(["d"] * depth + ["f%d" % k]))
+            paths.append("/".join(["d"] * depth + [f"f{k}"]))
         n = rnd.randint(0, 45)
         sel = _ShallowestPaths(n)
         for p in paths:

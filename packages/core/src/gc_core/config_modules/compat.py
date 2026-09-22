@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Tuple
 
-# {"старый.dotted.путь": "новый.dotted.путь"}
+# {"старый.dotted.путь": "новый.dotted.путь"}  # noqa: ERA001  # описание формата, не выключенный код
 RENAMES: Dict[str, str] = {
     # AliasChoices("auxiliary_llm", "llm") недостаточно: deep_merge user(llm)+project
     # (auxiliary_llm) оставляет оба ключа → extra=forbid «Extra inputs are not permitted».
@@ -21,7 +21,7 @@ RENAMES: Dict[str, str] = {
 }
 # опциональное преобразование значения при переносе (смена формата/смысла)
 RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
-# {"dotted.путь": "почему удалён"}
+# {"dotted.путь": "почему удалён"}  # noqa: ERA001  # описание формата, не выключенный код
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",

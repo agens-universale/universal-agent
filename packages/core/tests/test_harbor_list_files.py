@@ -14,6 +14,10 @@ absolute path roots (strip 'path' from each entry, compare only 'type' and
 """
 
 import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pathlib
 
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.list_files import ListFiles

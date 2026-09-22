@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from rich.text import Text
 
 from gc_tui.services.duration_format import format_compact_int
 
@@ -394,7 +397,7 @@ def merge_nested_readonly(mount_target, records: list, calls: dict) -> None:
             nested_rows[tool_call_id] = row
         _mount_after(parent_call_id, row)
 
-    def _finish(*, parent_call_id, tool_call_id="", ok=True, error_brief=None, **_kw):
+    def _finish(*, parent_call_id, tool_call_id="", ok=True, error_brief=None, **_kw):  # noqa: ARG001  # часть контракта: подпись менять нельзя
         row = nested_rows.get(tool_call_id)
         if row is not None:
             row.set_result(summary="" if ok else (error_brief or "error"), error=not ok)
@@ -426,7 +429,7 @@ def merge_nested_readonly(mount_target, records: list, calls: dict) -> None:
     def _child_summary(*, parent_call_id, prose="", **_kw):
         _prose(parent_call_id=parent_call_id, prose=prose or CHILD_SUMMARY_LABEL)
 
-    def _todo(*, parent_call_id, tool_call_id="", todo_items=None, **_kw):
+    def _todo(*, parent_call_id, tool_call_id="", todo_items=None, **_kw):  # noqa: ARG001  # часть контракта: подпись менять нельзя
         _mount_after(parent_call_id, build_todo_block(todo_items or [], subagent=True, indent=NESTED_PREFIX))
 
     apply_sidecar_nested_actions(

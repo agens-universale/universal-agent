@@ -1093,7 +1093,7 @@ async def test_big_directory_listing_is_capped_with_note(tmp_path):
 
     (tmp_path / "many").mkdir()
     for i in range(150):
-        (tmp_path / "many" / ("f%03d.txt" % i)).write_text("x", encoding="utf-8")
+        (tmp_path / "many" / f"f{i:03d}.txt").write_text("x", encoding="utf-8")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen

@@ -46,7 +46,7 @@ class ClickModelMixin:
     # экран события накроет трейс. self.focus() в on_click остаётся как
     # идемпотентная страховка (синтетические клики в тестах идут мимо
     # mousedown-пути экрана), а event.stop() — защита от перехвата фокуса
-    # контейнером #trace (main.py.on_click) — живёт на Click-уровне.
+    # контейнером #trace (main.py.on_click) — живёт на Click-уровне.  # noqa: ERA001  # описание формата, не выключенный код
 
     def _open_request(self) -> Optional[Message]:
         raise NotImplementedError

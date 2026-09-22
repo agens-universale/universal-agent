@@ -71,7 +71,7 @@ class TouchedJournal:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = None
         try:
-            fd = open(lock_path, "a+", encoding="utf-8")
+            fd = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115  # дескриптор держит блокировку
             fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
             yield
         except OSError as exc:

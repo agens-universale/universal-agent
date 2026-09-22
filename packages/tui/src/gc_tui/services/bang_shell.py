@@ -168,9 +168,8 @@ def preflight(command: str) -> Optional[str]:
     if leading.lower() in _INTERACTIVE_BINS:
         return _MSG_INTERACTIVE
 
-    if leading.lower() in _TTY_CONTAINER_CMDS:
-        if any(t in _TTY_FLAGS for t in tokens):
-            return _MSG_INTERACTIVE
+    if leading.lower() in _TTY_CONTAINER_CMDS and any(t in _TTY_FLAGS for t in tokens):
+        return _MSG_INTERACTIVE
 
     return None
 

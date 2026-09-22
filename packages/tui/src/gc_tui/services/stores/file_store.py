@@ -228,7 +228,7 @@ class FileTaskStore:
         if live.exists():
             files.append(live)
 
-        # parsed[i] = (seg_records, leading_summary_record_or_None)
+        # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
         parsed: list[tuple[list[dict], Optional[dict]]] = []
         for fpath in files:
             recs: list[dict] = []

@@ -232,7 +232,7 @@ Usage:
         return (printable / max(len(sample), 1)) < 0.75
 
     @staticmethod
-    def _result(
+    def _result(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         *,
         url: str,
         ok: bool,

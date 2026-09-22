@@ -48,9 +48,8 @@ def evict_stale_cache(
         return 0
     removed = 0
     for key in list(store.load_index()):
-        if key in git_visible_keys:
-            if store.drop_entry(key):
-                removed += 1
+        if key in git_visible_keys and store.drop_entry(key):
+            removed += 1
     if removed:
         _logger.info("evicted %s stale cache key(s) superseded by git", removed)
     return removed

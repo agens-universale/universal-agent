@@ -40,7 +40,7 @@ __all__ = [
 _META = frozenset(".*+?|()[]{}^$\\")
 
 
-class PatternMode(str, Enum):
+class PatternMode(str, Enum):  # noqa: UP042  # StrEnum сменил бы str(member) — это поведение
     """Scan-budget / prefilter policy label."""
 
     LIKE = "like"

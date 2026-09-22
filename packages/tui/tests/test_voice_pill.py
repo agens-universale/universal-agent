@@ -4,6 +4,8 @@
 спектр-эквалайзер braille-рампой, распознавание — braille-волна расщепления.
 """
 
+import itertools
+
 from gc_tui.services.voice_pill import (
     _RAMP,
     PILL_WIDTH,
@@ -12,7 +14,6 @@ from gc_tui.services.voice_pill import (
     format_stt_time,
     render_pill,
 )
-import itertools
 
 
 def test_pill_is_exactly_pill_width_cells():

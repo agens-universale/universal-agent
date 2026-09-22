@@ -242,7 +242,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
 
-    def _result(
+    def _result(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
         self,
         *,
         path: str,

@@ -322,7 +322,7 @@ class SkillsRegistry:
             for entry, is_dir in await self._backend.listdir(root):
                 if is_dir:
                     await self._load_root_entry(root, entry, source)
-                # else: пусто, скип
+                # else: пусто, скип  # noqa: ERA001  # описание формата, не выключенный код
 
     async def _load_skill_dir(
         self,

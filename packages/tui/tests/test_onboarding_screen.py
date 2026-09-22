@@ -3496,6 +3496,7 @@ async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
     Показывается ЯВНО назначенный слот, а не резолв матрицей фоллбэков: незаданный
     `max` работает моделью `default`, но написать против него её имя значило бы сказать
     «уровень назначен» там, где он не назначен."""
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_LEVELS
 

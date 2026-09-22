@@ -127,7 +127,7 @@ def inject_working_memory_prompt_placeholders(prompt: str) -> str:
     return prompt
 
 
-class _RegisterBagMixin:
+class _RegisterBagMixin:  # noqa: PLW1641  # сравнение по составу; в множества не кладётся
     """Атрибуты по одному на каждый ``SESSION_MEMORY_REGISTERS[].name``."""
 
     def __init__(self, **kwargs: Any) -> None:

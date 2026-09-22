@@ -429,7 +429,7 @@ def test_force_include_keys_stay_inside_project_root():
     Подмена, которую ловит тест: вернуть любому ключу префикс `../`.
     """
     offenders = []
-    for name, sub in MANIFESTS.items():
+    for _name, sub in MANIFESTS.items():
         man = tomllib.loads((REPO / sub / "pyproject.toml").read_text(encoding="utf-8"))
         targets = (
             man.get("tool", {})

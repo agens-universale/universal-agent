@@ -65,7 +65,7 @@ The assistant used the `update_plan` with TODOs list because:
 2. The user explicitly requested tests and build be run afterward.
 3. The assistant inferred that tests and build need to pass by adding "Ensure tests and build succeed" as the final task.
 
-You also can run `update_plan` after finishing some steps and decomposing next steps. 
+You also can run `update_plan` after finishing some steps and decomposing next steps.
 """
         return description
 

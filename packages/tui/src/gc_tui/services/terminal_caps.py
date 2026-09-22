@@ -41,9 +41,7 @@ def supports_font_fallback() -> bool:
         return True
     if _os_name() == "nt":  # conhost: один шрифт, без подстановки
         return False
-    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
-        # WSL: платформа posix, но рисует всё равно терминал Windows. Если это
-        # был бы Windows Terminal, нас поймала бы ветка WT_SESSION выше; раз не
-        # поймала — терминал неизвестен, и это вполне может быть conhost.
-        return False
-    return True
+    # WSL: платформа posix, но рисует всё равно терминал Windows. Если это
+    # был бы Windows Terminal, нас поймала бы ветка WT_SESSION выше; раз не
+    # поймала — терминал неизвестен, и это вполне может быть conhost.
+    return not (os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"))

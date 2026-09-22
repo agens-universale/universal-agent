@@ -176,9 +176,8 @@ def _reveal_widget(widget, frame: int) -> None:
     уходила навсегда, если её такт опередил применение mount'а."""
     if widget.is_mounted:
         widget.scroll_visible(animate=False)
-    if not widget.is_mounted or _again(frame, widget):
-        if frame + 1 < _MAX_FRAMES:
-            _step(widget.app, _reveal_widget, widget, frame + 1)
+    if (not widget.is_mounted or _again(frame, widget)) and frame + 1 < _MAX_FRAMES:
+        _step(widget.app, _reveal_widget, widget, frame + 1)
 
 
 def _schedule(host, frame: int) -> None:

@@ -209,7 +209,7 @@ class RunSupervisor:
 
         stop = threading.Event()
 
-        def _handler(signum: int, frame: object) -> None:
+        def _handler(signum: int, frame: object) -> None:  # noqa: ARG001  # часть контракта: подпись менять нельзя
             stop.set()
 
         previous_int = signal.getsignal(signal.SIGINT)

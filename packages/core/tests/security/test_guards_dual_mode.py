@@ -20,7 +20,7 @@ def _passthrough_flow(*args, **kwargs):
 def _blocking_flow(*args, **kwargs):
     """Тело, которое отказывает, не позвав тул."""
     return "blocked"
-    yield  # noqa: unreachable — делает функцию генератором
+    yield  # недостижимо намеренно: делает функцию генератором
 
 
 def _postprocessing_flow(*args, **kwargs):

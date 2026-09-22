@@ -74,7 +74,7 @@ async def _ask_via_thread() -> str:
 def make_cli_ask_human_port() -> Callable[[str], Any]:
     """Корутинный порт для ``ctx.ask_human``."""
 
-    async def _ask(question: str) -> str:
+    async def _ask(question: str) -> str:  # noqa: ARG001  # часть контракта: подпись менять нельзя
         fd = pollable_stdin_fd()
         if fd is None:
             return await _ask_via_thread()

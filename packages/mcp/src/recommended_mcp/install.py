@@ -534,7 +534,7 @@ def _fetch_expected_sha256(archive_filename: str) -> str:
     with urllib.request.urlopen(url, timeout=60) as resp:
         body = resp.read().decode("utf-8")
     for line in body.splitlines():
-        # Формат: "<64hex>  <filename>"
+        # Формат: "<64hex>  <filename>"  # noqa: ERA001  # описание формата, не выключенный код
         parts = line.split()
         if len(parts) == 2 and parts[1] == archive_filename:
             return parts[0]

@@ -204,7 +204,7 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
             )
         return None
 
-    # AGENT (text)
+    # AGENT (text)  # noqa: ERA001  # описание формата, не выключенный код
     if role == "assistant":
         text = _extract_assistant_text(msg.get("content"))
         if text:

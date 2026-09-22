@@ -82,7 +82,7 @@ def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> in
     return max(int(minimum), reduced)
 
 
-async def arequest_chat_completions_with_policy(
+async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
     initial_max_tokens: int,

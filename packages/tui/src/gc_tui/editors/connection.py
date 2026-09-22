@@ -494,9 +494,8 @@ class ConnectionEditor(Vertical):
         active = _auth_active(self._auth_header)
         if self._no_auth != (active == 1):
             return True  # галка отличается от действующего варианта
-        if not self._no_auth and token:
-            return True  # галка ○ (Bearer) и введён новый токен
-        return False
+        # галка ○ (Bearer) и введён новый токен
+        return bool(not self._no_auth and token)
 
     def submit(self) -> tuple[str | None, str | None, str | None, str | None]:
         """(url|None, header|None, error|None, proxy|None). None-значение = не менять.

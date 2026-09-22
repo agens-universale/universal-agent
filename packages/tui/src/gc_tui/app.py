@@ -5,7 +5,10 @@ from __future__ import annotations
 import threading
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from gc_core.model_router import ModelRouter
 
 from gc_core.runtime_notices import (
     collect_runtime_notices,

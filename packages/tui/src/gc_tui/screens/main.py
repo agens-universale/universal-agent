@@ -12,7 +12,10 @@ import uuid
 from collections import namedtuple
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
@@ -2953,7 +2956,7 @@ class TraceScreen(Screen):
         if not self._pending_user_widgets:
             return
         tid = self.app.tui_state.active_task_id
-        for cid, widget in self._pending_user_widgets.items():
+        for _cid, widget in self._pending_user_widgets.items():
             widget.set_state("failed")
         if tid is not None and self._store is not None:
             records = (self._store.get_task_meta(tid).get("tui") or {}).get("pending_user_messages", [])
@@ -3088,7 +3091,7 @@ class TraceScreen(Screen):
         return bool(getattr(self, "_selecting", False))
 
     def _poll_active(self) -> None:
-        # Потолок #trace = экран минус хром. Зависит только от стабильных высот
+        # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
         # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
         self._sync_trace_max_height()
@@ -3277,9 +3280,10 @@ class TraceScreen(Screen):
             # active_task_id (или после unmount task-switch), поэтому в этой
             # ветке не уничтожаем его, а даём _stop_for_ask_human перевести
             # в terminal-state (cancelled).
-            if not ask_human_active:
-                if self._thinking is None or not is_terminal_indicator_state(self._thinking._state):
-                    self._destroy_thinking_indicator()
+            if not ask_human_active and (
+                self._thinking is None or not is_terminal_indicator_state(self._thinking._state)
+            ):
+                self._destroy_thinking_indicator()
             if not _frozen:
                 self._clear_stream_block()
             self._refresh_footer()

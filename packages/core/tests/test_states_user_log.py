@@ -140,7 +140,7 @@ def test_seed_user_ask_appends_only_to_current():
 def test_multiple_user_asks_at_open_turn_like_agent_executor():
     state = _make_state()
     bodies = ["первый запрос", "второй запрос", "третий запрос"]
-    for idx, body in enumerate(bodies):
+    for _idx, body in enumerate(bodies):
         state.finish_gate_rejection_count = 0
         state.current_user_intent = append_user_ask_deduped(
             state.current_user_intent,

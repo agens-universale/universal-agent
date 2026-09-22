@@ -332,7 +332,7 @@ async def test_a_write_failure_past_the_slot_picker_closes_it_and_refocuses(tmp_
         assert "не сохранено" in _notice(scr)
         focused = scr.app.focused
         assert focused is not None and focused.id and focused.id.startswith("mef-"), (
-            "фокус не вернулся в форму: {!r}".format(focused)
+            f"фокус не вернулся в форму: {focused!r}"
         )
         assert cfg_file.read_bytes() == before
 

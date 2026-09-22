@@ -33,7 +33,7 @@ def _make_logger(tmp_path, level="info"):
 
 
 def _records(path):
-    for handler in list(__import__("logging").getLogger().handlers):
+    for _handler in list(__import__("logging").getLogger().handlers):
         pass
     with open(path, encoding="utf-8") as fd:
         return [json.loads(line) for line in fd if line.strip()]

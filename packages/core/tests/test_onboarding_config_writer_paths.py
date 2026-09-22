@@ -149,5 +149,5 @@ def test_field_anchor_paths_resolve_in_real_template():
     from gc_core.config import _default_config_path
 
     template = Path(_default_config_path()).read_text(encoding="utf-8")
-    for leaf, dotted in onboarding.FIELD_ANCHOR_PATHS.items():
+    for _leaf, dotted in onboarding.FIELD_ANCHOR_PATHS.items():
         w.find_anchor(template, dotted)  # KeyError = спека/шаблон разошлись
