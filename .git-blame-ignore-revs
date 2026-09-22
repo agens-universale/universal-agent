@@ -1,0 +1,7 @@
+# Коммиты, которые не должны попадать в git blame: только механика, ни одной
+# смысловой правки. Включить у себя:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# Подробности — docs/code-quality.md.
+
+# style: ruff format — форматтер прошёл по всему репозиторию (1352 файла)
+79a778a8151ae8e217a755436a1e351878f44779
