@@ -101,7 +101,8 @@ Behavior:
             body={"error": {"type": error_type, "message": message}},
         )
 
-    def __call__(
+
+    async def acall(
         self,
         action: str,
         offset: int = 0,

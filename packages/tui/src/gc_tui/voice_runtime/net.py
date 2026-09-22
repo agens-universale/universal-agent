@@ -7,10 +7,11 @@ SSLError, хотя браузеры работают. Лечение — как 
 поэтому включаем её ТОЛЬКО по факту TLS-ошибки в voice-пути и ровно один раз на
 процесс.
 
-POST: `post()` — единственный способ голоса сходить в сеть. Дефолтная сессия
-requests сюда не годится: при trust_env=True она читает ~/.netrc, и Basic-auth
-оттуда ПЕРЕТИРАЕТ явный Authorization → 401 на рабочем токене (грабля, которую
-backend уже обошёл через utils.http_session.NO_NETRC_SESSION)."""
+POST: `post()` — единственный способ голоса сходить в сеть. Клиент по умолчанию
+сюда не годится: при trust_env=True он читает ~/.netrc, и Basic-auth оттуда
+ПЕРЕТИРАЕТ явный Authorization → 401 на рабочем токене (грабля, которую backend
+уже обошёл через utils.http_session.NO_NETRC_SESSION). Этот клиент — httpx:
+ядро переехало на него целиком, и голос ходит в сеть им же."""
 
 from __future__ import annotations
 
@@ -20,21 +21,24 @@ from typing import Callable, Optional, TypeVar
 
 from gc_core.utils.url_addr import is_loopback
 
-import requests
-
 T = TypeVar("T")
 
 _injected = False
 
 
-def _is_tls_error(exc: BaseException) -> bool:
-    if isinstance(exc, (ssl.SSLError, requests.exceptions.SSLError)):
-        return True
-    # huggingface_hub заворачивает сетевые ошибки; SSLError лежит в цепочке причин
+def is_tls_error(exc: BaseException) -> bool:
+    """TLS ли это — по всей цепочке причин, а не по верхнему типу.
+
+    httpx отдаёт провал рукопожатия как `ConnectError`, и настоящая причина лежит
+    глубже: `httpx.ConnectError -> httpcore.ConnectError -> ssl.SSLError`
+    (проверено на самоподписанном сертификате). huggingface_hub заворачивает свои
+    сетевые ошибки так же. Раньше здесь стоял ещё и `requests.exceptions.SSLError`,
+    но POST давно идёт клиентом ядра на httpx, и совпасть тот тип уже не мог.
+    """
     seen = set()
-    cur = exc.__cause__ or exc.__context__
+    cur: Optional[BaseException] = exc
     while cur is not None and id(cur) not in seen:
-        if isinstance(cur, (ssl.SSLError, requests.exceptions.SSLError)):
+        if isinstance(cur, ssl.SSLError):
             return True
         seen.add(id(cur))
         cur = cur.__cause__ or cur.__context__
@@ -58,7 +62,7 @@ def with_system_trust_retry(fn: Callable[[], T]) -> T:
     try:
         return fn()
     except Exception as exc:
-        if not _is_tls_error(exc) or _injected:
+        if not is_tls_error(exc) or _injected:
             raise
         _inject()
         _injected = True
@@ -77,9 +81,18 @@ def post(url: str, *, config_proxy: Optional[str] = None, **kwargs):
     им Authorization. Плата за trust_env=False — сессия перестаёт видеть и env-прокси,
     поэтому прокси считаем явно тем же резолвером, что backend: config → env → прямо.
     Loopback исключаем всегда: локальная батарейка живёт на этой же машине.
+
+    После инъекции системного траста просим СВЕЖИЙ клиент: `inject_into_ssl`
+    действует на контексты, созданные после неё, а у общего клиента контекст
+    построен при импорте модуля. Пока повтор шёл общим клиентом, он повторял
+    запрос с теми же корнями certifi и падал так же — то есть повтор, ради
+    которого всё и затевалось, не менял ничего. Через прокси это было незаметно:
+    там под запрос и так поднимается свой транспорт.
     """
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
     proxies = None if is_loopback(url) else resolve_proxies(config_proxy, os.environ, url)
-    return NO_NETRC_SESSION.post(url, proxies=proxies, **kwargs)
+    return NO_NETRC_SESSION.post(
+        url, proxies=proxies, fresh_client=_injected, **kwargs
+    )

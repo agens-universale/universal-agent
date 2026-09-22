@@ -1,6 +1,7 @@
 from gc_core.persistence.schema import normalize_session_todo, serialize_shared_block
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import SharedStateData
+from gc_testkit import run_coro
 
 ITEMS = [
     {"content": "Изучить код", "status": "completed"},
@@ -86,7 +87,7 @@ def test_session_todo_survives_compaction_payload():
     (поле есть только в этой ветке, поэтому тест живёт отдельно от фикса)."""
     import types
     from unittest.mock import patch
-    from gc_core.summarize.compaction import run_summary_compaction
+    from gc_core.summarize.compaction import arun_summary_compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
     state = types.SimpleNamespace(
@@ -102,7 +103,7 @@ def test_session_todo_survives_compaction_payload():
     ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
     captured: dict = {}
 
-    def _fake_summarize(**_kw):
+    async def _fake_summarize(**_kw):
         return {"raw_summary": "<summary>ok</summary>", "num_batches": 1,
                 "last_dialog_steps": "", "memory_append_deltas": WorkingMemoryDeltas(),
                 "memory_replace_deltas": WorkingMemoryDeltas(), "memory_append_touched": [],
@@ -113,10 +114,10 @@ def test_session_todo_survives_compaction_payload():
          patch("gc_core.summarize.compaction.log_summary_raw_text"), \
          patch("gc_core.summarize.compaction.log_summary_message_body"), \
          patch("gc_core.summarize.compaction.log_compaction_completed"), \
-         patch("gc_core.summarize.compaction.summarize_dialog_via_chat_completions", _fake_summarize), \
+         patch("gc_core.summarize.compaction.asummarize_dialog_via_chat_completions", _fake_summarize), \
          patch("gc_core.summarize.compaction.apply_summary_state_patch", lambda **_kw: "body"):
-        run_summary_compaction(ctx=ctx, state=state, trigger_reason="test",
+        run_coro(arun_summary_compaction(ctx=ctx, state=state, trigger_reason="test",
                                is_cli_mode=False,
-                               on_summary_applied=lambda e: captured.update(e))
+                               on_summary_applied=lambda e: captured.update(e)))
 
     assert captured["summary_payload"]["shared"]["session_todo"] == ITEMS

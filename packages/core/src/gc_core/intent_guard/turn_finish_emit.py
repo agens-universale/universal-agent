@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from gc_core.utils.aio_compat import await_callback
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
@@ -42,7 +43,7 @@ def patch_function_call_output(
     return None
 
 
-def apply_finish_gate_to_turn_finish_output_in_state(
+async def apply_finish_gate_to_turn_finish_output_in_state(
     *,
     state: Any,
     finish_call_id: str,
@@ -96,7 +97,7 @@ def apply_finish_gate_to_turn_finish_output_in_state(
 
     if persist_messages_callback is not None:
         try:
-            persist_messages_callback([updated_message])
+            await await_callback(persist_messages_callback([updated_message]))
         except Exception as exc:
             log.warning(
                 "finish_gate finish_turn_output_persist_warning call_id=%s error=%s",

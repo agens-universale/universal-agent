@@ -381,7 +381,7 @@ def test_size_from_walk_spares_getsize():
 
     backend = _Counting({"/work/app.py": "print(1)\n"})
     tool = FindFilesByName.__new__(FindFilesByName)
-    bind_os_backend(tool, backend)
+    tool = bind_os_backend(tool, backend)
 
     data = json.loads(tool(path="/work", query="app"))
 

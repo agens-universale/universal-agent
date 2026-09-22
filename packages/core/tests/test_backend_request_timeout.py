@@ -2,14 +2,13 @@
 
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
-
 import pytest
 import yaml
 
 from gc_core.config import load_config
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC, BackendConfig
 from gc_core.utils import connect_backend
+from gc_testkit import run_coro
 
 
 def test_backend_config_timeout_default():
@@ -54,30 +53,45 @@ def test_load_config_timeout_default_when_omitted():
         assert cfg["backend_request_timeout_sec"] == DEFAULT_REQUEST_TIMEOUT_SEC
 
 
-def test_chat_completions_passes_timeout():
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
-        connect_backend.request_backend_chat_completions(
-            {"messages": []},
-            {},
-            url="https://b/v1/chat",
-            use_retry=False,
-            timeout=120,
-        )
-    assert post.call_args.kwargs["timeout"] == 120
+def _install_capturing_transport(monkeypatch, seen):
+    """Подменить фабрику httpx-клиента, запомнив таймаут запроса.
+
+    С Задачи 9 таймаут передаётся на уровне ЗАПРОСА, а не клиента: клиент
+    переиспользуется между вызовами, и зашитый в него таймаут молча применился
+    бы к чужому запросу.
+    """
+    import httpx
+
+    class _Capturing(httpx.AsyncClient):
+        async def post(self, *args, **kwargs):
+            seen["timeout"] = kwargs.get("timeout")
+            return await super().post(*args, **kwargs)
+
+    def handler(request):
+        return httpx.Response(200, json={"id": "x", "choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr(
+        connect_backend, "get_async_client",
+        lambda **kw: _Capturing(transport=httpx.MockTransport(handler)),
+    )
 
 
-def test_chat_completions_default_timeout():
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
-        connect_backend.request_backend_chat_completions(
-            {"messages": []}, {}, url="https://b/v1/chat", use_retry=False
-        )
-    assert post.call_args.kwargs["timeout"] == DEFAULT_REQUEST_TIMEOUT_SEC
+def test_chat_completions_passes_timeout(monkeypatch):
+    seen = {}
+    _install_capturing_transport(monkeypatch, seen)
+    run_coro(connect_backend.arequest_backend_chat_completions(
+        {"messages": []}, {}, url="https://b/v1/chat", use_retry=False, timeout=120,
+    ))
+    assert seen["timeout"] == 120
+
+
+def test_chat_completions_default_timeout(monkeypatch):
+    seen = {}
+    _install_capturing_transport(monkeypatch, seen)
+    run_coro(connect_backend.arequest_backend_chat_completions(
+        {"messages": []}, {}, url="https://b/v1/chat", use_retry=False,
+    ))
+    assert seen["timeout"] == DEFAULT_REQUEST_TIMEOUT_SEC
 
 
 def test_policy_forwards_timeout(monkeypatch):
@@ -85,12 +99,12 @@ def test_policy_forwards_timeout(monkeypatch):
 
     seen = {}
 
-    def fake_req(*_args, **kwargs):
+    async def fake_req(*_args, **kwargs):
         seen["timeout"] = kwargs.get("timeout")
         return {"choices": [{"message": {"content": "ok"}}]}
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", fake_req)
-    policy.request_chat_completions_with_policy(
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", fake_req)
+    run_coro(policy.arequest_chat_completions_with_policy(
         payload_factory=lambda mt: {"max_tokens": mt},
         initial_max_tokens=100,
         min_response_tokens=10,
@@ -99,5 +113,5 @@ def test_policy_forwards_timeout(monkeypatch):
         verify=True,
         use_retry=False,
         timeout=90,
-    )
+    ))
     assert seen["timeout"] == 90

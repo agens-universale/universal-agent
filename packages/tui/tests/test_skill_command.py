@@ -3,7 +3,7 @@ import pytest
 
 
 class _FakeReg:
-    def list_skills(self, *, pack=None, include_all=False):
+    async def list_skills(self, *, pack=None, include_all=False):
         return [
             {"id": "supercoder", "name": "supercoder", "description": "supercoder pack"},
             {"id": "codebase", "name": "codebase", "description": "codebase pack"},

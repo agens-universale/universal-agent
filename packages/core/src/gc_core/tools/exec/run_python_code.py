@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import exec_timeout_from_config_dict
 from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
@@ -150,7 +151,7 @@ Usage:
 
     @enforce_command_guard(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
     @moderate_command_execution(payload_arg="code", tool_name=EXEC_PYTHON_NAME)
-    def __call__(
+    async def acall(
         self,
         code: str,
         timeout: Optional[int] = None,
@@ -158,6 +159,45 @@ Usage:
         env_vars: Optional[list[dict]] = None,
         **kwargs,
     ) -> str:
+        """Нативный вход: процесс через ``asyncio.create_subprocess_exec``.
+
+        Ровно та же причина, что у ``exec_command``: слот общего пула держался
+        весь таймаут запуска. Гварды навешены и здесь — иначе асинхронный путь
+        обошёл бы политику. ``aexec_port`` вместо прямого ``backend.arun_python``
+        оставляет рабочими бэкенды без нативного запуска (harbor, TUI).
+        """
+        early, plan = await self._plan(code, timeout, cwd, env_vars, **kwargs)
+        if early is not None:
+            return early
+        try:
+            res = await aexec_port(self._backend).arun_python(
+                plan["code"], cwd=plan["cwd"], timeout=plan["timeout"],
+                env=plan["env"],
+            )
+        except Exception as exc:
+            return self._exec_failed(exc)
+        return self._finish(res, plan)
+
+    def _exec_failed(self, exc: Exception) -> str:
+        """Отказ запуска — общий для обоих входов."""
+        return self._result(
+            ok=False,
+            return_code=None,
+            timed_out=False,
+            stdout="",
+            stderr="",
+            error={"type": "execution_failed", "message": str(exc)},
+        )
+
+    async def _plan(
+        self,
+        code: str,
+        timeout: Optional[int],
+        cwd: Optional[str],
+        env_vars: Optional[list[dict]],
+        **kwargs,
+    ) -> "tuple[str | None, dict]":
+        """Разобрать и проверить аргументы. Общее для обоих входов."""
         if not isinstance(code, str):
             return self._result(
                 ok=False,
@@ -166,7 +206,7 @@ Usage:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code"},
-            )
+            ), {}
 
         if not code.strip():
             return self._result(
@@ -176,7 +216,7 @@ Usage:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "code", "message": "Code is empty"},
-            )
+            ), {}
 
         effective_timeout = (
             timeout
@@ -191,7 +231,7 @@ Usage:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "timeout"},
-            )
+            ), {}
 
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
@@ -202,11 +242,11 @@ Usage:
                 stdout="",
                 stderr="",
                 error={"type": "invalid_argument", "field": "cwd"},
-            )
+            ), {}
 
         if self._backend.is_sandbox:
             cwd_used = cwd  # None → container default workdir
-            if cwd_used is not None and not self._backend.is_dir(cwd_used):
+            if cwd_used is not None and not await self._backend.is_dir(cwd_used):
                 return self._result(
                     ok=False,
                     return_code=None,
@@ -223,7 +263,7 @@ Usage:
                             "use one of those paths — they are the writable locations allowed for this agent run."
                         ),
                     },
-                )
+                ), {}
         else:
             security_context = resolve_tool_context(self, **kwargs)
             cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
@@ -258,7 +298,7 @@ Usage:
                             "use one of those paths — they are the writable locations allowed for this agent run."
                         ),
                     },
-                )
+                ), {}
 
         env_map: Optional[Dict[str, str]] = None
         if env_vars is not None:
@@ -274,7 +314,7 @@ Usage:
                         "field": "env_vars",
                         "message": "env_vars must be a list of key/value pairs: [{'name': 'KEY', 'value': 'VALUE'}]",
                     },
-                )
+                ), {}
             parsed: Dict[str, str] = {}
             for idx, item in enumerate(env_vars):
                 if not isinstance(item, dict):
@@ -289,7 +329,7 @@ Usage:
                             "field": f"env_vars[{idx}]",
                             "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
                         },
-                    )
+                    ), {}
                 name = item.get("name")
                 if not isinstance(name, str) or not name.strip():
                     return self._result(
@@ -299,7 +339,7 @@ Usage:
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].name"},
-                    )
+                    ), {}
                 value = item.get("value")
                 if not isinstance(value, str):
                     return self._result(
@@ -309,23 +349,22 @@ Usage:
                         stdout="",
                         stderr="",
                         error={"type": "invalid_argument", "field": f"env_vars[{idx}].value"},
-                    )
+                    ), {}
                 parsed[name.strip()] = value
             env_map = parsed
 
-        try:
-            res = self._backend.run_python(
-                code, cwd=cwd_used, timeout=effective_timeout, env=env_map
-            )
-        except Exception as e:
-            return self._result(
-                ok=False,
-                return_code=None,
-                timed_out=False,
-                stdout="",
-                stderr="",
-                error={"type": "execution_failed", "message": str(e)},
-            )
+        return None, {
+            "code": code,
+            "cwd": cwd_used,
+            "timeout": effective_timeout,
+            "env": env_map,
+        }
+
+    def _finish(self, res: "Any", plan: dict) -> str:
+        """Разобрать результат запуска. Общий для обоих входов."""
+        cwd_used = plan["cwd"]
+        effective_timeout = plan["timeout"]
+
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.

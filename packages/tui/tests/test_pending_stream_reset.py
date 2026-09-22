@@ -36,7 +36,7 @@ async def test_pending_record_survives_stream_reset(tmp_path):
 
     class _Fake:
         """Блокируется до stop_run; ничего не пишет (пишем «компакцию» сами)."""
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             self._evt = threading.Event()
             self._evt.wait(timeout=30.0)
         def stop_run(self):

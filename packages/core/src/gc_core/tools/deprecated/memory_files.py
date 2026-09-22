@@ -236,7 +236,7 @@ Return format (JSON string):
             error=err,
         )
 
-    def __call__(
+    async def acall(
         self,
         action: str,
         file_name: str = "journal",

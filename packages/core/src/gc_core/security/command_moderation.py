@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import os
@@ -9,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
+
 from gc_core.config_modules.security import validate_command_moderation_mode
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.confirm_port import confirm_available, request_confirm
@@ -16,7 +17,7 @@ from gc_core.security.path_policy import ToolSecurityContext, _extract_config_di
 from gc_core.security.protected_paths import protected_paths
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.message_projection import project_text_for_model
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens, request_auxiliary_completion_text
+from gc_core.summarize.llm import arequest_auxiliary_completion_text, auxiliary_llm_completion_kwargs, auxiliary_llm_judge_max_tokens
 from gc_core.utils.project_data import os_label
 from gc_core.bundled_assets import bundled_root
 
@@ -177,6 +178,36 @@ def run_command_judge_with_retry(
     raise last_exc
 
 
+def judge_with_retry_flow(judge_client: Any, judge_payload: dict[str, Any], *, retries: int = 1):
+    """То же правило ретраев, но вызов судьи отдан ДРАЙВЕРУ гварда.
+
+    Тело гварда делегирует сюда через `yield from`: `AwaitOnCaller` уводит
+    корутину судьи на loop вызывающего (соединение и пул общие с агентом),
+    `OffLoop` — синхронного судью в поток. Отказ прилетает обратно в точку
+    `yield` через `throw`, поэтому `try/except` здесь работает ровно так же,
+    как вокруг прямого вызова в синхронном близнеце.
+    """
+    if judge_client is None:
+        raise JudgeUnavailable("judge client is not configured")
+    request = (
+        AwaitOnCaller if inspect.iscoroutinefunction(judge_client) else OffLoop
+    )
+    last_exc: Exception | None = None
+    for _ in range(retries + 1):
+        try:
+            if request is AwaitOnCaller:
+                raw = yield AwaitOnCaller(lambda: judge_client(judge_payload))
+            else:
+                raw = yield OffLoop(judge_client, judge_payload)
+            if isinstance(raw, JudgeResult):
+                return raw
+            return validate_judge_result(raw)
+        except Exception as exc:
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
 def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
     if not isinstance(raw, dict):
         raise ValueError("judge result must be an object")
@@ -197,6 +228,12 @@ def validate_judge_result(raw: dict[str, Any]) -> JudgeResult:
         risk_flags=risk_flags,
         confidence=confidence_float,
     )
+
+
+#: Промежуточное решение режима deny при недоступном судье: нужен ответ
+#: ЧЕЛОВЕКА. Отдельный код — чтобы драйвер не подставил вместо человека
+#: экстрактор подтверждения из аргументов вызова, то есть от модели.
+JUDGE_UNAVAILABLE_CONFIRM_REQUIRED = "judge_unavailable_confirm_required"
 
 
 def decide_command_execution(
@@ -239,21 +276,29 @@ def decide_command_execution(
                 reason="Judge is unavailable; user confirmation is required.",
                 requires_confirmation=True,
             )
-        # C1 Часть 2: при недоступности судьи в deny — пробуем confirm-порт.
-        if confirm_available(ctx):
-            confirmed = request_confirm(
-                title="Проверка команды",
-                question="Судья недоступен. Выполнить команду?",
-                fields=[("mode", normalized_mode)],
-                ctx=ctx,
+        # C1 Часть 2: при недоступности судьи в deny — спросить через confirm-порт.
+        #
+        # Сама функция человека НЕ спрашивает: решение здесь чистое, а ожидание
+        # человека — дело драйвера гарда (`yield OffLoop(...)` в теле ниже).
+        # Раньше `request_confirm` звался прямо отсюда, а функцию тело гарда
+        # зовёт инлайн — в асинхронном пути ожидание человека (в TUI до 600 с)
+        # шло прямо на event loop агента. Протокол теперь двухшаговый, как у
+        # режима ask: сначала «нужно подтверждение», потом решение по ответу.
+        if user_confirmation is True:
+            return ExecutionDecision(
+                allowed=True,
+                decision="executed",
+                reason_code="judge_unavailable_user_confirmed",
+                reason="User confirmed execution after judge was unavailable.",
             )
-            if confirmed:
-                return ExecutionDecision(
-                    allowed=True,
-                    decision="executed",
-                    reason_code="judge_unavailable_user_confirmed",
-                    reason="User confirmed execution after judge was unavailable.",
-                )
+        if user_confirmation is None and confirm_available(ctx):
+            return ExecutionDecision(
+                allowed=False,
+                decision="asked",
+                reason_code=JUDGE_UNAVAILABLE_CONFIRM_REQUIRED,
+                reason="Judge is unavailable; user confirmation is required.",
+                requires_confirmation=True,
+            )
         # Fail-closed: confirm недоступен или пользователь отказал — блокируем.
         return ExecutionDecision(
             allowed=False,
@@ -340,8 +385,17 @@ def moderate_command_execution(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        # Тело — ГЕНЕРАТОР: `dual_wrap` строит по нему обе обёртки. Обычный
+        # декоратор на `async def acall` ломался молча — в ветке отказа отдавал
+        # строку вместо корутины. `return (yield)` — точка вызова самого тула.
+        #
+        # Тело идёт ИНЛАЙН: блокирующего в нём самом не осталось. Судью оно
+        # просит у драйвера через `AwaitOnCaller` (корутина ждётся на loop
+        # вызывающего, на общем пуле соединений), ожидание человека — через
+        # `OffLoop` (свой поток). Раньше в поток уезжало тело ЦЕЛИКОМ, и
+        # судья звался оттуда через `run_coro_blocking`: свой `asyncio.run`,
+        # свой пул httpx и новое TLS-рукопожатие на каждый `exec_command`.
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             # Если в config_dict отсутствует блок command_moderation вообще —
             # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
@@ -353,17 +407,17 @@ def moderate_command_execution(
             )
             cm_cfg = _cfg.get("command_moderation")
             if not isinstance(cm_cfg, dict):
-                return func(*args, **kwargs)
+                return (yield)
             # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
             # На нормальном пути load_config кладёт command_moderation из pydantic
             # (secure-by-default enabled=True), поэтому fallback достижим лишь в
             # обход load_config (bespoke/тест-конфиги), а не в проде.
             if not bool(cm_cfg.get("enabled", False)):
-                return func(*args, **kwargs)
+                return (yield)
             try:
                 payload = _extract_payload(func, args, kwargs, payload_arg, payload_extractor)
             except ValueError:
-                return func(*args, **kwargs)
+                return (yield)
             moderation_context = _build_context(tool_name or func.__name__, context, kwargs)
             if moderation_context.mode == "allow":
                 audit_policy_decision(
@@ -372,7 +426,7 @@ def moderate_command_execution(
                     decision="executed",
                     reason_code="policy_allow",
                 )
-                return func(*args, **kwargs)
+                return (yield)
 
             judge_result = None
             judge_available = True
@@ -382,7 +436,7 @@ def moderate_command_execution(
                     if judge_client_extractor is not None
                     else _default_judge_client(args, kwargs)
                 )
-                judge_result = run_command_judge_with_retry(
+                judge_result = yield from judge_with_retry_flow(
                     judge_client,
                     build_judge_payload(moderation_context.tool_name, payload, moderation_context),
                     retries=1,
@@ -412,11 +466,25 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                user_confirmation = (
-                    user_confirmation_extractor(*args, **kwargs)
-                    if user_confirmation_extractor is not None
-                    else _ask_user_confirmation(payload, moderation_context, decision, ctx=tool_ctx)
-                )
+                # Экстрактор — только для режима ask. В deny подтверждение даёт
+                # человек через порт: иначе подтверждение из аргументов вызова
+                # (то есть от модели) разрешало бы команду при недоступном судье.
+                if (
+                    user_confirmation_extractor is not None
+                    and decision.reason_code != JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
+                ):
+                    user_confirmation = user_confirmation_extractor(*args, **kwargs)
+                else:
+                    # Единственное, что остаётся блокирующим по существу:
+                    # человек думает, и асинхронной формы у этого нет.
+                    user_confirmation = yield OffLoop(
+                        _ask_user_confirmation,
+                        payload,
+                        moderation_context,
+                        decision,
+                        tool_ctx,
+                        on_interrupt=False,
+                    )
                 decision = decide_command_execution(
                     moderation_context.mode,
                     judge_result,
@@ -433,7 +501,7 @@ def moderate_command_execution(
                     risk_flags=decision.risk_flags,
                     error_type=decision.error_type,
                 )
-                return func(*args, **kwargs)
+                return (yield)
             error = make_block_error(decision, moderation_context.mode)
             audit_policy_decision(
                 context,
@@ -457,7 +525,7 @@ def moderate_command_execution(
                 ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator
 
@@ -562,7 +630,18 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
-def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+def _default_judge_client(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Callable[[dict[str, Any]], Any]:
+    """Судья модерации: корутина, которую ждёт loop ВЫЗЫВАЮЩЕГО.
+
+    Прежняя редакция была синхронной и поднимала `asyncio.run` на каждый
+    вызов — свежий пул httpx и новое TLS-рукопожатие к LLM на КАЖДЫЙ
+    модерируемый `exec_command`, при том что соединение агента простаивало
+    рядом. Шов остался один и под тем же именем: `judge_with_retry_flow`
+    сама смотрит, корутинный ей отдали судью или обычный, поэтому подмена
+    синхронной заглушкой в тестах работает по-прежнему.
+    """
     self_obj = args[0] if args else None
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
@@ -570,12 +649,11 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
     if ctx is None or state is None or not cfg.get("completions_url"):
         raise JudgeUnavailable("chat/completions context is not configured")
 
-    def judge(judge_payload: dict[str, Any]) -> dict[str, Any]:
-        messages = _build_judge_messages(judge_payload)
-        raw_text = request_auxiliary_completion_text(
+    async def ajudge(judge_payload: dict[str, Any]) -> dict[str, Any]:
+        raw_text = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=messages,
+            messages=_build_judge_messages(judge_payload),
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
@@ -589,7 +667,7 @@ def _default_judge_client(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Call
             tags=tags,
         )
 
-    return judge
+    return ajudge
 
 
 def _build_judge_messages(judge_payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -727,6 +805,7 @@ def _ask_user_confirmation(
     decision: ExecutionDecision,
     ctx: Any = None,
 ) -> bool:
+    """Ожидание человека. Зовётся драйвером гварда в отдельном потоке."""
     primary_label = _primary_payload_label(context.tool_name)
     # Full payload as-is: TUI banner scrolls body + docks Y/O/N/T.
     return request_confirm(

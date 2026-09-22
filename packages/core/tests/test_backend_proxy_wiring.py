@@ -1,16 +1,21 @@
-"""backend.proxy → config_dict["proxy"] → connect_backend proxies= на post."""
+"""backend.proxy → config_dict["proxy"] → proxies при создании httpx-клиента.
+
+С Задачи 9 прокси едут в httpx-клиент (mounts по схемам), а не kwargs
+запроса, — поэтому наблюдаем параметры создания клиента.
+"""
 
 from __future__ import annotations
 
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
-
 import yaml
 
 from gc_core.config import load_config
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.utils import connect_backend
+
+from transport_fakes import install_transport
+from gc_testkit import run_coro
 
 
 def test_backend_config_proxy_default_none():
@@ -62,19 +67,15 @@ def test_chat_completions_passes_resolved_proxies(monkeypatch):
     monkeypatch.delenv("NO_PROXY", raising=False)
     monkeypatch.delenv("no_proxy", raising=False)
 
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
-        connect_backend.request_backend_chat_completions(
-            {"messages": []},
-            {},
-            url="https://api.example/v1/chat",
-            use_retry=False,
-            config_proxy="socks5h://proxy.example:1080",
-        )
-    kwargs = post.call_args.kwargs
-    assert kwargs["proxies"] == {
+    spy = install_transport(monkeypatch)
+    run_coro(connect_backend.arequest_backend_chat_completions(
+        {"messages": []},
+        {},
+        url="https://api.example/v1/chat",
+        use_retry=False,
+        config_proxy="socks5h://proxy.example:1080",
+    ))
+    assert spy.last_client_kwargs["proxies"] == {
         "http": "socks5h://proxy.example:1080",
         "https": "socks5h://proxy.example:1080",
     }
@@ -89,18 +90,15 @@ def test_chat_completions_falls_back_to_env_proxy(monkeypatch):
     monkeypatch.delenv("no_proxy", raising=False)
     monkeypatch.setenv("HTTPS_PROXY", "http://env-proxy:8080")
 
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
-        connect_backend.request_backend_chat_completions(
-            {"messages": []},
-            {},
-            url="https://api.example/v1/chat",
-            use_retry=False,
-            config_proxy=None,
-        )
-    assert post.call_args.kwargs["proxies"] == {
+    spy = install_transport(monkeypatch)
+    run_coro(connect_backend.arequest_backend_chat_completions(
+        {"messages": []},
+        {},
+        url="https://api.example/v1/chat",
+        use_retry=False,
+        config_proxy=None,
+    ))
+    assert spy.last_client_kwargs["proxies"] == {
         "http": "http://env-proxy:8080",
         "https": "http://env-proxy:8080",
     }
@@ -111,19 +109,34 @@ def test_chat_completions_no_proxy_bypasses_config(monkeypatch):
     monkeypatch.delenv("https_proxy", raising=False)
     monkeypatch.setenv("NO_PROXY", "api.example")
 
-    fake = MagicMock()
-    fake.json.return_value = {"id": "x", "choices": [{"message": {"content": "ok"}}]}
-    fake.raise_for_status.return_value = None
-    with patch.object(connect_backend._NO_NETRC_SESSION, "post", return_value=fake) as post:
-        connect_backend.request_backend_chat_completions(
-            {"messages": []},
-            {},
-            url="https://api.example/v1/chat",
-            use_retry=False,
-            config_proxy="http://proxy.example:8080",
-        )
-    assert post.call_args.kwargs["proxies"] is None
+    spy = install_transport(monkeypatch)
+    run_coro(connect_backend.arequest_backend_chat_completions(
+        {"messages": []},
+        {},
+        url="https://api.example/v1/chat",
+        use_retry=False,
+        config_proxy="http://proxy.example:8080",
+    ))
+    assert spy.last_client_kwargs["proxies"] is None
 
 
 def test_trust_env_stays_false():
-    assert connect_backend._NO_NETRC_SESSION.trust_env is False
+    """Контракт один на оба клиента: ~/.netrc и env-прокси не читаем.
+
+    Синхронный общий клиент (`NO_NETRC_SESSION`) из `connect_backend` ушёл
+    вместе с легаси-транспортом, но живёт для `model_picker` и `prod_auth` —
+    его и проверяем по месту, а не через реэкспорт."""
+    from gc_core.utils.async_http import get_async_client
+    from gc_core.utils.http_session import NO_NETRC_SESSION
+
+    assert NO_NETRC_SESSION.trust_env is False
+
+    async def _check():
+        from gc_core.utils.async_http import aclose_clients
+        try:
+            assert get_async_client().trust_env is False
+        finally:
+            await aclose_clients()
+
+    import asyncio
+    asyncio.run(_check())

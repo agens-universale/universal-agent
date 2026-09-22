@@ -522,14 +522,40 @@ def test_setup_guide_marks_config_created_when_just_created():
     assert "Конфигурация:" in existing
 
 
-def test_setup_guide_mentions_gc_mcp():
-    """pending-подсказка упоминает gc-mcp для установки MCP-серверов."""
-    cfg = {
+def _pending_cfg():
+    return {
         "completions_url": onboarding.URL_SENTINEL,
         "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
         "model": "gigacode_agent_v1.6_rc",
     }
-    assert "gc-mcp install" in onboarding.setup_guide("/p", cfg)
+
+
+def test_setup_guide_mentions_gc_mcp(monkeypatch):
+    """pending-подсказка упоминает gc-mcp для установки MCP-серверов.
+
+    ``gc-mcp`` в PATH пинуется: подсказка выбирает ветку по
+    ``shutil.which``, и без пина проверка читала бы PATH машины —
+    на хосте без установленного gc-mcp она краснела на своём же окружении,
+    а не на регрессе.
+    """
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/gc-mcp")
+    assert "gc-mcp install" in onboarding.setup_guide("/p", _pending_cfg())
+
+
+def test_setup_guide_tells_how_to_get_gc_mcp_when_absent(monkeypatch):
+    """Узкий профиль: gc-mcp нет в PATH — советуем доставку, а не команду.
+
+    Советовать `gc-mcp install` там, где его нет, значит советовать
+    command not found.
+    """
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    guide = onboarding.setup_guide("/p", _pending_cfg())
+    assert "gc-mcp install" not in guide
+    assert "uv tool install" in guide
 
 
 # --- алиас записи реестра из провайдерского id ----------------------------

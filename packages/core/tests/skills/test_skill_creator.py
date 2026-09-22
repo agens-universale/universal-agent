@@ -87,14 +87,14 @@ def _sample_skill() -> tuple[Path, str]:
     raise AssertionError("no sample skill with SKILL.md found under skills/")
 
 
-def test_skill_creator_loads_via_registry():
+async def test_skill_creator_loads_via_registry():
     """skill-creator must be discoverable in the registry with correct metadata.
 
     In the lean version we don't ship references/ — so detail['references']
     should be empty.
     """
     with _registry() as registry:
-        detail = registry.load_skill_detail("skill-creator")
+        detail = await registry.load_skill_detail("skill-creator")
 
         assert detail["id"] == "skill-creator"
         assert detail["name"]

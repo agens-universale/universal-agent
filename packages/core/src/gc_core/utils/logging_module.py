@@ -5,7 +5,7 @@ import os
 import sys
 import time
 import uuid
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, List, Optional
 
 from gc_core.trace_id import trace_id_from_config, trace_id_slug
 
@@ -232,17 +232,39 @@ def create_run_logger(
     config_dict: Dict[str, Any],
     run_id: Optional[str] = None,
     agent_kind: Optional[str] = None,
+    *,
+    log_handlers: Optional[List[logging.Handler]] = None,
 ) -> Tuple[logging.Logger, str, str]:
     """
     Создать per-run логгер. Формат берётся из config_dict['logging_format']:
     'text' (дефолт) = историческое поведение; 'jsonl' = структурный event-поток.
     Редактирование секретов — только при redact_secrets.enabled.
+
+    ВСТРАИВАЮЩЕМУ: своя доставка логов — через ``log_handlers``.
+
+    Абстракции для логирования у ядра нет и не нужно: возвращается обычный
+    ``logging.Logger``, а лучшего контракта, чем стандартная библиотека, не
+    придумать. Нужен был только способ подключиться, и мешали ему две вещи:
+
+    * ``logger.propagate = False`` — записи не всплывали в корневой логгер, и
+      приложение со своей настройкой ``logging`` не видело НИЧЕГО. Теперь
+      управляется ключом ``logging_propagate`` (дефолт ``false`` — прежнее
+      поведение: ран пишет в свой файл и не засоряет чужие хендлеры);
+    * ``logger.handlers.clear()`` — стирало всё, подключённое заранее. Поэтому
+      хендлеры принимаются ЗДЕСЬ и ставятся после очистки.
+
+    Файловые хендлеры ядра при этом остаются: свой обработчик ДОБАВЛЯЕТСЯ, а не
+    заменяет их. Отключить файл можно как и раньше — ``save_logs: false``.
+
+    ВНИМАНИЕ на ``ctx.logging_path`` и ``ctx.summary_trace_path``: это пути к
+    ФАЙЛАМ, и при ``save_logs: false`` они пусты. Потребители обязаны это
+    переживать (см. ``agent_executor`` и ``summarize/summary_logging``).
     """
     effective_run_id = run_id or generate_run_id()
     kind = _normalize_agent_kind(agent_kind)
     logger_name = f"agent_run_{kind}_{effective_run_id}"
     logger = logging.getLogger(logger_name)
-    logger.propagate = False
+    logger.propagate = bool(config_dict.get("logging_propagate", False))
     logger.handlers.clear()
     for existing in list(logger.filters):
         logger.removeFilter(existing)
@@ -253,12 +275,58 @@ def create_run_logger(
 
     fmt = str(config_dict.get("logging_format", "text")).strip().lower()
     if fmt == "jsonl":
-        return _build_jsonl_logger(logger, config_dict, effective_run_id, kind, redactor)
-    return _build_text_logger(logger, config_dict, effective_run_id, kind, redactor)
+        built = _build_jsonl_logger(logger, config_dict, effective_run_id, kind, redactor)
+    else:
+        built = _build_text_logger(logger, config_dict, effective_run_id, kind, redactor)
+
+    # Хендлеры вызывающего — ПОСЛЕ сборки: handlers.clear() выше стёр бы их.
+    # Их мы запоминаем как ЧУЖИЕ: закрывать чужое хозяйство не наше дело.
+    foreign = set()
+    for handler in log_handlers or ():
+        logger.addHandler(handler)
+        foreign.add(id(handler))
+    _FOREIGN_HANDLERS[logger.name] = foreign
+    return built
+
+
+#: Хендлеры, переданные вызывающим. Их ``release_run_logger`` не трогает.
+_FOREIGN_HANDLERS: dict[str, set] = {}
+
+
+def release_run_logger(logger: Any) -> None:
+    """Закрыть хендлеры прогона и снять логгер из реестра ``logging``.
+
+    Имя логгера уникально на ран (``agent_run_<kind>_<run_id>``), а
+    ``logging`` держит созданные объекты в ``loggerDict`` до конца процесса и
+    сам их не отдаёт. Один процесс — один-два логгера, и это было незаметно.
+    Но ветка объявляет сценарий «много ``AsyncAgent`` в одном процессе», где
+    каждый агент и каждый субагент заводит свой: рост становится линейным, и
+    вместе с логгерами живут ОТКРЫТЫЕ ``FlushFileHandler`` — то есть
+    дескрипторы.
+
+    Чужие хендлеры (``log_handlers`` вызывающего) не закрываются: их жизнь
+    принадлежит тому, кто их передал.
+    """
+    if logger is None:
+        return
+    name = getattr(logger, "name", None)
+    if not name or not str(name).startswith("agent_run_"):
+        return                       # не наш логгер — не наше дело
+    foreign = _FOREIGN_HANDLERS.pop(name, set())
+    for handler in list(getattr(logger, "handlers", ())):
+        logger.removeHandler(handler)
+        if id(handler) in foreign:
+            continue
+        try:
+            handler.close()
+        except Exception:
+            pass
+    logging.Logger.manager.loggerDict.pop(name, None)
 
 
 __all__ = [
     "create_run_logger",
+    "release_run_logger",
     "FlushFileHandler",
     "JsonlFormatter",
     "RunContextFilter",

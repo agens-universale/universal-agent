@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import asyncio
-import threading
-import concurrent.futures
+import os
+import logging
+import weakref
 from urllib.parse import urlsplit, urlunsplit
 
 from gc_core.utils.url_addr import is_loopback
@@ -16,145 +17,207 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.exceptions import McpError
 
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.utils.ssl_config import get_verify_ssl, get_client_cert
 from gc_core.mcp_runtime.env import mcp_stdio_env
+from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.transport import _resolve_command
 
-
-def _run_coro(coro):
-    """Run a coroutine to completion, safe even when an event loop is already
-    running on the current thread (e.g. inside the TUI's Textual loop).
-
-    Plain ``asyncio.run()`` raises ``RuntimeError: asyncio.run() cannot be
-    called from a running event loop``. When that happens we execute the
-    coroutine in a fresh worker thread (which has no running loop), so MCP
-    tool listing/calls work both from the CLI (no loop) and the TUI (loop)."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
-        return _ex.submit(asyncio.run, coro).result()
+#: Логгер модуля: сюда уходит предупреждение о нарушенном инварианте
+#: «сессия закрывается в той же задаче, где открыта».
+_LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Persistent session manager
-# Keeps one MCP ClientSession alive per server key in a background event loop.
-# This lets browser (and other stateful) MCP servers maintain context across
-# multiple tool calls within a single gc-cli process.
+# Кэш персистентных MCP-сессий
 # ---------------------------------------------------------------------------
 
 class _PersistentSessionManager:
+    """Кэш живых ``ClientSession``, ключ — ``(id(loop), server_key)``.
+
+    Раньше здесь крутился ВЕЧНЫЙ event loop в фоновом демон-потоке, а вызовы
+    уезжали в него через ``run_coroutine_threadsafe``. Это было нужно, пока
+    ядро было синхронным: корутину SDK негде было исполнить. Теперь цикл
+    агента асинхронный, и сессия живёт прямо на loop вызывающего.
+
+    Ключ включает ``id(loop)`` по той же причине, что у httpx-клиентов в
+    ``utils/async_http.py``: ``ClientSession`` держит открытые соединения,
+    привязанные к своему loop. Сессия, открытая на одном loop и
+    переиспользованная на другом, дала бы «Event loop is closed» в самый
+    неудобный момент — посреди вызова тула.
+
+    Ключ включает и ВЛАДЕЛЬЦА (см. ``gc_core.mcp_session_owner``). Без него сессии были
+    общими для всех прогонов на одном loop, и ``arun`` первого доигравшего
+    агента закрывал живые сессии остальных. Для ``stream_*`` это не просто
+    потеря состояния, а падение: сессии SDK построены на anyio-scope'ах, вошли
+    в них задачи-владельцы, и закрытие из чужой задачи отменяет не ту::
+
+        CancelledError: Cancelled via cancel scope … by <Task pending Task-5>
+
+    Воспроизводилось тремя ``AsyncAgent`` на одном loop, каждый со своим
+    браузерным сервером.
     """
-    Runs a dedicated asyncio event loop in a background daemon thread.
-    Caches open MCP ClientSession objects keyed by server_key.
-    All async calls are dispatched to that loop via run_coroutine_threadsafe.
-    """
 
-    def __init__(self):
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()
-        # server_key -> open ClientSession (async object in _loop)
-        self._sessions: Dict[str, Any] = {}
-        # server_key -> context managers stack (for cleanup)
-        self._cm_stacks: Dict[str, Any] = {}
+    def __init__(self) -> None:
+        # (owner, id(loop), server_key) -> открытая ClientSession
+        self._sessions: Dict[tuple, Any] = {}
+        # (owner, id(loop), server_key) -> стек контекст-менеджеров для закрытия
+        self._cm_stacks: Dict[tuple, Any] = {}
+        # key -> weakref на loop: голого id мало, они переиспользуются.
+        self._loops: Dict[tuple, Any] = {}
+        # key -> weakref на задачу, в которой сессию открыли.
+        self._tasks: Dict[tuple, Any] = {}
 
-    def _ensure_loop(self):
-        with self._lock:
-            if self._loop is None or not self._loop.is_running():
-                self._loop = asyncio.new_event_loop()
-                self._thread = threading.Thread(
-                    target=self._loop.run_forever,
-                    daemon=True,
-                    name="mcp-session-loop",
-                )
-                self._thread.start()
+    @staticmethod
+    def _loop_id() -> int:
+        return id(asyncio.get_running_loop())
 
-    def run(self, coro) -> Any:
-        """Submit a coroutine to the background loop and block until done."""
-        self._ensure_loop()
-        fut = concurrent.futures.Future()
+    def _key(self, server_key: str) -> tuple:
+        return (current_owner(), self._loop_id(), server_key)
 
-        async def _wrapper():
-            try:
-                result = await coro
-                fut.set_result(result)
-            except Exception as exc:
-                fut.set_exception(exc)
+    def _same_loop(self, key: tuple) -> bool:
+        """Тот ли это loop, на котором сессию заводили.
 
-        asyncio.run_coroutine_threadsafe(_wrapper(), self._loop)
-        return fut.result(timeout=120)
+        ``id`` переиспользуются между последовательными ``asyncio.run`` —
+        проверено, шестой прогон получил id третьего. У ``async_http`` та же
+        ловушка уже закрыта weakref'ом, а здесь оставалась открытой, хотя
+        сценарий ровно наш: TUI собирает контекст на одном loop, а ходы гоняет
+        на новых, и сессия мёртвого loop досталась бы живому.
+        """
+        ref = self._loops.get(key)
+        if ref is None:
+            return False
+        try:
+            return ref() is asyncio.get_running_loop()
+        except RuntimeError:
+            return False
 
     def get_session(self, server_key: str) -> Optional[Any]:
-        return self._sessions.get(server_key)
-
-    def set_session(self, server_key: str, session: Any, cm_stack: Any):
-        self._sessions[server_key] = session
-        self._cm_stacks[server_key] = cm_stack
-
-    def invalidate(self, server_key: str):
-        """Remove cached session (e.g. after an error)."""
-        self._sessions.pop(server_key, None)
-        self._cm_stacks.pop(server_key, None)
-
-    def close_all(self) -> None:
-        """
-        Закрыть все открытые сессии и остановить фоновый loop.
-        Безопасно вызывать из основного потока; каждый cm_stack закрывается
-        в своём же event loop через run_coroutine_threadsafe.
-        Ничего не делает, если loop не запускался.
-        """
-        with self._lock:
-            loop = self._loop
-            stacks = list(self._cm_stacks.items())
-            self._sessions.clear()
-            self._cm_stacks.clear()
-
-        if loop is None or not loop.is_running():
-            return
-
-        async def _close_stack(cms: Any) -> None:
-            # cm_stack — tuple контекст-менеджеров в порядке открытия;
-            # закрываем в обратном порядке, глотая ошибки по каждому.
-            for cm in reversed(cms):
-                try:
-                    await cm.__aexit__(None, None, None)
-                except Exception:
-                    pass
-
-        for _key, cm_stack in stacks:
-            fut = concurrent.futures.Future()
-
-            async def _wrapper(cms=cm_stack):
-                try:
-                    await _close_stack(cms)
-                    fut.set_result(None)
-                except Exception as exc:
-                    fut.set_exception(exc)
-
-            try:
-                asyncio.run_coroutine_threadsafe(_wrapper(), loop)
-                fut.result(timeout=15)
-            except Exception:
-                pass
-
-        # Останавливаем loop и даём фоновому потоку завершиться.
         try:
-            loop.call_soon_threadsafe(loop.stop)
-        except Exception:
-            pass
-        thread = self._thread
-        if thread is not None:
+            key = self._key(server_key)
+        except RuntimeError:
+            # Живого loop нет — значит и сессии на нём быть не может.
+            return None
+        if not self._same_loop(key):
+            return None
+        return self._sessions.get(key)
+
+    def set_session(self, server_key: str, session: Any, cm_stack: Any) -> None:
+        key = self._key(server_key)
+        self._loops[key] = weakref.ref(asyncio.get_running_loop())
+        # Задача-владелец: сессию надо закрывать там же, где открыли —
+        # см. `_aclose_stack`. Слабая ссылка, чтобы не держать задачу живой.
+        try:
+            self._tasks[key] = weakref.ref(asyncio.current_task())
+        except (RuntimeError, TypeError):
+            self._tasks.pop(key, None)
+        self._sessions[key] = session
+        self._cm_stacks[key] = cm_stack
+
+    def _take(self, server_key: str) -> Any:
+        """Снять сессию с реестра и вернуть её стек (или ``None``)."""
+        try:
+            key = self._key(server_key)
+        except RuntimeError:
+            return None
+        self._sessions.pop(key, None)
+        self._loops.pop(key, None)
+        self._tasks.pop(key, None)
+        return self._cm_stacks.pop(key, None)
+
+    async def ainvalidate(self, server_key: str) -> None:
+        """Забыть сессию после ошибки и ЗАКРЫТЬ её стек здесь же.
+
+        Раньше стек просто выбрасывался из словарей — «loop может быть
+        чужим». Для ошибочной ветки это неверно и дорого: мы находимся ровно
+        в той задаче и на том loop, где сессию открывали, а брошенный стек
+        закрывать в итоге будет сборщик мусора.
+
+        Чем это плохо. Внутри стека (``stdio_client`` /
+        ``streamable_http_client`` + ``ClientSession``) живёт anyio task
+        group. Когда до асинхронного генератора добирается GC, asyncio ставит
+        его ``aclose()`` ОТДЕЛЬНОЙ задачей, а выход из cancel scope в чужой
+        задаче даёт ``RuntimeError`` и швыряет посторонний ``CancelledError``
+        в ту задачу, которая в этот момент под рукой, — то есть в ход агента.
+        ``aapply_tool`` ловит только ``Exception``, поэтому отмена прошивала
+        ход насквозь. Триггером служила любая ошибка вызова через
+        ``persistent_session: true``: McpError, таймаут, разбор pydantic.
+
+        Закрываем сами и молча: стек всё равно уже негоден, а ошибки закрытия
+        не должны подменять исходную причину, из-за которой сессию сносят.
+        """
+        try:
+            owner_task = self._tasks.pop(self._key(server_key), None)
+        except RuntimeError:
+            owner_task = None
+        cms = self._take(server_key)
+        if cms is not None:
+            await self._aclose_stack(
+                cms, opened_in=owner_task() if owner_task is not None else None
+            )
+
+    async def _aclose_stack(self, cms: Any, *, opened_in: Any = None) -> None:
+        """Закрыть стек в обратном порядке, глотая ошибку по каждому.
+
+        Про ``opened_in``. У сессии есть НЕВЫСКАЗАННЫЙ инвариант: открывать и
+        закрывать её надо в ОДНОЙ задаче. Внутри стека anyio task group, и
+        выход из cancel scope в чужой задаче даёт ``RuntimeError``, который
+        мы здесь же и глотаем — то есть сессия остаётся незакрытой МОЛЧА.
+
+        Сегодня инвариант держится сам собой: тулы ждутся инлайн, и закрытие
+        приходит из той же задачи. Сломает его первый же параллельный
+        диспетчер или ``asyncio.wait_for`` у встраивающего — и сломает без
+        единой строки в логе. Поэтому сверяем задачу и предупреждаем: молчать
+        о нарушенном инварианте хуже, чем шуметь.
+        """
+        if opened_in is not None:
             try:
-                thread.join(timeout=5)
+                here = asyncio.current_task()
+            except RuntimeError:
+                here = None
+            if here is not None and here is not opened_in:
+                _LOGGER.warning(
+                    "MCP-сессия закрывается не в той задаче, где открыта "
+                    "(открыта в %r, закрывается в %r). Внутри стека anyio "
+                    "task group: выход из cancel scope в чужой задаче даёт "
+                    "RuntimeError, и сессия может остаться незакрытой.",
+                    getattr(opened_in, "get_name", lambda: opened_in)(),
+                    getattr(here, "get_name", lambda: here)(),
+                )
+        for cm in reversed(cms):
+            try:
+                await cm.__aexit__(None, None, None)
             except Exception:
                 pass
 
-        with self._lock:
-            if self._loop is loop:
-                self._loop = None
-                self._thread = None
+    async def aclose_all(self) -> None:
+        """Закрыть сессии ЭТОГО владельца на ЭТОМ loop.
+
+        Оба условия обязательны. Чужой loop — закрывать нечем (соединения
+        привязаны к своему). Чужой владелец — сессия ещё РАБОТАЕТ: параллельный
+        агент в этот момент внутри вызова тула, и закрытие из нашей задачи
+        отменит его anyio-scope.
+        """
+        try:
+            loop_id = self._loop_id()
+        except RuntimeError:
+            return
+        owner = current_owner()
+        keys = [k for k in self._cm_stacks if k[0] == owner and k[1] == loop_id]
+        for key in keys:
+            cms = self._cm_stacks.pop(key, None)
+            self._sessions.pop(key, None)
+            self._loops.pop(key, None)
+            owner_ref = self._tasks.pop(key, None)
+            if cms is not None:
+                # `shield` по той же причине, что и у stdio: teardown зовётся
+                # из `finally` цикла агента, и отмена посреди закрытия
+                # оставляет соединение и его anyio task group висеть.
+                await asyncio.shield(
+                    self._aclose_stack(
+                        cms, opened_in=owner_ref() if owner_ref is not None else None
+                    )
+                )
 
 
 _SESSION_MANAGER = _PersistentSessionManager()
@@ -204,22 +267,54 @@ def _make_httpx_factory(
     cert: Optional[Tuple[str, str]] = None,
     *,
     trust_env: bool = True,
+    url: str = "",
 ):
     """
     Фабрика httpx-клиентов с управляемой проверкой SSL и клиентским сертификатом.
     Совместима с сигнатурой httpx_client_factory из MCP SDK.
+
+    ``trust_env`` здесь НЕ передаётся в httpx напрямую, и это правка по факту.
+    Флаг включал сразу две вещи: прокси из окружения (что и требовалось) и
+    чтение ``~/.netrc`` (чего не требовалось никогда). Basic-auth из netrc
+    перетирает явный ``Authorization: Bearer``, которым MCP и авторизуется, —
+    ровно та ловушка, ради которой всё остальное ядро живёт с
+    ``trust_env=False``. Плюс расхождение было МОЛЧАЛИВЫМ: одноразовый
+    транспорт ставил ``False``, персистентный ``True``, и переключение
+    ``persistent_session`` меняло поведение прокси и mTLS без единого слова.
+
+    Теперь контракт один: netrc не читаем никогда, прокси резолвим явно тем
+    же ``resolve_proxies``, что и остальное ядро, — то есть с учётом
+    ``NO_PROXY`` и без сюрпризов для loopback-адресов.
     """
+    from gc_core.utils.http_proxy import resolve_proxies
+
+    # Loopback проверяем ЗДЕСЬ, а не только у вызывающего: правило «локальный
+    # MCP-демон мимо прокси» должно жить в одном месте, иначе прямой вызов
+    # фабрики (тест, новый вызывающий) тихо отправит localhost через socks5h.
+    use_env_proxy = bool(trust_env and url and _trust_env_for_url(url))
+    proxies = resolve_proxies(None, dict(os.environ), url) if use_env_proxy else None
 
     def factory(headers: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, auth: Any = None):
+        ssl_context = httpx.create_ssl_context(verify=verify)
         kwargs: Dict[str, Any] = dict(
             headers=headers,
             timeout=timeout,
             auth=auth,
-            verify=httpx.create_ssl_context(verify=verify),
-            trust_env=trust_env,
+            verify=ssl_context,
+            trust_env=False,
         )
         if cert is not None:
             kwargs["cert"] = cert
+        if proxies:
+            # Тот же ssl-контекст, что и у основного клиента: прокси не повод
+            # ослаблять проверку сертификата.
+            kwargs["mounts"] = {
+                f"{scheme}://": httpx.AsyncHTTPTransport(
+                    proxy=proxy_url, verify=ssl_context, trust_env=False
+                )
+                for scheme, proxy_url in proxies.items()
+                if proxy_url
+            }
         return httpx.AsyncClient(**kwargs)
 
     return factory
@@ -239,16 +334,37 @@ def _make_stream_http_client(
     В этой версии streamable_http_client принимает http_client и
     не принимает headers/timeout/httpx_client_factory напрямую.
     """
+    from gc_core.utils.http_proxy import resolve_proxies
+
     headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
+    ssl_context = httpx.create_ssl_context(verify=verify)
+
+    # Контракт тот же, что у фабрики выше: netrc не читаем никогда
+    # (`trust_env=False`), прокси резолвим явно. Иначе `persistent_session`
+    # молча менял бы поведение прокси и mTLS относительно одноразового
+    # транспорта, у которого `trust_env=False` стоял всегда.
+    proxies = (
+        resolve_proxies(None, dict(os.environ), base_url)
+        if (base_url and _trust_env_for_url(base_url))
+        else None
+    )
 
     kwargs: Dict[str, Any] = dict(
         headers=headers or None,
         timeout=timeout,
-        verify=httpx.create_ssl_context(verify=verify),
-        trust_env=_trust_env_for_url(base_url),
+        verify=ssl_context,
+        trust_env=False,
     )
     if cert is not None:
         kwargs["cert"] = cert
+    if proxies:
+        kwargs["mounts"] = {
+            f"{scheme}://": httpx.AsyncHTTPTransport(
+                proxy=proxy_url, verify=ssl_context, trust_env=False
+            )
+            for scheme, proxy_url in proxies.items()
+            if proxy_url
+        }
 
     return httpx.AsyncClient(**kwargs)
 
@@ -308,6 +424,7 @@ async def _list_tools_stream_sse_async(
         verify,
         cert=cert,
         trust_env=_trust_env_for_url(base_url),
+        url=base_url,
     )
 
     async with (
@@ -340,29 +457,26 @@ async def _list_tools_stream_sse_async(
         return tools
 
 
-def list_tools_stream_sse(
+async def alist_tools_stream_sse(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Синхронная обёртка над _list_tools_stream_sse_async для кода реестра тулов.
+    """Список тулов по SSE, не занимая поток.
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
-    return _run_coro(
-        _list_tools_stream_sse_async(
-            base_url=url,
-            token=token,
-            extra_headers=extra_headers,
-            timeout=timeout,
-            verify=verify,
-            cert=cert,
-        )
+    return await _list_tools_stream_sse_async(
+        base_url=url,
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        cert=cert,
     )
 
 
@@ -390,6 +504,7 @@ async def _call_tool_stream_sse_async(
         verify,
         cert=cert,
         trust_env=_trust_env_for_url(base_url),
+        url=base_url,
     )
 
     async with (
@@ -421,6 +536,40 @@ async def _call_tool_stream_sse_async(
         }
 
 
+async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
+    """Войти в транспорт и ``ClientSession``, откатив всё при ошибке.
+
+    ``initialize()`` падает не в теории: сервер отвечает не тем протоколом,
+    рвётся соединение, приходит таймаут. Без отката транспорт и сессия
+    оставались ВОШЕДШИМИ и ничьими — в реестр они не попадали, потому что
+    ``set_session`` до них не доходил, — и закрывал их потом сборщик мусора
+    в чужой задаче, ровно с тем же эффектом, что описан у ``ainvalidate``.
+
+    Возвращает ``(session, cm_stack)``; стек в порядке открытия.
+    """
+    read_stream, write_stream = await transport_cm.__aenter__()
+    session = ClientSession(read_stream, write_stream)
+    try:
+        await session.__aenter__()
+    except BaseException:
+        await _exit_quietly(transport_cm)
+        raise
+    try:
+        await session.initialize()
+    except BaseException:
+        await _exit_quietly(session)
+        await _exit_quietly(transport_cm)
+        raise
+    return session, (transport_cm, session)
+
+
+async def _exit_quietly(cm: Any) -> None:
+    """Выйти из контекст-менеджера, не подменяя исходную ошибку."""
+    try:
+        await cm.__aexit__(None, None, None)
+    except Exception:
+        pass
+
 async def _call_tool_stream_sse_persistent(
     server_key: str,
     base_url: str,
@@ -445,6 +594,7 @@ async def _call_tool_stream_sse_persistent(
             verify,
             cert=cert,
             trust_env=_trust_env_for_url(base_url),
+            url=base_url,
         )
         transport_cm = sse_client(
             endpoint,
@@ -452,11 +602,8 @@ async def _call_tool_stream_sse_persistent(
             timeout=timeout,
             httpx_client_factory=httpx_factory,
         )
-        read_stream, write_stream = await transport_cm.__aenter__()
-        new_session = ClientSession(read_stream, write_stream)
-        await new_session.__aenter__()
-        await new_session.initialize()
-        _SESSION_MANAGER.set_session(server_key, new_session, (transport_cm, new_session))
+        new_session, cm_stack = await _enter_session(transport_cm)
+        _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
@@ -473,14 +620,14 @@ async def _call_tool_stream_sse_persistent(
         try:
             return await _call(session)
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             session = None
 
     session = await _open_session()
     return await _call(session)
 
 
-def call_tool_stream_sse(
+async def acall_tool_stream_sse(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
@@ -488,11 +635,10 @@ def call_tool_stream_sse(
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Синхронная обёртка над _call_tool_stream_sse_async для tools/call.
+    """Вызов тула по SSE, не занимая поток.
 
-    Если server_cfg.persistent_session=true — используется persistent режим
-    (сессия живёт между вызовами). Иначе — stateless (как раньше).
+    Если server_cfg.persistent_session=true — persistent режим (сессия живёт
+    между вызовами). Иначе stateless.
 
     url: базовый URL сервера из конфига (без /sse в конце).
     """
@@ -503,33 +649,29 @@ def call_tool_stream_sse(
     if bool(server_cfg.get("persistent_session")):
         server_key = f"stream_sse::{url}"
         try:
-            return _SESSION_MANAGER.run(
-                _call_tool_stream_sse_persistent(
-                    server_key=server_key,
-                    base_url=url,
-                    token=token,
-                    extra_headers=extra_headers,
-                    timeout=timeout,
-                    verify=verify,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    cert=cert,
-                )
+            return await _call_tool_stream_sse_persistent(
+                server_key=server_key,
+                base_url=url,
+                token=token,
+                extra_headers=extra_headers,
+                timeout=timeout,
+                verify=verify,
+                tool_name=tool_name,
+                arguments=arguments,
+                cert=cert,
             )
         except Exception:
-            _SESSION_MANAGER.invalidate(f"stream_sse::{url}")
+            await _SESSION_MANAGER.ainvalidate(server_key)
 
-    return _run_coro(
-        _call_tool_stream_sse_async(
-            base_url=url,
-            token=token,
-            extra_headers=extra_headers,
-            timeout=timeout,
-            verify=verify,
-            tool_name=tool_name,
-            arguments=arguments,
-            cert=cert,
-        )
+    return await _call_tool_stream_sse_async(
+        base_url=url,
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        tool_name=tool_name,
+        arguments=arguments,
+        cert=cert,
     )
 
 
@@ -594,29 +736,26 @@ async def _list_tools_stream_http_async(
     return []
 
 
-def list_tools_stream_http(
+async def alist_tools_stream_http(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Синхронная обёртка над _list_tools_stream_http_async.
+    """Список тулов по streamable HTTP, не занимая поток.
 
     url: базовый URL сервера из конфига (без /mcp в конце).
     """
     verify = get_verify_ssl(server_cfg)
     cert = get_client_cert(server_cfg)
     extra_headers = server_cfg.get("headers") or None
-    return _run_coro(
-        _list_tools_stream_http_async(
-            base_url=url,
-            token=token,
-            extra_headers=extra_headers,
-            timeout=timeout,
-            verify=verify,
-            cert=cert,
-        )
+    return await _list_tools_stream_http_async(
+        base_url=url,
+        token=token,
+        extra_headers=extra_headers,
+        timeout=timeout,
+        verify=verify,
+        cert=cert,
     )
 
 
@@ -709,12 +848,25 @@ async def _call_tool_stream_http_persistent(
             cert=cert,
             base_url=base_url,
         )
+        # У stream_http стек на один менеджер длиннее: сначала httpx-клиент.
+        # Откат тот же — всё, во что успели войти, закрываем здесь, а не
+        # оставляем сборщику мусора (см. `_enter_session`).
         await http_client.__aenter__()
         transport = streamable_http_client(endpoint, http_client=http_client)
-        read_stream, write_stream, _ = await transport.__aenter__()
+        try:
+            read_stream, write_stream, _ = await transport.__aenter__()
+        except BaseException:
+            await _exit_quietly(http_client)
+            raise
         new_session = ClientSession(read_stream, write_stream)
-        await new_session.__aenter__()
-        await new_session.initialize()
+        try:
+            await new_session.__aenter__()
+            await new_session.initialize()
+        except BaseException:
+            await _exit_quietly(new_session)
+            await _exit_quietly(transport)
+            await _exit_quietly(http_client)
+            raise
         _SESSION_MANAGER.set_session(server_key, new_session, (http_client, transport, new_session))
         return new_session
 
@@ -735,7 +887,7 @@ async def _call_tool_stream_http_persistent(
         try:
             return await _call(session)
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             session = None
 
     # Open new persistent session
@@ -746,20 +898,20 @@ async def _call_tool_stream_http_persistent(
             return await _call(session)
         except McpError as exc:
             last_error = exc
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             if "Session terminated" in str(exc) and endpoint != endpoints[-1]:
                 continue
             raise
         except Exception as exc:
             last_error = exc
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
 
     if last_error is not None:
         raise last_error
     return {"content": [], "isError": True}
 
 
-def call_tool_stream_http(
+async def acall_tool_stream_http(
     url: str,
     server_cfg: Dict[str, Any],
     token: Optional[str],
@@ -767,8 +919,8 @@ def call_tool_stream_http(
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Синхронная обёртка над _call_tool_stream_http_async.
+    """Вызов тула по streamable HTTP, не занимая поток.
+
     Персистентная сессия включается флагом `persistent_session: true`
     (единый дефолт со всеми остальными транспортами — False).
 
@@ -779,49 +931,37 @@ def call_tool_stream_http(
     extra_headers = server_cfg.get("headers") or None
     server_key = f"stream_http::{url}"
 
-    persistent = bool(server_cfg.get("persistent_session"))
-    if not persistent:
-        return _run_coro(
-            _call_tool_stream_http_async(
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
-            )
+    async def _stateless() -> Dict[str, Any]:
+        return await _call_tool_stream_http_async(
+            base_url=url,
+            token=token,
+            extra_headers=extra_headers,
+            timeout=timeout,
+            verify=verify,
+            tool_name=tool_name,
+            arguments=arguments,
+            cert=cert,
         )
 
+    if not bool(server_cfg.get("persistent_session")):
+        return await _stateless()
+
     try:
-        return _SESSION_MANAGER.run(
-            _call_tool_stream_http_persistent(
-                server_key=server_key,
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
-            )
+        return await _call_tool_stream_http_persistent(
+            server_key=server_key,
+            base_url=url,
+            token=token,
+            extra_headers=extra_headers,
+            timeout=timeout,
+            verify=verify,
+            tool_name=tool_name,
+            arguments=arguments,
+            cert=cert,
         )
     except Exception:
-        # Fallback to stateless mode on any persistent session failure
-        return _run_coro(
-            _call_tool_stream_http_async(
-                base_url=url,
-                token=token,
-                extra_headers=extra_headers,
-                timeout=timeout,
-                verify=verify,
-                tool_name=tool_name,
-                arguments=arguments,
-                cert=cert,
-            )
-        )
+        # Персистентная сессия не задалась — забываем её и идём stateless.
+        await _SESSION_MANAGER.ainvalidate(server_key)
+        return await _stateless()
 
 
 async def _list_tools_stream_stdio_async(
@@ -866,18 +1006,14 @@ async def _list_tools_stream_stdio_async(
         return tools
 
 
-def list_tools_stream_stdio(
+async def alist_tools_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float = 10.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Синхронная обёртка над _list_tools_stream_stdio_async.
-    """
-    return _run_coro(
-        _list_tools_stream_stdio_async(
-            server_cfg=server_cfg,
-            timeout=timeout,
-        )
+    """Список тулов по stdio (через SDK), не занимая поток."""
+    return await _list_tools_stream_stdio_async(
+        server_cfg=server_cfg,
+        timeout=timeout,
     )
 
 
@@ -950,11 +1086,8 @@ async def _call_tool_stream_stdio_persistent(
             cwd=server_cfg.get("cwd") or None,
         )
         transport_cm = stdio_client(params)
-        read_stream, write_stream = await transport_cm.__aenter__()
-        new_session = ClientSession(read_stream, write_stream)
-        await new_session.__aenter__()
-        await new_session.initialize()
-        _SESSION_MANAGER.set_session(server_key, new_session, (transport_cm, new_session))
+        new_session, cm_stack = await _enter_session(transport_cm)
+        _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
@@ -971,21 +1104,20 @@ async def _call_tool_stream_stdio_persistent(
         try:
             return await _call(session)
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
             session = None
 
     session = await _open_session()
     return await _call(session)
 
 
-def call_tool_stream_stdio(
+async def acall_tool_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float,
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Синхронная обёртка над _call_tool_stream_stdio_async.
+    """Вызов тула по stdio (через SDK), не занимая поток.
 
     При persistent_session=true субпроцесс и ClientSession держатся живыми
     между вызовами (одна Chromium-сессия на весь цикл работы агента).
@@ -996,34 +1128,31 @@ def call_tool_stream_stdio(
         args_key = ",".join(str(a) for a in (args if isinstance(args, list) else [args]))
         server_key = f"stream_stdio::{server_cfg.get('command')}::{args_key}"
         try:
-            return _SESSION_MANAGER.run(
-                _call_tool_stream_stdio_persistent(
-                    server_key=server_key,
-                    server_cfg=server_cfg,
-                    timeout=timeout,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                )
+            return await _call_tool_stream_stdio_persistent(
+                server_key=server_key,
+                server_cfg=server_cfg,
+                timeout=timeout,
+                tool_name=tool_name,
+                arguments=arguments,
             )
         except Exception:
-            _SESSION_MANAGER.invalidate(server_key)
+            await _SESSION_MANAGER.ainvalidate(server_key)
 
-    return _run_coro(
-        _call_tool_stream_stdio_async(
-            server_cfg=server_cfg,
-            timeout=timeout,
-            tool_name=tool_name,
-            arguments=arguments,
-        )
+    return await _call_tool_stream_stdio_async(
+        server_cfg=server_cfg,
+        timeout=timeout,
+        tool_name=tool_name,
+        arguments=arguments,
     )
 
+
 __all__ = [
-    "list_tools_stream_sse",
-    "call_tool_stream_sse",
-    "list_tools_stream_http",
-    "call_tool_stream_http",
-    "list_tools_stream_stdio",
-    "call_tool_stream_stdio",
+    "acall_tool_stream_http",
+    "acall_tool_stream_sse",
+    "acall_tool_stream_stdio",
+    "alist_tools_stream_http",
+    "alist_tools_stream_sse",
+    "alist_tools_stream_stdio",
 ]
 
 

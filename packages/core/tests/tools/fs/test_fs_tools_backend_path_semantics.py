@@ -41,8 +41,11 @@ def test_list_files_rejects_a_host_absolute_path_the_backend_calls_relative():
     assert _error_type(raw) == "invalid_argument"
 
 
-def test_find_in_files_rejects_a_host_absolute_path_the_backend_calls_relative():
-    raw = _tool(FindInFiles)(path="C:/work", pattern="needle", query_mode="text")
+async def test_find_in_files_rejects_a_host_absolute_path_the_backend_calls_relative():
+    # У тула только асинхронный вход: синхронный `__call__` был шимом портала.
+    raw = await _tool(FindInFiles).acall(
+        path="C:/work", pattern="needle", query_mode="text"
+    )
 
     assert _error_type(raw) == "invalid_argument"
 
@@ -60,9 +63,9 @@ def test_backend_absolute_path_is_accepted():
     assert data["ok"] is True
 
 
-def test_exclude_dirs_is_normalized_by_the_backend():
+async def test_exclude_dirs_is_normalized_by_the_backend():
     """Хостовый normpath ломал контейнерный путь, и исключение молча терялось."""
-    raw = _tool(FindInFiles)(
+    raw = await _tool(FindInFiles).acall(
         path="/work",
         pattern="needle",
         query_mode="text",
@@ -78,9 +81,8 @@ def test_exclude_dirs_is_normalized_by_the_backend():
 def test_refuse_breakdown_reports_backend_paths():
     """Разбивка при отказе предлагает пути для повторного вызова — они контейнерные."""
     files = {f"/work/pkg{i}/f.py": "needle\n" for i in range(4)}
-    tool = FindInFiles.__new__(FindInFiles)
-    bind_os_backend(
-        tool,
+    tool = bind_os_backend(
+        FindInFiles.__new__(FindInFiles),
         FakeBackend(files),
         config_dict={"fs_tools": {"find_in_files": {"max_candidates_like": 1}}},
     )

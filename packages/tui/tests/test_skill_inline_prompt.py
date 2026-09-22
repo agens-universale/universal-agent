@@ -16,7 +16,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
     captured = {}
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
             self._evt = threading.Event()
@@ -34,7 +34,7 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]  # coder не в реальном реестре — задаём явно
-        scr._handle_command("skill coder почини баг в парсере")
+        await scr._handle_command("skill coder почини баг в парсере")
         await pilot.pause(0.3)
         msgs = captured["messages"]
         assert len(msgs) == 1                  # одно сообщение, не пара
@@ -53,7 +53,7 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
     added = []
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=2.0)
@@ -70,9 +70,9 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]
-        scr._handle_command("skill coder сначала запусти что-нибудь")
+        await scr._handle_command("skill coder сначала запусти что-нибудь")
         await pilot.pause(0.3)                  # run стартовал и висит в _Fake.run
-        scr._handle_command("skill coder добавь логирование")
+        await scr._handle_command("skill coder добавь логирование")
         await pilot.pause(0.3)
         assert len(added) == 1
         assert added[0]["content"].startswith("Use skill `coder`.")
@@ -88,7 +88,7 @@ async def test_skill_without_prompt_stays_pending(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._handle_command("skill coder")
+        await scr._handle_command("skill coder")
         await pilot.pause(0.1)
         assert app.tui_state.pending_skill_id == "coder"
 
@@ -104,7 +104,7 @@ async def test_unknown_skill_first_token_not_inline(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]  # 'foo' НЕ валиден
-        scr._handle_command("skill foo bar")
+        await scr._handle_command("skill foo bar")
         await pilot.pause(0.1)
         # не inline: pending_skill_id выставлен в весь arg
         assert app.tui_state.pending_skill_id == "foo bar"

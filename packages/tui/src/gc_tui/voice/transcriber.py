@@ -10,11 +10,11 @@ import io
 import wave
 from typing import Any, Dict
 
-import requests
+import httpx
 
 from gc_tui.voice.errors import VoiceError
 from gc_tui.voice.recorder import SAMPLE_RATE
-from gc_tui.voice_runtime.net import post as voice_post, with_system_trust_retry
+from gc_tui.voice_runtime.net import is_tls_error, post as voice_post, with_system_trust_retry
 
 
 def transcribe(pcm: bytes, cfg: Dict[str, Any]) -> str:
@@ -47,9 +47,13 @@ def _transcribe_openai(pcm: bytes, cfg: Dict[str, Any]) -> str:
             verify=cfg.get("verify_ssl", True),
             config_proxy=cfg.get("proxy"),
         )
-    except requests.exceptions.SSLError:
-        raise                                  # corp-retry в transcribe()
-    except requests.RequestException as exc:
+    except httpx.HTTPError as exc:
+        # Тип httpx, а не requests: POST идёт клиентом ядра, а ядро на httpx.
+        # Пока здесь стояли requests-исключения, не совпадало НИ ОДНО, и человеку
+        # в тост уходил сырой `httpx.ConnectError: [Errno 61] Connection refused`
+        # вместо «STT недоступен».
+        if is_tls_error(exc):
+            raise                              # corp-retry в transcribe()
         raise VoiceError(f"STT недоступен: {exc}") from exc
     if resp.status_code != 200:
         raise VoiceError(f"STT: HTTP {resp.status_code}")

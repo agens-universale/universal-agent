@@ -9,6 +9,8 @@ from gc_core.states import State
 from types import SimpleNamespace
 from gc_core.utils.convertations import sanitize_messages_for_chat_completions
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def teardown_module(_module) -> None:
@@ -18,7 +20,7 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
@@ -35,13 +37,18 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         raise AssertionError("apply_tool should not be called in this test")
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = lambda _output: False
     tools_dir = module_dir("tools")
+    # `processing_responses` импортирует эти имена на уровне модуля. Без них
+    # подмена пакета даёт ImportError, и файл падает целиком — но только
+    # когда реальные модули не подтянул сосед по прогону. При случайном
+    # порядке (pytest-randomly) это молчащая мина, а не свойство файла.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_kw: False
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
@@ -55,7 +62,7 @@ def setup_module(_module) -> None:
     from gc_core import processing_responses as pm
 
     processing_module = pm
-    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
 
 
 def test_make_technical_feedback_message_wraps_generic_feedback():
@@ -104,7 +111,7 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
     def _fake_create_call_headers(_state, _ctx, resolved=None):
         return {"Authorization": "Bearer fake"}
 
-    def _fake_request_backend_chat_completions(data, *_args, **_kwargs):
+    async def _fake_request_backend_chat_completions(data, *_args, **_kwargs):
         captured["messages"] = data.get("messages", [])
         return {
             "id": "chat_1",
@@ -117,10 +124,10 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         }
 
     monkeypatch.setattr(
-        processing_module, "create_call_headers", _fake_create_call_headers
+        processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers)
     )
     monkeypatch.setattr(
-        "gc_core.request_backend_policy.request_backend_chat_completions",
+        "gc_core.request_backend_policy.arequest_backend_chat_completions",
         _fake_request_backend_chat_completions,
     )
 
@@ -155,11 +162,11 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         logger=None,
     )
 
-    processing_module._request_backend_canonical(
+    run_coro(processing_module._arequest_backend_canonical(
         [{"role": "user", "content": "next", "id": "m_1"}],
         state,
         ctx,
-    )
+    ))
 
     payload_messages = captured["messages"]
     assert len(payload_messages) == 2

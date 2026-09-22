@@ -4,13 +4,16 @@
 Раньше ``SpecialAgent._generate_role`` строил HTTP-вызов вручную и никогда не
 прикладывал заголовок ``Authorization`` (латентный баг — генерация роли всегда
 уходила без Bearer). Теперь она идёт через
-``summarize.llm.request_auxiliary_completion_text`` (aux kwargs + strip_think),
-с заголовками из ``create_call_headers`` (auth_connector/resolved-модель).
+``summarize.llm.arequest_auxiliary_completion_text`` (aux kwargs + strip_think)
+— тот же путь, что и любой другой служебный LLM-вызов (summary/finish_gate/
+judges/memory_compaction), с заголовками из ``acreate_call_headers``
+(auth_connector/resolved-модель).
 
 Заодно бюджет-хардкоды (special_agent role draft, project_memory compaction)
 вынесены в конфиг.
 """
 import asyncio
+from gc_testkit import as_coro
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -28,6 +31,7 @@ from gc_core.tools.subagents.special_agent import SpecialAgent
 from gc_core.usage.account import CATEGORY_SUBAGENT, UsageAccount
 from gc_core.usage.context import current_usage_context
 from gc_core.utils import llm_chat_client
+from gc_testkit import run_coro
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -92,7 +96,7 @@ def test_default_budgets_match_prior_hardcodes():
 
 def test_special_agent_role_generation_attaches_bearer_header(monkeypatch):
     """Регресс: раньше заголовки собирались вручную из ``chat_completion_headers``
-    и Authorization никогда не прикладывался. Теперь ``create_call_headers`` (не
+    и Authorization никогда не прикладывался. Теперь ``acreate_call_headers`` (не
     замоканный здесь) читает ``ctx.auth_connector`` и кладёт Bearer-токен."""
     captured = {}
 
@@ -101,16 +105,14 @@ def test_special_agent_role_generation_attaches_bearer_header(monkeypatch):
         payload = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "generated role"}}]}, payload
 
-    monkeypatch.setattr(
-        llm_chat_client, "request_chat_completions_with_policy", _fake_policy
-    )
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
     ctx = _ctx(
         auth_connector=SimpleNamespace(get_token=lambda: "secret-token"),
     )
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     assert captured["headers"].get("Authorization") == "Bearer secret-token"
     assert instance.agent_role.startswith("generated role")
@@ -132,11 +134,9 @@ def test_special_agent_role_generation_uses_subagent_usage_category(monkeypatch)
         payload = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "request_chat_completions_with_policy", _fake_policy
-    )
-    monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = _ctx()
@@ -144,7 +144,7 @@ def test_special_agent_role_generation_uses_subagent_usage_category(monkeypatch)
     state.usage = UsageAccount()
 
     instance = _create_instance()
-    instance.finalize_role(ctx, state)
+    run_coro(instance.afinalize_role(ctx, state))
 
     assert captured["category"] == CATEGORY_SUBAGENT
 
@@ -154,18 +154,16 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
         payload = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "request_chat_completions_with_policy", _fake_policy
-    )
-    monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
     ctx = _ctx(model_router=router)
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     router.resolve.assert_called_once_with("subagent:subagent_special_agent")
 
@@ -178,17 +176,15 @@ def test_special_agent_role_generation_uses_configured_max_tokens_default(monkey
         payload = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "request_chat_completions_with_policy", _fake_policy
-    )
-    monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = _ctx()
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     assert captured["initial_max_tokens"] == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
 
@@ -201,11 +197,9 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
         payload = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "role"}}]}, payload
 
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "request_chat_completions_with_policy", _fake_policy
-    )
-    monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = _ctx(
@@ -218,7 +212,7 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(m
     )
 
     instance = _create_instance()
-    instance.finalize_role(ctx, _state())
+    run_coro(instance.afinalize_role(ctx, _state()))
 
     assert captured["initial_max_tokens"] == 222
 
@@ -231,14 +225,15 @@ def test_project_memory_compaction_uses_configured_max_tokens_default(monkeypatc
         return "compressed"
 
     monkeypatch.setattr(
-        "gc_core.project_memory.compaction.request_auxiliary_completion_text", _fake_call
+        "gc_core.project_memory.compaction.arequest_auxiliary_completion_text",
+        as_coro(_fake_call),
     )
 
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "chat_completions", "model": "test-model"},
         logger=None,
     )
-    res = compaction.compact_text("text", ctx)
+    res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert captured["max_tokens"] == DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
 
@@ -251,7 +246,8 @@ def test_project_memory_compaction_respects_configured_max_tokens_override(monke
         return "compressed"
 
     monkeypatch.setattr(
-        "gc_core.project_memory.compaction.request_auxiliary_completion_text", _fake_call
+        "gc_core.project_memory.compaction.arequest_auxiliary_completion_text",
+        as_coro(_fake_call),
     )
 
     ctx = SimpleNamespace(
@@ -262,6 +258,6 @@ def test_project_memory_compaction_respects_configured_max_tokens_override(monke
         },
         logger=None,
     )
-    res = compaction.compact_text("text", ctx)
+    res = run_coro(compaction.acompact_text("text", ctx))
     assert res.ok is True
     assert captured["max_tokens"] == 111

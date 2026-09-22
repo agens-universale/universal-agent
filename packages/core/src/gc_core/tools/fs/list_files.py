@@ -17,6 +17,7 @@ from gc_core.security.read_guard import (
 )
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
+from gc_core.tools.fs.cooperative import LoopYielder
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
@@ -173,8 +174,9 @@ Examples:
         extra_allowed = [skills_root] if skills_root else None
         return cfg, context.launch_root, extra_allowed
 
+
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         glob: Optional[str] = None,
@@ -237,9 +239,9 @@ Examples:
 
         path = self._backend.normpath(path)
 
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
-        if not self._backend.is_dir(path):
+        if not await self._backend.is_dir(path):
             return _result(ok=False, error={"type": "not_a_directory"})
 
         file_matcher = None
@@ -266,12 +268,12 @@ Examples:
                 scan_max_entries = max_entries + 1
 
             if effective_max_depth == 0:
-                hit_limit = self._list_directory(
+                hit_limit = await self._list_directory(
                     path, result, file_matcher=file_matcher, max_entries=scan_max_entries,
                     rg_cfg=_rg_cfg, rg_root=_rg_root, rg_extra=_rg_extra,
                 )
             else:
-                hit_limit = self._walk_directory(
+                hit_limit = await self._walk_directory(
                     path,
                     result,
                     file_matcher=file_matcher,
@@ -308,11 +310,11 @@ Examples:
             truncated=hit_limit,
         )
 
-    def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
+    async def _entry(self, filepath: str, is_dir: bool) -> Dict[str, Any]:
         return {
             "path": tool_report_abspath(filepath, workspace=self._workspace),
             "type": "directory" if is_dir else "file",
-            "is_hidden": self._backend.is_hidden(filepath),
+            "is_hidden": await self._backend.is_hidden(filepath),
         }
 
     @staticmethod
@@ -333,7 +335,7 @@ Examples:
             return False
         return True
 
-    def _list_directory(
+    async def _list_directory(
         self,
         root_path: str,
         result: List[Dict[str, Any]],
@@ -346,7 +348,7 @@ Examples:
     ):
         """List only immediate children of the directory."""
         try:
-            entries = self._backend.listdir(root_path)
+            entries = await self._backend.listdir(root_path)
         except WalkOutputTooLargeError:
             raise  # domain envelope (walk_too_large) is built by the caller
         except PermissionError:
@@ -366,13 +368,13 @@ Examples:
             # в denied paths (включая symlink escape наружу launch_root).
             if not self._read_guard_pass(filepath, rg_cfg, rg_root, rg_extra):
                 continue
-            result.append(self._entry(filepath, is_dir))
+            result.append(await self._entry(filepath, is_dir))
             if max_entries is not None and len(result) >= max_entries:
                 return True
 
         return False
 
-    def _walk_directory(
+    async def _walk_directory(
         self,
         root_path: str,
         result: List[Dict[str, Any]],
@@ -403,7 +405,12 @@ Examples:
         except OSError as e:
             raise RuntimeError(f"Failed to walk directory '{root_path}': {e}") from e
 
-        for rel, is_d in walk_iter:
+        yielder = LoopYielder()
+        async for rel, is_d in walk_iter:
+            # Тот же обход, что у поиска по имени, и та же цена: см. модуль
+            # `cooperative`. Метод стал корутиной ради этой строки —
+            # единственный вызывающий и так `acall`.
+            await yielder.tick()
             if is_agent_hidden(os.path.basename(rel)):
                 continue
             if file_matcher is not None and not file_matcher(rel):
@@ -411,7 +418,7 @@ Examples:
             abs_path = self._backend.join(root_path, rel)
             if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
                 continue
-            result.append(self._entry(abs_path, is_d))
+            result.append(await self._entry(abs_path, is_d))
             if max_entries is not None and len(result) >= max_entries:
                 return True
 

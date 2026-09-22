@@ -151,7 +151,7 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
         from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput")
         inp.text = "продолжаем"
-        screen.on_command_text_area_submitted(
+        await screen.on_command_text_area_submitted(
             CommandTextArea.Submitted(value="продолжаем")
         )
         await pilot.pause()
@@ -382,7 +382,7 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
         from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput")
         inp.text = "продолжаем"
-        screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="продолжаем"))
+        await screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="продолжаем"))
         await pilot.pause()
         assert started, "runner.start должен быть вызван для продолжения треда"
         assert started[0]["thread_id"] == thread_id

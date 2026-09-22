@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 import gc
 import json
 import time
@@ -12,36 +14,42 @@ from gc_core.config_modules.strip_tags_projection import (
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, SESSION_TODO_TOOL_NAME, TURN_FINALIZING_TOOLS
 from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.text_answer_judge import should_return_text_answer
+from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, get_function_call_output_text
-from gc_core.intent_scope.hook import maybe_update_intent_scope_from_tool
+from gc_core.intent_scope.hook import amaybe_update_intent_scope_from_tool
+# Детектор зацикливания приехал с develop синхронным. Оставлен как есть: его
+# наблюдатели — работа с памятью на микросекундах, нативной async-формы у них нет
+# (правило ветки: «есть нативная форма — идём через неё; формы нет, работа
+# короткая — инлайн на loop»).
 from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
 from gc_core.loop_detector.detector import clear as clear_loop_detector
-from gc_core.intent_scope.final_answer import maybe_record_final_answer_intent
+from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.user_stop import not_started_due_to_user_stop_output
-from gc_core.summarize.limit_trace_summary import build_limit_envelope
-from gc_core.request_backend_policy import request_chat_completions_with_policy
+from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.tools import (
-    apply_tool,
+    aapply_tool,
     WrongFunctionArgumentsException,
     is_internal_tool_error_output,
     is_unknown_tool_output,
 )
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
 from gc_core.tools.subagents.progress import brief_args_summary, emit_progress, extract_intermediate_prose, parse_tool_result_status, todo_items_from_arguments
-from gc_core.tools.subagents.sidecar import persist_subagent_trace
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     backend_override_value,
-    create_call_headers,
+    acreate_call_headers,
+    aresolve_auth_token,
     resolve_network_params,
 )
-from gc_core.utils.connect_backend import request_backend_responses as request_backend
+from gc_core.utils.connect_backend import arequest_backend_responses as arequest_backend
 from gc_core.utils.logging_module import human_console_enabled
+from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import (
     is_auth_error,
     is_context_overflow_error,
@@ -82,7 +90,30 @@ import logging
 _fallback_logger = logging.getLogger(__name__)
 
 
-def _maybe_persist(
+
+
+
+
+async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
+    """Позвать «тяжёлый» колбэк вызывающего, не занимая event loop.
+
+    Ядро передаёт сюда КОРУТИННЫЕ имена хуков, и такой хук ждётся нативно —
+    ни потока, ни заморозки loop. Ветка с потоком осталась для чужих
+    вызывающих, которые передали обычную функцию: позвать её «нативно
+    асинхронно» нельзя в принципе, а звать инлайн значит заморозить loop
+    приложения на всё время суммаризации.
+
+    Что ядро не сползёт обратно на синхронные имена, стережёт AST-тест
+    ``test_loop_hooks_are_native``.
+    """
+    if fn is None:
+        return None
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)
+    return await asyncio.to_thread(lambda: fn(*args, **kwargs))
+
+
+async def _maybe_persist(
     callback,
     messages: list,
     state,
@@ -93,6 +124,10 @@ def _maybe_persist(
 
     ``pairing=True`` — technical closing A/B при user-stop пишем всегда
     (иначе orphan function_call в jsonl).
+
+    Колбэк по контракту возвращает ``None`` либо awaitable: ядро передаёт сюда
+    асинхронный (история треда может лежать в базе, и ждать её надо нативно),
+    а внешние вызывающие и тесты — обычный синхронный.
     """
     if callback is None:
         return
@@ -103,7 +138,7 @@ def _maybe_persist(
         token = True
         state.allow_pairing_persist = True
     try:
-        callback(messages)
+        await await_callback(callback(messages))
     except Exception as persist_exc:
         _fallback_logger.warning(
             "Thread messages persist warning: %s",
@@ -124,7 +159,7 @@ def _function_call_output_message(call_id: Any, output: str) -> Dict:
     }
 
 
-def _commit_user_stop_pairing(
+async def _commit_user_stop_pairing(
     state: State,
     outputs: List[Dict],
     persist_messages_callback: Optional[Callable[[List[Dict]], None]],
@@ -138,7 +173,7 @@ def _commit_user_stop_pairing(
     )
     if to_append:
         state.messages.extend(to_append)
-    _maybe_persist(
+    await _maybe_persist(
         persist_messages_callback,
         to_append or list(outputs),
         state,
@@ -317,7 +352,7 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
         raise
 
 
-def _request_backend_canonical(
+async def _arequest_backend_canonical(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -341,28 +376,30 @@ def _request_backend_canonical(
             _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
 
     try:
-        return _request_backend_canonical_once(
+        return await _arequest_backend_canonical_once(
             messages, state, ctx, set_previous_response_id=set_previous_response_id
         )
     except Exception as exc:
-        if auth_connector is not None and is_auth_error(exc):
-            run_logger = getattr(ctx, "logger", None) or _fallback_logger
-            run_logger.warning(
-                "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
-            )
-            auth_connector.get_token(force=True)
-            try:
-                return _request_backend_canonical_once(
-                    messages, state, ctx, set_previous_response_id=set_previous_response_id
+            if auth_connector is not None and is_auth_error(exc):
+                run_logger = getattr(ctx, "logger", None) or _fallback_logger
+                run_logger.warning(
+                    "backend auth 401 → пере-выпуск токена и повтор запроса один раз: %s", exc
                 )
-            except Exception as retry_exc:
-                _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
-                raise
-        _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
-        raise
+                # Пере-выпуск — тот же блокирующий поход в сеть, что и обычный
+                # `get_token`, только гарантированный: `force=True` мимо кэша.
+                await aresolve_auth_token(auth_connector, force=True)
+                try:
+                    return await _arequest_backend_canonical_once(
+                        messages, state, ctx, set_previous_response_id=set_previous_response_id
+                    )
+                except Exception as retry_exc:
+                    _maybe_trip_and_raise_main_unavailable(state, ctx, retry_exc)
+                    raise
+            _maybe_trip_and_raise_main_unavailable(state, ctx, exc)
+            raise
 
 
-def _request_backend_canonical_once(
+async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -383,7 +420,7 @@ def _request_backend_canonical_once(
     # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
     # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
     resolved = _resolve_main_for_turn(state, ctx)
-    call_headers = create_call_headers(state, ctx, resolved=resolved)
+    call_headers = await acreate_call_headers(state, ctx, resolved=resolved)
     cfg = getattr(ctx, "config_dict", {}) or {}
     backend_mode = _get_backend_api_mode(ctx)
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
@@ -403,7 +440,7 @@ def _request_backend_canonical_once(
             resolved=resolved,
         )
         with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
-            res, res_headers = request_backend(
+            res, res_headers = await arequest_backend(
                 call_data,
                 call_headers,
                 url=url,
@@ -468,7 +505,7 @@ def _request_backend_canonical_once(
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
 
     with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
-        res, call_data = request_chat_completions_with_policy(
+        res, call_data = await arequest_chat_completions_with_policy(
             payload_factory=_create_payload,
             initial_max_tokens=completions_max_tokens,
             min_response_tokens=min_response_tokens,
@@ -581,8 +618,8 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     }
 
 
-def process_user_ask(messages, state: State, ctx: Any):
-    resp_messages, response_id, res_headers = _request_backend_canonical(
+async def aprocess_user_ask(messages, state: State, ctx: Any):
+    resp_messages, response_id, res_headers = await _arequest_backend_canonical(
         messages,
         state,
         ctx,
@@ -700,7 +737,7 @@ def _attach_truncation_hint(exc: WrongFunctionArgumentsException, state: Any) ->
     exc.extra_hint = "\n\n".join(hints)
 
 
-def process_tool_calls(
+async def aprocess_tool_calls(
     messages: List[Dict],
     state: State,
     ctx: Any,
@@ -816,7 +853,7 @@ def process_tool_calls(
             state.turn_tool_calls += 1
         prior = list(tools_outputs) + skip_outputs
         if prior and (i > 0 or tool_name == ASK_HUMAN_TOOL_NAME):
-            _maybe_persist(persist_messages_callback, prior, state)
+            await _maybe_persist(persist_messages_callback, prior, state)
         tool_arguments = str(m.get("arguments", ""))
         tool_call_id = m.get("call_id")
         call_id_str = str(tool_call_id) if tool_call_id is not None else None
@@ -848,12 +885,12 @@ def process_tool_calls(
                 todo_items=_todo_items,
             )
         if persist_tool_trace:
-            persist_subagent_trace(ctx, kind="call", payload=dict(m))
+            await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
         try:
             # call_id для субагента: чтобы вложенные строки в TUI знали,
             # под какой корневой subagent_* они относятся.
             state.tool_calls += 1
-            tool_res_raw = apply_tool(
+            tool_res_raw = await aapply_tool(
                 tool_name=tool_name,
                 arguments=tool_arguments,
                 ctx=ctx,
@@ -892,7 +929,7 @@ def process_tool_calls(
             ir_payload: Dict[str, Any] = {"prose": prose or ""}
             if call_id_str:
                 ir_payload["call_id"] = call_id_str
-            persist_subagent_trace(
+            await apersist_subagent_trace(
                 ctx, kind="intermediate_reply", payload=ir_payload
             )
         else:
@@ -913,7 +950,7 @@ def process_tool_calls(
                     if isinstance(tool_res_raw, str)
                     else json.dumps(tool_res_raw, ensure_ascii=False)
                 )
-                persist_subagent_trace(
+                await apersist_subagent_trace(
                     ctx,
                     kind="error" if ok is False else "result",
                     payload={
@@ -959,7 +996,7 @@ def process_tool_calls(
         )
         if tool_name != FINISH_TOOL_NAME:
             observe_loop_detector(state, ctx, tool_name, tool_arguments)
-            maybe_update_intent_scope_from_tool(
+            await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
                 tool_name=tool_name,
                 tool_output_raw=tool_res_raw,
                 tool_arguments=tool_arguments,
@@ -998,10 +1035,10 @@ def process_tool_calls(
     if aborted_by_user_stop:
         # run_agent после stop часто выходит на check_stop до обычного persist —
         # закрывающие A/B пишем сразу (исключение discard_writes).
-        _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
-        # Прогон остановлен: notice агенту не нужен, окно прошлого батча
-        # не должно всплыть при продолжении сессии.
-        clear_loop_detector(state)
+            await _commit_user_stop_pairing(state, tools_outputs, persist_messages_callback)
+            # Прогон остановлен: notice агенту не нужен, окно прошлого батча
+            # не должно всплыть при продолжении сессии.
+            clear_loop_detector(state)
 
     # Если внутри batch сработал session_compact — вместо сырых output'ов
     # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
@@ -1045,8 +1082,8 @@ def process_tool_calls(
     return tools_outputs
 
 
-def process_tool_outputs(messages, state: State, ctx: Any):
-    resp_messages, response_id, res_headers = _request_backend_canonical(
+async def aprocess_tool_outputs(messages, state: State, ctx: Any):
+    resp_messages, response_id, res_headers = await _arequest_backend_canonical(
         messages,
         state,
         ctx,
@@ -1088,7 +1125,7 @@ def _pickup_pending_as_new_turn(
     return pending
 
 
-def run_agent(
+async def arun_agent(
     messages,
     state: State,
     ctx: Any,
@@ -1118,6 +1155,7 @@ def run_agent(
     state.unknown_tool_repeat_count = 0
     state.last_batch_unknown_tool_count = 0
     state.last_batch_invalid_arguments_count = 0
+    first_poll = True
     while True:
         if check_stop is not None and check_stop():
             clear_loop_detector(state)
@@ -1125,7 +1163,13 @@ def run_agent(
         if get_pending_messages is not None:
             pending = get_pending_messages()
             if pending:
-                messages = pending
+                # На ПЕРВОМ опросе склеиваем со стартовым батчем, а не
+                # подменяем его: сообщение, пришедшее между стартом прогона и
+                # первым запросом к модели, иначе вытесняло стартовое — и оно
+                # не доходило ни до модели, ни до треда. Дальше подмена верна:
+                # там `messages` — это уже ответ модели, а не просьба человека.
+                messages = [*messages, *pending] if first_poll else pending
+        first_poll = False
         # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
         # не передаём его дальше в check_mode, чтобы не падать
         # с ValueError('Empty messages list'). Вместо этого генерируем понятное
@@ -1199,7 +1243,7 @@ def run_agent(
             )
             if new_state_messages:
                 state.messages += new_state_messages
-            _maybe_persist(persist_messages_callback, messages, state)
+            await _maybe_persist(persist_messages_callback, messages, state)
 
             # Лимиты (step / tool_calls / tokens) — только когда нет pending
             # function_call: сначала дожимаем весь батч tools от модели, иначе
@@ -1209,14 +1253,14 @@ def run_agent(
             if not pending_tool_exec:
                 if state.steps >= state.max_steps:
                     state.terminal_outcome = "step_limit"
-                    return build_limit_envelope(state, "step_limit", ctx)
+                    return await _acall_blocking_hook(abuild_limit_envelope, state, "step_limit", ctx)
 
                 if (
                     max_tool_calls_limit is not None
                     and state.tool_calls >= max_tool_calls_limit
                 ):
                     state.terminal_outcome = "tool_call_limit"
-                    return build_limit_envelope(state, "tool_call_limit", ctx)
+                    return await _acall_blocking_hook(abuild_limit_envelope, state, "tool_call_limit", ctx)
 
                 if session_token_limit is not None:
                     _baseline = UsageAccount.from_meta(
@@ -1225,7 +1269,7 @@ def run_agent(
                     _spent = state.usage.delta_from(_baseline).totals()["total"]
                     if _spent >= session_token_limit:
                         state.terminal_outcome = "token_limit"
-                        return build_limit_envelope(state, "token_limit", ctx)
+                        return await _acall_blocking_hook(abuild_limit_envelope, state, "token_limit", ctx)
 
             if tool_error_cnt > max_tool_errors:
                 state.terminal_outcome = "tool_errors"
@@ -1239,7 +1283,7 @@ def run_agent(
                 and pre_backend_compaction_hook is not None
             ):
                 try:
-                    pre_backend_compaction_hook(messages, mode)
+                    await _acall_blocking_hook(pre_backend_compaction_hook, messages, mode)
                 except Exception as pre_backend_exc:
                     run_logger.warning(
                         "Pre-backend compaction hook warning: %s",
@@ -1271,7 +1315,9 @@ def run_agent(
                             state.messages += to_append
                         if persist_messages_callback is not None:
                             try:
-                                persist_messages_callback(notice_messages)
+                                await await_callback(
+                                    persist_messages_callback(notice_messages)
+                                )
                             except Exception as persist_exc:
                                 run_logger.warning(
                                     "Thread notice messages persist warning: %s",
@@ -1303,7 +1349,7 @@ def run_agent(
             try:
                 if mode == "user_ask":
                     try:
-                        messages, response_id = process_user_ask(messages, state, ctx)
+                        messages, response_id = await aprocess_user_ask(messages, state, ctx)
                     except Exception as user_ask_exc:
                         can_retry_with_full_history = (
                             backend_mode == "responses"
@@ -1320,7 +1366,7 @@ def run_agent(
                         )
                         full_history_messages = get_full_history_messages()
                         state.previous_response_id = None
-                        messages, response_id, _ = _request_backend_canonical(
+                        messages, response_id, _ = await _arequest_backend_canonical(
                             full_history_messages,
                             state,
                             ctx,
@@ -1334,8 +1380,8 @@ def run_agent(
                     # Свежий tool-батч: сначала вся work, потом не больше
                     # одного turn_finish. Close — только после батча, по output.
                     pending_tool_calls = group_messages(messages).get("tool_calls", [])
-                    messages = process_tool_calls(
-                        messages, state, ctx, run_agent_func=run_agent,
+                    messages = await aprocess_tool_calls(
+                        messages, state, ctx, run_agent_func=arun_agent,
                         persist_messages_callback=persist_messages_callback,
                     )
                     closing_finish = _closing_finish_after_batch(
@@ -1363,7 +1409,7 @@ def run_agent(
                         # увидит устаревший notice как начало нового хода.
                         if work_new:
                             state.messages += work_new
-                            _maybe_persist(
+                            await _maybe_persist(
                                 persist_messages_callback, work_new, state
                             )
                         if finish_new:
@@ -1380,15 +1426,17 @@ def run_agent(
                                 mark_finish_gate_checking is not None and gate.enabled
                             )
                             if checking:
-                                mark_finish_gate_checking(True)
+                                await await_callback(mark_finish_gate_checking(True))
                             try:
-                                decision = gate.evaluate_turn_finish(
+                                decision = await gate.aevaluate_turn_finish(
                                     finish_handoff_arguments=finish_arguments,
                                 )
                             finally:
                                 if checking:
-                                    mark_finish_gate_checking(False)
-                            apply_finish_gate_to_turn_finish_output_in_state(
+                                    await await_callback(
+                                        mark_finish_gate_checking(False)
+                                    )
+                            await apply_finish_gate_to_turn_finish_output_in_state(
                                 state=state,
                                 finish_call_id=finish_call_id,
                                 decision=decision,
@@ -1398,7 +1446,7 @@ def run_agent(
                             final_submit_output = get_function_call_output_text(
                                 state.messages, finish_call_id
                             )
-                            maybe_update_intent_scope_from_tool(
+                            await _acall_blocking_hook(amaybe_update_intent_scope_from_tool,
                                 tool_name=FINISH_TOOL_NAME,
                                 tool_output_raw=final_submit_output or "",
                                 tool_arguments=finish_arguments or "",
@@ -1408,7 +1456,7 @@ def run_agent(
                             if decision.outcome == "reject":
                                 if tail_new:
                                     state.messages += tail_new
-                                    _maybe_persist(
+                                    await _maybe_persist(
                                         persist_messages_callback, tail_new, state
                                     )
                                 # Вердикт уже в output turn_finish (ok: false +
@@ -1425,7 +1473,7 @@ def run_agent(
                                 state.flush_current_user_intent()
                                 clear_loop_detector(state)
                                 if turn_end_compaction_hook is not None:
-                                    turn_end_compaction_hook()
+                                    await _acall_blocking_hook(turn_end_compaction_hook)
                                 # Сообщение, пришедшее во время (блокирующей) компакции, не
                                 # теряем: продолжаем новым ходом на уже сжатом контексте.
                                 new_turn_messages = _pickup_pending_as_new_turn(
@@ -1437,7 +1485,7 @@ def run_agent(
                                 return finish_arguments
                         else:
                             if finish_new:
-                                _maybe_persist(
+                                await _maybe_persist(
                                     persist_messages_callback, finish_new, state
                                 )
                             state.current_user_intent = []
@@ -1445,6 +1493,7 @@ def run_agent(
                             clear_loop_detector(state)
                             return finish_arguments
                     else:
+
                         n_unknown = int(
                             getattr(state, "last_batch_unknown_tool_count", 0) or 0
                         )
@@ -1486,12 +1535,16 @@ def run_agent(
                         # Невалидный finish сюда же: отказной output в трейсе, ход открыт.
                         count_completed_step = True
                 elif mode == "function_call_output":
-                    messages, response_id = process_tool_outputs(messages, state, ctx)
+                    messages, response_id = await aprocess_tool_outputs(messages, state, ctx)
                     if backend_mode == "responses":
                         state.previous_response_id = response_id
                     state.last_backend_response_id = response_id
                     # Half-turn: как user_ask — ждём разбора ответа модели.
                 elif mode == "text_response":
+                    # Аргументы проекции — с develop; форма вызова НАША.
+                    # develop зовёт синхронный `should_return_text_answer`: у
+                    # него он такой и есть, а у нас снят вместе с синхронным
+                    # публичным API.
                     assistant_text = extract_last_assistant_text(
                         messages, tags=_proj_tags, strip_think=True
                     )
@@ -1505,7 +1558,9 @@ def run_agent(
                         decision_accept = False
                         decision_reject_feedback = None
                     else:
-                        decision = should_return_text_answer(ctx, state, assistant_text)
+                        decision = await ashould_return_text_answer(
+                            ctx, state, assistant_text
+                        )
                         decision_accept = decision.accept
                         decision_reject_feedback = decision.reject_feedback
                     if decision_accept:
@@ -1514,18 +1569,22 @@ def run_agent(
                         # runtime.finalizing в meta; снимаем строго в finally).
                         state.steps += 1
                         if mark_finalizing is not None:
-                            mark_finalizing(True)
+                            await await_callback(mark_finalizing(True))
                         try:
-                            maybe_record_final_answer_intent(
+                            # Корутинным именем, как соседние intent-scope
+                            # хуки: синхронное имя fail-open внутри проглотил
+                            # бы, и сводка молча подменилась бы сырым текстом.
+                            await _acall_blocking_hook(
+                                amaybe_record_final_answer_intent,
                                 assistant_text=assistant_text, state=state, ctx=ctx
                             )
                             state.flush_current_user_intent()
                             clear_loop_detector(state)
                         finally:
                             if mark_finalizing is not None:
-                                mark_finalizing(False)
+                                await await_callback(mark_finalizing(False))
                         if turn_end_compaction_hook is not None:
-                            turn_end_compaction_hook()
+                            await _acall_blocking_hook(turn_end_compaction_hook)
                         new_turn_messages = _pickup_pending_as_new_turn(
                             get_pending_messages, state, ctx
                         )
@@ -1594,7 +1653,7 @@ def run_agent(
                         _MAX_CONTEXT_OVERFLOW_RETRIES,
                         backend_exc,
                     )
-                    force_compact_hook()
+                    await _acall_blocking_hook(force_compact_hook)
                     continue
                 raise
 

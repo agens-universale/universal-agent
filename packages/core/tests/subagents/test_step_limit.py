@@ -1,6 +1,7 @@
 """Subagent step-limit: ok=false, finish_reason=step_limit (не completed)."""
 from __future__ import annotations
 
+from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
@@ -25,17 +26,19 @@ class _FakeChildState:
 
 def _wire_runner(monkeypatch, runner, child):
     class _Inst:
-        def finalize_role(self, ctx, state):
+        # Runner зовёт асинхронный хук порта: синхронный ушёл бы в поток и
+        # оттуда в портал, а тот из-под работающего loop отказывает.
+        async def afinalize_role(self, ctx, state):
             return None
 
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", lambda role: child)
+    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
     monkeypatch.setattr(
         runner,
         "_build_child_ctx",
-        lambda tool_name: SimpleNamespace(logger=None, run_id="cr-step"),
+        as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr-step")),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
@@ -68,12 +71,12 @@ def _runner():
     return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
 
 
-def test_step_limit_returns_ok_false_not_completed(monkeypatch):
+async def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     runner, _orch = _runner()
     child = _FakeChildState(steps=5, max_steps=5, terminal_outcome="step_limit")
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         child_state.terminal_outcome = "step_limit"
         child_state.steps = 5
         # Child run_agent returns a limit envelope (build_limit_envelope).
@@ -84,7 +87,7 @@ def test_step_limit_returns_ok_false_not_completed(monkeypatch):
             "raw_trace_summary": "## Intent\n\nDid work.",
         })
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     # Runner pass-through: child envelope returned as-is (spec §6.2).
@@ -96,15 +99,15 @@ def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     assert "error" not in payload  # no _limit_response rebuild
 
 
-def test_normal_complete_still_ok_true(monkeypatch):
+async def test_normal_complete_still_ok_true(monkeypatch):
     runner, _orch = _runner()
     child = _FakeChildState(steps=2, max_steps=50, terminal_outcome=None)
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
-    def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
-    out = runner._run_internal(
+    out = await runner._arun_internal(
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     payload = json.loads(out)

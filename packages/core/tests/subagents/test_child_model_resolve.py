@@ -4,11 +4,16 @@
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-8-brief.md.
 """
 from gc_core.config import flatten_app_config
+import asyncio
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.states import State, SharedStateData
+from gc_testkit import run_coro as _await
 from gc_testkit.helpers.tool_ctx import local_ctx
 from gc_core.tools.subagents.runner import SubagentRunner
+
+
+
 
 
 def _snapshot(raw: dict) -> dict:
@@ -80,7 +85,7 @@ class TestChildConfigMutationIsolation:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
         child_ctx.config_dict["chat_completion_headers"]["Authorization"] = "Bearer child-token"
 
         assert cfg["chat_completion_headers"]["Authorization"] == "Bearer parent-token"
@@ -99,7 +104,11 @@ class TestChildConfigMutationIsolation:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        runner._build_child_ctx(tool_name="subagent_planner")
+        # `_build_child_ctx` — корутина: без run_coro она не исполнялась
+        # вовсе, и утверждения ниже проверяли нетронутый конфиг, а не
+        # отсутствие мутации. Прогон об этом честно предупреждал
+        # («coroutine ... was never awaited»), но предупреждение не роняет.
+        _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         assert cfg["slots"]["default"] == "flash"
         assert ctx.model_router.resolve("main").alias == "flash"
@@ -120,7 +129,7 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_planner")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         resolved = child_ctx.model_router.resolve("main")
         assert resolved.alias == "deepseek-max"
@@ -135,7 +144,7 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_planner")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         # "summary" has no assign binding — must inherit the subagent's own model,
         # not the active-level model ("flash") an unpinned subagent would get.
@@ -152,7 +161,7 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_worker")  # no pin
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))  # no pin
 
         resolved = child_ctx.model_router.resolve("main")
         assert resolved.alias == "flash"
@@ -172,7 +181,7 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_planner")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         assert child_ctx.model_router.resolve("finish_gate").alias == "glm-flash"
         assert child_ctx.model_router.resolve("main").alias == "deepseek-max"
@@ -195,7 +204,7 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_planner")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         assert child_ctx.model_router.resolve("summary").alias == "flash"
         assert child_ctx.model_router.resolve("main").alias == "deepseek-max"
@@ -223,13 +232,13 @@ class TestChildModelResolve:
         ctx.model_router = ModelRouter(cfg, level_provider=lambda: level_box["value"])
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
         assert child_ctx.model_router.resolve("main").alias == "flash"
 
         level_box["value"] = "max"  # живой /level родителя меняется посреди работы
         assert child_ctx.model_router.resolve("main").alias == "flash"
 
-    def test_child_state_default_model_is_subagent_resolved_model(self, tmp_path):
+    async def test_child_state_default_model_is_subagent_resolved_model(self, tmp_path):
         """state.default_model ребёнка = резолв субагента (begin_turn на старте
         child-хода, см. SubagentRunner._run_internal)."""
         raw = {
@@ -247,7 +256,7 @@ class TestChildModelResolve:
             captured["default_model"] = child_state.default_model
             return "ok"
 
-        runner.run("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
+        await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
 
         assert captured["default_model"] == "deepseek-v3-max"
 
@@ -270,7 +279,7 @@ class TestChildModelResolve:
         ctx.model_router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=True)
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_planner")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         main_resolved = child_ctx.model_router.resolve("main")
         assert main_resolved.alias is None
@@ -298,6 +307,6 @@ class TestChildModelResolve:
         # ctx.model_router намеренно не выставлен.
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = runner._build_child_ctx(tool_name="subagent_worker")
+        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
 
         assert child_ctx.model_router is None

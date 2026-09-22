@@ -281,8 +281,9 @@ Update version string:
             error=error,
         )
 
+
     @enforce_write_guard(path_arg="path", operation="search_and_replace")
-    def __call__(
+    async def acall(
         self,
         path: str,
         search: str,
@@ -469,7 +470,7 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "invalid_argument", "field": "path"},
             )
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return _result(
                 ok=False,
                 matched=False,
@@ -481,7 +482,7 @@ Update version string:
                 suggestions_total=0,
                 error={"type": "not_found"},
             )
-        if not self._backend.is_file(path):
+        if not await self._backend.is_file(path):
             return _result(
                 ok=False,
                 matched=False,
@@ -494,7 +495,7 @@ Update version string:
                 error={"type": "not_a_file"},
             )
         try:
-            file_size = self._backend.getsize(path)
+            file_size = await self._backend.getsize(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -539,7 +540,7 @@ Update version string:
             )
 
         try:
-            raw = self._backend.read_bytes(path)
+            raw = await self._backend.read_bytes(path)
         except Exception as e:
             return _result(
                 ok=False,
@@ -728,7 +729,7 @@ Update version string:
         if backup:
             backup_path = f"{path}.bak"
             try:
-                self._backend.copy(path, backup_path)
+                await self._backend.copy(path, backup_path)
             except Exception as e:
                 return _result(
                     ok=False,
@@ -761,7 +762,7 @@ Update version string:
                     error=encode_err,
                 )
             assert out_bytes is not None
-            self._backend.write_bytes(path, out_bytes)
+            await self._backend.write_bytes(path, out_bytes)
         except Exception as e:
             return _result(
                 ok=False,

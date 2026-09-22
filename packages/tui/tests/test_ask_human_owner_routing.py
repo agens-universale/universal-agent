@@ -157,7 +157,7 @@ async def test_live_owner_answer_goes_to_stdin(tmp_path):
         app.active_runner = r
         scr._ask_human_owner_runner = r
         _set_ask_human_state(app)
-        scr.on_command_text_area_submitted(_Evt("мой ответ"))
+        await scr.on_command_text_area_submitted(_Evt("мой ответ"))
         await pilot.pause()
         assert r.submitted == ["мой ответ"]      # ушло владельцу в stdin
         assert r.started == []                     # новый ход не стартовал
@@ -181,7 +181,7 @@ async def test_replay_banner_answer_starts_new_turn(tmp_path):
         scr._active_task_id = tid
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
         _set_ask_human_state(app)
-        scr.on_command_text_area_submitted(_Evt("ответ новым ходом"))
+        await scr.on_command_text_area_submitted(_Evt("ответ новым ходом"))
         await pilot.pause()
         assert r.submitted == []                   # в stdin не писали
         assert any(kw.get("query") == "ответ новым ходом" for kw in r.started)  # новый ход
@@ -211,7 +211,7 @@ async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
             scr._active_task_id = tid
             scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
             _set_ask_human_state(app)
-            scr.on_command_text_area_submitted(_Evt("ответ"))
+            await scr.on_command_text_area_submitted(_Evt("ответ"))
             await pilot.pause()
         finally:
             _ar.AgentRunner = orig

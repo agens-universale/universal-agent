@@ -12,14 +12,15 @@ from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.states import State
 from gc_core.turn_boundary import begin_turn
+from gc_testkit import as_coro
 
 
 @pytest.fixture
 def minimal_config_dict(monkeypatch):
     monkeypatch.setattr(
         rc,
-        "build_tools_data",
-        lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {}),
+        "abuild_tools_data",
+        as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
     return {"model": "M", "level": "max"}
 
@@ -45,37 +46,37 @@ def _make_state(model: str = "unused-legacy-default") -> State:
 # --- create_run_context: model_router + level_provider ---------------------------
 
 
-def test_create_run_context_without_level_provider_reads_config_level(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict)
+async def test_create_run_context_without_level_provider_reads_config_level(minimal_config_dict):
+    ctx = await rc.acreate_run_context(minimal_config_dict)
     assert isinstance(ctx.model_router, ModelRouter)
     assert ctx.model_router.active_level() == "max"
 
 
-def test_create_run_context_with_level_provider_uses_callable(minimal_config_dict):
+async def test_create_run_context_with_level_provider_uses_callable(minimal_config_dict):
     level = {"value": "light"}
-    ctx = rc.create_run_context(minimal_config_dict, level_provider=lambda: level["value"])
+    ctx = await rc.acreate_run_context(minimal_config_dict, level_provider=lambda: level["value"])
     assert ctx.model_router.active_level() == "light"
     level["value"] = "default"
     assert ctx.model_router.active_level() == "default"  # провайдер живой, не закэширован
 
 
-def test_create_run_context_model_router_resolves_legacy_main(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict)
+async def test_create_run_context_model_router_resolves_legacy_main(minimal_config_dict):
+    ctx = await rc.acreate_run_context(minimal_config_dict)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
 
 
-def test_create_run_context_force_legacy_propagates_to_router(minimal_config_dict):
+async def test_create_run_context_force_legacy_propagates_to_router(minimal_config_dict):
     """Task 10: `--model` при непустом реестре -> `force_legacy=True` доезжает от
     CLI до ModelRouter через create_run_context (спека §2)."""
-    ctx = rc.create_run_context(minimal_config_dict, force_legacy=True)
+    ctx = await rc.acreate_run_context(minimal_config_dict, force_legacy=True)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
     assert resolved.source == "легаси-форс --model"
 
 
-def test_create_run_context_default_force_legacy_is_false(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict)
+async def test_create_run_context_default_force_legacy_is_false(minimal_config_dict):
+    ctx = await rc.acreate_run_context(minimal_config_dict)
     resolved = ctx.model_router.resolve("main")
     assert resolved.source == "легаси"
 

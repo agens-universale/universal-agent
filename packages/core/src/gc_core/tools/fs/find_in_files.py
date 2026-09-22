@@ -8,12 +8,12 @@ Hits / context / stop A/B/C — FINAL-SPEC.
 
 from __future__ import annotations
 
+import asyncio
 import bisect
 import json
 import os
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -52,6 +52,7 @@ from gc_core.security.read_guard import (
     _resolve_skills_root,
 )
 from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
+from gc_core.tools.fs.cooperative import LoopYielder
 
 # Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
 # recipe exists (grep+find), only the pattern/glob could not be expressed natively.
@@ -255,7 +256,7 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         pattern: str,
@@ -267,7 +268,16 @@ class FindInFiles(AbstractSimpleTool):
         exclude_dirs: Optional[List[str]] = None,
         show_excluded_dirs: bool = False,
     ) -> str:
-        return self._dispatch(
+        # Пробы возможностей (`has_grep`/`has_find`/…) — СИНХРОННЫЕ свойства, и
+        # ниже по пути они читаются прямо на loop. Под медленной песочницей
+        # это до четырёх запусков процесса подряд (~10 с на пробу): агент
+        # выглядит зависшим на первом же инструменте, а loop всё это время
+        # стоит. Прогрев уводит их в поток один раз на процесс — дальше
+        # свойства отвечают из кэша, и читать их инлайн уже нечем платить.
+        warm = getattr(self._backend, "awarm_capabilities", None)
+        if callable(warm):
+            await warm()
+        return await self._dispatch(
             path,
             pattern,
             query_mode,
@@ -293,7 +303,7 @@ class FindInFiles(AbstractSimpleTool):
         attr = _MODE_CANDIDATE_LIMIT_ATTR[mode]
         return int(getattr(config, attr))
 
-    def _dispatch(
+    async def _dispatch(
         self,
         path: str,
         pattern: str,
@@ -397,11 +407,11 @@ class FindInFiles(AbstractSimpleTool):
         limit_capped = limit_requested > config.max_total_matches
 
         backend = self._backend
-        if not backend.exists(path):
+        if not await backend.exists(path):
             return self._error("not_found")
 
-        if backend.is_file(path):
-            return self._search_single_file(
+        if await backend.is_file(path):
+            return await self._search_single_file(
                 path,
                 compiled,
                 pattern,
@@ -415,8 +425,8 @@ class FindInFiles(AbstractSimpleTool):
                 max_bytes,
                 config,
             )
-        if backend.is_dir(path):
-            return self._search_directory(
+        if await backend.is_dir(path):
+            return await self._search_directory(
                 path,
                 compiled,
                 pattern,
@@ -684,7 +694,7 @@ class FindInFiles(AbstractSimpleTool):
             if size is not None:
                 m["size_bytes"] = size
 
-    def _attach_native_match_contexts(
+    async def _attach_native_match_contexts(
         self,
         shown: List[Dict[str, Any]],
         max_bytes: int,
@@ -697,7 +707,7 @@ class FindInFiles(AbstractSimpleTool):
         backend = self._backend
         for abs_path, hits in by_file.items():
             try:
-                size = backend.getsize(abs_path)
+                size = await backend.getsize(abs_path)
             except OSError:
                 self._omit_native_context(hits, "read_error")
                 continue
@@ -705,7 +715,7 @@ class FindInFiles(AbstractSimpleTool):
                 self._omit_native_context(hits, "file_too_large", size)
                 continue
             try:
-                raw = backend.read_bytes(abs_path)
+                raw = await backend.read_bytes(abs_path)
             except OSError:
                 self._omit_native_context(hits, "read_error", size)
                 continue
@@ -849,7 +859,17 @@ class FindInFiles(AbstractSimpleTool):
                 "the candidates inside the sandbox"
             ), False
         backend = self._backend
-        if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+        # Пробы читаются ИЗ КЭША и отказывают, если прогрева не было
+        # (`CapabilitiesNotWarmedError`). Непрогретый бэкенд для префильтра —
+        # это «нативного пути нет», а не отказ инструмента: та же защита стоит
+        # ниже, на маршруте нативного grep.
+        try:
+            native_ok = getattr(backend, "has_grep", False) and getattr(
+                backend, "has_find", False
+            )
+        except Exception:
+            native_ok = False
+        if not native_ok:
             return "grep or find is unavailable in the sandbox, so no prefilter is possible", False
         from gc_core.utils.native_fs_search import prefilter_terms
 
@@ -903,7 +923,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # per-file funnel (§6.2)
     # ------------------------------------------------------------------
-    def _open_decode_text(
+    async def _open_decode_text(
         self,
         abs_path: str,
         file_size: Optional[int] = None,
@@ -915,7 +935,7 @@ class FindInFiles(AbstractSimpleTool):
         """
         backend = self._backend
         try:
-            head = backend.read_head_bytes(abs_path, BINARY_SAMPLE_BYTES)
+            head = await backend.read_head_bytes(abs_path, BINARY_SAMPLE_BYTES)
         except OSError:
             return None, 0, "read_error"
         bytes_read = len(head)
@@ -927,7 +947,7 @@ class FindInFiles(AbstractSimpleTool):
         size = file_size
         if size is None:
             try:
-                size = backend.getsize(abs_path)
+                size = await backend.getsize(abs_path)
             except OSError:
                 size = None
 
@@ -935,7 +955,7 @@ class FindInFiles(AbstractSimpleTool):
             raw = head
         else:
             try:
-                raw = backend.read_bytes(abs_path)
+                raw = await backend.read_bytes(abs_path)
             except OSError:
                 return None, bytes_read, "read_error"
             bytes_read = len(raw)
@@ -987,7 +1007,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # single file (§7)
     # ------------------------------------------------------------------
-    def _search_single_file(
+    async def _search_single_file(
         self,
         path: str,
         compiled: re.Pattern,
@@ -1008,7 +1028,7 @@ class FindInFiles(AbstractSimpleTool):
         guidance: Optional[str] = None
 
         try:
-            size = backend.getsize(path)
+            size = await backend.getsize(path)
         except OSError as e:
             return self._error("stat_failed", message=str(e))
 
@@ -1034,7 +1054,7 @@ class FindInFiles(AbstractSimpleTool):
                 effective_ci=effective_ci,
             )
 
-        text, _bytes_read, skip = self._open_decode_text(path, file_size=size)
+        text, _bytes_read, skip = await self._open_decode_text(path, file_size=size)
         if skip == "read_error":
             return self._error("read_failed", message="Failed to read file")
         if skip in ("binary", "encoding"):
@@ -1152,7 +1172,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # exclude_dirs normalize (§2)
     # ------------------------------------------------------------------
-    def _normalize_exclude_dirs(
+    async def _normalize_exclude_dirs(
         self,
         exclude_dirs: Optional[List[str]],
         *,
@@ -1177,12 +1197,12 @@ class FindInFiles(AbstractSimpleTool):
             if not backend.isabs(raw):
                 return None, [], f"exclude_dirs entry must be absolute: {raw!r}"
             norm = backend.normpath(raw)
-            if not backend.exists(norm):
+            if not await backend.exists(norm):
                 soft.append({"path": norm, "reason": "missing"})
                 continue
-            if backend.is_file(norm):
+            if await backend.is_file(norm):
                 return None, [], f"exclude_dirs entry is a file, not a directory: {norm}"
-            if not backend.is_dir(norm):
+            if not await backend.is_dir(norm):
                 return None, [], f"exclude_dirs entry is not a directory: {norm}"
             if norm not in seen:
                 seen.add(norm)
@@ -1392,7 +1412,7 @@ class FindInFiles(AbstractSimpleTool):
             key=lambda e: (e.get("reason") or "", e.get("path") or ""),
         )
 
-    def _prefilter_candidates(
+    async def _prefilter_candidates(
         self,
         *,
         path: str,
@@ -1413,8 +1433,8 @@ class FindInFiles(AbstractSimpleTool):
         (show_excluded_dirs).
         """
         from gc_core.utils.native_fs_search import (
+            anative_prefilter_candidates,
             hard_exclude_names_for_grep,
-            native_prefilter_candidates,
             prefilter_terms,
         )
         from gc_core.utils.pattern_native_gate import is_safe_grep_include
@@ -1431,7 +1451,7 @@ class FindInFiles(AbstractSimpleTool):
         except Exception:
             return None, None
         native_glob = file_pattern if file_pattern and is_safe_grep_include(file_pattern) else None
-        return native_prefilter_candidates(
+        return await anative_prefilter_candidates(
             backend,
             path,
             terms=terms,
@@ -1442,8 +1462,14 @@ class FindInFiles(AbstractSimpleTool):
             exclude_paths=accepted_excludes,
         )
 
-    def _prefiltered_entries(self, root: str, abs_paths: List[str]):
-        """Prefilter hits as walk entries ``(relpath, is_dir=False)``."""
+    async def _prefiltered_entries(self, root: str, abs_paths: List[str]):
+        """Prefilter hits as walk entries ``(relpath, is_dir=False)``.
+
+        Асинхронный генератор — не ради работы внутри (её тут нет, одни
+        строки), а ради ОДНОРОДНОСТИ: вызывающий выбирает между этим
+        источником и ``backend.iter_walk_entries``, и обходить их обязан
+        одним и тем же ``async for``.
+        """
         backend = self._backend
         root_n = backend.normpath(root).rstrip("/\\")
         for abs_path in abs_paths:
@@ -1457,7 +1483,7 @@ class FindInFiles(AbstractSimpleTool):
                 rel = os.path.basename(abs_n)
             yield WalkEntry(rel or ".", False)
 
-    def _try_native_grep_directory(
+    async def _try_native_grep_directory(
         self,
         *,
         path: str,
@@ -1484,9 +1510,9 @@ class FindInFiles(AbstractSimpleTool):
         every candidate file from the host, so the switch is never silent.
         """
         from gc_core.utils.native_fs_search import (
+            arun_native_grep,
             hard_exclude_names_for_grep,
             native_grep_refusal,
-            run_native_grep,
         )
         from gc_core.utils.pattern_native_gate import is_grep_native_safe
 
@@ -1550,7 +1576,7 @@ class FindInFiles(AbstractSimpleTool):
                 abs_path, self._depth_under(path, abs_path), needle_strings, effective_ci
             )
 
-        result = run_native_grep(
+        result = await arun_native_grep(
             self._backend,
             path,
             plan,
@@ -1603,7 +1629,7 @@ class FindInFiles(AbstractSimpleTool):
         for m in shown:
             m["line_content"] = self._clip_line_content(m["line_content"])
             m.pop("context", None)
-        self._attach_native_match_contexts(shown, max_bytes)
+        await self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
             m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
 
@@ -1690,7 +1716,7 @@ class FindInFiles(AbstractSimpleTool):
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
     # ------------------------------------------------------------------
-    def _search_directory(
+    async def _search_directory(
         self,
         path: str,
         compiled: re.Pattern,
@@ -1714,7 +1740,7 @@ class FindInFiles(AbstractSimpleTool):
         backend = self._backend
         report_path = tool_report_abspath(path, workspace=self._workspace)
 
-        accepted_excludes, exclude_soft_errors, excl_err = self._normalize_exclude_dirs(
+        accepted_excludes, exclude_soft_errors, excl_err = await self._normalize_exclude_dirs(
             exclude_dirs,
             start_path=path,
             config=config,
@@ -1750,7 +1776,7 @@ class FindInFiles(AbstractSimpleTool):
             return True
 
         # --- native grep (gates) before Python pipeline ---
-        native_resp, fallback_reason = self._try_native_grep_directory(
+        native_resp, fallback_reason = await self._try_native_grep_directory(
             path=path,
             pattern=pattern,
             query_mode=query_mode,
@@ -1831,7 +1857,7 @@ class FindInFiles(AbstractSimpleTool):
         # Needle prefilter inside the sandbox: when native grep cannot answer
         # the pattern but a sound fixed-string needle exists, grep -l names the
         # candidate files first and only those are read from the host.
-        prefilter_paths, prefilter_failure = self._prefilter_candidates(
+        prefilter_paths, prefilter_failure = await self._prefilter_candidates(
             path=path,
             needles=needles,
             effective_ci=effective_ci,
@@ -1861,7 +1887,11 @@ class FindInFiles(AbstractSimpleTool):
                     prune_dot_dirs=prune_dot,
                 )
             )
-            for entry in entries:
+            yielder = LoopYielder()
+            async for entry in entries:
+                # Питоновский фоллбек читает КАЖДЫЙ файл и гоняет по нему
+                # regex — самая дорогая инлайн-операция из всех файловых.
+                await yielder.tick()
                 if entry.is_dir:
                     continue
                 relpath = entry.rel
@@ -1876,7 +1906,7 @@ class FindInFiles(AbstractSimpleTool):
                 fsize = entry.size
                 if fsize is None:
                     try:
-                        fsize = backend.getsize(abs_path)
+                        fsize = await backend.getsize(abs_path)
                     except OSError:
                         continue
                 if fsize > max_bytes:
@@ -2001,7 +2031,7 @@ class FindInFiles(AbstractSimpleTool):
 
         shared = _ScanShared()
 
-        def _process_one(item: Tuple[str, int, str, int]) -> None:
+        async def _process_one(item: Tuple[str, int, str, int]) -> None:
             abs_path, _depth, _rel, fsize = item
             with shared.lock:
                 if shared.stop:
@@ -2016,7 +2046,7 @@ class FindInFiles(AbstractSimpleTool):
                     return
                 shared.content_paths_touched += 1
 
-            text, br, skip = self._open_decode_text(abs_path, file_size=fsize)
+            text, br, skip = await self._open_decode_text(abs_path, file_size=fsize)
             with shared.lock:
                 shared.bytes_read += br
                 if skip == "binary":
@@ -2072,26 +2102,72 @@ class FindInFiles(AbstractSimpleTool):
                 # that proves a file was actually refused. Checking after the
                 # last file turned a complete scan into too_many_files_opened.
 
+        async def _scan_cooperatively() -> None:
+            """Разбор файлов инлайн, но с уступками loop.
+
+            Это ОСНОВНОЙ путь: параллельная ветка включается от 20 000
+            кандидатов, чего на реальном дереве не бывает. Раньше цикл шёл
+            без единой точки уступки и держал loop весь разбор (замерено —
+            79 мс на 260 файлах, и это линейно растёт с деревом).
+
+            Поток здесь не нужен и вреден: разбор упирается в GIL, а хождение
+            в него на каждый файл дороже самого разбора (замерено — 178 мс
+            против 129 мс). ``LoopYielder`` уступает по ВРЕМЕНИ, тем же
+            правилом, что и обход выше.
+            """
+            yielder = LoopYielder()
+            for item in candidates:
+                if shared.stop:
+                    break
+                await yielder.tick()
+                await _process_one(item)
+
+        async def _scan_in_parallel() -> None:
+            """Несколько разборщиков сразу — корутинами, не потоками.
+
+            Потоки отсюда ушли вместе с синхронной формой файлового порта:
+            чтение файла у бэкенда теперь корутина, а поток её ждать не умеет.
+            Потери в параллельности нет — есть уточнение, где она вообще была.
+
+            Для ЛОКАЛЬНОГО бэкенда её и не было: чтение идёт инлайн, GIL никто
+            не отпускает, и два потока разбирали ровно так же долго, как один
+            (замерено — 124 мс против 129 мс). А вот для бэкенда по сети
+            (Harbor) каждое чтение — это roundtrip, и вот они теперь
+            накладываются: ``workers`` разборщиков ждут ответа одновременно.
+            Именно этого прежняя форма и не умела — поток там блокировался на
+            ``run_coroutine_threadsafe(...).result()``.
+
+            Балансировку даёт общая очередь: разборщик берёт следующего
+            кандидата, как только освободился.
+            """
+            pending = iter(candidates)
+            yielder = LoopYielder()
+
+            async def _worker() -> None:
+                while not shared.stop:
+                    # Локом не огорожено намеренно: разборщики — корутины на
+                    # ОДНОМ loop, между `next()` и следующей точкой ожидания
+                    # переключений нет.
+                    item = next(pending, None)
+                    if item is None:
+                        return
+                    await yielder.tick()
+                    await _process_one(item)
+
+            results = await asyncio.gather(
+                *(_worker() for _ in range(workers)), return_exceptions=True
+            )
+            # Ждём всех и только потом бросаем: иначе оставшиеся дописывали бы
+            # `shared` уже после того, как мы вернули ошибку.
+            for res in results:
+                if isinstance(res, BaseException):
+                    raise res
+
         try:
             if workers == 1:
-                for item in candidates:
-                    if shared.stop:
-                        break
-                    _process_one(item)
+                await _scan_cooperatively()
             else:
-                # Preserve sort order of submission; early-stop via shared.stop
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    futures = [pool.submit(_process_one, item) for item in candidates]
-                    for fut in as_completed(futures):
-                        # surface unexpected errors
-                        exc = fut.exception()
-                        if exc is not None:
-                            raise exc
-                        if shared.stop:
-                            # cancel pending is best-effort
-                            for f in futures:
-                                f.cancel()
-                            break
+                await _scan_in_parallel()
         except PermissionError as exc:
             return self._error("permission_denied", message=str(exc))
         except Exception as exc:

@@ -961,6 +961,7 @@ name = "gc-core"
 version = "0.3.1"
 source = { editable = "packages/core" }
 dependencies = [
+    { name = "certifi" },
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
     { name = "httpx-sse" },
@@ -970,12 +971,12 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "readability-lxml" },
-    { name = "requests", extra = ["socks"] },
     { name = "trafilatura" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi" },
     { name = "chardet", specifier = ">=7.4.3" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "httpx-sse", specifier = ">=0.4.0" },
@@ -985,7 +986,6 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "readability-lxml" },
-    { name = "requests", extras = ["socks"] },
     { name = "trafilatura" },
 ]
 
@@ -1045,6 +1045,7 @@ source = { editable = "packages/tui" }
 dependencies = [
     { name = "gc-core" },
     { name = "gc-mcp" },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "pygments" },
     { name = "rich" },
@@ -1057,6 +1058,7 @@ dependencies = [
 requires-dist = [
     { name = "gc-core", editable = "packages/core" },
     { name = "gc-mcp", editable = "packages/mcp" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "huggingface-hub", specifier = ">=0.30" },
     { name = "pygments", specifier = ">=2.13" },
     { name = "rich", specifier = ">=13" },

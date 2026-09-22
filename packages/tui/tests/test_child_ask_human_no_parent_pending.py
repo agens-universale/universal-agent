@@ -63,7 +63,7 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
         assert scr._ask_human_child_parent_call_id == "call_sub_1"
 
         submitted = CommandTextArea.Submitted(value="копни глубже")
-        scr.on_command_text_area_submitted(submitted)
+        await scr.on_command_text_area_submitted(submitted)
         await pilot.pause()
 
         assert runner.submitted == ["копни глубже"]
@@ -125,7 +125,7 @@ async def test_parent_ask_human_answer_still_tracks_pending(tmp_path):
         await pilot.pause()
         assert scr._ask_human_child_parent_call_id is None
 
-        scr.on_command_text_area_submitted(
+        await scr.on_command_text_area_submitted(
             CommandTextArea.Submitted(value="да")
         )
         await pilot.pause()

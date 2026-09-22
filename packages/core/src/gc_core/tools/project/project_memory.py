@@ -213,17 +213,36 @@ Return format (JSON string):
             payload["hint"] = resolved_hint
         return json.dumps(payload, ensure_ascii=False)
 
-    def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
+    async def acall(self, action: str, content: str = "", **kwargs: Any) -> str:
+        """Инлайн на loop: нативного async у файлов нет (docs/async.md).
+
+        Файловые ветки исполняются прямо здесь — оборачивать нечего. Отличается
+        только ``append``: у него есть редкая ветка переполнения с LLM-компакцией,
+        и её надо ждать нативно — это единственный сетевой шаг в append'е.
+        См. ``_ahandle_append``.
+        """
+        early = self._reject_unusable(action)
+        if early is not None:
+            return early
+        if action == "append":
+            return await self._ahandle_append(content)
+        return self._dispatch_sync(action, content)
+
+
+    def _reject_unusable(self, action: str) -> Optional[str]:
+        """Отказ, если тулу негде работать. Общий для обоих входов."""
         if self._path is None:
             return self._err(
                 action=action,
                 error_type="not_configured",
                 message="project_memory path is not available in this context.",
             )
+        return None
+
+    def _dispatch_sync(self, action: str, content: str) -> str:
+        """Ветки без компакции: они одинаковы для синхронного и async входа."""
         if action == "read":
             return self._handle_read()
-        if action == "append":
-            return self._handle_append(content)
         if action == "write":
             return self._handle_write(content)
         return self._err(
@@ -249,7 +268,27 @@ Return format (JSON string):
             hint=_READ_EMPTY_HINT if is_empty else None,
         )
 
-    def _handle_append(self, content: str) -> str:
+
+    async def _ahandle_append(self, content: str) -> str:
+        """Дописать в long memory; компакцию ждём НАТИВНО.
+
+        Сжатие — LLM-вызов, и он единственное место в append'е, которое ходит
+        по сети: остальное — чтение и запись файла, они инлайновые.
+        """
+        early, combined = self._append_prepare(content)
+        if early is not None:
+            return early
+        return self._append_finish(
+            combined, await compaction.acompact_text(combined, self._ctx, self._state)
+        )
+
+    def _append_prepare(self, content: str) -> "tuple[Optional[str], str]":
+        """``(готовый ответ, текст для компакции)`` — ровно одно из двух значимо.
+
+        Всё, что не зависит от способа дождаться компакции: валидация, чтение
+        текущего содержимого и простая дозапись, если всё влезает. Вынесено,
+        чтобы у двух входов не разошлись правила — расходились бы молча.
+        """
         delta = content if isinstance(content, str) else ""
         delta_stripped = delta.strip()
         if not delta_stripped:
@@ -257,7 +296,7 @@ Return format (JSON string):
                 action="append",
                 error_type="empty_content",
                 message="content must be non-empty for append.",
-            )
+            ), ""
         if len(delta_stripped) > self._max_append_chars:
             return self._err(
                 action="append",
@@ -267,7 +306,7 @@ Return format (JSON string):
                     f"(> {self._max_append_chars}). "
                     "Rewrite more concisely (store facts, not raw text) and retry."
                 ),
-            )
+            ), ""
         existing = storage.read(self._path, backup=self._backup)
         existing_stripped = existing.strip()
         combined = (
@@ -281,11 +320,14 @@ Return format (JSON string):
                     self._path, delta_stripped, max_chars=self._max_chars, backup=self._backup
                 )
             except ProjectMemoryError as e:
-                return self._err(action="append", error_type=e.code, message=e.message)
+                return self._err(action="append", error_type=e.code, message=e.message), ""
             self._sync_baseline_after_mutation()
-            return self._ok(action="append", length=info.chars, lines=info.lines)
+            return self._ok(action="append", length=info.chars, lines=info.lines), ""
         # Overflow path: compact existing + delta together; LLM decides what to keep.
-        result = compaction.compact_text(combined, self._ctx, self._state)
+        return None, combined
+
+    def _append_finish(self, combined: str, result: Any) -> str:
+        """Разобрать итог компакции и записать результат."""
         if not result.ok:
             return self._err(
                 action="append",

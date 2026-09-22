@@ -69,18 +69,18 @@ def _registry(tmp_path, *, with_layers=("system",)):
     ), paths
 
 
-def test_discriminator_flat_skill_only(tmp_path):
+async def test_discriminator_flat_skill_only(tmp_path):
     """Папка с SKILL.md и без pack.yaml — обычный flat-скилл."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_flat_skill(paths["system"], "swe-task-solver", "do swe tasks")
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     assert "swe-task-solver" in items
     assert items["swe-task-solver"]["pack_id"] is None
     assert items["swe-task-solver"]["is_pack_bootstrap"] is False
     assert "pack_size" not in items["swe-task-solver"]
 
 
-def test_discriminator_pack_only(tmp_path):
+async def test_discriminator_pack_only(tmp_path):
     """Папка с pack.yaml — пакет, не flat-скилл."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -88,7 +88,7 @@ def test_discriminator_pack_only(tmp_path):
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     # Только bootstrap в default-выдаче
     assert "superpowers:using-superpowers" in items
     # Internal не виден
@@ -97,7 +97,7 @@ def test_discriminator_pack_only(tmp_path):
     assert "superpowers" not in items
 
 
-def test_discriminator_pack_and_skill_md_on_root_warns_treats_as_pack(tmp_path, caplog):
+async def test_discriminator_pack_and_skill_md_on_root_warns_treats_as_pack(tmp_path, caplog):
     """Папка с pack.yaml И SKILL.md на корне — гибрид; warn + трактуется как пакет, корневой SKILL.md игнорируется."""
     import logging
     reg, paths = _registry(tmp_path, with_layers=("system",))
@@ -112,7 +112,7 @@ def test_discriminator_pack_and_skill_md_on_root_warns_treats_as_pack(tmp_path, 
         encoding="utf-8",
     )
     with caplog.at_level(logging.WARNING):
-        items = {i["id"]: i for i in reg.list_skills()}
+        items = {i["id"]: i for i in await reg.list_skills()}
     # Пакет, а не flat
     assert "hybrid:using-it" in items
     assert "hybrid" not in items   # SKILL.md на корне НЕ регистрируется как flat
@@ -120,17 +120,17 @@ def test_discriminator_pack_and_skill_md_on_root_warns_treats_as_pack(tmp_path, 
     assert any("hybrid" in record.getMessage().lower() for record in caplog.records)
 
 
-def test_discriminator_empty_directory_silently_skipped(tmp_path):
+async def test_discriminator_empty_directory_silently_skipped(tmp_path):
     """Папка без SKILL.md и без pack.yaml — молча скипается."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     (paths["system"] / "empty-dir").mkdir()
     _write_flat_skill(paths["system"], "real-skill", "")
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     assert "real-skill" in items
     assert "empty-dir" not in items
 
 
-def test_filter_default_hides_internal_skills(tmp_path):
+async def test_filter_default_hides_internal_skills(tmp_path):
     """По умолчанию internal-скиллы скрыты, виден только bootstrap."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -138,12 +138,12 @@ def test_filter_default_hides_internal_skills(tmp_path):
         inner_skills=["using-superpowers", "brainstorming", "writing-plans"],
         bootstrap_skill="using-superpowers",
     )
-    items = reg.list_skills()
+    items = await reg.list_skills()
     ids = {i["id"] for i in items}
     assert ids == {"superpowers:using-superpowers"}
 
 
-def test_filter_with_pack_param_returns_all_pack_internals(tmp_path):
+async def test_filter_with_pack_param_returns_all_pack_internals(tmp_path):
     """list_skills(pack='X') возвращает все internal этого пакета (включая bootstrap)."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -151,7 +151,7 @@ def test_filter_with_pack_param_returns_all_pack_internals(tmp_path):
         inner_skills=["using-superpowers", "brainstorming", "writing-plans"],
         bootstrap_skill="using-superpowers",
     )
-    items = reg.list_skills(pack="superpowers")
+    items = await reg.list_skills(pack="superpowers")
     ids = {i["id"] for i in items}
     assert ids == {
         "superpowers:using-superpowers",
@@ -160,7 +160,7 @@ def test_filter_with_pack_param_returns_all_pack_internals(tmp_path):
     }
 
 
-def test_filter_with_pack_param_unknown_pack_returns_empty(tmp_path):
+async def test_filter_with_pack_param_unknown_pack_returns_empty(tmp_path):
     """list_skills(pack='nonexistent') не падает, возвращает []."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -168,10 +168,10 @@ def test_filter_with_pack_param_unknown_pack_returns_empty(tmp_path):
         inner_skills=["using-superpowers"],
         bootstrap_skill="using-superpowers",
     )
-    assert reg.list_skills(pack="nonexistent") == []
+    assert await reg.list_skills(pack="nonexistent") == []
 
 
-def test_filter_include_all_returns_everything(tmp_path):
+async def test_filter_include_all_returns_everything(tmp_path):
     """include_all=True возвращает flat + bootstrap + internal."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_flat_skill(paths["system"], "swe-task-solver", "")
@@ -180,12 +180,12 @@ def test_filter_include_all_returns_everything(tmp_path):
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
-    items = reg.list_skills(include_all=True)
+    items = await reg.list_skills(include_all=True)
     ids = {i["id"] for i in items}
     assert ids == {"swe-task-solver", "superpowers:using-superpowers", "superpowers:brainstorming"}
 
 
-def test_filter_pack_overrides_include_all(tmp_path):
+async def test_filter_pack_overrides_include_all(tmp_path):
     """pack='X' имеет приоритет над include_all=True (более специфичный фильтр)."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_flat_skill(paths["system"], "swe-task-solver", "")
@@ -194,13 +194,13 @@ def test_filter_pack_overrides_include_all(tmp_path):
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
-    items = reg.list_skills(pack="superpowers", include_all=True)
+    items = await reg.list_skills(pack="superpowers", include_all=True)
     ids = {i["id"] for i in items}
     # flat не показывается, потому что pack=superpowers фильтрует к одному пакету
     assert ids == {"superpowers:using-superpowers", "superpowers:brainstorming"}
 
 
-def test_bootstrap_has_is_pack_bootstrap_true_and_pack_size(tmp_path):
+async def test_bootstrap_has_is_pack_bootstrap_true_and_pack_size(tmp_path):
     """Bootstrap entry получает is_pack_bootstrap=true и pack_size=N."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -208,14 +208,14 @@ def test_bootstrap_has_is_pack_bootstrap_true_and_pack_size(tmp_path):
         inner_skills=["using-superpowers", "brainstorming", "writing-plans"],
         bootstrap_skill="using-superpowers",
     )
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     bootstrap = items["superpowers:using-superpowers"]
     assert bootstrap["is_pack_bootstrap"] is True
     assert bootstrap["pack_size"] == 3
     assert bootstrap["pack_id"] == "superpowers"
 
 
-def test_internal_non_bootstrap_has_is_pack_bootstrap_false_no_pack_size(tmp_path):
+async def test_internal_non_bootstrap_has_is_pack_bootstrap_false_no_pack_size(tmp_path):
     """Internal non-bootstrap скиллы получают is_pack_bootstrap=false, без pack_size."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -223,23 +223,23 @@ def test_internal_non_bootstrap_has_is_pack_bootstrap_false_no_pack_size(tmp_pat
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
-    items = {i["id"]: i for i in reg.list_skills(pack="superpowers")}
+    items = {i["id"]: i for i in await reg.list_skills(pack="superpowers")}
     inner = items["superpowers:brainstorming"]
     assert inner["is_pack_bootstrap"] is False
     assert "pack_size" not in inner
 
 
-def test_flat_skill_has_is_pack_bootstrap_false_no_pack_size(tmp_path):
+async def test_flat_skill_has_is_pack_bootstrap_false_no_pack_size(tmp_path):
     """Flat-скиллы получают is_pack_bootstrap=false, без pack_size."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_flat_skill(paths["system"], "swe-task-solver", "")
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     flat = items["swe-task-solver"]
     assert flat["is_pack_bootstrap"] is False
     assert "pack_size" not in flat
 
 
-def test_internal_skill_standalone_loadable_despite_hidden(tmp_path):
+async def test_internal_skill_standalone_loadable_despite_hidden(tmp_path):
     """skills_load("pack:inner") работает даже если inner скрыт из default list."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -248,14 +248,14 @@ def test_internal_skill_standalone_loadable_despite_hidden(tmp_path):
         bootstrap_skill="using-superpowers",
     )
     # brainstorming не виден в default list_skills
-    default_ids = {i["id"] for i in reg.list_skills()}
+    default_ids = {i["id"] for i in await reg.list_skills()}
     assert "superpowers:brainstorming" not in default_ids
     # Но грузится напрямую
-    detail = reg.load_skill_detail("superpowers:brainstorming")
+    detail = await reg.load_skill_detail("superpowers:brainstorming")
     assert detail["id"] == "superpowers:brainstorming"
 
 
-def test_short_alias_finds_hidden_internal(tmp_path):
+async def test_short_alias_finds_hidden_internal(tmp_path):
     """skills_load("brainstorming") (без префикса) находит uniques superpowers:brainstorming."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -263,11 +263,11 @@ def test_short_alias_finds_hidden_internal(tmp_path):
         inner_skills=["using-superpowers", "brainstorming"],
         bootstrap_skill="using-superpowers",
     )
-    detail = reg.load_skill_detail("brainstorming")
+    detail = await reg.load_skill_detail("brainstorming")
     assert detail["id"] == "superpowers:brainstorming"
 
 
-def test_pack_with_missing_bootstrap_skill_invisible_but_internals_loadable(tmp_path):
+async def test_pack_with_missing_bootstrap_skill_invisible_but_internals_loadable(tmp_path):
     """Пакет без bootstrap_skill в манифесте: в default list не появляется, но internal грузятся."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -276,17 +276,17 @@ def test_pack_with_missing_bootstrap_skill_invisible_but_internals_loadable(tmp_
         bootstrap_skill=None,   # манифест без bootstrap_skill
     )
     # В default ни одной записи
-    assert reg.list_skills() == []
+    assert await reg.list_skills() == []
     # Но internal-скиллы регистрируются и доступны напрямую
-    detail = reg.load_skill_detail("broken-pack:inner-a")
+    detail = await reg.load_skill_detail("broken-pack:inner-a")
     assert detail["id"] == "broken-pack:inner-a"
     # И через list_skills(pack=) тоже видны
-    pack_items = reg.list_skills(pack="broken-pack")
+    pack_items = await reg.list_skills(pack="broken-pack")
     pack_ids = {i["id"] for i in pack_items}
     assert pack_ids == {"broken-pack:inner-a", "broken-pack:inner-b"}
 
 
-def test_pack_bootstrap_pointing_to_nonexistent_skill_invisible(tmp_path):
+async def test_pack_bootstrap_pointing_to_nonexistent_skill_invisible(tmp_path):
     """Пакет с bootstrap_skill, указывающим в никуда: невидим, но internal доступны."""
     reg, paths = _registry(tmp_path, with_layers=("system",))
     _write_pack(
@@ -294,13 +294,13 @@ def test_pack_bootstrap_pointing_to_nonexistent_skill_invisible(tmp_path):
         inner_skills=["actual-inner"],
         bootstrap_skill="nonexistent-entry",   # такого скилла нет
     )
-    assert reg.list_skills() == []
+    assert await reg.list_skills() == []
     # Internal доступен напрямую
-    detail = reg.load_skill_detail("misconfigured:actual-inner")
+    detail = await reg.load_skill_detail("misconfigured:actual-inner")
     assert detail["id"] == "misconfigured:actual-inner"
 
 
-def test_override_inner_skill_project_layer(tmp_path):
+async def test_override_inner_skill_project_layer(tmp_path):
     """project-layer переопределяет internal-скилл пакета system-слоя."""
     reg, paths = _registry(tmp_path, with_layers=("system", "project"))
     # System-слой: пакет с internal-скиллом
@@ -321,12 +321,12 @@ def test_override_inner_skill_project_layer(tmp_path):
         "---\nid: brainstorming\nname: brainstorming\ndescription: \"from project\"\n---\n# project version\n",
         encoding="utf-8",
     )
-    detail = reg.load_skill_detail("superpowers:brainstorming")
+    detail = await reg.load_skill_detail("superpowers:brainstorming")
     assert detail["source"] == "project"
     assert "from project" in detail["description"]
 
 
-def test_single_source_escape_disables_pack_walk(tmp_path):
+async def test_single_source_escape_disables_pack_walk(tmp_path):
     """skills_data_path в config → single-source режим, паки игнорируются."""
     from gc_core.tools.skills.registry import get_skills_registry
 
@@ -342,14 +342,14 @@ def test_single_source_escape_disables_pack_walk(tmp_path):
     _write_flat_skill(custom, "flat-skill", "")
 
     reg = get_skills_registry({"skills_data_path": str(custom)})
-    items = {i["id"] for i in reg.list_skills()}
+    items = {i["id"] for i in await reg.list_skills()}
     # В single-source режиме папка с pack.yaml без SKILL.md на корне игнорируется
     assert "flat-skill" in items
     assert "would-be-pack:inner-a" not in items
     assert "would-be-pack" not in items
 
 
-def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(tmp_path):
+async def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(tmp_path):
     """
     REGRESSION: pack.yaml::bootstrap_skill может ссылаться на имя ПАПКИ или
     на frontmatter id entry-скилла. Folder-name match — fallback когда прямой
@@ -383,7 +383,7 @@ def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(tmp_path)
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     # Pack должен быть видим — bootstrap резолвится через folder-name fallback.
     # Canonical скилла строится из frontmatter id, не из имени папки.
     assert "my-pack:actual-entry" in items
@@ -392,7 +392,7 @@ def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(tmp_path)
     assert bootstrap["pack_size"] == 1
 
 
-def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
+async def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
     """
     Если есть два скилла где folder-name одного совпадает с frontmatter-id
     другого, прямой canonical lookup выигрывает: bootstrap_skill: bar →
@@ -429,7 +429,7 @@ def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = {i["id"]: i for i in reg.list_skills()}
+    items = {i["id"]: i for i in await reg.list_skills()}
     # Виден bootstrap — скилл A (canonical ambig:bar) по прямому lookup'у.
     assert "ambig:bar" in items
     assert items["ambig:bar"]["is_pack_bootstrap"] is True
@@ -437,7 +437,7 @@ def test_bootstrap_direct_canonical_wins_over_folder_name_match(tmp_path):
     assert "ambig:baz" not in items
 
 
-def test_bare_pack_id_resolves_to_bootstrap(tmp_path):
+async def test_bare_pack_id_resolves_to_bootstrap(tmp_path):
     """A bare pack-id loads the pack's bootstrap (entry) skill instead of 404 (hop1)."""
     _write_pack(
         tmp_path / "system",
@@ -446,12 +446,12 @@ def test_bare_pack_id_resolves_to_bootstrap(tmp_path):
         bootstrap_skill="using-superpowers",
     )
     reg, _ = _registry(tmp_path)
-    detail = reg.load_skill_detail("superpowers")
+    detail = await reg.load_skill_detail("superpowers")
     assert detail["id"] == "superpowers:using-superpowers"
     assert detail["pack_id"] == "superpowers"
 
 
-def test_bare_pack_id_underscore_variant_resolves(tmp_path):
+async def test_bare_pack_id_underscore_variant_resolves(tmp_path):
     """Bare pack-id with underscores normalizes to the hyphen pack id."""
     _write_pack(
         tmp_path / "system",
@@ -460,11 +460,11 @@ def test_bare_pack_id_underscore_variant_resolves(tmp_path):
         bootstrap_skill="using-science-article-creator",
     )
     reg, _ = _registry(tmp_path)
-    detail = reg.load_skill_detail("science_article_creator")
+    detail = await reg.load_skill_detail("science_article_creator")
     assert detail["id"] == "science-article-creator:using-science-article-creator"
 
 
-def test_bare_pack_id_without_bootstrap_still_raises(tmp_path):
+async def test_bare_pack_id_without_bootstrap_still_raises(tmp_path):
     """A pack that declares no bootstrap_skill does not resolve by bare id."""
     _write_pack(
         tmp_path / "system",
@@ -474,12 +474,12 @@ def test_bare_pack_id_without_bootstrap_still_raises(tmp_path):
     )
     reg, _ = _registry(tmp_path)
     with pytest.raises(KeyError):
-        reg.load_skill_detail("nobs")
+        await reg.load_skill_detail("nobs")
 
 
-def test_unknown_bare_id_still_raises(tmp_path):
+async def test_unknown_bare_id_still_raises(tmp_path):
     """Non-pack, non-skill ids still raise KeyError (no regression)."""
     _write_flat_skill(tmp_path / "system", "swe-task-solver")
     reg, _ = _registry(tmp_path)
     with pytest.raises(KeyError):
-        reg.load_skill_detail("totally-bogus-xyz")
+        await reg.load_skill_detail("totally-bogus-xyz")

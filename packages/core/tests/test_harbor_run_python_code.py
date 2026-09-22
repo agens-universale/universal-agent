@@ -30,7 +30,7 @@ class _RecordingFakeBackend:
         self.calls.append({"code": code, "cwd": cwd, "timeout": timeout, "env": env})
         return self.res
 
-    def is_dir(self, path):
+    async def is_dir(self, path):
         return path in self._dirs
 
 

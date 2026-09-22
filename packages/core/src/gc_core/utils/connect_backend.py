@@ -1,11 +1,12 @@
+import asyncio
 import logging
 import os
-import requests
+import httpx
 import re
 import json
 from copy import deepcopy
 from uuid import uuid4
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
@@ -14,13 +15,14 @@ from gc_core.model_router import ResolvedModel
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.aretry import retry_with_backoff_async
+from gc_core.utils.async_http import get_async_client
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
-from gc_core.utils.http_session import NO_NETRC_SESSION as _NO_NETRC_SESSION
-from gc_core.utils.retry import retry_with_backoff
+from gc_core.utils.stream_assembler import StreamAssembler
 from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.usage.context import record_usage
-from gc_core.utils.chat_completions_stream import iter_sse_data_lines, assemble_streamed_completion, OnDelta, BackendStreamError
-from gc_core.utils.backend_errors import is_empty_completion
+from gc_core.utils.chat_completions_stream import OnDelta, BackendStreamError
+from gc_core.utils.backend_errors import HTTP_STATUS_ERRORS, HTTP_TRANSPORT_ERRORS, http_status_code, is_empty_completion
 from gc_core.trace_id import (
     trace_id_from_config,
     trace_header_name,
@@ -166,32 +168,144 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
       туннеля (транзиентно); честный 404 просто ждёт retry-бюджет.
     - иногда рвётся стрим: ошибки парсинга/валидации
     """
-    if isinstance(exc, requests.exceptions.HTTPError):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, HTTP_STATUS_ERRORS):
+        status_code = http_status_code(exc)
         if status_code is None:
             return False
         return status_code in (404, 429) or status_code >= 500
 
-    if isinstance(
-        exc,
-        (
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-            requests.exceptions.RequestException,
-        ),
-    ):
+    if isinstance(exc, HTTP_TRANSPORT_ERRORS):
         return True
 
     return isinstance(exc, (json.JSONDecodeError, ValueError))
 
 
-@retry_with_backoff(
+
+def _log_backend_request(logger, api_mode: str, url: str, payload: Dict) -> None:
+    """Лог исходящего запроса. Один на оба транспорта: расхождение в логах
+    между sync и async путями искало бы себя часами."""
+    if logger is None:
+        return
+    try:
+        logger.debug(
+            "Send request to backend %s url=%s payload=%s",
+            api_mode, url, json.dumps(payload, ensure_ascii=False),
+        )
+    except Exception:
+        # Не роняем процесс из-за проблем с сериализацией payload.
+        logger.debug("Send request to backend %s url=%s", api_mode, url)
+    logger.debug(
+        "backend_request",
+        extra={"event": "backend_request", "api_mode": api_mode,
+               "url": url, "payload": payload},
+    )
+
+
+def _log_backend_response(logger, api_mode: str, response: Any) -> None:
+    if logger is None:
+        return
+    logger.debug(
+        "backend_response",
+        extra={"event": "backend_response", "api_mode": api_mode, "response": response},
+    )
+
+
+def _messages_summary(data: Dict) -> Optional[List[Dict]]:
+    """Скелет отправленных сообщений — по нему видно причину 422 без тела запроса."""
+    try:
+        payload_messages = data.get("messages") if isinstance(data, dict) else None
+        if not isinstance(payload_messages, list):
+            return None
+        return [
+            {
+                "role": m.get("role") if isinstance(m, dict) else None,
+                "has_content": isinstance(m, dict) and "content" in m,
+                "content_type": type(m.get("content")).__name__
+                if isinstance(m, dict) and "content" in m
+                else None,
+                "has_tool_calls": isinstance(m, dict)
+                and isinstance(m.get("tool_calls"), list),
+                "tool_calls_len": len(m.get("tool_calls"))
+                if isinstance(m, dict) and isinstance(m.get("tool_calls"), list)
+                else None,
+                "has_tool_call_id": isinstance(m, dict) and "tool_call_id" in m,
+            }
+            for m in payload_messages[:20]
+        ]
+    except Exception:
+        return None
+
+
+def _report_chat_http_error(*, status, err_text, url, data, logger) -> None:
+    """Диагностика HTTP-ошибки chat/completions.
+
+    Общая для обоих транспортов. В случае 422/400 причина валидации лежит в
+    теле ответа, и печать в stdout здесь намеренная: при неполной конфигурации
+    логгера иначе не видно вообще ничего.
+    """
+    messages_summary = _messages_summary(data) if logger is not None else None
+    if logger is not None:
+        logger.error(
+            "Backend chat/completions HTTP error status=%s url=%s response_body=%s",
+            status, url, err_text,
+        )
+        if messages_summary is not None:
+            logger.error(
+                "Backend chat/completions request messages summary=%s", messages_summary
+            )
+    try:
+        err_text_short = err_text[:4000] if isinstance(err_text, str) else str(err_text)
+    except Exception:
+        err_text_short = str(err_text)
+    print(
+        "=== backend chat/completions validation error ===\n"
+        f"url={url}\n"
+        f"status={status}\n"
+        f"response_body={err_text_short}\n"
+    )
+    if logger is None and messages_summary is not None:
+        print(f"request messages summary={messages_summary}")
+
+
+async def _aiter_utf8_lines(response: "httpx.Response"):
+    """Строки SSE, декодированные строго как UTF-8.
+
+    ``httpx.aiter_lines()`` декодирует по charset из заголовка ответа, а
+    синхронный путь до переезда делал ``line.decode("utf-8", errors="replace")``
+    независимо от того, что объявил провайдер. Разница не теоретическая:
+    провайдер, объявивший ISO-8859-1 или windows-1251, портил ответ там, где
+    старый путь давал верный текст. Тело SSE у OpenAI-совместимых API — всегда
+    UTF-8, что бы ни стояло в заголовке.
+    """
+    buf = b""
+    async for chunk in response.aiter_bytes():
+        buf += chunk
+        while True:
+            idx = buf.find(b"\n")
+            if idx == -1:
+                break
+            line, buf = buf[:idx], buf[idx + 1:]
+            yield line.decode("utf-8", errors="replace")
+    if buf:
+        yield buf.decode("utf-8", errors="replace")
+
+
+async def _aread_error_text(response: "httpx.Response") -> Optional[str]:
+    """Тело ответа-ошибки. У стримового ответа оно недоступно до aread()."""
+    try:
+        await response.aread()
+        return response.text
+    except Exception:
+        return None
+
+
+@retry_with_backoff_async(
     should_retry=_default_should_retry_backend_exception,
     retry_log_level=logging.ERROR,
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend request",
 )
-def request_backend_responses(
+async def arequest_backend_responses(
     data: Dict,
     headers: Dict,
     url: str,
@@ -202,47 +316,56 @@ def request_backend_responses(
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
     config_proxy: Optional[str] = None,
 ) -> Tuple[Dict, Dict]:
-    """
-    Отправить запрос в backend responses API.
+    """Запрос в backend responses API (deprecated-режим), неблокирующий.
 
     url и verify передаются явно вызывающим кодом (как правило, из ctx.config_dict).
     timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
-    config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый post.
+    config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый запрос.
     """
-    chunks: List[bytes] = []
     proxies = resolve_proxies(config_proxy, os.environ, url)
+    client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 
-    data['stream'] = True
-
+    data["stream"] = True
     if logger is not None:
         logger.debug(
             "backend_request",
-            extra={"event": "backend_request", "api_mode": "responses", "url": url, "payload": data},
+            extra={"event": "backend_request", "api_mode": "responses",
+                   "url": url, "payload": data},
         )
 
-    with _NO_NETRC_SESSION.post(
-        url,
-        json=data,
-        headers=headers,
-        stream=True,
-        verify=verify,
-        cert=cert,
-        timeout=timeout,
-        proxies=proxies,
+    chunks: List[str] = []
+    async with client.stream(
+        "POST", url, json=data, headers=headers, timeout=timeout
     ) as r:
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            # Тело у потокового ответа не прочитано, и исключение улетало с
+            # пустым `response.text`. Для 4xx это ровно та строка, в которой
+            # бэкенд объясняет причину (неизвестная модель, превышен лимит):
+            # в лог попадал голый код, и разбираться было не с чем. Путь
+            # chat/completions это уже делал — здесь была асимметрия.
+            err_text = await _aread_error_text(r)
+            if logger is not None:
+                logger.error(
+                    "Backend responses HTTP error status=%s url=%s body=%s",
+                    r.status_code, url, (err_text or "")[:2000],
+                )
+            raise
         r_headers = r.headers
-        for line in r.iter_lines():
-            chunks.append(line)
-            # print(line.decode('utf-8'))
+        async for line in _aiter_utf8_lines(r):
+            # Пустые строки — разделители событий SSE. requests.iter_lines их
+            # проглатывал, httpx.aiter_lines отдаёт: без фильтра «последним
+            # чанком» оказался бы пустой разделитель, и режим responses падал
+            # бы на разборе JSON.
+            if line.strip():
+                chunks.append(line)
 
-    last_chunk = chunks[-1].decode('utf-8')
-    # print(last_chunk)
-    # print(last_chunk)
+    last_chunk = chunks[-1] if chunks else ""
     try:
-        result = json.loads(re.sub('^data: +', '', last_chunk))
+        result = json.loads(re.sub("^data: +", "", last_chunk))
     except Exception as e:
-        print(f'Error read json from backend. Last chunk: {last_chunk}')
+        print(f"Error read json from backend. Last chunk: {last_chunk}")
         if logger is not None:
             logger.error(
                 "backend_responses_json_error",
@@ -250,28 +373,25 @@ def request_backend_responses(
             )
         raise e
 
-    result_type = result.get("type")
-    if result_type != "response.completed":
-        raise ValueError(f'wrong stream finish: {chunks[-1].decode("utf-8")}')
+    if result.get("type") != "response.completed":
+        raise ValueError(f"wrong stream finish: {last_chunk}")
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
         record_usage(response_obj.get("usage"), url)
-    if logger is not None:
-        logger.debug(
-            "backend_response",
-            extra={"event": "backend_response", "api_mode": "responses", "response": response_obj},
-        )
+    _log_backend_response(logger, "responses", response_obj)
     return response_obj, r_headers
 
 
-@retry_with_backoff(
+
+
+@retry_with_backoff_async(
     should_retry=_default_should_retry_backend_exception,
     retry_log_level=logging.ERROR,
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend chat completion request",
 )
-def request_backend_chat_completions(
+async def arequest_backend_chat_completions(
     data: Dict,
     headers: Dict,
     url: str,
@@ -283,17 +403,15 @@ def request_backend_chat_completions(
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
     config_proxy: Optional[str] = None,
 ):
-    """
-    Отправить запрос в backend chat completions API.
+    """Запрос в backend chat/completions, неблокирующий.
 
-    url передаётся явно вызывающим кодом (как правило, из ctx.config_dict).
-    timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
-    config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый post.
+    Стриминг задействован ТОЛЬКО когда caller передал on_delta (его ставит лишь
+    TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None → всегда
+    non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
     """
     proxies = resolve_proxies(config_proxy, os.environ, url)
-    # Стриминг задействован ТОЛЬКО когда caller передал on_delta (его ставит
-    # лишь TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None →
-    # всегда non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
+    client = get_async_client(verify=verify, cert=cert, proxies=proxies)
+
     if on_delta is not None:
         stream_data = dict(data)
         stream_data["stream"] = True
@@ -301,45 +419,16 @@ def request_backend_chat_completions(
         # запросу — иначе финального usage-чанка нет и токены основного цикла
         # (он всегда стримится) не учитываются.
         stream_data["stream_options"] = {"include_usage": True}
-        if logger is not None:
-            try:
-                logger.debug(
-                    "Send request to backend chat/completions (stream=True) url=%s payload=%s",
-                    url,
-                    json.dumps(stream_data, ensure_ascii=False),
-                )
-            except Exception:
-                logger.debug(
-                    "Send request to backend chat/completions (stream=True) url=%s", url
-                )
-            logger.debug(
-                "backend_request",
-                extra={
-                    "event": "backend_request",
-                    "api_mode": "chat_completions",
-                    "url": url,
-                    "payload": stream_data,
-                },
-            )
-        with _NO_NETRC_SESSION.post(
-            url,
-            json=stream_data,
-            headers=headers,
-            stream=True,
-            verify=verify,
-            cert=cert,
-            timeout=timeout,
-            proxies=proxies,
+        _log_backend_request(logger, "chat_completions", url, stream_data)
+
+        async with client.stream(
+            "POST", url, json=stream_data, headers=headers, timeout=timeout
         ) as r:
             try:
                 r.raise_for_status()
-            except requests.exceptions.HTTPError:
-                # Preserve error-body diagnostics (parity with blocking path).
-                err_text = None
-                try:
-                    err_text = r.text
-                except Exception:
-                    err_text = None
+            except httpx.HTTPStatusError:
+                # Диагностика тела сохраняется как в блокирующем пути.
+                err_text = await _aread_error_text(r)
                 if logger is not None:
                     logger.error(
                         "Backend chat/completions (stream) HTTP error status=%s url=%s body=%s",
@@ -353,124 +442,120 @@ def request_backend_chat_completions(
                 raise
             on_delta("reset", "")
 
-            assembled = assemble_streamed_completion(
-                iter_sse_data_lines(r.iter_lines()), on_delta=on_delta
-            )
+            assembler = StreamAssembler(on_delta=on_delta)
+            async for line in _aiter_utf8_lines(r):
+                assembler.feed_line(line)
+                if assembler.done:
+                    # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
+                    # нельзя: закрывает его сервер, а корп-прокси вправе держать
+                    # соединение сколько угодно. Ход ждал бы read-timeout (600 с
+                    # по умолчанию), а тот считается поводом повторить ВЕСЬ
+                    # запрос: показанный ответ стирается и генерируется заново.
+                    # Синхронный путь до переезда выходил здесь же —
+                    # `iter_sse_data_lines` делала на маркере `return`.
+                    break
+            assembler.flush()
+            assembled = assembler.result()
+
             if is_empty_completion(assembled):
                 raise BackendStreamError(
                     "Backend returned empty stream response (no content, tool_calls, "
                     "finish_reason, or error)",
                     status_code=None,
                 )
-                        # основного цикла терялся — фиксировался только non-stream aux-вызов).
             if isinstance(assembled, dict):
                 record_usage(assembled.get("usage"), url)
-            if logger is not None:
-                logger.debug(
-                    "backend_response",
-                    extra={
-                        "event": "backend_response",
-                        "api_mode": "chat_completions",
-                        "response": assembled,
-                    },
-                )
+            _log_backend_response(logger, "chat_completions", assembled)
             return assembled
 
-    if logger is not None:
-        try:
-            logger.debug(
-                "Send request to backend chat/completions url=%s payload=%s",
-                url,
-                json.dumps(data, ensure_ascii=False),
-            )
-        except Exception:
-            # Не роняем процесс из-за проблем с сериализацией payload.
-            logger.debug("Send request to backend chat/completions url=%s", url)
-        logger.debug(
-            "backend_request",
-            extra={"event": "backend_request", "api_mode": "chat_completions", "url": url, "payload": data},
-        )
-
-    r = _NO_NETRC_SESSION.post(
-        url, json=data, headers=headers, verify=verify, cert=cert, timeout=timeout,
-        proxies=proxies,
-    )
+    _log_backend_request(logger, "chat_completions", url, data)
+    r = await client.post(url, json=data, headers=headers, timeout=timeout)
     try:
         r.raise_for_status()
-    except requests.exceptions.HTTPError:
-        # В случае 422/400 полезно видеть body: там обычно лежит причина валидации.
+    except httpx.HTTPStatusError:
         err_text = None
-        messages_summary = None
         try:
             err_text = r.text
         except Exception:
             err_text = None
-        if logger is not None:
-            try:
-                payload_messages = data.get("messages") if isinstance(data, dict) else None
-                if isinstance(payload_messages, list):
-                    messages_summary = [
-                        {
-                            "role": m.get("role") if isinstance(m, dict) else None,
-                            "has_content": isinstance(m, dict) and "content" in m,
-                            "content_type": type(m.get("content")).__name__
-                            if isinstance(m, dict) and "content" in m
-                            else None,
-                            "has_tool_calls": isinstance(m, dict)
-                            and isinstance(m.get("tool_calls"), list),
-                            "tool_calls_len": len(m.get("tool_calls"))
-                            if isinstance(m, dict) and isinstance(m.get("tool_calls"), list)
-                            else None,
-                            "has_tool_call_id": isinstance(m, dict)
-                            and "tool_call_id" in m,
-                        }
-                        for m in payload_messages[:20]
-                    ]
-            except Exception:
-                messages_summary = None
-
-            logger.error(
-                "Backend chat/completions HTTP error status=%s url=%s response_body=%s",
-                getattr(r, "status_code", None),
-                url,
-                err_text,
-            )
-            if messages_summary is not None:
-                logger.error(
-                    "Backend chat/completions request messages summary=%s",
-                    messages_summary,
-                )
-        # Печатаем в stdout, чтобы даже при неполной конфигурации логгера
-        # вы точно увидели причину 422 в выводе.
-        try:
-            # Пробуем подсократить слишком длинные ответы.
-            err_text_short = err_text[:4000] if isinstance(err_text, str) else str(err_text)
-        except Exception:
-            err_text_short = str(err_text)
-        print(
-            "=== backend chat/completions validation error ===\n"
-            f"url={url}\n"
-            f"status={getattr(r, 'status_code', None)}\n"
-            f"response_body={err_text_short}\n"
+        _report_chat_http_error(
+            status=getattr(r, "status_code", None),
+            err_text=err_text, url=url, data=data, logger=logger,
         )
-        if logger is None and messages_summary is not None:
-            print(f"request messages summary={messages_summary}")
         raise
 
-    data = r.json()
-    if isinstance(data, dict):
-        record_usage(data.get("usage"), url)
-    if logger is not None:
-        logger.debug(
-            "backend_response",
-            extra={"event": "backend_response", "api_mode": "chat_completions", "response": data},
-        )
-    return data
+    payload = r.json()
+    if isinstance(payload, dict):
+        record_usage(payload.get("usage"), url)
+    _log_backend_response(logger, "chat_completions", payload)
+    return payload
 
 
-def create_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) -> Dict[str, str]:
+
+
+async def aresolve_auth_token(auth_connector, *, force: bool = False) -> str:
+    """Токен, не морозя loop.
+
+    ``AuthConnector.get_token()`` делает два последовательных блокирующих
+    HTTP-вызова (GET, потом POST, по 10 с таймаута каждый) одноразовым
+    синхронным клиентом. Звали его из ``async def`` напрямую — при истечении
+    токена (примерно раз в десять минут) и на каждом 401-ретрае, — и loop мог
+    замереть до двадцати секунд, останавливая ВСЕХ агентов и TUI на нём. Это
+    ровно тот бюджет отзывчивости, который заявлен в docs/async.md.
+
+    Свой ``aget_token`` у коннектора — идём через него нативно. Нет —
+    единственный честный вариант для чужого синхронного кода: поток. Заход в
+    пул стоит десятки микросекунд против сотен миллисекунд самого запроса к
+    модели, поэтому быстрый путь (токен ещё свеж) отдельно не выделяем — он
+    того не стоит, а ветвление стоило бы знания о внутренностях коннектора.
     """
-    Сформировать заголовки вызова для backend API на основе State и RunContext.
+    aget = getattr(auth_connector, "aget_token", None)
+    if callable(aget):
+        return await aget(force=force)
+
+    # Зовём РОВНО так, как звали синхронные вызывающие: без `force` — совсем
+    # без аргумента. Чужие коннекторы (и тестовые двойники) объявляют
+    # `get_token()` без параметров, и лишний позиционный аргумент их ломает.
+    def _get() -> str:
+        return auth_connector.get_token(force=True) if force else auth_connector.get_token()
+
+    return await asyncio.to_thread(_get)
+
+
+async def acreate_call_headers(
+    state, ctx, resolved: Optional[ResolvedModel] = None
+) -> Dict[str, str]:
+    """Заголовки вызова backend. ЕДИНСТВЕННАЯ форма этой операции.
+
+    Отличие от чистой сборки ровно одно и несущее: токен берётся не на loop.
+    Всё остальное — работа со словарями, и она вынесена в
+    :func:`build_call_headers`, которая ничего не ждёт и потому двойником не
+    является: у неё нет своей формы «сходить за токеном».
+
+    Синхронный близнец снят. Он звал ``auth_connector.get_token()`` прямо —
+    два последовательных блокирующих HTTP-вызова по 10 с таймаута, — и это
+    единственное, чем он отличался. В проде его не звал никто (оставались
+    только мёртвые импорты в ``processing_responses`` и ``llm_chat_client``).
+    """
+    auth_connector = getattr(ctx, "auth_connector", None)
+    token = None
+    if auth_connector is not None:
+        token = await aresolve_auth_token(auth_connector)
+    return build_call_headers(state, ctx, resolved, token=token)
+
+
+def build_call_headers(
+    state,
+    ctx,
+    resolved: Optional[ResolvedModel] = None,
+    *,
+    token: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Собрать заголовки вызова для backend API на основе State и RunContext.
+
+    ЧИСТАЯ часть: ни одного ожидания, ни одного похода в сеть. Токен приходит
+    готовым — добывает его :func:`acreate_call_headers`, вне loop.
 
     ``resolved`` — комплект ResolvedModel этого вызова (Router, спека §6/§7). Per-model
     ``authorization``/``backend.chat_completion_headers`` действуют только в chat_completions —
@@ -500,7 +585,18 @@ def create_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) ->
     elif authorization_override:
         call_headers["Authorization"] = authorization_override
     elif auth_connector is not None:
-        token = auth_connector.get_token()
+        # Токен добывает ТОЛЬКО `acreate_call_headers`, и вне loop. Здесь его
+        # брать нечем: `AuthConnector.get_token()` — два блокирующих HTTP-вызова
+        # по 10 с, и снятая синхронная форма морозила loop ровно на них.
+        # `token is None` при живом коннекторе — это незаполненный аргумент, а
+        # не «явно без авторизации»; молча уйти без Authorization хуже всего:
+        # backend ответит 401, и искать причину будут в конфиге.
+        if token is None:
+            raise ValueError(
+                "build_call_headers: ctx.auth_connector задан, а token не передан. "
+                "Заголовки с авторизацией собирает acreate_call_headers — она "
+                "берёт токен вне loop."
+            )
         call_headers["Authorization"] = f"Bearer {token}"
 
     # Дополнительные заголовки для chat/completions передаются

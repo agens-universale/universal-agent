@@ -6,17 +6,27 @@ State создаётся заново при каждом run(). Возвращ�
 нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
 """
 
+import asyncio
 import gc
 import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
-from gc_core.processing_responses import run_agent, begin_turn_main_trace
+from gc_core.processing_responses import (
+    _acall_blocking_hook,
+    arun_agent,
+    begin_turn_main_trace,
+)
 from gc_core.run_context import RunContext
 from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.run_summary_coordinator import RunSummaryCoordinator, reset_stale_summarizing_flag, set_tui_finalizing, set_tui_finish_gate_checking
+from gc_core.run_summary_coordinator import (
+    RunSummaryCoordinator,
+    areset_stale_summarizing_flag,
+    aset_tui_finalizing,
+    aset_tui_finish_gate_checking,
+)
 from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
@@ -24,12 +34,17 @@ from gc_core.message_policy.user_message_policy import extract_real_user_message
 from gc_core.states import State, SharedStateData
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_report, build_run_usage_dict
-from gc_core.thread_store import ThreadSession, make_message_key, reset_thread_files, resolve_threads_dir, update_runtime_meta
+from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
 from gc_core.trace_id import trace_id_from_config
-from gc_core.tools.subagents.active_scope import try_enqueue_user_message
+from gc_core.tools.subagents.active_scope import (
+    active_parent_call_id,
+    is_child_input_active,
+    try_enqueue_user_message,
+)
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
 from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
@@ -49,7 +64,7 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
 )
 
 
-def _append_trace_id_to_meta(
+async def _aappend_trace_id_to_meta(
     thread_session: Any, trace_id: str, logger: Any | None = None
 ) -> None:
     """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
@@ -66,22 +81,26 @@ def _append_trace_id_to_meta(
     вызывающих сторон).
     """
     from gc_core.persistence.meta_ownership import runtime_section
-    from gc_core.thread_store import load_thread_meta, sanitize_system_id, update_runtime_meta
+    from gc_core.thread_store import sanitize_system_id
 
-    threads_dir = getattr(thread_session, "threads_dir", None)
+    # Хранилище берём у самой сессии: у неё оно уже своё — файловое по
+    # умолчанию или переданное встраивающим. Прямой вызов модульных функций
+    # уводил бы записи на диск даже тогда, когда история лежит в базе.
+    store = getattr(thread_session, "store", None)
+    port = getattr(thread_session, "port", None)
     system_id = getattr(thread_session, "system_id", None)
     thread_id = getattr(thread_session, "thread_id", None)
-    if not threads_dir or not system_id or not thread_id:
+    if store is None or port is None or not system_id or not thread_id:
         return
     try:
         sys_norm = sanitize_system_id(system_id)
-        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+        meta = await port.aload_meta(sys_norm, thread_id) or {}
         existing = runtime_section(meta).get("trace_ids")
         ids = [str(x) for x in existing] if isinstance(existing, list) else []
         if trace_id in ids:
             return
         ids.append(trace_id)
-        update_runtime_meta(threads_dir, sys_norm, thread_id, {"trace_ids": ids})
+        await port.aupdate_runtime_meta(sys_norm, thread_id, {"trace_ids": ids})
     except Exception as exc:
         if logger is not None:
             try:
@@ -89,6 +108,65 @@ def _append_trace_id_to_meta(
             except Exception:
                 pass
         return
+
+
+
+
+async def _aclose_mcp_and_release(owner_reset: Any) -> None:
+    """Уборка после прогона: stdio-сессии, stream-сессии, владение.
+
+    Отмену КОПИМ, а не пробрасываем сразу. Раньше `CancelledError` из первого
+    шага уносил управление мимо всего остального: не закрывались
+    stream-сессии, не снималось владение. Отмена приходит ровно тогда, когда
+    прибираться нужнее всего — по стопу пользователя или дедлайну, — и именно
+    тогда браузер оставался жить. `except Exception` её не ловит: она
+    `BaseException`.
+
+    Вынесено из `finally` отдельной функцией не ради красоты: внутри `finally`
+    это свойство проверялось бы только копией блока в тесте, то есть никак.
+    """
+    cancelled: Optional[BaseException] = None
+    try:
+        # Долгоживущие stdio (напр. @playwright/mcp + Chromium): владелец
+        # берётся из contextvar здесь же — закроется только наше, чужой
+        # браузер продолжит работать.
+        await PersistentStdioRegistry.instance().aclose_all()
+    except asyncio.CancelledError as exc:
+        cancelled = exc
+    except Exception:
+        pass
+    try:
+        # НЕ через to_thread: сессии ключуются по id(loop) и живут на ЭТОМ
+        # loop — из чужого потока их не видно и закрыть нечем.
+        await _STREAM_SESSION_MANAGER.aclose_all()
+    except asyncio.CancelledError as exc:
+        cancelled = cancelled or exc
+    except Exception:
+        pass
+    # C2: после закрытия MCP/stdio — подбираем циклический мусор
+    # (pipes, ClientSession, loop buffers).
+    gc.collect()
+    # Владение снимаем последним: всё выше его требует.
+    reset_owner(owner_reset)
+    if cancelled is not None:
+        raise cancelled
+
+
+def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
+    """Недоставленные сообщения → аргументы `arun` для отдельного хода.
+
+    Владелец доигрывает хвост (`take_undelivered_messages`) новым ходом, а
+    `arun` принимает тексты и параллельные списки полей, тогда как в очередь
+    кладут готовые словари. Поля переносятся те, из которых `arun` и строит
+    сообщение: id (по нему TUI точечно откатывает реплику), display_content и
+    skill_loaded — других в очередь не кладут ни сервер, ни TUI.
+    """
+    texts = [str(m.get("content", "")) for m in messages]
+    return texts, {
+        "message_ids": [m.get("id") for m in messages],
+        "display_contents": [m.get("display_content") for m in messages],
+        "skills_loaded": [m.get("skill_loaded") for m in messages],
+    }
 
 
 class AgentExecutor:
@@ -101,13 +179,39 @@ class AgentExecutor:
         self._ctx = ctx
         self._lock = threading.Lock()
         self._pending_messages: list[dict] = []
+        #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
+        #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
+        #: ответили «принято», и молча терять их нельзя. Забирает владелец —
+        #: `take_undelivered_messages`, вместе с пришедшим после.
+        self._undelivered_messages: list[dict] = []
         self._state: State | None = None
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
         self.last_terminal_outcome: Optional[str] = None
 
-    def run(
+    def take_undelivered_messages(self) -> list[dict]:
+        """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
+
+        Это хвост, снятый с очереди на выходе из цикла, и то, что легло в
+        очередь уже после: цикл вычерпывает её в последний раз при закрытии
+        хода, а прогон ещё сохраняет тред и сносит MCP-сессии — через `await`,
+        и не быстро. Звать ПОСЛЕ `arun`: из идущего прогона это украло бы
+        очередь у цикла.
+
+        Владелец (сервер, TUI) доигрывает хвост отдельным ходом того же треда
+        (`undelivered_as_arun_args`) — пока он этого не сделал, прогон нельзя
+        объявлять законченным. Если не забрать, пришедшее после `finally`
+        уедет следующему прогону вслед за его собственным запросом, а снятое
+        `finally` так и останется лежать.
+        """
+        with self._lock:
+            out = [*self._undelivered_messages, *self._pending_messages]
+            self._undelivered_messages = []
+            self._pending_messages = []
+            return out
+
+    async def arun(
         self,
         messages: list[str],
         *,
@@ -120,16 +224,35 @@ class AgentExecutor:
         display_contents: list[str | None] | None = None,
         skills_loaded: list[str | None] | None = None,
     ) -> Any:
-        """Запускает агента. При каждом вызове state создаётся заново.
+        """Прогон агента, не блокирующий вызывающий loop.
 
-        messages: непустой список текстов — каждый элемент уходит отдельным user-сообщением.
+        При каждом вызове state создаётся заново. messages — непустой список
+        текстов, каждый уходит отдельным user-сообщением.
+
+        Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
+        ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
+        harbor-адаптер.
         """
+        with self._lock:
+            # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
+            # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
+            # состояния, остановка uvicorn) писал флаг в мёртвый state: новый
+            # стартовал чистым, и ход доигрывался целиком — с вызовами модели и
+            # тулов, уже после нажатия стопа. Второй ход у владельца исполнителя
+            # обычное дело: хвост прогона у сервера и SDK, следующий запрос в
+            # TUI. Теперь такой стоп ложится в `_stop_pending` и применяется при
+            # создании state (ниже по функции).
+            #
+            # Именно в НАЧАЛЕ хода, а не в конце прошлого: стоп по остывшему
+            # прогону (ход кончился, ничего не идёт) обязан пропасть, иначе он
+            # молча погасил бы следующий запрос человека.
+            self._state = None
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else config_dict.get("verbose", False)
         )
-        skills_list = self._ctx.skills_registry.list_skills()
+        skills_list = await self._ctx.skills_registry.list_skills()
 
         thread_session: ThreadSession | None = None
         thread_shared: SharedStateData | None = None
@@ -138,10 +261,23 @@ class AgentExecutor:
         if thread_id is not None:
             system_id = system or "cli"
             if start_new_thread:
-                threads_dir = resolve_threads_dir(config_dict)
-                reset_thread_files(threads_dir, system_id=system_id, thread_id=thread_id)
-            thread_session = ThreadSession.from_config(
-                config_dict=config_dict, system_id=system_id, thread_id=thread_id
+                # Сессии ещё нет, поэтому хранилище берём из контекста; нет и
+                # там — файловое, как раньше.
+                _reset_store = getattr(self._ctx, "thread_store", None)
+                if _reset_store is None:
+                    from gc_core.thread_store_file import FileThreadStore
+
+                    _reset_store = FileThreadStore(resolve_threads_dir(config_dict))
+                from gc_core.thread_store_async import athread_store
+
+                await athread_store(_reset_store).areset(system_id, thread_id)
+            thread_session = await ThreadSession.afrom_config(
+                config_dict=config_dict,
+                system_id=system_id,
+                thread_id=thread_id,
+                # Хранилище встраивающего, если он его передал. None — файловое
+                # по умолчанию, ровно прежнее поведение.
+                store=getattr(self._ctx, "thread_store", None),
             )
             if logger is not None:
                 # Единственная связка «этот лог-файл ↔ этот тред»: на момент
@@ -186,20 +322,19 @@ class AgentExecutor:
 
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
         # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
-        reset_stale_summarizing_flag(thread_session)
+        await areset_stale_summarizing_flag(thread_session)
         # Снять протухший флаг финализации от прерванного прошлого run'а.
-        set_tui_finalizing(thread_session, False)
+        await aset_tui_finalizing(thread_session, False)
         # Снять протухший флаг «судья работает» от прерванного прошлого run'а.
-        set_tui_finish_gate_checking(thread_session, False)
+        await aset_tui_finish_gate_checking(thread_session, False)
 
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         if thread_id is not None and config_dict.get("mcp-servers"):
             try:
                 from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
                 snap = build_mcp_tools_snapshot(config_dict, self._ctx.tools_data, self._ctx.mcp_status)
-                update_runtime_meta(
-                    resolve_threads_dir(config_dict), system_id, thread_id,
-                    {"mcp_tools": snap},
+                await thread_session.port.aupdate_runtime_meta(
+                    system_id, thread_id, {"mcp_tools": snap},
                 )
             except Exception:
                 pass
@@ -269,7 +404,7 @@ class AgentExecutor:
         }
         if subagents_enabled(config_dict.get("use_local_subagents", False)):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
-        state = State(**state_data)
+        state = await State.acreate(**state_data)
         # Старт рана — первая из двух точек начала хода (спека §6.4): фиксируем
         # модель этого хода через Router, дальше внутри хода не перечитываем.
         # Открытый активный алиас (trip прошлого хода / персист breaker при attach)
@@ -321,7 +456,17 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
-            self._pending_messages = []
+            # Очередь здесь НЕ сбрасываем. Сброс стоял тут с тех пор, когда до
+            # него не было setup-фазы и класть сообщения заранее было некому.
+            # Теперь кладут: сервер, пока прогон ещё не дошёл до цикла,
+            # `_prebuild_messages` в TUI, `AsyncAgent.send` — и всё это
+            # стиралось, не доходя до агента. Пустой очередь между прогонами
+            # НЕ бывает по построению: сообщение может лечь в неё и после
+            # последнего забора циклом — пока прогон сохраняет тред и сносит
+            # MCP. Такой хвост владелец забирает `take_undelivered_messages` и
+            # доигрывает отдельным ходом. Не забранное из очереди уходит этому
+            # прогону вслед за его собственными сообщениями (см. ниже), а
+            # отложенное `finally` прошлого прогона ждёт владельца.
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
@@ -356,7 +501,14 @@ class AgentExecutor:
         setattr(self._ctx, "on_summary_applied", summary.on_summary_applied)
         setattr(self._ctx, "is_cli_mode", is_cli_mode)
 
-        summary.pre_run_compact_if_needed(trigger_reason="pre_run")
+        # Хук передаётся КОРУТИННЫМ именем: `_acall_blocking_hook` ждёт
+        # такой нативно и в поток не уводит. Синхронное имя здесь было бы не
+        # просто медленнее — fail-open внутри компакции проглотил бы отказ, и
+        # она выключилась бы целиком, ничего не сказав. Стережёт
+        # `test_loop_hooks_are_native`.
+        await _acall_blocking_hook(
+            summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+        )
 
         if not messages:
             raise ValueError(
@@ -407,7 +559,7 @@ class AgentExecutor:
                 state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
                 messages = [*base_messages, *new_user_messages]
 
-            def _persist_thread_batch(step_messages: list[dict]) -> None:
+            async def _persist_thread_batch(step_messages: list[dict]) -> None:
                 if is_persist_discarded(state):
                     return
                 # Persist notes from in-memory state into thread meta.
@@ -448,7 +600,7 @@ class AgentExecutor:
                     thread_session.meta["last_backend_response_id"] = (
                         last_backend_response_id
                     )
-                thread_session.persist_batch(
+                await thread_session.apersist_batch(
                     step_messages, previous_response_id=state.previous_response_id
                 )
 
@@ -481,16 +633,33 @@ class AgentExecutor:
         # кладём на state — по нему TUI-футер считает live-«запрос» текущего хода.
         run_start_usage = UsageAccount.from_meta(state.usage.to_meta())
         state.run_start_usage_meta = run_start_usage.to_meta()
+        # Входим во владение MCP-сессиями этого контекста. Всё, что поднимут
+        # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
+        # ровно своё, не тронув сессии параллельных агентов на том же loop.
+        _owner_reset = set_owner(getattr(self._ctx, "mcp_session_owner", "") or None)
+        # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
+        # сообщений прогона: клиент, которому ответили `queued`, должен попасть
+        # к модели в том же запросе, а не ждать следующего хода.
+        with self._lock:
+            queued_before_loop = self._pending_messages[:]
+            self._pending_messages.clear()
+        if queued_before_loop:
+            messages = [*messages, *queued_before_loop]
         try:
-            response = run_agent(
+            response = await arun_agent(
                 messages,
                 state,
                 self._ctx,
                 get_full_history_messages=get_full_history_messages,
                 persist_messages_callback=persist_messages_callback,
-                pre_backend_compaction_hook=summary.pre_backend_compaction_hook,
-                turn_end_compaction_hook=summary.turn_end_compact_if_needed,
-                force_compact_hook=summary.force_compact_once,
+                # Корутинные двойники, а не синхронные имена — и это несущая
+                # деталь, а не стиль. _acall_blocking_hook корутинную функцию
+                # ждёт НАТИВНО, а обычную уводит в asyncio.to_thread. Передать
+                # сюда синхронное имя значит вернуть поток из пула, занятый на
+                # всё время суммаризации, ради которого всё и переводилось.
+                pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
+                turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
+                force_compact_hook=summary.aforce_compact_once,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
                 session_meta=(
@@ -499,10 +668,10 @@ class AgentExecutor:
                     else None
                 ),
                 mark_finalizing=(
-                    lambda active: set_tui_finalizing(thread_session, active)
+                    lambda active: aset_tui_finalizing(thread_session, active)
                 ),
                 mark_finish_gate_checking=(
-                    lambda active: set_tui_finish_gate_checking(thread_session, active)
+                    lambda active: aset_tui_finish_gate_checking(thread_session, active)
                 ),
             )
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
@@ -514,28 +683,32 @@ class AgentExecutor:
                 )
                 thread_session.meta["backend_api_mode"] = state.backend_api_mode
                 persist_tool_usage_notice_state(state, thread_session.meta)
-                thread_session.persist_batch(
+                await thread_session.apersist_batch(
                     [], previous_response_id=state.previous_response_id
                 )
                 _run_trace_id = trace_id_from_config(config_dict)
                 if _run_trace_id:
                     # После persist_batch: он пересобирает мету с диска, поэтому
                     # запись должна быть последней, иначе её затрёт.
-                    _append_trace_id_to_meta(thread_session, _run_trace_id, logger)
+                    await _aappend_trace_id_to_meta(thread_session, _run_trace_id, logger)
         finally:
+            # Несъеденное циклом откладываем в сторону: оно не должно молча
+            # уехать следующему прогону позади его запроса. Это НЕ граница
+            # «чистого листа»: ниже ещё `await` сноса MCP, и то, что ляжет в
+            # очередь за это время, окажется там же, где и раньше. Оба куска
+            # забирает владелец одним `take_undelivered_messages`.
+            with self._lock:
+                # КОПИМ, а не присваиваем: иначе следующий прогон затрёт хвост
+                # предыдущего пустым списком — то самое молчаливое исчезновение,
+                # ради которого всё и затевалось.
+                self._undelivered_messages.extend(self._pending_messages)
+                self._pending_messages = []
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
-            PersistentStdioRegistry.instance().close_all()
-            # И persistent-сессии stream_* транспортов (stream_stdio/stream_sse/stream_http):
-            # закрываем все открытые ClientSession в их фоновом event loop и гасим loop.
-            try:
-                _STREAM_SESSION_MANAGER.close_all()
-            except Exception:
-                pass
-            # C2: после закрытия MCP/stdio — подбираем циклический мусор
-            # (pipes, ClientSession, loop buffers). State здесь не трогаем:
-            # ниже usage-отчёт по state.
-            gc.collect()
+            # Ждём напрямую, без потока: блокирующим в закрытии было только
+            # ожидание смерти процесса, и оно переведено на опрос. Подробности
+            # и разбор отмены — в самой `_aclose_mcp_and_release`.
+            await _aclose_mcp_and_release(_owner_reset)
 
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         try:
@@ -578,15 +751,31 @@ class AgentExecutor:
             )
         return response
 
+
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.
 
         Executing subagent → child pending; иначе → parent pending.
         """
-        if try_enqueue_user_message(message):
+        # Адресат берётся из СВОЕГО контекста: сообщение этого прогона не может
+        # уехать субагенту чужой сессии — до её контекста отсюда нет ссылки.
+        if try_enqueue_user_message(self._ctx, message):
             return
         with self._lock:
             self._pending_messages.append(message)
+
+    def is_child_input_active(self) -> bool:
+        """Работает ли сейчас субагент, которому уйдёт ввод пользователя.
+
+        Фронтенду нужно спрашивать СВОЕГО исполнителя, а не модуль ядра:
+        модульная функция отвечала за весь процесс и в многосессионном сервере
+        говорила о чужом прогоне.
+        """
+        return is_child_input_active(self._ctx)
+
+    def active_parent_call_id(self) -> str | None:
+        """``call_id`` вызова субагента, который сейчас принимает ввод."""
+        return active_parent_call_id(self._ctx)
 
     def get_state(self) -> State | None:
         """
@@ -680,14 +869,15 @@ class AgentExecutor:
             else:
                 self._stop_pending = True
 
-    def compact_thread(self, thread_id: str, system: str | None = None) -> bool:
+    async def acompact_thread(self, thread_id: str, system: str | None = None) -> bool:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
         (оркестрация суммаризации, вне run-loop)."""
-        from gc_core.manual_compaction import compact_thread as _compact_thread
-        return _compact_thread(
+        from gc_core.manual_compaction import acompact_thread as _acompact_thread
+        return await _acompact_thread(
             ctx=self._ctx,
             _lock=self._lock,
             self_state=self._state,
             thread_id=thread_id,
             system=system
         )
+

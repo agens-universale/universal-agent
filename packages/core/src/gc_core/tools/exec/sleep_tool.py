@@ -1,4 +1,5 @@
 import json
+import asyncio
 import time
 from typing import Any, Dict, Optional
 
@@ -61,7 +62,27 @@ Return format (JSON string):
 {{"tool":"exec_sleep","ok":true|false,"seconds":<requested>|null,"slept_seconds":<actual>|null,"error":null|{{"type":"...","message":"..."}}}}
 '''
 
-    def __call__(self, seconds: float | int | None = None, **kwargs) -> str:
+    async def acall(self, seconds: float | int | None = None, **kwargs) -> str:
+        """Нативный сон: ни loop, ни поток из пула не заняты.
+
+        Синхронный ``time.sleep`` держал слот общего пула ``to_thread`` до
+        180 с (потолок тула) — при 14 воркерах это отнятый слот у всех
+        остальных тулов прогона. У ожидания есть нативная форма, и она здесь.
+        """
+        rejection = self._reject_bad_seconds(seconds)
+        if rejection is not None:
+            return rejection
+        await asyncio.sleep(seconds)
+        return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
+
+
+    def _reject_bad_seconds(self, seconds: float | int | None) -> "str | None":
+        """Готовый отказ, если аргумент негоден. Общий для обоих входов.
+
+        Вынесено, чтобы проверки не разъехались между синхронным и
+        асинхронным путём: разойдясь, они дали бы тулу два разных контракта
+        на одни и те же аргументы.
+        """
         if seconds is None:
             return self._result(
                 ok=False,
@@ -98,5 +119,4 @@ Return format (JSON string):
                 },
             )
 
-        time.sleep(seconds)
-        return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
+        return None

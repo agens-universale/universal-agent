@@ -1,5 +1,6 @@
 """State.discard_writes_after_stop — флаг для guard перед persist после стопа."""
 from gc_core.states import State
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -28,7 +29,7 @@ def test_state_discard_writes_after_stop_can_be_set_true():
     assert state.discard_writes_after_stop is True
 
 
-def test_persist_callback_skipped_when_discard_and_stop():
+async def test_persist_callback_skipped_when_discard_and_stop():
     """Если discard_writes_after_stop=True И stop_requested=True — callback не вызывается."""
     state = _make_state()
     state.discard_writes_after_stop = True
@@ -39,12 +40,12 @@ def test_persist_callback_skipped_when_discard_and_stop():
         persisted.append(messages)
 
     from gc_core.processing_responses import _maybe_persist
-    _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
+    await _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert persisted == []
 
 
-def test_persist_callback_called_when_not_discarding():
+async def test_persist_callback_called_when_not_discarding():
     """Если discard_writes_after_stop=False (default) — callback вызывается как обычно даже на stop."""
     state = _make_state()
     state.stop_requested = True  # стоп есть, но discard False (CLI/server поведение)
@@ -54,12 +55,12 @@ def test_persist_callback_called_when_not_discarding():
         persisted.append(messages)
 
     from gc_core.processing_responses import _maybe_persist
-    _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
+    await _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert len(persisted) == 1
 
 
-def test_persist_callback_called_when_no_stop():
+async def test_persist_callback_called_when_no_stop():
     """Если stop_requested=False — callback всегда вызывается."""
     state = _make_state()
     state.discard_writes_after_stop = True  # флаг True, но стопа нет
@@ -69,17 +70,17 @@ def test_persist_callback_called_when_no_stop():
         persisted.append(messages)
 
     from gc_core.processing_responses import _maybe_persist
-    _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
+    await _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert len(persisted) == 1
 
 
-def test_persist_callback_none_is_noop():
+async def test_persist_callback_none_is_noop():
     """callback=None не падает."""
     state = _make_state()
     # Не должно бросать
     from gc_core.processing_responses import _maybe_persist
-    _maybe_persist(None, [], state)
+    await _maybe_persist(None, [], state)
 
 
 def _make_executor_cfg(tmp_path):
@@ -93,31 +94,39 @@ def _make_executor_cfg(tmp_path):
     }
 
 
-def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
+async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     """executor.run(discard_writes_after_stop=True) выставляет state.discard_writes_after_stop=True."""
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
+
     # Monkey-patch run_agent to immediately exit без HTTP
-    monkeypatch.setattr("gc_core.agent_executor.run_agent", lambda *a, **kw: {"finished": True})
-    ctx = create_run_context(cfg, auth_connector=None)
+    async def _fake_arun_agent(*a, **kw):
+        return {"finished": True}
+
+    monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
+    ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    ex.run([{"role": "user", "content": "x"}],
-           thread_id="t", start_new_thread=True, system="cli",
-           discard_writes_after_stop=True)
+    await ex.arun([{"role": "user", "content": "x"}],
+                  thread_id="t", start_new_thread=True, system="cli",
+                  discard_writes_after_stop=True)
     assert ex._state.discard_writes_after_stop is True
 
 
-def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
+async def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     """Без kwarg — state.discard_writes_after_stop остаётся False."""
-    from gc_core.run_context import create_run_context
+    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
 
     cfg = _make_executor_cfg(tmp_path)
-    monkeypatch.setattr("gc_core.agent_executor.run_agent", lambda *a, **kw: {"finished": True})
-    ctx = create_run_context(cfg, auth_connector=None)
+
+    async def _fake_arun_agent(*a, **kw):
+        return {"finished": True}
+
+    monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
+    ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    ex.run([{"role": "user", "content": "x"}],
-           thread_id="t", start_new_thread=True, system="cli")
+    await ex.arun([{"role": "user", "content": "x"}],
+                  thread_id="t", start_new_thread=True, system="cli")
     assert ex._state.discard_writes_after_stop is False

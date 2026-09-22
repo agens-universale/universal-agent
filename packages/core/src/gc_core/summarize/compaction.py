@@ -1,5 +1,6 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
+from gc_core.utils.aio_compat import await_callback
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
 from gc_core.loop_detector.detector import clear as clear_loop_detector
 from gc_core.message_policy.user_message_policy import (
@@ -13,9 +14,11 @@ from gc_core.message_format.serialization import calc_history_chars_for_trigger,
 from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_precheck, log_compaction_started, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, logger_from_ctx
 from gc_core.summarize.summary_message_body import build_dialog_summary_content, resolve_intent_log_preview_chars
 from gc_core.summarize.summary_spec import agent_summary_slice_mode, slice_summary
-from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
 from gc_core.message_policy.todo_context import render_todo_for_persistent_state
 from gc_core.summarize.working_memory_gateway import REGISTER_ORDER, WorkingMemoryDeltas, apply_memory_patch, apply_summary_memory_patch, coerce_working_memory_deltas, read_session_todo_from_state, read_snapshot_from_state, render_persistent_state_for_prompt, render_session_memory_for_summary_message
+
+
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -179,7 +182,7 @@ def history_exceeds_summary_trigger(
     )
 
 
-def run_summary_compaction(
+async def arun_summary_compaction(
     *,
     ctx: Any,
     state: Any,
@@ -188,6 +191,14 @@ def run_summary_compaction(
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
     trigger_threshold_chars: int | None = None,
 ) -> None:
+    """Сжать историю треда: суммаризация, патч состояния, событие хосту.
+
+    Основная и единственная реализация: синхронное имя ``run_summary_compaction``
+    Сетевой шаг один —
+    ``asummarize_dialog_via_chat_completions``; всё остальное здесь — чистые
+    вычисления над state и логи, поэтому поток на время суммаризации больше
+    не занимается.
+    """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
     tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
@@ -215,7 +226,7 @@ def run_summary_compaction(
     source_user_log = list(getattr(state, "user_intent_log", []) or [])
     source_current_intent = list(getattr(state, "current_user_intent", []) or [])
     memory_snapshot = read_snapshot_from_state(state)
-    summary_result = summarize_dialog_via_chat_completions(
+    summary_result = await asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=full_messages,
@@ -310,7 +321,7 @@ def run_summary_compaction(
         ),
     }
     if on_summary_applied is not None:
-        on_summary_applied(summary_event)
+        await await_callback(on_summary_applied(summary_event))
 
     archive_suffix = summary_event.get("archive_suffix")
     if isinstance(archive_suffix, str):
@@ -342,7 +353,7 @@ def run_summary_compaction(
     clear_loop_detector(state)
 
 
-def maybe_run_summary_compaction(
+async def amaybe_run_summary_compaction(
     *,
     ctx: Any,
     state: Any,
@@ -351,6 +362,9 @@ def maybe_run_summary_compaction(
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> bool:
+    """Проверка порога плюс запуск сжатия. Основная реализация — эта.
+
+    """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
     if summary_trigger_chars <= 0:
@@ -375,7 +389,7 @@ def maybe_run_summary_compaction(
     if trigger_volume <= summary_trigger_chars:
         return False
 
-    run_summary_compaction(
+    await arun_summary_compaction(
         ctx=ctx,
         state=state,
         trigger_reason=trigger_reason,

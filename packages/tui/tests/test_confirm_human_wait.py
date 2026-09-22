@@ -6,6 +6,15 @@ import time
 import types
 
 import pytest
+from gc_testkit import run_coro
+
+
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
 
 
 def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
@@ -169,7 +178,7 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
     persisted: list = []
     order: list[str] = []
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         order.append(kw["tool_name"])
         if kw["tool_name"] == "exec_python":
             flushed = [m for batch in persisted for m in batch]
@@ -178,9 +187,9 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
             )
         return '{"ok": true}'
 
-    monkeypatch.setattr(pr, "apply_tool", fake_apply)
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:
@@ -208,12 +217,12 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
         },
     ]
     ctx = type("C", (), {"config_dict": {}, "logger": None})()
-    outs = pr.process_tool_calls(
+    outs = run_coro(pr.aprocess_tool_calls(
         messages,
         _State(),
         ctx,
         run_agent_func=None,
         persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
-    )
+    ))
     assert order == ["session_memory", "exec_python"]
     assert any(m.get("call_id") == "c1" for m in outs)

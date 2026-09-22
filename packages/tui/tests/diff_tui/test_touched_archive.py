@@ -8,7 +8,7 @@ from gc_tui.diff_tui.touched import TouchedJournal
 from gc_core.thread_store import ThreadSession, delete_thread, touched_journal_path
 
 
-def test_summary_leaves_touched_journal_intact(tmp_path):
+async def test_summary_leaves_touched_journal_intact(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
     tid = "arch1"
@@ -39,12 +39,12 @@ def test_summary_leaves_touched_journal_intact(tmp_path):
         encoding="utf-8",
     )
 
-    session = ThreadSession.from_config(
+    session = await ThreadSession.afrom_config(
         config_dict={"threads_data_path": str(threads)},
         system_id="tui",
         thread_id=tid,
     )
-    result = session.archive_and_compact_summary_payload(
+    result = await session.aarchive_and_compact_summary_payload(
         {
             "summary_message_content": "summary",
             "dialog_steps_offset": 0,

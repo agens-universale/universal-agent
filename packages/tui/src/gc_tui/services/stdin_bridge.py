@@ -16,7 +16,6 @@ mouse/key-escapes) → ask_human виснет.
 from __future__ import annotations
 
 import io
-import queue
 import sys
 import threading
 from contextlib import contextmanager

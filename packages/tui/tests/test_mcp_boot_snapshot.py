@@ -1,6 +1,7 @@
 """/mcp показывает результат boot-дискавери сразу (warm-on-start выставляет
 app._mcp_snapshot), а не ждёт первого сообщения."""
 import pytest
+from gc_testkit import as_coro
 
 
 @pytest.mark.asyncio
@@ -38,7 +39,7 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
     class _Ctx:
         # У настоящего RunContext бэкенд есть всегда; двойнику он нужен, потому что
         # TuiApp включает diff-журнал сам (attach_to_context) — раньше это делало
-        # ядро внутри create_run_context, то есть внутри подменённой функции.
+        # ядро внутри acreate_run_context, то есть внутри подменённой функции.
         os_backend = None
         tools_data = {"mcp_office_read": {"description": "read"}}
         mcp_status = {"office": {"status": "connected", "reason": None,
@@ -50,7 +51,9 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
         def stop_run(self): pass
 
     monkeypatch.setattr("gc_core.config.build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr("gc_core.run_context.create_run_context", lambda *a, **k: _Ctx())
+    monkeypatch.setattr(
+        "gc_core.run_context.acreate_run_context", as_coro(lambda *a, **k: _Ctx())
+    )
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", _Ex)
     app._build_real_executor()
     assert app._mcp_snapshot is not None

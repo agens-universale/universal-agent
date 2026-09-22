@@ -55,40 +55,40 @@ def _make_ctx(cfg=None):
 
 
 class TestStopRequestedPropagation:
-    def test_check_stop_passed_to_run_agent(self):
+    async def test_check_stop_passed_to_run_agent(self):
         """run_agent_func receives check_stop kwarg."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
         captured = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["kwargs"] = kwargs
             return "done"
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         assert "check_stop" in captured["kwargs"]
         assert callable(captured["kwargs"]["check_stop"])
 
-    def test_check_stop_reflects_orchestrator_stop(self):
+    async def test_check_stop_reflects_orchestrator_stop(self):
         """check_stop returns True when orchestrator state.stop_requested is set."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
         captured = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["check_stop"] = kwargs["check_stop"]
             return "done"
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         check_stop = captured["check_stop"]
 
@@ -96,13 +96,13 @@ class TestStopRequestedPropagation:
         orch.stop_requested = True
         assert check_stop() is True
 
-    def test_stopped_subagent_returns_stub_message(self):
+    async def test_stopped_subagent_returns_stub_message(self):
         """When run_agent returns None (stopped), run() returns a stub message."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             check_stop = kwargs.get("check_stop")
             orch.stop_requested = True
             if check_stop and check_stop():
@@ -112,7 +112,7 @@ class TestStopRequestedPropagation:
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            result = await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -120,38 +120,38 @@ class TestStopRequestedPropagation:
         assert payload["error"]["code"] == "cancelled_by_user"
         assert payload["meta"]["finish_reason"] == "stopped_by_user"
 
-    def test_stopped_subagent_includes_child_run_id_in_meta(self):
+    async def test_stopped_subagent_includes_child_run_id_in_meta(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             return None
 
         runner = SubagentRunner(ctx, orch, cfg)
         with patch.object(
             runner, "_build_child_ctx", return_value=SimpleNamespace(run_id="child-run-42")
         ):
-            result = runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            result = await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         payload = json.loads(result)
         assert payload["meta"]["child_run_id"] == "child-run-42"
         assert payload["meta"]["finish_reason"] == "stopped_by_user"
 
-    def test_normal_run_check_stop_returns_false(self):
+    async def test_normal_run_check_stop_returns_false(self):
         """check_stop returns False when orchestrator is not stopped."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
         stop_values = []
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             stop_values.append(kwargs["check_stop"]())
             return "ok"
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         assert stop_values == [False]

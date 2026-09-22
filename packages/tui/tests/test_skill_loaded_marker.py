@@ -1,5 +1,12 @@
 import pytest
 
+def _as_coro(fn):
+    """Обернуть синхронный двойник в корутину."""
+    async def _wrapped(*a, **kw):
+        return fn(*a, **kw)
+
+    return _wrapped
+
 
 def _trace_texts(scr):
     from textual.widgets import Static
@@ -13,11 +20,21 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
-    monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
-    monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: True)
+    monkeypatch.setattr(
+        sd,
+        "build_skill_delivery",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: "WIRE"),
+    )
+    monkeypatch.setattr(
+        sd,
+        "skill_is_available",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: True),
+    )
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event(); self._evt.wait(timeout=2.0)
         def stop_run(self):
@@ -29,7 +46,7 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]
-        scr._handle_command("skill coder создай скилл")
+        await scr._handle_command("skill coder создай скилл")
         await pilot.pause(0.3)
         texts = _trace_texts(scr)
         joined = "\n".join(texts)
@@ -72,11 +89,21 @@ async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
-    monkeypatch.setattr(sd, "build_skill_delivery", lambda skill_id, reg: "WIRE")
-    monkeypatch.setattr(sd, "skill_is_available", lambda skill_id, reg: False)
+    monkeypatch.setattr(
+        sd,
+        "build_skill_delivery",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: "WIRE"),
+    )
+    monkeypatch.setattr(
+        sd,
+        "skill_is_available",
+        # Двойник повторяет ФОРМУ: настоящая функция корутинная.
+        _as_coro(lambda skill_id, reg: False),
+    )
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             import threading
             self._evt = threading.Event(); self._evt.wait(timeout=2.0)
         def stop_run(self):
@@ -88,7 +115,7 @@ async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "foo"}]
-        scr._handle_command("skill foo сделай")
+        await scr._handle_command("skill foo сделай")
         await pilot.pause(0.3)
         joined = "\n".join(_trace_texts(scr))
         assert "не найден" in joined

@@ -39,7 +39,7 @@ class _CapturingFakeBackend(FakeBackend):
         super().__init__()
         self.written_bytes: dict[str, bytes] = {}
 
-    def write_bytes(self, path: str, data: bytes) -> None:  # type: ignore[override]
+    async def write_bytes(self, path: str, data: bytes) -> None:  # type: ignore[override]
         self.written_bytes[path] = data
 
 

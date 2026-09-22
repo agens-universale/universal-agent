@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import urllib3
-
 from gc_core.config_modules.auth import build_auth_connector
 from pydantic import ValidationError as _PydanticValidationError
 
@@ -583,10 +581,10 @@ def load_config_ex(
 
     sync_logging_flat_and_params(config_dict)
 
-    verify = config_dict["use_ssl"]
-    if verify is False and apply_to_process:
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+    # Здесь глушились предупреждения urllib3 при `use_ssl: false`. Ядро ходит
+    # httpx, своих предупреждений urllib3 больше не рождает, а сам пакет ядро
+    # не объявляет — он приезжал транзитом через trafilatura. Тот же класс
+    # поломки, что был с requests у голоса, только тише.
     meta = ProfileMeta(active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices)
     return config_dict, meta
 

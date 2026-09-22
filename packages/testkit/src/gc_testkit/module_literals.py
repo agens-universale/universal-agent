@@ -31,7 +31,7 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from gc_testkit.paths import REPO, _MAP_PATH, module_map, package_src_dirs
+from gc_testkit.paths import REPO, module_map, package_src_dirs
 from gc_testkit.sources import ensure_sources_on_path
 
 #: Каталоги корня, которые сканировать НЕ надо. Раньше здесь был обратный

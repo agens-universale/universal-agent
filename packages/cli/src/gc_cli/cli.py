@@ -20,7 +20,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
-from gc_core.run_context import RunContext, create_run_context
+from gc_core.run_context import RunContext, acreate_run_context
 from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
@@ -51,7 +51,7 @@ def _ensure_user_skills_dir() -> None:
         pass
 
 
-def run(
+async def arun(
     messages: list[str],
     ctx: RunContext,
     *,
@@ -66,7 +66,7 @@ def run(
     messages: непустой список строк — каждая уходит отдельным user-сообщением
     (один запрос передавайте как ``[текст]``).
     """
-    return AgentExecutor(ctx).run(
+    return await AgentExecutor(ctx).arun(
         messages,
         thread_id=thread_id,
         start_new_thread=start_new_thread,
@@ -74,7 +74,7 @@ def run(
     )
 
 
-def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
+async def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     """Resolve the -s/--skill flag deterministically (pack-aware).
 
     Returns the exact canonical skill id when resolved; the raw name as a
@@ -91,7 +91,7 @@ def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
     from gc_core.tools.skills.registry import get_skills_registry
 
     try:
-        catalog = get_skills_registry(config_dict).skill_catalog()
+        catalog = await get_skills_registry(config_dict).skill_catalog()
     except Exception as exc:  # noqa: BLE001 - surface as warning, not traceback
         print(
             f"warning: не удалось построить каталог скиллов для -s ({exc}); "
@@ -345,22 +345,44 @@ def _run_update() -> int:
     return 0
 
 
-def _run_init_agents_md() -> int:
-    """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md."""
+async def _run_init_agents_md() -> int:
+    """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
+
+    Корутина, потому что зовётся из-под ``asyncio.run(arun_cli())``, а
+    синхронного входа у ядра нет вовсе.
+    """
     from gc_core.instructions.init_agents_md import build_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
     config_dict = load_config(arg_parser.run_args.config)
     auth_connector = build_auth_connector(config_dict)
-    ctx = create_run_context(config_dict, auth_connector=auth_connector)
+    # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
+    # create_run_context морозил бы его на всё MCP-дискавери — замер на
+    # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
+    # против 0.01 с и 365 тиков у асинхронного двойника.
+    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
+    # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
+    # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
+    from gc_cli.ask_human_port import make_cli_ask_human_port
+
+    ctx.ask_human = make_cli_ask_human_port()
+
+    from gc_core.utils.async_http import aclose_clients
 
     prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
-    AgentExecutor(ctx).run([prompt])  # агент пишет AGENTS.md сам (write_to_file)
+    try:
+        await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
+    finally:
+        # Тот же `finally`, что и у `arun_cli`: свой `asyncio.run` — свой пул
+        # клиентов, и закрыть его больше некому. Без этого `--init` уходил с
+        # открытым сокетом и «Event loop is closed» на закрытии loop.
+        await aclose_clients()
     print("[gc] --init: генерация AGENTS.md завершена", file=sys.stderr)
     return 0
 
 
-def main() -> int:
+async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
     создание RunContext и запуск агента.
@@ -387,7 +409,7 @@ def main() -> int:
         return _run_update()
 
     if getattr(arg_parser.run_args, "init", False):
-        return _run_init_agents_md()
+        return await _run_init_agents_md()
 
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)
@@ -436,7 +458,7 @@ def main() -> int:
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
-    forced_skill_id = _resolve_forced_skill(
+    forced_skill_id = await _resolve_forced_skill(
         arg_parser.run_args.skill, config_dict
     )
 
@@ -448,7 +470,18 @@ def main() -> int:
         ensure_mcp_daemons(
             config_dict, disable_hint="отключить автозапуск: запустите без `-a`"
         )
-    ctx = create_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
+    # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
+    # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
+    # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
+    ctx = await acreate_run_context(
+        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+    )
+    # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
+    # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
+    # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
+    from gc_cli.ask_human_port import make_cli_ask_human_port
+
+    ctx.ask_human = make_cli_ask_human_port()
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli
@@ -480,13 +513,18 @@ def main() -> int:
 
     executor = AgentExecutor(ctx)
     try:
-        response = executor.run(
+        response = await executor.arun(
             user_parts,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
         )
     finally:
+        # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
+        # иначе на выходе получим «Event loop is closed» из деструктора.
+        from gc_core.utils.async_http import aclose_clients
+
+        await aclose_clients()
         if auto_mcp:
             shutdown_mcp_daemons()
     formatted = format_json_for_display(response)
@@ -501,6 +539,20 @@ def main() -> int:
     return 0
 
 
+def main() -> int:
+    """Синхронная точка входа команды ``gc-cli``.
+
+    Сам прогон асинхронный (``arun_cli``), поэтому здесь заводится ОДИН loop на
+    процесс, и ход агента идёт на нём же.
+
+    Это НЕ синхронный двойник: одноимённой корутины ``amain`` больше нет.
+    Пара ``main``/``amain`` читалась счётчиком как случайная — точка входа
+    консольной команды обязана быть синхронной, и прогон у неё ровно один.
+    """
+    import asyncio
+
+    return asyncio.run(arun_cli())
+
+
 if __name__ == "__main__":
-    # -q "создай подпапку test_project. в ней напиши на python модуль вычисления чисел фиббоначи. там же в отдельном файле напиши тесты. как прогонишь все тесты, запусти посчитай первые 1000е числео фиббоначи и сложи результат в json файл там же. Пиши быстрый код, чтобы кешировало расчеты и долго не считало. Скажи мне чему будет равно 1000-е числов фиббоначи, умноженное на 3."
-    main()
+    raise SystemExit(main())

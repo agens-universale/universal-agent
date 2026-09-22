@@ -15,7 +15,7 @@ import json
 import sys
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 # `import cli` (below, inside the final_answer test) parses sys.argv at
 # import time (--query is required); pin a valid argv up front so this file
@@ -23,6 +23,7 @@ from unittest.mock import patch
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit import run_coro
 
 
 def _make_logger(tmp_path, level="info"):
@@ -87,7 +88,7 @@ def test_build_run_usage_dict_empty_account_returns_none():
 
 
 class _SkillsRegistryStub:
-    def list_skills(self):
+    async def list_skills(self):
         return []
 
 
@@ -133,9 +134,9 @@ def test_run_usage_event_emitted_at_end_of_run(tmp_path):
             state.usage.add("main", input_tokens=123, output_tokens=45, cached_tokens=0)
             return "ok"
 
-        with patch.object(agent_executor_module, "run_agent", side_effect=_fake_run_agent):
+        with patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent):
             executor = agent_executor_module.AgentExecutor(ctx)
-            result = executor.run(["hello"], thread_id="thr2", system="cli", verbose=False)
+            result = run_coro(executor.arun(["hello"], thread_id="thr2", system="cli", verbose=False))
             assert result == "ok"
 
     _flush(logger)
@@ -166,9 +167,9 @@ def test_run_usage_event_not_emitted_when_no_usage(tmp_path):
     with tempfile.TemporaryDirectory() as thread_dir:
         ctx = _base_ctx(logger, logging_path, thread_dir)
 
-        with patch.object(agent_executor_module, "run_agent", return_value="ok"):
+        with patch.object(agent_executor_module, "arun_agent", return_value="ok"):
             executor = agent_executor_module.AgentExecutor(ctx)
-            result = executor.run(["hello"], thread_id="thr3", system="cli", verbose=False)
+            result = run_coro(executor.arun(["hello"], thread_id="thr3", system="cli", verbose=False))
             assert result == "ok"
 
     _flush(logger)
@@ -219,9 +220,14 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
         )), \
         patch.object(cli_module, "_resolve_forced_skill", return_value=None), \
         patch.object(cli_module, "build_auth_connector", return_value=None), \
-        patch.object(cli_module, "create_run_context", return_value=ctx), \
+        patch.object(cli_module, "acreate_run_context", new=AsyncMock(return_value=ctx)), \
         patch.object(cli_module, "AgentExecutor") as mock_executor_cls:
-        mock_executor_cls.return_value.run.return_value = "the final answer text"
+        # Точка входа CLI асинхронная (Задача 23 async-переезда): прогон идёт
+        # через arun, и заглушка обязана быть корутинной.
+        async def _arun(*_a, **_kw):
+            return "the final answer text"
+
+        mock_executor_cls.return_value.arun = _arun
 
         rc = cli_module.main()
         assert rc == 0

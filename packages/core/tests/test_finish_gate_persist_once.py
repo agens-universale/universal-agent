@@ -9,6 +9,7 @@ from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_core.thread_store import make_message_key
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -25,12 +26,16 @@ def _make_state() -> State:
 
 
 def _finish_output() -> str:
-    """Живой output тула turn_finish (валидные аргументы, статус submitted)."""
-    return SubmitSolution()(
+    """Живой output тула turn_finish (валидные аргументы, статус submitted).
+
+    Через ``run_coro(...acall(...))``: у тулов форма ОДНА — корутинная,
+    синхронного ``__call__`` у них нет.
+    """
+    return run_coro(SubmitSolution().acall(
         solution_type="direct_answer",
         task_report="готово",
         handoff="{}",
-    )
+    ))
 
 
 def test_apply_finish_gate_skipped_sets_runtime_outcome():
@@ -98,13 +103,13 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         coverage_score=1.0,
         feedback_for_agent="",
     )
-    ok = apply_finish_gate_to_turn_finish_output_in_state(
+    ok = run_coro(apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id=call_id,
         decision=FinishGateDecision(outcome="accept", validation=validation),
         logger=None,
         persist_messages_callback=persist,
-    )
+    ))
     assert ok is True
     assert len(persisted) == 1
     payload = json.loads(persisted[0][0]["output"])

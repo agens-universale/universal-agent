@@ -1,24 +1,25 @@
 """Runtime notices: LLM failures → ephemeral Notice list."""
 from __future__ import annotations
+from gc_testkit import as_coro
 
 import json
 from types import SimpleNamespace
 
 import pytest
-import requests
+import httpx
 
 from gc_core import request_backend_policy as policy
 from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_testkit import run_coro
 
 
-def _http_error(status: int, body: dict) -> requests.exceptions.HTTPError:
-    resp = requests.Response()
-    resp.status_code = status
-    resp._content = json.dumps(body).encode("utf-8")
-    err = requests.exceptions.HTTPError(response=resp)
-    return err
+def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:
+    """Ошибка ровно того типа, который летит из ядра: оно ходит через httpx."""
+    request = httpx.Request("POST", "http://backend.invalid/v1/chat/completions")
+    resp = httpx.Response(status, json=body, request=request)
+    return httpx.HTTPStatusError("http error", request=request, response=resp)
 
 
 def setup_function():
@@ -67,10 +68,10 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(400, {"message": "bad request"})
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", boom)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
-    with pytest.raises(requests.exceptions.HTTPError):
-        policy.request_chat_completions_with_policy(
+    with pytest.raises(httpx.HTTPStatusError):
+        run_coro(policy.arequest_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,
             min_response_tokens=1024,
@@ -81,7 +82,7 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
             request_label="intent_guard_finish_gate",
             runtime_notices_enabled=True,
             notice_url="http://test/v1/chat/completions",
-        )
+        ))
 
     notices = collect_runtime_notices()
     assert len(notices) == 1
@@ -94,10 +95,10 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(500, {"message": "fail"})
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", boom)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
 
-    with pytest.raises(requests.exceptions.HTTPError):
-        policy.request_chat_completions_with_policy(
+    with pytest.raises(httpx.HTTPStatusError):
+        run_coro(policy.arequest_chat_completions_with_policy(
             payload_factory=lambda mt: {"model": "m", "messages": []},
             initial_max_tokens=1400,
             min_response_tokens=1024,
@@ -106,7 +107,7 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
             verify=False,
             use_retry=False,
             runtime_notices_enabled=False,
-        )
+        ))
 
     assert collect_runtime_notices() == []
 
@@ -120,3 +121,26 @@ def test_listener_called_on_push():
     register_runtime_notices_listener(lambda: seen.append(1))
     push_runtime_notice(Notice("info", "x", "msg"))
     assert seen == [1]
+
+
+def test_unregistered_listener_is_dropped():
+    """Список подписчиков модульный: без отписки подписчик (у TUI — метод
+    приложения) жил до конца процесса и держал приложение целиком."""
+    from gc_core import runtime_notices
+    from gc_core.runtime_notices import (
+        register_runtime_notices_listener,
+        unregister_runtime_notices_listener,
+    )
+
+    seen = []
+
+    def listener():
+        seen.append(1)
+
+    register_runtime_notices_listener(listener)
+    unregister_runtime_notices_listener(listener)
+    unregister_runtime_notices_listener(listener)   # повтор — не ошибка
+    push_runtime_notice(Notice("info", "y", "msg"))
+
+    assert seen == []
+    assert listener not in runtime_notices._listeners

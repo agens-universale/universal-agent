@@ -23,6 +23,7 @@ from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _has_git() -> bool:
@@ -77,8 +78,8 @@ def _tool_ctx(
     return ctx
 
 
-def _write_tool(launch_root: Path, threads: Path, **kw) -> WriteToFile:
-    return WriteToFile(ctx=_tool_ctx(launch_root, threads, **kw))
+def _write_tool(launch_root: Path, threads: Path, **kw):
+    return CallableTool(WriteToFile(ctx=_tool_ctx(launch_root, threads, **kw)))
 
 
 def _orig(launch_root: Path, key: str) -> Path:
@@ -140,7 +141,7 @@ def test_append_existing_snapshots_orig(launch_root):
     root, threads = launch_root
     target = root / "src" / "a.py"
     target.write_text("head\n", encoding="utf-8")
-    tool = AppendToFile(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(AppendToFile(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(tool(path=str(target), content="tail", separator="\n"))
     assert res["ok"] is True
@@ -151,7 +152,7 @@ def test_search_and_replace_snapshots_orig(launch_root):
     root, threads = launch_root
     target = root / "src" / "b.py"
     target.write_text("foo = 1\n", encoding="utf-8")
-    tool = SearchAndReplace(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
         tool(path=str(target), search="foo = 1", replace="foo = 2")
@@ -164,7 +165,7 @@ def test_search_and_replace_dry_run_does_not_track(launch_root):
     root, threads = launch_root
     target = root / "src" / "b.py"
     target.write_text("foo = 1\n", encoding="utf-8")
-    tool = SearchAndReplace(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
         tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True)
@@ -178,7 +179,7 @@ def test_apply_file_edits_snapshots_orig(launch_root):
     root, threads = launch_root
     target = root / "src" / "c.py"
     target.write_text("alpha\n", encoding="utf-8")
-    tool = ApplyFileEdits(ctx=_tool_ctx(root, threads))
+    tool = CallableTool(ApplyFileEdits(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
         tool(
@@ -240,7 +241,7 @@ def test_git_mode_ignored_is_tracked_via_cache(launch_root):
     assert "src/secret.md" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
-def test_exec_delta_adds_journal(launch_root):
+async def test_exec_delta_adds_journal(launch_root):
     root, threads = launch_root
     if not _has_git():
         pytest.skip("git недоступен")
@@ -252,7 +253,7 @@ def test_exec_delta_adds_journal(launch_root):
     )
     ctx = _tool_ctx(root, threads)
     assert isinstance(ctx.os_backend, TrackingFsBackend)
-    ctx.os_backend.exec("echo hello > shell_out.txt", cwd=str(root))
+    await ctx.os_backend.aexec("echo hello > shell_out.txt", cwd=str(root))
     assert "shell_out.txt" in TouchedJournal(str(threads), "tui", "t1").paths()
 
 
@@ -281,7 +282,17 @@ def test_tools_do_not_import_diff_tui():
 # Members of FsBackend the wrapper is allowed NOT to expose. Keep it empty:
 # TrackingFsBackend is a decorator, so every public member of the port must be
 # reachable through it (it is not an FsBackend subclass, so ABC cannot enforce).
-TRACKING_NOT_FORWARDED: set[str] = set()
+# Синхронная тройка exec сознательно НЕ проксируется. На ``FsBackend`` она
+# осталась входом для ЧУЖИХ реализаций (их ядро видит через
+# ``SyncExecAdapter``), а наши бэкенды её не реализуют вовсе: прежние тела
+# были обёртками ``run_coro_blocking``, то есть заводили второй event loop, а
+# из-под живого — морозили поток вызывающего на всё время команды. Обёртка
+# оборачивает НАШ бэкенд, поэтому проксирует только корутинную форму — её
+# наличие сторожится отдельной проверкой ниже.
+# Синхронные входы порта для ЧУЖИХ реализаций: обёртка их не проксирует, но
+# корутинную форму каждого (`a<имя>`) — обязана, это проверяет цикл ниже.
+# `exec_raw` приехал с develop вместе со вторым каналом запуска.
+TRACKING_NOT_FORWARDED: set[str] = {"exec", "exec_raw", "exec_argv", "run_python"}
 
 
 def _fsbackend_public_members() -> set[str]:
@@ -302,6 +313,14 @@ def test_tracking_fs_backend_mirrors_fsbackend_public_surface():
     exposed = set(dir(type(wrapper))) | set(vars(wrapper))
     missing = sorted(_fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED)
     assert missing == []
+
+    # Исключение из списка выше не должно означать «форму потеряли»: у каждой
+    # снятой синхронной операции обёртка обязана проксировать корутинную.
+    for name in TRACKING_NOT_FORWARDED:
+        assert hasattr(type(wrapper), f"a{name}"), (
+            f"обёртка не проксирует a{name} — операция потеряна целиком, "
+            "а не переведена в корутинную форму"
+        )
 
 
 class _CapStub:

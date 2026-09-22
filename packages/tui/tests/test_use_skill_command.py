@@ -30,7 +30,7 @@ async def test_use_skill_running_sends_message_and_updates_meta(tmp_path):
     captured: list = []
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"data_cli_{thread_id}.jsonl").write_text(
                 json.dumps({"type": "message", "seq": 1, "ts_utc": "...",
                             "payload": {"id": "u1", "role": "user", "content": messages[0]}}) + "\n",

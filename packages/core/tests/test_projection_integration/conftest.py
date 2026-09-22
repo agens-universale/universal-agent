@@ -92,7 +92,7 @@ def capture_outbound(monkeypatch):
     """Мок policy: вызывает payload_factory и сохраняет messages перед «вызовом LLM»."""
     captured: dict = {}
 
-    def fake_policy(
+    async def fake_policy(
         *,
         payload_factory,
         initial_max_tokens,
@@ -128,5 +128,5 @@ def capture_outbound(monkeypatch):
             payload,
         )
 
-    monkeypatch.setattr(pr, "request_chat_completions_with_policy", fake_policy)
+    monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", fake_policy)
     return captured

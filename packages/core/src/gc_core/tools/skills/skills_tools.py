@@ -12,6 +12,7 @@ import shlex
 import sys
 from typing import Any, Dict, Optional
 
+from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
@@ -69,10 +70,11 @@ class SkillsListTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    def __call__(self, pack: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+
+    async def acall(self, pack: Optional[str] = None, **kwargs: Any) -> str:
         pack = coalesce_optional_string(pack)
         try:
-            skills = self._registry.list_skills(pack=pack)
+            skills = await self._registry.list_skills(pack=pack)
             return _wrap(tool="skills_list", ok=True, result={"skills": skills})
         except Exception as exc:  # noqa: BLE001
             logger.error("skills_list failed: %s", exc, exc_info=True)
@@ -89,9 +91,10 @@ class LoadSkillTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    def __call__(self, skill_id: str, **kwargs: Any) -> Dict[str, Any]:
+
+    async def acall(self, skill_id: str, **kwargs: Any) -> str:
         try:
-            detail = self._registry.load_skill_detail(skill_id)
+            detail = await self._registry.load_skill_detail(skill_id)
             return _wrap(
                 tool="skills_load",
                 ok=True,
@@ -135,12 +138,13 @@ class RunSkillScriptTool:
         self._ctx = kwargs.get("ctx")
         self._config_dict = kwargs.get("config_dict") or {}
 
+
     @parse_json_object_argument(
         source_arg="args",
         target_arg="args_data",
         error_handler_method="_json_arg_error",
     )
-    def __call__(
+    async def acall(
         self,
         skill_id: str,
         script_name: str | None = None,
@@ -148,9 +152,9 @@ class RunSkillScriptTool:
         args: str | None = None,
         args_data: Dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> str:
         try:
-            resolved = self._registry.resolve_script(
+            resolved = await self._registry.resolve_script(
                 skill_id=skill_id, script_name=script_name or ""
             )
             if self._ctx is None or not hasattr(self._ctx, "os_backend"):
@@ -163,7 +167,12 @@ class RunSkillScriptTool:
                 run_argv += shlex.split(argv)
             elif args_data is not None:
                 stdin = json.dumps(args_data, ensure_ascii=False)
-            exec_result = backend.exec_argv(
+            # Нативно: asyncio.create_subprocess_exec внутри aexec_argv, без
+            # потока. Синхронный exec_argv — сам шим над этой же корутиной
+            # (backends/local.py), так что реализация та же, а с пути уходят
+            # поток из пула и лишний event loop. Чужой бэкенд без aexec_argv
+            # aexec_port завернёт в SyncExecAdapter — совместимость цела.
+            exec_result = await aexec_port(backend).aexec_argv(
                 run_argv,
                 stdin=stdin,
                 timeout=exec_timeout_from_config_dict(self._config_dict),
@@ -260,9 +269,10 @@ class LoadReferenceTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
+
+    async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = self._registry.load_reference(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_reference(skill_id=skill_id, slug=slug)
             return _wrap(
                 tool="skills_read_reference",
                 ok=True,
@@ -309,9 +319,10 @@ class LoadAssetTool:
     def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
         self._registry = registry
 
-    def __call__(self, skill_id: str, slug: str, **kwargs: Any) -> Dict[str, Any]:
+
+    async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = self._registry.load_asset(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_asset(skill_id=skill_id, slug=slug)
             return _wrap(
                 tool="skills_read_asset",
                 ok=True,

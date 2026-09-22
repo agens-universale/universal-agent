@@ -134,7 +134,8 @@ Behavior:
             read_via=cls.registered_tool_name(),
         )
 
-    def __call__(
+
+    async def acall(
         self,
         output_ref: str,
         offset: int = 0,

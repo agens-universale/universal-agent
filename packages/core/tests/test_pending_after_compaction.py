@@ -11,12 +11,13 @@ from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
+from gc_testkit import run_coro
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
 @pytest.fixture(autouse=True)
 def _stub_apply_tool(monkeypatch):
-    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -69,7 +70,7 @@ def _expected_finish_return() -> str:
     return _submit_solution_call()["arguments"]
 
 
-def _accept_validation(**_kwargs):
+async def _accept_validation(**_kwargs):
     return ValidationResult(
         ok=True, action="accept", trace_ok=True, report_ok=True,
         trace_gaps=[], report_mismatches=[], missing_requirements=[],
@@ -90,7 +91,7 @@ def _pending_once(compacted):
 def test_pending_after_compaction_is_picked_up(monkeypatch):
     """Сообщение, пришедшее во время компакции, подхватывается → backend вызван для нового хода."""
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept_validation
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation
     )
     compacted = {"done": False, "consumed": False}
 
@@ -99,19 +100,19 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 
     backend_calls: list = []
 
-    def _fake_user_ask(messages, _state, _ctx):
+    async def _fake_user_ask(messages, _state, _ctx):
         backend_calls.append([m.get("content") for m in messages])
         return [_submit_solution_call()], "resp_2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
         get_pending_messages=_pending_once(compacted),
-    )
+    ))
 
     assert result == _expected_finish_return()
     assert compacted["done"] is True
@@ -122,7 +123,7 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 def test_no_pending_finishes_normally(monkeypatch):
     """Нет pending → финиш как раньше: компакция один раз, backend не зовётся (регресс инварианта)."""
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept_validation
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation
     )
     hook_calls: list = []
 
@@ -131,19 +132,19 @@ def test_no_pending_finishes_normally(monkeypatch):
 
     ua_calls: list = []
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         ua_calls.append(1)
         return [_submit_solution_call()], "resp"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
         get_pending_messages=lambda: [],
-    )
+    ))
 
     assert result == _expected_finish_return()
     assert hook_calls == [1]
@@ -153,7 +154,7 @@ def test_no_pending_finishes_normally(monkeypatch):
 def test_stop_after_compaction_does_not_continue(monkeypatch):
     """stop_requested во время компакции → после continue верх цикла возвращает None, нового хода нет."""
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept_validation
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation
     )
     compacted = {"done": False, "consumed": False}
     stopped = {"flag": False}
@@ -164,20 +165,20 @@ def test_stop_after_compaction_does_not_continue(monkeypatch):
 
     ua_calls: list = []
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         ua_calls.append(1)
         return [_submit_solution_call()], "resp"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         turn_end_compaction_hook=_hook,
         get_pending_messages=_pending_once(compacted),
         check_stop=lambda: stopped["flag"],
-    )
+    ))
 
     assert result is None
     assert ua_calls == []
@@ -191,28 +192,28 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
     def _hook():
         compacted["done"] = True
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         return [_submit_solution_call()], "resp_2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
 
     gate_calls: list = []
 
-    def _capture(**kwargs):
+    async def _capture(**kwargs):
         gate_calls.append(kwargs)
-        return _accept_validation()
+        return await _accept_validation()
 
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _capture
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
     )
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(strict_turn_finish_validation=True),
         turn_end_compaction_hook=_hook,
         get_pending_messages=_pending_once(compacted),
-    )
+    ))
 
     assert result == _expected_finish_return()
     # finish-gate отработал дважды: первый ход + продолженный (после компакции)

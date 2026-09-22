@@ -18,7 +18,20 @@ from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.states import State
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 from helpers.turn_finish_apply import stub_turn_finish_apply
+
+
+def _async_noop(fn):
+    """Корутинная заглушка: ядро зовёт диспетчер и хуки только async-именами.
+
+    Синхронную подмену цикл получил бы как готовый результат вместо awaitable
+    и упал бы на ``await`` — или, хуже, тихо не исполнил бы её вовсе.
+    """
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -84,7 +97,7 @@ def _expected_finish_arguments() -> str:
     return _submit_solution_call()["arguments"]
 
 
-def _accept_validation(**_kwargs):
+async def _accept_validation(**_kwargs):
     return ValidationResult(
         ok=True,
         action="accept",
@@ -99,7 +112,7 @@ def _accept_validation(**_kwargs):
     )
 
 
-def _reject_validation(**_kwargs):
+async def _reject_validation(**_kwargs):
     return ValidationResult(
         ok=False,
         action="fix_report_and_continue",
@@ -137,10 +150,10 @@ def _seed_long_history(state: State, *, user_chars: int = 80) -> None:
 
 @pytest.fixture(autouse=True)
 def _accept_finish_gate(monkeypatch):
-    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _accept_validation,
     )
 
@@ -154,15 +167,15 @@ def test_turn_end_below_threshold_does_not_compact(monkeypatch):
     def record(**kwargs):
         recorded.append(str(kwargs.get("trigger_reason")))
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", record)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", record)
     coord = _coordinator(state, turn_end_trigger_chars=10_000)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert recorded == []
@@ -199,15 +212,15 @@ def test_turn_end_above_threshold_replaces_trace(monkeypatch):
             }
         ]
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]
@@ -218,7 +231,7 @@ def test_turn_end_above_threshold_replaces_trace(monkeypatch):
 def test_turn_end_reject_skips_compaction(monkeypatch):
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _reject_validation,
     )
     state = _make_state(max_steps=0)
@@ -228,11 +241,11 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
 
     monkeypatch.setattr(
         rsc,
-        "run_summary_compaction",
+        "arun_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 
-    def _stub_user_ask(_messages, _state, _ctx):
+    async def _stub_user_ask(_messages, _state, _ctx):
         return (
             [
                 {
@@ -245,27 +258,27 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
             "rid",
         )
 
-    monkeypatch.setattr(pr, "process_user_ask", _stub_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    pr.run_agent(
+    run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert recorded == []
     assert intent_user_ask_texts(state.current_user_intent) == ["open"]
 
 
 def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
-    def _raise_validation(*_args, **_kwargs):
+    async def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
 
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _raise_validation,
     )
     state = _make_state()
@@ -275,17 +288,17 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
 
     monkeypatch.setattr(
         rsc,
-        "run_summary_compaction",
+        "arun_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(strict_turn_finish_validation=True),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]
@@ -308,15 +321,15 @@ def test_turn_end_flush_moves_intent_before_compact(monkeypatch):
         )
         st.messages = [sys_m, {"role": "user", "content": "summary", "id": "s"}] if sys_m else []
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    pr.run_agent(
+    run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
 
 def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
@@ -328,15 +341,15 @@ def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
     def boom(**_kwargs):
         raise RuntimeError("summary backend down")
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", boom)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert result == _expected_finish_arguments()
     assert state.current_user_intent == []
@@ -367,15 +380,15 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
             summarized_messages_count=2,
         )
 
-    monkeypatch.setattr(rsc, "run_summary_compaction", compact)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    pr.run_agent(
+    run_coro(pr.arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(),
-        turn_end_compaction_hook=coord.turn_end_compact_if_needed,
-    )
+        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+    ))
 
     assert state.shared.working_memory.get("knowledge") == "note from patch"
     summary_msgs = [
@@ -417,22 +430,22 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
     from gc_core import agent_executor as ae
 
     class _SkillsRegistryStub:
-        def list_skills(self):
+        async def list_skills(self):
             return []
 
-    def _raise_validation(*_args, **_kwargs):
+    async def _raise_validation(*_args, **_kwargs):
         raise RuntimeError("validation backend failure")
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         return ([_submit_solution_call()], "resp_stub")
 
     recorded: list[str] = []
     monkeypatch.setattr(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _raise_validation,
     )
-    monkeypatch.setattr(pr, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
     # Строковые пути: после reload в test_summary_triggers импорт ``rsc`` в этом файле
     # может указывать на старый модуль, а AgentExecutor — на актуальный.
     monkeypatch.setattr(
@@ -440,7 +453,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         lambda **_k: True,
     )
     monkeypatch.setattr(
-        "gc_core.run_summary_coordinator.run_summary_compaction",
+        "gc_core.run_summary_coordinator.arun_summary_compaction",
         lambda **kwargs: recorded.append(str(kwargs.get("trigger_reason"))),
     )
 
@@ -452,7 +465,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
         skills_registry=_SkillsRegistryStub(),
     )
     executor = ae.AgentExecutor(ctx)
-    result = executor.run(["вопрос"], system="cli", verbose=False)
+    result = run_coro(executor.arun(["вопрос"], system="cli", verbose=False))
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]

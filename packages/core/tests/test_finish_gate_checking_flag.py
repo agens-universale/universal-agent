@@ -12,13 +12,14 @@ import pytest
 from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
+from gc_testkit import run_coro
 from gc_core import processing_responses as pr
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
 @pytest.fixture(autouse=True)
 def _stub_apply_tool(monkeypatch):
-    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
 
 
 def _make_state() -> State:
@@ -84,24 +85,24 @@ def test_flag_raised_during_judge_call_and_cleared_after_accept(monkeypatch):
     """Флаг True ровно на время вызова судьи; после accept — снят (finally)."""
     calls: list[bool] = []
 
-    def _accept(**_kwargs):
+    async def _accept(**_kwargs):
         # В момент вызова судьи флаг уже должен быть поднят (True) — это сигнал,
         # который включает TUI-индикатор «сверяюсь…».
         assert calls == [True]
         return _accept_validation()
 
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _accept
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept
     )
 
-    from gc_core.processing_responses import run_agent
+    from gc_core.processing_responses import arun_agent
 
-    result = run_agent(
+    result = run_coro(arun_agent(
         [_submit_solution_call()],
         _make_state(),
         _make_ctx(),
         mark_finish_gate_checking=lambda active: calls.append(active),
-    )
+    ))
 
     assert result is not None
     assert calls == [True, False]
@@ -113,24 +114,24 @@ def test_flag_not_raised_on_smart_skip(monkeypatch):
     calls: list[bool] = []
     judge_calls: list[int] = []
 
-    def _should_not_run(**_kwargs):
+    async def _should_not_run(**_kwargs):
         judge_calls.append(1)
         return _accept_validation()
 
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _should_not_run
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _should_not_run
     )
 
-    from gc_core.processing_responses import run_agent
+    from gc_core.processing_responses import arun_agent
 
     state = _make_state()
     state.turn_tool_calls = 0
-    result = run_agent(
+    result = run_coro(arun_agent(
         [_submit_solution_call()],
         state,
         _make_ctx(finish_gate_smart=True),
         mark_finish_gate_checking=lambda active: calls.append(active),
-    )
+    ))
 
     assert result is not None
     assert judge_calls == []
@@ -148,7 +149,7 @@ def test_flag_cleared_in_finally_even_if_guard_raises(monkeypatch):
         def __init__(self, **_kwargs) -> None:
             pass
 
-        def evaluate_turn_finish(self, **_kwargs):
+        async def aevaluate_turn_finish(self, **_kwargs):
             raise RuntimeError("judge boom")
 
     from gc_core import processing_responses as pr
@@ -156,12 +157,12 @@ def test_flag_cleared_in_finally_even_if_guard_raises(monkeypatch):
     monkeypatch.setattr(pr, "FinishGateGuard", _BoomGuard)
 
     with pytest.raises(RuntimeError):
-        pr.run_agent(
+        run_coro(pr.arun_agent(
             [_submit_solution_call()],
             _make_state(),
             _make_ctx(),
             mark_finish_gate_checking=lambda active: calls.append(active),
-        )
+        ))
 
     assert calls == [True, False]
 
@@ -172,14 +173,14 @@ def test_flag_absent_when_callback_not_wired():
     monkeypatch_calls: list[bool] = []
     from gc_core.intent_guard import guard as guard_mod
 
-    orig = guard_mod.validate_final_report_vs_user_intent
-    guard_mod.validate_final_report_vs_user_intent = lambda **_kwargs: _accept_validation()
+    orig = guard_mod.avalidate_final_report_vs_user_intent
+    guard_mod.avalidate_final_report_vs_user_intent = lambda **_kwargs: _accept_validation()
     try:
-        from gc_core.processing_responses import run_agent
+        from gc_core.processing_responses import arun_agent
 
-        result = run_agent([_submit_solution_call()], _make_state(), _make_ctx())
+        result = run_coro(arun_agent([_submit_solution_call()], _make_state(), _make_ctx()))
     finally:
-        guard_mod.validate_final_report_vs_user_intent = orig
+        guard_mod.avalidate_final_report_vs_user_intent = orig
 
     assert result is not None
     assert monkeypatch_calls == []

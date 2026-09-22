@@ -7,6 +7,7 @@ from gc_core.intent_log import ACTION_USER_ASK, append_user_ask, flush
 from gc_core.intent_guard import guard as intent_guard_guard_module
 from gc_core.intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
 from gc_core.intent_guard.validation_result import ValidationResult
+from gc_testkit import run_coro
 
 
 class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
@@ -76,7 +77,7 @@ class FinishGateGuardTest(unittest.TestCase):
         state = SimpleNamespace(parent_state_id=None)
         guard = FinishGateGuard(ctx=ctx, state=state, logger=None)
         self.assertFalse(guard.enabled)
-        d = guard.evaluate_turn_finish(finish_handoff_arguments={})
+        d = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
         self.assertEqual(d.outcome, "skipped")
 
     def test_iteration_limit_skips_llm(self) -> None:
@@ -95,7 +96,7 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         guard = FinishGateGuard(ctx=ctx, state=state)
         self.assertTrue(guard.enabled)
-        d = guard.evaluate_turn_finish(finish_handoff_arguments={})
+        d = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
         self.assertEqual(d.outcome, "fail_open_limit")
 
     def test_reject_increments_counter(self) -> None:
@@ -113,7 +114,7 @@ class FinishGateGuardTest(unittest.TestCase):
             finish_gate_rejection_count=0,
         )
 
-        def _reject(**_kwargs):
+        async def _reject(**_kwargs):
             return ValidationResult(
                 ok=False,
                 action="continue_work",
@@ -129,11 +130,11 @@ class FinishGateGuardTest(unittest.TestCase):
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d = guard.evaluate_turn_finish(finish_handoff_arguments={})
+            d = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
             self.assertEqual(d.outcome, "reject")
             self.assertEqual(state.finish_gate_rejection_count, 1)
 
@@ -152,16 +153,16 @@ class FinishGateGuardTest(unittest.TestCase):
             finish_gate_rejection_count=0,
         )
 
-        def _raise(**_kwargs):
+        async def _raise(**_kwargs):
             raise RuntimeError("llm down")
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _raise,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d = guard.evaluate_turn_finish(finish_handoff_arguments={})
+            d = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
 
         self.assertEqual(d.outcome, "fail_open_error")
         self.assertEqual(state.finish_gate_rejection_count, 0)
@@ -185,7 +186,7 @@ class FinishGateGuardTest(unittest.TestCase):
         )
         captured: dict[str, list[str]] = {}
 
-        def _capture(**kwargs):
+        async def _capture(**kwargs):
             captured["current"] = list(kwargs.get("current_user_requests") or [])
             captured["context"] = list(kwargs.get("context_user_messages") or [])
             return ValidationResult(
@@ -203,12 +204,12 @@ class FinishGateGuardTest(unittest.TestCase):
 
         with patch.object(
             intent_guard_guard_module,
-            "validate_final_report_vs_user_intent",
+            "avalidate_final_report_vs_user_intent",
             _capture,
         ):
-            FinishGateGuard(ctx=ctx, state=state).evaluate_turn_finish(
+            run_coro(FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(
                 finish_handoff_arguments={}
-            )
+            ))
 
         assert len(captured["current"]) == 1
         row = json.loads(captured["current"][0])

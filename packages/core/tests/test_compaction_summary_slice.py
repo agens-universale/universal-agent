@@ -4,10 +4,11 @@ import types
 import unittest
 from unittest.mock import patch
 
-from gc_core.summarize.compaction import run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import agent_summary_slice_mode, hint_section_tags, slice_summary
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 class CompactionSummarySliceTest(unittest.TestCase):
@@ -37,7 +38,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
         trace = {"memory_patch": {"executed": True}, "final_output": {}}
         seen: dict = {}
 
-        def fake_summarize(**_kwargs):
+        async def fake_summarize(**_kwargs):
             return {
                 "raw_summary": full_xml,
                 "num_batches": 1,
@@ -72,18 +73,18 @@ class CompactionSummarySliceTest(unittest.TestCase):
         ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
 
         with patch(
-            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions",
+            "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
             fake_summarize,
         ), patch(
             "gc_core.summarize.compaction.apply_summary_state_patch",
             fake_apply,
         ):
-            run_summary_compaction(
+            run_coro(arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason="test",
                 is_cli_mode=False,
-            )
+            ))
 
         short = slice_summary(full_xml, "short")
         self.assertEqual(seen["raw_summary"], short)
@@ -114,7 +115,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
         }
         seen: dict = {}
 
-        def fake_summarize(**_kwargs):
+        async def fake_summarize(**_kwargs):
             return {
                 "raw_summary": full_xml,
                 "num_batches": 2,
@@ -149,18 +150,18 @@ class CompactionSummarySliceTest(unittest.TestCase):
         ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
 
         with patch(
-            "gc_core.summarize.compaction.summarize_dialog_via_chat_completions",
+            "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
             fake_summarize,
         ), patch(
             "gc_core.summarize.compaction.apply_summary_state_patch",
             fake_apply,
         ):
-            run_summary_compaction(
+            run_coro(arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason="test",
                 is_cli_mode=False,
-            )
+            ))
 
         full_slice = slice_summary(full_xml, "full")
         self.assertEqual(seen["raw_summary"], full_slice)

@@ -17,17 +17,17 @@ def _reg_with_refs(tmp_path):
     return SkillsRegistry(system_root=str(system))
 
 
-def test_load_reference_miss_lists_available(tmp_path):
+async def test_load_reference_miss_lists_available(tmp_path):
     reg = _reg_with_refs(tmp_path)
     with pytest.raises(KeyError) as ei:
-        reg.load_reference("qa-req-validation", "manual")  # выдуманный slug
+        await reg.load_reference("qa-req-validation", "manual")  # выдуманный slug
     msg = str(ei.value)
     assert "quality_criteria" in msg
     assert "report_templates" in msg
 
 
-def test_load_reference_hit_still_works(tmp_path):
+async def test_load_reference_hit_still_works(tmp_path):
     reg = _reg_with_refs(tmp_path)
-    res = reg.load_reference("qa-req-validation", "quality_criteria")
+    res = await reg.load_reference("qa-req-validation", "quality_criteria")
     assert res["slug"] == "quality_criteria"
     assert res["content"] == "qc"

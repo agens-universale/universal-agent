@@ -1,15 +1,16 @@
 """Capability probes and FakeBackend overrides."""
 import os
+import pytest
 import re
 import shlex
 from fnmatch import fnmatch
 
 from gc_core.backends.capabilities import (
-    probe_find_xargs_grep,
-    probe_grep_exclude_dir,
-    probe_grep_include,
-    probe_has_find,
-    probe_has_grep,
+    aprobe_find_xargs_grep,
+    aprobe_grep_exclude_dir,
+    aprobe_grep_include,
+    aprobe_has_find,
+    aprobe_has_grep,
 )
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult
@@ -39,8 +40,10 @@ def test_fake_backend_override_caps():
     assert b.has_grep is True
 
 
-def test_local_has_find_grep_smoke_cache():
+async def test_local_capabilities_answer_from_cache_after_warm_up():
+    """Прогрев — обязательный шаг; после него свойства отвечают из кэша."""
     b = LocalFsBackend()
+    await b.awarm_capabilities()
     # On a typical Linux CI/dev host GNU find/grep exist.
     f1 = b.has_find
     f2 = b.has_find
@@ -51,6 +54,24 @@ def test_local_has_find_grep_smoke_cache():
     # Values are bool (probe may fail in minimal env — still no raise)
     assert isinstance(f1, bool)
     assert isinstance(g1, bool)
+
+
+def test_reading_a_capability_before_warm_up_refuses_loudly():
+    """Не прогрели — честный отказ, а не тихий синхронный exec из-под loop.
+
+    Раньше свойство само запускало пробу: до четырёх запусков процесса подряд
+    (в песочнице это сеть, до ~10 с на пробу) прямо на event loop вызывающего.
+    Молчаливая заморозка выглядела как зависший агент на первом инструменте,
+    и найти её по логам было нечем. Теперь отказ называет и причину, и
+    лекарство.
+    """
+    from gc_core.backends.protocol import CapabilitiesNotWarmedError
+
+    b = LocalFsBackend()
+    for name in ("has_find", "has_grep", "grep_exclude_dir", "grep_include"):
+        with pytest.raises(CapabilitiesNotWarmedError) as exc:
+            getattr(b, name)
+        assert "awarm_capabilities" in str(exc.value)
 
 
 # --- probe ≡ production wire -------------------------------------------------
@@ -67,6 +88,12 @@ class _PosixBox(LocalFsBackend):
     Probes run with ``is_sandbox`` False, so they build their fixture with host
     ``tempfile``; the sim answers each recipe by walking that tree for real.
     The knobs model exactly the portability holes the probes exist to catch.
+
+    Подменяются КОРУТИННЫЕ ``aexec``/``aexec_argv``: пробы ходят через
+    ``aexec_port``, а тот отдаёт сам бэкенд, если у него есть корутинная
+    форма. Оставь здесь синхронные ``exec`` — и порт взял бы унаследованные от
+    ``LocalFsBackend`` корутины, то есть НАСТОЯЩИЙ подпроцесс вместо
+    симуляции, а проверки бы зеленели на живом grep хоста.
     """
 
     def __init__(
@@ -87,7 +114,7 @@ class _PosixBox(LocalFsBackend):
 
     # --- exec surface ---
 
-    def exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def aexec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
         self.commands.append(command)
         if command.startswith("command -v "):
             name = shlex.split(command)[2]
@@ -96,7 +123,7 @@ class _PosixBox(LocalFsBackend):
             return self._pipeline(command)
         return ExecResult("", "", 0)
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def aexec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
         argv = [str(a) for a in argv]
         self.commands.append(" ".join(argv))
         prog = os.path.basename(argv[0])
@@ -286,79 +313,89 @@ def _always_on_grep_flags():
     )
 
 
-def test_grep_probes_run_the_production_flags():
+async def test_grep_probes_run_the_production_flags():
     """Probe argv must carry every always-on production flag, or it proves nothing."""
     always = _always_on_grep_flags()
-    for probe in (probe_has_grep, probe_grep_exclude_dir, probe_grep_include):
+    for probe in (aprobe_has_grep, aprobe_grep_exclude_dir, aprobe_grep_include):
         box = _PosixBox()
-        assert probe(box) is True
+        assert await probe(box) is True
         assert box.grep_argvs
         for argv in box.grep_argvs:
             assert always <= set(argv)
 
 
-def test_grep_probe_smokes_fixed_and_case_insensitive_flags():
+async def test_grep_probe_smokes_fixed_and_case_insensitive_flags():
     mode_flags = set(build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]) - set(
         build_grep_argv_flags()[1:]
     )
     box = _PosixBox()
 
-    assert probe_has_grep(box) is True
+    assert await aprobe_has_grep(box) is True
 
     seen = {flag for argv in box.grep_argvs for flag in argv}
     assert mode_flags <= seen
 
 
-def test_grep_rejecting_no_messages_is_not_reported_usable():
+async def test_grep_rejecting_no_messages_is_not_reported_usable():
     """BusyBox case: probe flags pass, a production-only long option does not."""
     box = _PosixBox(grep_rejects=("--no-messages",))
 
-    assert probe_has_grep(box) is False
+    assert await aprobe_has_grep(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_grep is False
 
 
-def test_grep_rejecting_binary_files_is_not_reported_usable():
+async def test_grep_rejecting_binary_files_is_not_reported_usable():
     box = _PosixBox(grep_rejects=("--binary-files=without-match",))
 
-    assert probe_has_grep(box) is False
+    assert await aprobe_has_grep(box) is False
 
 
-def test_backend_without_xargs_r_does_not_report_find():
+async def test_backend_without_xargs_r_does_not_report_find():
     """has_find gates the find -print0 | xargs -0 -r grep recipe — smoke it whole."""
     box = _PosixBox(xargs_flags=("-0",))
 
-    assert probe_find_xargs_grep(box) is False
-    assert probe_has_find(box) is False
+    assert await aprobe_find_xargs_grep(box) is False
+    assert await aprobe_has_find(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is False
 
 
-def test_backend_that_runs_grep_on_empty_xargs_input_does_not_report_find():
+async def test_backend_that_runs_grep_on_empty_xargs_input_does_not_report_find():
     box = _PosixBox(xargs_no_run_if_empty=False)
 
-    assert probe_find_xargs_grep(box) is False
+    assert await aprobe_find_xargs_grep(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is False
 
 
-def test_backend_without_find_print0_does_not_report_find():
+async def test_backend_without_find_print0_does_not_report_find():
     box = _PosixBox(find_rejects=("-print0",))
 
-    assert probe_find_xargs_grep(box) is False
+    assert await aprobe_find_xargs_grep(box) is False
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is False
 
 
-def test_backend_without_gnu_printf_still_reports_find():
+async def test_backend_without_gnu_printf_still_reports_find():
     """has_find gates the prune pipeline, not Harbor's walk -printf listing."""
     box = _PosixBox(find_rejects=("-printf",))
 
-    assert probe_find_xargs_grep(box) is True
-    assert probe_has_find(box) is True
+    assert await aprobe_find_xargs_grep(box) is True
+    assert await aprobe_has_find(box) is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_find is True
 
 
-def test_pipeline_probe_runs_the_production_wire():
+async def test_pipeline_probe_runs_the_production_wire():
     box = _PosixBox()
 
-    assert probe_find_xargs_grep(box) is True
+    assert await aprobe_find_xargs_grep(box) is True
 
     piped = [c for c in box.commands if "| xargs" in c]
     assert piped
@@ -367,13 +404,23 @@ def test_pipeline_probe_runs_the_production_wire():
         assert "| xargs -0 -r " in cmd
 
 
-def test_capable_box_reports_all_capabilities():
+async def test_capable_box_reports_all_capabilities():
     """Regression: nothing above narrowed what a fully capable box reports."""
     box = _PosixBox()
 
+    # Свойства читают только кэш — его наполняет прогрев.
+
+    await box.awarm_capabilities()
+
     assert box.has_find is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.has_grep is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.grep_exclude_dir is True
+    # Свойства читают только кэш — его наполняет прогрев.
+    await box.awarm_capabilities()
     assert box.grep_include is True
 
 

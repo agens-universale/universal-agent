@@ -7,7 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.agent import AgentConfig, DEFAULT_FINISH_GATE_MAX_ITERATIONS, DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+from gc_core.config_modules.agent import (
+    AgentConfig,
+    DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+    DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+)
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.logging_config import LoggingConfig
 from gc_core.config_modules.mcp import McpConfig

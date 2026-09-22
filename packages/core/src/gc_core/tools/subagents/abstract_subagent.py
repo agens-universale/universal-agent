@@ -59,12 +59,16 @@ HANDOFF CONTRACT
         """
         ...
 
-    def finalize_role(self, ctx: Any, state: Any) -> None:
-        """Хук для субагентов, чья роль резолвится ПОСЛЕ сборки child-контекста
-        (нужен ``ctx.model_router``/сетевые параметры — например, LLM-генерация
-        роли у ``special_agent``). Вызывается runner'ом между ``create_instance``
-        и ``get_initial_data``. По умолчанию no-op — субагенты со статичной
-        ``agent_role`` (заданной на уровне класса) ничего не резолвят.
+    async def afinalize_role(self, ctx: Any, state: Any) -> None:
+        """Хук для субагентов, чья роль резолвится ПОСЛЕ сборки child-контекста.
+
+        Нужен, когда для роли требуются ``ctx.model_router`` и сетевые
+        параметры ребёнка — например, у ``special_agent`` роль ГЕНЕРИРУЕТ
+        модель. Вызывается runner'ом между ``create_instance`` и
+        ``get_initial_data``.
+
+        По умолчанию no-op: субагенты со статичной ``agent_role`` ничего не
+        резолвят. Форма одна, асинхронная, — как у тулов.
         """
         return
 

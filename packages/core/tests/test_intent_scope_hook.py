@@ -6,8 +6,12 @@ import pytest
 from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
 from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_user_ask
 from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
-from gc_core.intent_scope.hook import maybe_update_intent_scope_from_tool
+from gc_core.intent_scope.hook import (
+    amaybe_update_intent_scope_from_tool,
+    amaybe_update_intent_scope_from_tool,
+)
 from gc_core.states import State
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -50,18 +54,18 @@ def test_raw_store_flags_require_at_least_one_enabled():
 
 def test_hook_skipped_on_responses_backend():
     state = _make_state()
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
         ctx=_ctx(backend="responses", tools=_tool("turn_ask_human")),
-    )
+    ))
     assert state.current_user_intent == []
 
 
 def test_hook_skipped_without_intent_scope_on_ctx():
     state = _make_state()
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
@@ -69,33 +73,36 @@ def test_hook_skipped_without_intent_scope_on_ctx():
             config_dict={"backend_api_mode": "chat_completions"},
             logger=None,
         ),
-    )
+    ))
     assert state.current_user_intent == []
 
 
 def test_hook_skipped_when_tools_empty():
     state = _make_state()
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw='{"response":"hi"}',
         state=state,
         ctx=_ctx(backend="chat_completions", tools={}),
-    )
+    ))
     assert state.current_user_intent == []
 
 
 def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
+    async def _fake_summary(**kwargs):
+        return "User confirmed option B."
+
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
-        lambda **kwargs: "User confirmed option B.",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
+        _fake_summary,
     )
     state = _make_state()
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw='{"response":"B"}',
         state=state,
         ctx=_ctx(backend="chat_completions", tools=_tool("turn_ask_human")),
-    )
+    ))
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_AGGREGATED
@@ -105,13 +112,16 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
 
 
 def test_hook_raw_truncates_oversized_output(monkeypatch):
+    async def _no_llm(**kwargs):
+        raise AssertionError("LLM must not run for raw")
+
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
+        _no_llm,
     )
     state = _make_state()
     huge = "z" * 20_000
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_finish",
         tool_output_raw=json.dumps({"blob": huge}),
         tool_arguments='{"task_report":"done"}',
@@ -120,7 +130,7 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
             backend="chat_completions",
             tools=_tool("turn_finish", record="raw"),
         ),
-    )
+    ))
     record = state.current_user_intent[0]
     out_text = record.content["output"]
     assert isinstance(out_text, str)
@@ -128,7 +138,7 @@ def test_hook_raw_truncates_oversized_output(monkeypatch):
     assert len(json.dumps(record.content, ensure_ascii=False)) <= 5200
 
 
-def test_finish_gate_reject_submit_in_current_without_flush():
+async def test_finish_gate_reject_submit_in_current_without_flush():
     """Ветка processing_responses после reject: patch output + hook, без flush."""
     from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
     from gc_core.intent_guard.guard import FinishGateDecision
@@ -157,7 +167,7 @@ def test_finish_gate_reject_submit_in_current_without_flush():
         },
         ensure_ascii=False,
     )
-    raw_ok = SubmitSolution()(
+    raw_ok = await SubmitSolution().acall(
         solution_type="full_solution",
         task_report="Сделано по запросу пользователя",
         handoff="{}",
@@ -192,13 +202,13 @@ def test_finish_gate_reject_submit_in_current_without_flush():
         validation=validation,
         feedback_text="Finish gate: fix report.",
     )
-    apply_finish_gate_to_turn_finish_output_in_state(
+    await apply_finish_gate_to_turn_finish_output_in_state(
         state=state,
         finish_call_id="call_finish",
         decision=decision,
     )
     final_output = get_function_call_output_text(state.messages, "call_finish") or ""
-    maybe_update_intent_scope_from_tool(
+    await amaybe_update_intent_scope_from_tool(
         tool_name="turn_finish",
         tool_output_raw=final_output,
         tool_arguments=args,
@@ -230,22 +240,25 @@ def test_finish_gate_reject_submit_in_current_without_flush():
 
 
 def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
+    async def _no_llm(**kwargs):
+        raise AssertionError("LLM must not run for raw")
+
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
+        _no_llm,
     )
     state = _make_state()
     reject_output = (
         '{"ok":false,"rejected_by_finish_gate":true,'
         '"finish_gate":{"feedback":"fix tests"}}'
     )
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_finish",
         tool_output_raw=reject_output,
         tool_arguments='{"task_report":"done"}',
         state=state,
         ctx=_ctx(backend="chat_completions", tools=_tool("turn_finish", record="raw")),
-    )
+    ))
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_RAW
@@ -255,12 +268,15 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
 
 
 def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
+    async def _no_llm(**kwargs):
+        raise AssertionError("LLM must not run for raw")
+
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("LLM must not run for raw")),
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
+        _no_llm,
     )
     state = _make_state()
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_finish",
         tool_output_raw='{"ok":true,"status":"submitted"}',
         tool_arguments='{"task_report":"done"}',
@@ -275,7 +291,7 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
                 )
             },
         ),
-    )
+    ))
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_RAW
@@ -284,13 +300,16 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
 
 
 def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch):
+    async def _empty_summary(**kwargs):
+        return ""
+
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
-        lambda **kwargs: "",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
+        _empty_summary,
     )
     state = _make_state()
     raw = '{"ok":false,"error":"validation"}'
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw=raw,
         state=state,
@@ -299,7 +318,7 @@ def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch
             tools=_tool("turn_ask_human", record="aggregated"),
             fallback=True,
         ),
-    )
+    ))
     assert len(state.current_user_intent) == 1
     record = state.current_user_intent[0]
     assert record.action == ACTION_TOOL_AGGREGATED
@@ -308,24 +327,27 @@ def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch
 
 
 def test_hook_dedup_within_current(monkeypatch):
+    async def _fake_summary(**kwargs):
+        return "same line"
+
     monkeypatch.setattr(
-        "gc_core.intent_scope.hook.summarize_tool_intent_line",
-        lambda **kwargs: "same line",
+        "gc_core.intent_scope.hook.asummarize_tool_intent_line",
+        _fake_summary,
     )
     state = _make_state()
     ctx = _ctx(backend="chat_completions", tools=_tool("turn_ask_human"))
-    maybe_update_intent_scope_from_tool(
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw="a",
         state=state,
         ctx=ctx,
-    )
-    maybe_update_intent_scope_from_tool(
+    ))
+    run_coro(amaybe_update_intent_scope_from_tool(
         tool_name="turn_ask_human",
         tool_output_raw="b",
         state=state,
         ctx=ctx,
-    )
+    ))
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].content == "same line"
 

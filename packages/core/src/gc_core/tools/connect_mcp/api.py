@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import base64
@@ -7,13 +8,17 @@ import os
 import time
 import uuid
 
+
 from gc_core.config import load_config
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.registry import get_all_tools
+from gc_core.tools.connect_mcp.abandonable import run_abandonable
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
 from gc_core.tools.connect_mcp.validation import (
     _validate_tool_arguments,
     format_mcp_tool_result,
 )
+from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -211,34 +216,53 @@ def _wrap_mcp_result(
     return json.dumps(envelope, ensure_ascii=False)
 
 
-def call_mcp_tool(
+@dataclass(frozen=True)
+class _McpCallTarget:
+    """Всё, что нужно знать о вызове, после валидации и резолва.
+
+    Вынесено из ``call_mcp_tool``, чтобы синхронный и асинхронный входы
+    считали это ОДИНАКОВО. Второй копии подготовки быть не должно: именно на
+    таком дублировании уже разъезжалось правило выбора транспорта (см.
+    ``transport_policy``).
+    """
+
+    server_key: str
+    server_cfg: Dict[str, Any]
+    base_tool_name: str
+    arguments_obj: Dict[str, Any]
+    url: str
+    token: Optional[str]
+    transport: Optional[str]
+    effective_transport: Optional[str]
+    # Клиент выбран ОДИН раз, здесь: выбор — детерминированное решение по
+    # конфигу, и неверная пара локус/транспорт обязана падать сразу, а не
+    # ретраиться с backoff и логироваться ERROR трижды (комментарий develop).
+    client: Any
+    use_retry: bool
+
+
+def _prepare_mcp_call(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
     servers_cfg: Dict[str, Dict[str, Any]],
-    tools_registry: Dict[str, Dict[str, Any]] | None = None,
-    timeout: float = 10.0,
-    default_use_retry: bool = False,
-    *,
+    tools_registry: Dict[str, Dict[str, Any]] | None,
+    default_use_retry: bool,
     os_backend: Any = None,
-) -> Any:
-    """
-    Вызвать инструмент на соответствующем MCP-сервере.
+) -> _McpCallTarget:
+    """Разобрать имя тула, найти сервер, провалидировать аргументы.
 
-    full_tool_name: имя вида "<mcp_key>_<tool_name>" (как в get_all_tools).
-    arguments: словарь аргументов ИЛИ JSON-строка с аргументами (как в OpenAI tool_call).
-
-    tools_registry:
-        результат get_all_tools(servers_cfg) — словарь всех инструментов.
-        Если None — будет получен заново.
-
-    Поведение:
-    - валидирует arguments против JSON Schema из tools_registry[full_tool_name]['parameters'];
-      при ошибке бросает ValueError с подробным описанием путей и сообщений;
-    - если всё валидно — вызывает соответствующий MCP tool через tools/call
-      и возвращает result (data['result'] из MCP-ответа).
+    Бросает ``ValueError`` с человекочитаемым текстом — контракт прежний, эти
+    сообщения видит агент.
     """
     if tools_registry is None:
-        tools_registry = get_all_tools(servers_cfg)
+        # Дискавери — это сеть и запуск процессов; синхронный откат здесь
+        # уводил её в `run_coro_blocking` и морозил loop вызывающего на весь
+        # обход серверов. Реестр обязан приехать готовым: его собирает
+        # `acall_mcp_tool` до разбора имени.
+        raise ValueError(
+            "tools_registry обязателен: дискавери делает вызывающий "
+            "(`ToolsCache.aget_tools`), а не разбор имени тула"
+        )
 
     if full_tool_name not in tools_registry:
         raise ValueError(f"Unknown tool '{full_tool_name}'")
@@ -299,44 +323,111 @@ def call_mcp_tool(
 
     use_retry = bool(server_cfg.get("use_retry", default_use_retry))
 
-    # Resolved once, outside the retry: picking the client is a deterministic
-    # config decision, and a bad locus/transport pair must fail immediately
-    # instead of being retried with backoff and logged as ERROR three times.
+    # Правила выбора (persistent_session, депрекейт sse) — в transport_policy,
+    # общем с registry: раньше они дублировались и разъезжались.
+    effective_transport = resolve_effective_transport(
+        server_cfg, server_name=server_key
+    )
+
     client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
 
-    @retry_with_backoff(
-        operation_name=f"MCP tool call ({server_key}:{base_tool_name})",
+    return _McpCallTarget(
+        client=client,
+        server_key=server_key,
+        server_cfg=server_cfg,
+        base_tool_name=base_tool_name,
+        arguments_obj=arguments_obj,
+        url=url,
+        token=token,
+        transport=transport,
+        effective_transport=effective_transport,
+        use_retry=use_retry,
+    )
+
+
+async def acall_mcp_tool(
+    full_tool_name: str,
+    arguments: Dict[str, Any] | str,
+    servers_cfg: Dict[str, Dict[str, Any]],
+    tools_registry: Dict[str, Dict[str, Any]] | None = None,
+    timeout: float = 10.0,
+    default_use_retry: bool = False,
+    *,
+    os_backend: Any = None,
+) -> Any:
+    """Вызвать MCP-тул, не занимая поток на время ожидания.
+
+    Подготовка и оформление результата — ровно те же, что у синхронного
+    ``call_mcp_tool`` (общие ``_prepare_mcp_call`` и ``_wrap_mcp_result``):
+    две копии этой логики неизбежно разъехались бы, и синхронный с
+    асинхронным вызовы тула стали бы вести себя по-разному.
+
+    Отличается только середина:
+
+    * SDK-транспорты (``stream_sse`` / ``stream_http`` / ``stream_stdio``, и
+      сюда же уходит депрекейтнутый ``sse``) исполняются ПРЯМО на loop
+      вызывающего — ни одного потока;
+    * легаси (свои ``http`` и ``stdio`` на ``requests`` и ``subprocess``)
+      блокирующие, прервать их нечем — уходят в поток, который можно бросить
+      по дедлайну. Loop при этом свободен: ``requests`` отпускает GIL на
+      сокете (замерено — 21 мс разрыва на двухсекундном вызове против 2016 мс
+      при прямом вызове в корутине).
+    """
+    if tools_registry is None:
+        # Реестра нет — значит нужна ДИСКАВЕРИ, а это сеть и запуск процессов.
+        # Синхронный `get_all_tools` внутри `_prepare_mcp_call` уводил её в
+        # `run_coro_blocking`, то есть морозил loop вызывающего на всё время
+        # обхода серверов. Асинхронная форма у кэша есть — берём её здесь, до
+        # разбора, и дальше `_prepare_mcp_call` получает готовый реестр.
+        from gc_core.tools.connect_mcp.registry import ToolsCache
+
+        cache_cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
+        # Бэкенд тому же кэшу ОБЯЗАТЕЛЕН: по его наличию кэш решает, где
+        # поднимать сервер. Без него `execute_on: os_backend` считается
+        # «нашим», и для stdio дискавери запускает команду сервера на хосте —
+        # мимо песочницы, тогда как вызов тула строкой ниже уходит в неё.
+        tools_registry = await ToolsCache(
+            cache_cfg, os_backend=os_backend
+        ).aget_tools()
+
+    target = _prepare_mcp_call(
+        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
+        os_backend=os_backend,
+    )
+
+    @retry_with_backoff_async(
+        operation_name=(
+            f"MCP tool call ({target.server_key}:{target.base_tool_name})"
+        ),
         retry_log_level=logging.ERROR,
         no_more_retries_log_level=logging.ERROR,
     )
-    def _do_mcp_call() -> Any:
-        return client.call_tool(base_tool_name, arguments_obj, timeout=timeout)
-
-    data = _do_mcp_call(
-        use_retry=use_retry,
-        logger=logger,
-    )
-
-    if not isinstance(data, dict):
-        # Unknown/legacy transport returned non-dict; still normalize
-        return _wrap_mcp_result(
-            full_tool_name=full_tool_name,
-            server_key=server_key,
-            base_tool_name=base_tool_name,
-            arguments=arguments_obj,
-            raw=data,
+    async def _ado_mcp_call() -> Any:
+        # Диспетчер один — порт клиента (`McpClientPort`), который develop ввёл
+        # в PR #88 вместе с `execute_on`. Прежний switch по транспортам здесь и
+        # был той второй копией правил выбора, про которую предупреждает
+        # докстринг `_McpCallTarget`: разъезжалась она уже дважды.
+        #
+        # `acall_tool` порт получил вместе с этим вливанием: у develop он был
+        # только синхронным, и звать его отсюда значило морозить loop на всё
+        # время обмена. SDK-транспорты внутри идут нативно, легаси и persistent
+        # stdio — через `run_abandonable`, ровно как дискавери.
+        return await target.client.acall_tool(
+            target.base_tool_name, target.arguments_obj, timeout=timeout
         )
 
-    result = data.get("result", data)
+    data = await _ado_mcp_call(use_retry=target.use_retry, logger=logger)
+
+    raw = data.get("result", data) if isinstance(data, dict) else data
     return _wrap_mcp_result(
         full_tool_name=full_tool_name,
-        server_key=server_key,
-        base_tool_name=base_tool_name,
-        arguments=arguments_obj,
-        raw=result,
+        server_key=target.server_key,
+        base_tool_name=target.base_tool_name,
+        arguments=target.arguments_obj,
+        raw=raw,
     )
 
 
 __all__ = [
-    "call_mcp_tool",
+    "acall_mcp_tool",
 ]

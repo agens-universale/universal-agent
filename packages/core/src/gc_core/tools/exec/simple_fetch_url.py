@@ -1,24 +1,41 @@
+import asyncio
 import functools
 import html as html_lib
 import json
+import os
 import re
-import time
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urljoin
 
-import requests
+import httpx
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.url_policy import enforce_url_policy, validate_url_policy, UrlPolicyDecision
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
+import asyncio
+from gc_core.tools.exec.redirect_policy import (
+    DEFAULT_MAX_REDIRECTS,
+    RedirectBlocked as _SharedRedirectBlocked,
+    TooManyRedirects as _TooManyRedirects,
+    fetch_validating_redirects,
+)
+from gc_core.security.path_policy import resolve_tool_context
 
 
-class _RedirectBlocked(Exception):
-    """Внутреннее исключение для срыва redirect-цикла при policy-блокировке."""
-    def __init__(self, decision: UrlPolicyDecision) -> None:
-        super().__init__(decision.reason or "redirect blocked")
-        self.decision = decision
+def _response_url(exc: Exception) -> "str | None":
+    """URL из ответа-ошибки строкой: httpx.URL в JSON не сериализуется."""
+    response = getattr(exc, "response", None)
+    url = getattr(response, "url", None)
+    return str(url) if url is not None else None
+
+
+#: Псевдоним общего исключения: петля редиректов теперь одна на три тула
+#: (``tools/exec/redirect_policy``), а имя оставлено — на него ссылаются
+#: ветки обработки ниже.
+_RedirectBlocked = _SharedRedirectBlocked
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class SimpleFetchUrl(AbstractSimpleTool):
@@ -426,8 +443,9 @@ class SimpleFetchUrl(AbstractSimpleTool):
             error=error,
         )
 
+
     @enforce_url_policy(url_arg="url")
-    def __call__(
+    async def acall(
         self,
         url: str,
         timeout: Optional[int] = None,
@@ -520,102 +538,107 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         response = None
         attempts = 1 + self.max_retries
-        # Извлекаем url_policy для per-hop redirect-валидации.
-        # Берём из ToolSecurityContext (тот же путь что и enforce_url_policy).
-        _cfg = getattr(self, "_ctx", None)
-        _cfg = getattr(_cfg, "config_dict", {}) or {}
-        _cm = _cfg.get("command_moderation") or {}
-        _up = _cm.get("url_policy") or {}
-        _allowed_schemes = list(_up.get("allowed_schemes") or ["http", "https"])
-        _url_blacklist = list(_up.get("url_blacklist") or [])
-        _max_redirects = 10
+        # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
+        # через `resolve_tool_context`.
+        #
+        # Комментарий выше это и обещал («тот же путь»), а код читал
+        # `config_dict["command_moderation"]["url_policy"]`. Политика лежит на
+        # ВЕРХНЕМ уровне (`path_policy.resolve_tool_context`), поэтому чёрный
+        # список всегда получался пустым, и per-hop проверка, ради которой всё
+        # писалось, ничего не проверяла: редирект на запрещённый адрес
+        # проходил. Поймано сторожем `test_redirect_policy_shared`.
+        _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
+        _allowed_schemes = list(_policy.url_allowed_schemes or ["http", "https"])
+        _url_blacklist = list(_policy.url_blacklist or [])
+        # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
+        # переходов считается петлёй. Было 5 / 10 / 5 — разноголосица ровно
+        # того сорта, ради устранения которой петлю и свели в одну.
+        _max_redirects = DEFAULT_MAX_REDIRECTS
 
-        def _fetch_with_redirect_validation(session, start_url, headers, timeout, proxies=None):
-            """Manual redirect loop с per-hop validate_url_policy."""
-            current = start_url
-            for _ in range(_max_redirects + 1):
-                get_kwargs: Dict[str, Any] = {
-                    "headers": headers,
-                    "timeout": timeout,
-                    "allow_redirects": False,
-                }
-                if proxies is not None:
-                    get_kwargs["proxies"] = proxies
-                resp = session.get(current, **get_kwargs)
-                status = getattr(resp, "status_code", 0) or 0
-                # 3xx redirect codes. Используем status_code чтобы не зависеть
-                # от Response.is_redirect (отсутствует в тест-stubах).
-                if not (300 <= status < 400):
-                    return resp
-                next_url = getattr(resp, "headers", {}).get("Location") if hasattr(resp, "headers") else None
-                if not next_url:
-                    return resp
-                # Абсолютизируем относительный Location.
-                next_abs = urljoin(current, next_url)
-                # ВАЛИДИРУЕМ КАЖДЫЙ HOP. AS-IS spec говорил «redirect не перепроверяется» —
-                # это и было дырой. Теперь перепроверяется.
-                decision = validate_url_policy(next_abs, _allowed_schemes, _url_blacklist)
-                if not decision.allowed:
-                    raise _RedirectBlocked(decision)
-                current = next_abs
-            raise _RedirectBlocked(
-                UrlPolicyDecision(
-                    allowed=False, url=current,
-                    error_type="too_many_redirects",
-                    reason=f"Exceeded {_max_redirects} redirects.",
-                )
+        async def _fetch_with_redirect_validation(session, start_url, headers, timeout):
+            """Общая петля из ``redirect_policy``: одно правило на три тула.
+
+            Копий было две, а у ``fetch_url`` её не было вовсе — он доверял
+            всей цепочке. Две реализации одного правила расходятся молча,
+            третья дырявая; теперь петля одна.
+            """
+            return await fetch_validating_redirects(
+                session, start_url, headers, timeout,
+                allowed_schemes=_allowed_schemes,
+                url_blacklist=_url_blacklist,
+                max_redirects=_max_redirects,
             )
 
-        with requests.Session() as session:
-            for attempt in range(1, attempts + 1):
-                try:
-                    response = _fetch_with_redirect_validation(
-                        session, normalized_url, headers, effective_timeout, proxies=proxies
-                    )
-                    response.raise_for_status()
-                    break
-                except _RedirectBlocked as redirect_exc:
-                    _decision = redirect_exc.decision
+        # Клиент общий и переиспользуемый (пул соединений), закрывать его здесь
+        # нельзя — он принадлежит loop, а не одному вызову.
+        session = get_async_client(
+            # Явный `proxy` тула — первым аргументом, иначе он молча
+            # игнорируется (тот же промах, что был в fetch_url).
+            proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url)
+        )
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await _fetch_with_redirect_validation(
+                    session, normalized_url, headers, effective_timeout
+                )
+                response.raise_for_status()
+                break
+            except _TooManyRedirects as loop_exc:
+                # Петля редиректов — сетевая проблема, а не запрет политики.
+                return _result(
+                    ok=False,
+                    final_url=loop_exc.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": "too_many_redirects",
+                        "reason": str(loop_exc),
+                        "limit": loop_exc.limit,
+                    },
+                )
+            except _RedirectBlocked as redirect_exc:
+                _decision = redirect_exc.decision
+                return _result(
+                    ok=False,
+                    final_url=_decision.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": _decision.error_type or "url_blocked_by_policy",
+                        "reason": _decision.reason,
+                        "matched_rule": _decision.matched_rule,
+                        "blocked_on_redirect": True,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
                     return _result(
                         ok=False,
-                        final_url=_decision.url,
-                        status_code=None,
-                        content_type=None,
+                        final_url=_response_url(exc),
+                        status_code=status,
+                        content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
+                        if getattr(exc, "response", None) is not None
+                        else None,
                         result_type="error",
                         error={
-                            "type": _decision.error_type or "url_blocked_by_policy",
-                            "reason": _decision.reason,
-                            "matched_rule": _decision.matched_rule,
-                            "blocked_on_redirect": True,
+                            "type": "request_failed",
+                            "message": str(exc),
+                            "attempt": attempt,
+                            "attempts_total": attempts,
+                            "retryable": retryable,
                         },
                     )
-                except requests.RequestException as exc:
-                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                    retryable = status is None or status in (429,) or status >= 500
-                    if (not retryable) or attempt == attempts:
-                        return _result(
-                            ok=False,
-                            final_url=getattr(getattr(exc, "response", None), "url", None),
-                            status_code=status,
-                            content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
-                            if getattr(exc, "response", None) is not None
-                            else None,
-                            result_type="error",
-                            error={
-                                "type": "request_failed",
-                                "message": str(exc),
-                                "attempt": attempt,
-                                "attempts_total": attempts,
-                                "retryable": retryable,
-                            },
-                        )
-                    time.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return _result(ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."})
 
         content_type = response.headers.get("Content-Type", "")
-        final_url = response.url
+        final_url = str(response.url)
         status_code = response.status_code
         raw_content = getattr(response, "content", b"")
         content_type_binary = self._is_binary_content_type(content_type)
@@ -641,7 +664,11 @@ class SimpleFetchUrl(AbstractSimpleTool):
 
         text = response.text or ""
         page_meta = self._extract_meta(text)
-        extracted = self._extract_simple_html_text(text)
+        # Разбор — десяток `re.sub` с бэктрекингом по всему документу, то есть
+        # чистый CPU на размере страницы. У `fetch_url` он по этой же причине
+        # давно уходит в поток (замер там: 237 мс инлайн против 22 мс), а
+        # здесь оставался на loop.
+        extracted = await asyncio.to_thread(self._extract_simple_html_text, text)
         if extracted:
             self._put_to_cache(cache_key, extracted, page_meta)
             sliced = self._slice_content(extracted, offset, limit)

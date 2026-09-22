@@ -122,7 +122,7 @@ def _requests_get_ex(
     config_proxy: Optional[str] = None,
 ) -> HttpReply:
     """GET через backend-сессию: trust_env=False + resolve_proxies."""
-    import requests
+    import httpx
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
@@ -133,13 +133,13 @@ def _requests_get_ex(
         )
         try:
             payload = _payload_dict(resp.json())
-        except ValueError:
+        except (ValueError, json.JSONDecodeError):
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
     # UnicodeEncodeError — не сеть: заголовки кодируются в latin-1, и токен с
     # кириллицей рвёт запрос в клиенте. Это ValueError, мимо RequestException, —
     # без перехвата исключение уходит наверх и там читается как «сервер недоступен».
-    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
+    except (httpx.HTTPError, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,
@@ -156,7 +156,7 @@ def _requests_post_ex(
     config_proxy: Optional[str] = None,
 ) -> HttpReply:
     """POST через backend-сессию: trust_env=False + resolve_proxies."""
-    import requests
+    import httpx
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
@@ -167,11 +167,11 @@ def _requests_post_ex(
         )
         try:
             payload = _payload_dict(resp.json())
-        except ValueError:
+        except (ValueError, json.JSONDecodeError):
             payload = None
         return HttpReply(status=resp.status_code, payload=payload)
     # см. комментарий в _requests_get_ex: кириллица в токене — ValueError, не сеть
-    except (requests.exceptions.RequestException, UnicodeEncodeError) as exc:
+    except (httpx.HTTPError, UnicodeEncodeError) as exc:
         return HttpReply(
             status=None,
             payload=None,

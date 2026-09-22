@@ -49,7 +49,7 @@ def test_iter_walk_entries_keeps_the_flat_walk_order():
     assert [e.size for e in walked] == [None, 1, 2]
 
 
-def test_local_backend_walk_entries_carry_sizes_and_prune(tmp_path):
+async def test_local_backend_walk_entries_carry_sizes_and_prune(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_bytes(b"12345")
     (tmp_path / "node_modules").mkdir()
@@ -57,11 +57,12 @@ def test_local_backend_walk_entries_carry_sizes_and_prune(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "HEAD").write_bytes(b"1")
 
-    entries = list(
-        LocalFsBackend().iter_walk_entries(
+    entries = [
+        e
+        async for e in LocalFsBackend().iter_walk_entries(
             str(tmp_path), prune_names=("node_modules",), prune_dot_dirs=True
         )
-    )
+    ]
 
     assert [(e.rel, e.is_dir, e.size) for e in entries] == [
         (".git", True, None),
@@ -71,22 +72,23 @@ def test_local_backend_walk_entries_carry_sizes_and_prune(tmp_path):
     ]
 
 
-def test_local_backend_should_descend_still_applies(tmp_path):
+async def test_local_backend_should_descend_still_applies(tmp_path):
     (tmp_path / "skip").mkdir()
     (tmp_path / "skip" / "x.py").write_bytes(b"1")
 
-    entries = list(
-        LocalFsBackend().iter_walk_entries(
+    entries = [
+        e
+        async for e in LocalFsBackend().iter_walk_entries(
             str(tmp_path), should_descend=lambda p: os.path.basename(p) != "skip"
         )
-    )
+    ]
 
     assert [e.rel for e in entries] == ["skip"]
 
 
-def test_fake_backend_walk_entries_carry_sizes_and_prune():
+async def test_fake_backend_walk_entries_carry_sizes_and_prune():
     backend = FakeBackend({"/work/a.py": "abc", "/work/node_modules/x.js": "z"})
-    entries = backend.walk_entries("/work", prune_names=("node_modules",))
+    entries = await backend.walk_entries("/work", prune_names=("node_modules",))
     assert [(e.rel, e.is_dir, e.size) for e in entries] == [("node_modules", True, None), ("a.py", False, 3)]
 
 
@@ -98,24 +100,28 @@ def test_pruned_dir_predicate_is_the_single_rule():
     assert pruned_dir_predicate((), prune_dot_dirs=False)(".git") is False
 
 
-def test_local_backend_iter_walk_is_the_entries_walk_without_sizes(tmp_path):
+async def test_local_backend_iter_walk_is_the_entries_walk_without_sizes(tmp_path):
     (tmp_path / "b").mkdir()
     (tmp_path / "b" / "c.py").write_bytes(b"12")
     (tmp_path / "a.py").write_bytes(b"1")
     backend = LocalFsBackend()
-    assert list(backend.iter_walk(str(tmp_path))) == [
-        (e.rel, e.is_dir) for e in backend.iter_walk_entries(str(tmp_path))
+    walked = [pair async for pair in backend.iter_walk(str(tmp_path))]
+    assert walked == [
+        (e.rel, e.is_dir)
+        async for e in backend.iter_walk_entries(str(tmp_path))
     ]
-    assert list(backend.iter_walk(str(tmp_path))) == [("b", True), ("a.py", False), ("b/c.py", False)]
+    assert walked == [("b", True), ("a.py", False), ("b/c.py", False)]
 
 
-def test_local_backend_symlink_size_is_unknown_not_the_link_length(tmp_path):
+async def test_local_backend_symlink_size_is_unknown_not_the_link_length(tmp_path):
     target = tmp_path / "t.txt"
     target.write_bytes(b"12345")
     try:
         os.symlink(str(target), str(tmp_path / "l.txt"))
     except (OSError, NotImplementedError):
         pytest.skip("symlinks unavailable")
-    entries = {e.rel: e for e in LocalFsBackend().iter_walk_entries(str(tmp_path))}
+    entries = {
+        e.rel: e async for e in LocalFsBackend().iter_walk_entries(str(tmp_path))
+    }
     assert entries["t.txt"].size == 5
     assert entries["l.txt"].size is None  # размер узнает потребитель через getsize (по цели)

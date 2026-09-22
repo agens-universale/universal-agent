@@ -1,3 +1,4 @@
+import httpx
 import requests
 
 from gc_core.utils.backend_errors import (
@@ -18,6 +19,20 @@ from gc_core.utils.backend_errors import (
     normalize_finish_reason,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError
+
+
+def _http_error(status: int) -> httpx.HTTPStatusError:
+    """HTTP-отказ в форме ДЕЙСТВУЮЩЕГО транспорта.
+
+    Часть этих проверок приехала с develop, где путь к модели шёл через
+    `requests`. Здесь он httpx, и предикаты модуля спрашивают про
+    `httpx.HTTPStatusError` — на requests-исключении они просто не срабатывали
+    бы, и тест зеленел бы, ничего не проверив.
+    """
+    request = httpx.Request("POST", "http://backend.local/v1/chat/completions")
+    return httpx.HTTPStatusError(
+        "http error", request=request, response=httpx.Response(status, request=request)
+    )
 
 
 def _resp(*, content="", tool_calls=None, finish_reason=None, error=None, top_error=None):
@@ -125,8 +140,7 @@ def test_retriable_stream_nonnumeric_false():
     assert is_retriable_backend_error(BackendStreamError("x", status_code="content_filter")) is False
 
 def test_retriable_http_500():
-    resp = requests.Response(); resp.status_code = 500
-    assert is_retriable_backend_error(requests.exceptions.HTTPError(response=resp)) is True
+        assert is_retriable_backend_error(_http_error(500)) is True
 
 def test_retriable_unrelated_false():
     assert is_retriable_backend_error(ValueError("boom")) is False
@@ -153,16 +167,14 @@ def test_retriable_embedded_no_code_true():
 
 
 def test_auth_error_http_401_true():
-    resp = requests.Response(); resp.status_code = 401
-    assert is_auth_error(requests.exceptions.HTTPError(response=resp)) is True
+        assert is_auth_error(_http_error(401)) is True
 
 def test_auth_error_stream_401_true():
     assert is_auth_error(BackendStreamError("unauthorized", status_code=401)) is True
 
 def test_auth_error_403_and_500_false():
     for code in (403, 404, 500):
-        resp = requests.Response(); resp.status_code = code
-        assert is_auth_error(requests.exceptions.HTTPError(response=resp)) is False
+                assert is_auth_error(_http_error(code)) is False
 
 def test_auth_error_unrelated_false():
     assert is_auth_error(ValueError("boom")) is False
@@ -178,9 +190,9 @@ def test_auth_error_embedded_504_false():
 
 def test_model_unavailable_covers_network_errors():
     from gc_core.utils.backend_errors import is_model_unavailable_error
-    assert is_model_unavailable_error(requests.exceptions.ConnectTimeout("timeout")) is True
-    assert is_model_unavailable_error(requests.exceptions.SSLError("tls")) is True
-    assert is_model_unavailable_error(requests.exceptions.ProxyError("proxy")) is True
+    assert is_model_unavailable_error(httpx.ConnectTimeout("timeout")) is True
+    assert is_model_unavailable_error(httpx.ConnectError("tls")) is True
+    assert is_model_unavailable_error(httpx.ProxyError("proxy")) is True
 
 
 def test_model_unavailable_covers_4xx_of_a_renamed_or_revoked_model():
@@ -195,19 +207,15 @@ def test_model_unavailable_covers_4xx_of_a_renamed_or_revoked_model():
     """
     from gc_core.utils.backend_errors import is_model_unavailable_error
     for code in (401, 403, 404):
-        resp = requests.Response(); resp.status_code = code
-        assert is_model_unavailable_error(
-            requests.exceptions.HTTPError(f"{code}", response=resp)
-        ) is True, f"HTTPError {code} не признан недоступностью модели"
+        assert is_model_unavailable_error(_http_error(code)) is True, (
+            f"HTTPError {code} не признан недоступностью модели"
+        )
         assert is_model_unavailable_error(
             BackendStreamError("model not found", status_code=code)
         ) is True, f"BackendStreamError {code} не признан недоступностью модели"
 
     # 400 — ошибка запроса, а не модели: смена уровня её не исправит.
-    resp_400 = requests.Response(); resp_400.status_code = 400
-    assert is_model_unavailable_error(
-        requests.exceptions.HTTPError("400", response=resp_400)
-    ) is False
+    assert is_model_unavailable_error(_http_error(400)) is False
 
 
 def test_model_unavailable_ignores_non_network_request_exceptions():

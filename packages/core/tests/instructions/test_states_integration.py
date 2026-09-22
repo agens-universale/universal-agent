@@ -86,6 +86,10 @@ def test_state_agentsmd_override_false_includes_global(tmp_path, monkeypatch):
     """State(is_tui=True, agentsmd_override=False) → оба слоя (глобальный + проектный)."""
     from gc_core.config_modules import env_vars
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    # Тест про раскладку ОТ GC_HOME, а gc_paths() берёт `gc_config_dir or ...` —
+    # то есть явный GC_CONFIG_DIR законно перебивает gc_home. Прогон ставит его
+    # (изоляция от личного конфига, gc_testkit/plugin.py), поэтому здесь снимаем.
+    monkeypatch.setattr(env_vars.env, "gc_config_dir", None)
     monkeypatch.chdir(tmp_path)
     gc_global = tmp_path / "gc"
     _write(gc_global / "AGENTS.md", "GLOBAL RULES")

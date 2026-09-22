@@ -266,7 +266,8 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             error={"type": error_type, "message": message},
         )
 
-    def __call__(
+
+    async def acall(
         self,
         action: str,
         register: str = "",

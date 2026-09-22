@@ -5,14 +5,15 @@ import types
 
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_core.intent_log import deserialize_list
-from gc_core.summarize.compaction import maybe_run_summary_compaction
+from gc_core.summarize.compaction import amaybe_run_summary_compaction
 from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
 
 
 def _ctx():
@@ -61,7 +62,7 @@ def _read_current_data_rows(tmp_dir: str, thread_id: str):
         return [json.loads(line) for line in fd if line.strip()]
 
 
-def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(monkeypatch):
+async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread"
         system_id = "cli"
@@ -79,7 +80,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
             known,
             start_seq=0,
         )
-        session = ThreadSession.from_config(
+        session = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,
@@ -93,23 +94,28 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.user_turn_seq = 1
 
         monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        _patch_chat_completion(
-            monkeypatch,
-            lambda **_kwargs: _valid_summary("s"),
-        )
+
+        async def _fake_summary(**_kwargs):
+            return _valid_summary("s")
+
+        _patch_chat_completion(monkeypatch, _fake_summary)
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+        async def _fake_patch_replace(**_k):
+            return empty_patch
+
         monkeypatch.setattr(
-            "gc_core.summarize.memory_suggestions.request_patch_replace",
-            lambda **_k: empty_patch,
+            "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+            _fake_patch_replace,
         )
 
-        assert maybe_run_summary_compaction(
+        assert await amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
         )
@@ -123,7 +129,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         state.user_intent_log.extend(
             deserialize_list(["third request", "fourth request"])
         )
-        session.persist_batch(
+        await session.apersist_batch(
             [
                 {"role": "user", "content": "third request"},
                 {"role": "assistant", "content": "third reply"},
@@ -134,13 +140,13 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         )
         prev_offset = int(state.dialog_steps_offset)
         state.messages = session.get_full_history_messages()
-        assert maybe_run_summary_compaction(
+        assert await amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
         )
@@ -177,7 +183,7 @@ def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
         assert len(archives) >= 2
 
 
-def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
+async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread-tech"
         system_id = "cli"
@@ -198,7 +204,7 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             known,
             start_seq=0,
         )
-        session = ThreadSession.from_config(
+        session = await ThreadSession.afrom_config(
             config_dict={"threads_data_path": tmp_dir},
             system_id=system_id,
             thread_id=thread_id,
@@ -217,23 +223,28 @@ def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         state.user_turn_seq = 1
 
         monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
-        _patch_chat_completion(
-            monkeypatch,
-            lambda **_kwargs: _valid_summary("s-tech"),
-        )
+
+        async def _fake_summary(**_kwargs):
+            return _valid_summary("s-tech")
+
+        _patch_chat_completion(monkeypatch, _fake_summary)
         empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+
+        async def _fake_patch_replace(**_k):
+            return empty_patch
+
         monkeypatch.setattr(
-            "gc_core.summarize.memory_suggestions.request_patch_replace",
-            lambda **_k: empty_patch,
+            "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+            _fake_patch_replace,
         )
 
-        assert maybe_run_summary_compaction(
+        assert await amaybe_run_summary_compaction(
             ctx=_ctx(),
             state=state,
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.archive_and_compact_summary_payload(
+            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             ),
         )

@@ -6,10 +6,29 @@ from gc_core import thread_store
 
 
 class _FakeTS:
+    """Похожа на ThreadSession — с полем ``store``.
+
+    Флаг ``summarizing`` пишется через хранилище сессии; файловое хранилище
+    здесь как раз и делегирует в модульные функции, которые тест подменяет.
+    """
+
     def __init__(self):
+        from gc_core.thread_store_file import FileThreadStore
+
         self.threads_dir = "/tmp/x"; self.system_id = "cli"; self.thread_id = "t1"
         self.meta = {}
+        self.store = FileThreadStore(self.threads_dir)
         self.flushed_states = []  # снимки наличия флага при каждом flush
+        self._port = None
+
+    @property
+    def port(self):
+        """Как у ``ThreadSession``: асинхронный порт над своим хранилищем."""
+        if self._port is None:
+            from gc_core.thread_store_async import athread_store
+
+            self._port = athread_store(self.store)
+        return self._port
 
 
 def _patch_flush(monkeypatch, ts):
@@ -22,30 +41,30 @@ def _patch_flush(monkeypatch, ts):
     monkeypatch.setattr(thread_store, "save_thread_meta", fake_save)
 
 
-def test_flag_set_during_and_cleared_after(monkeypatch):
+async def test_flag_set_during_and_cleared_after(monkeypatch):
     ts = _FakeTS()
     _patch_flush(monkeypatch, ts)
     seen_during = {}
     def fake_compaction():
         rt = ts.meta.get("runtime") or {}
         seen_during["flag"] = bool(rt.get("summarizing"))
-    with rsc._summarizing_flag(ts):
+    async with rsc._asummarizing_flag(ts):
         fake_compaction()
     assert seen_during["flag"] is True
     assert not (ts.meta.get("runtime") or {}).get("summarizing")
     assert ts.flushed_states == [True, False]
 
 
-def test_flag_cleared_on_exception(monkeypatch):
+async def test_flag_cleared_on_exception(monkeypatch):
     ts = _FakeTS()
     _patch_flush(monkeypatch, ts)
     with pytest.raises(ValueError):
-        with rsc._summarizing_flag(ts):
+        async with rsc._asummarizing_flag(ts):
             raise ValueError("boom")
     assert not (ts.meta.get("runtime") or {}).get("summarizing")
     assert ts.flushed_states[-1] is False
 
 
-def test_flag_noop_when_no_thread_session():
-    with rsc._summarizing_flag(None):
+async def test_flag_noop_when_no_thread_session():
+    async with rsc._asummarizing_flag(None):
         pass

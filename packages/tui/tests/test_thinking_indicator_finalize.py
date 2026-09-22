@@ -156,7 +156,7 @@ class _BlockingFake:
         self._threads_dir = threads_dir
         self._evt = threading.Event()
 
-    def run(self, messages, *, thread_id, **kw):
+    async def arun(self, messages, *, thread_id, **kw):
         # auto-create: attach + pending mount на UI-потоке — до записи .jsonl.
         time.sleep(0.4)
         data = self._threads_dir / f"data_cli_{thread_id}.jsonl"

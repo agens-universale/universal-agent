@@ -360,8 +360,9 @@ Search for error logs in Rust source files:
 
         return True, None, start_0, lim_eff, off_eff
 
+
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         regex: str,
@@ -407,7 +408,7 @@ Search for error logs in Rust source files:
                 },
             )
 
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return _result(ok=False, error={"type": "not_found"})
 
         # Per-entry read_guard: пропускаем dir'и/файлы которые денилисчены,
@@ -451,10 +452,10 @@ Search for error logs in Rust source files:
             entry.update(extra)
             skipped.append(entry)
 
-        def _load_search_text(abs_path: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        async def _load_search_text(abs_path: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
             """Return (text, None) or (None, error dict with type/message for skip or tool error)."""
             try:
-                raw = self._backend.read_bytes(abs_path)
+                raw = await self._backend.read_bytes(abs_path)
             except OSError as e:
                 return None, {"type": "read_failed", "message": str(e)}
 
@@ -486,16 +487,16 @@ Search for error logs in Rust source files:
                 "message": err.get("message") or "Failed to decode file.",
             }
 
-        def _search_file_contents(abs_path: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
-            text, err = _load_search_text(abs_path)
+        async def _search_file_contents(abs_path: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+            text, err = await _load_search_text(abs_path)
             if err is not None:
                 return None, err
             assert text is not None
             return self._search_text(abs_path, text, regex), None
 
-        def _search_one(abs_path: str) -> Optional[List[Dict[str, Any]]]:
+        async def _search_one(abs_path: str) -> Optional[List[Dict[str, Any]]]:
             try:
-                size = self._backend.getsize(abs_path)
+                size = await self._backend.getsize(abs_path)
             except OSError as e:
                 _skip(abs_path, "stat_failed", message=str(e))
                 return None
@@ -508,7 +509,7 @@ Search for error logs in Rust source files:
                     max_bytes=max_bytes,
                 )
                 return None
-            hits, err = _search_file_contents(abs_path)
+            hits, err = await _search_file_contents(abs_path)
             if err is not None:
                 _skip(
                     abs_path,
@@ -518,34 +519,34 @@ Search for error logs in Rust source files:
                 return None
             return hits
 
-        if self._backend.is_file(path):
+        if await self._backend.is_file(path):
             # Single-file search (models often pass a file like `rg pattern file.py`).
             # file_pattern does not apply — the path already names the file.
             try:
-                size = self._backend.getsize(path)
+                size = await self._backend.getsize(path)
             except OSError:
                 return _result(ok=False, error={"type": "not_found"})
             size_err = check_file_size(size, max_bytes, operation="search_files")
             if size_err is not None:
                 return _result(ok=False, error=size_err)
-            hits, err = _search_file_contents(path)
+            hits, err = await _search_file_contents(path)
             if err is not None:
                 return _result(ok=False, error=err)
             results = hits or []
-        elif self._backend.is_dir(path):
+        elif await self._backend.is_dir(path):
             file_matcher = self._create_file_matcher(file_pattern, base_path=path)
             try:
                 file_iter = self._backend.iter_files(path, should_descend=_rg_pass)
             except FileNotFoundError:
                 return _result(ok=False, error={"type": "not_found"})
 
-            for relpath in file_iter:
+            async for relpath in file_iter:
                 abs_path = self._backend.join(path, relpath)
                 if file_pattern and not file_matcher(abs_path, path):
                     continue
                 if not _rg_pass(abs_path):
                     continue
-                file_result = _search_one(abs_path)
+                file_result = await _search_one(abs_path)
                 if file_result:
                     results += file_result
         else:

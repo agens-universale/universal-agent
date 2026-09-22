@@ -8,7 +8,7 @@ class _CaptureExecutor:
     def __init__(self):
         self.calls = []
 
-    def run(self, messages, **kwargs):
+    async def arun(self, messages, **kwargs):
         self.calls.append((list(messages), kwargs.get("message_ids")))
 
     def stop_run(self):

@@ -77,7 +77,7 @@ def test_no_execute_on_behaves_as_today():
     assert isinstance(client, cp.AgentRuntimeClient)
 
 
-def test_sidecar_tool_is_listed_and_callable_and_sessions_are_not_reused():
+async def test_sidecar_tool_is_listed_and_callable_and_sessions_are_not_reused():
     cp, eo, obc = _mcp()
     backend = _Sandbox([
         _ok({"result": {}}, {"mcp-session-id": "sid-1"}),
@@ -93,13 +93,13 @@ def test_sidecar_tool_is_listed_and_callable_and_sessions_are_not_reused():
          "execute_on": "os_backend"},
         os_backend=backend,
     )
-    assert client.list_tools(timeout=30.0) == [{"name": "ask_user"}]
-    out = client.call_tool("ask_user", {"question": "q"}, timeout=30.0)
+    assert await client.alist_tools(timeout=30.0) == [{"name": "ask_user"}]
+    out = await client.acall_tool("ask_user", {"question": "q"}, timeout=30.0)
     assert out["result"]["content"][0]["text"] == "answer"
     assert "sid-1" not in backend.codes[5]
 
 
-def test_stdio_process_starts_in_the_backend_not_on_the_agent_host():
+async def test_stdio_process_starts_in_the_backend_not_on_the_agent_host():
     cp, eo, obc = _mcp()
     calls = []
 
@@ -123,7 +123,7 @@ def test_stdio_process_starts_in_the_backend_not_on_the_agent_host():
         {"transport": "stdio", "command": "srv-bin", "execute_on": "os_backend"},
         os_backend=_StdioSandbox(),
     )
-    client.list_tools(timeout=20.0)
+    await client.alist_tools(timeout=20.0)
     assert calls == [["srv-bin"]]
 
 
@@ -151,7 +151,7 @@ def test_same_config_on_local_backend_uses_the_agent_path_without_exec():
     assert local.execs == []
 
 
-def test_agent_locus_server_details_never_enter_exec():
+async def test_agent_locus_server_details_never_enter_exec():
     cp, eo, obc = _mcp()
     backend = _Sandbox([
         _ok({"result": {}}, {"mcp-session-id": "sid"}),
@@ -170,13 +170,13 @@ def test_agent_locus_server_details_never_enter_exec():
          "execute_on": "os_backend"},
         os_backend=backend,
     )
-    sidecar.list_tools(timeout=10.0)
+    await sidecar.alist_tools(timeout=10.0)
     joined = "\n".join(backend.codes)
     assert "corp-secret" not in joined
     assert "corp-internal.example" not in joined
 
 
-def test_missing_carrier_is_an_error_and_installs_nothing():
+async def test_missing_carrier_is_an_error_and_installs_nothing():
     cp, eo, obc = _mcp()
     class _BareSandbox:
         is_sandbox = True
@@ -199,11 +199,11 @@ def test_missing_carrier_is_an_error_and_installs_nothing():
         os_backend=backend,
     )
     with pytest.raises(obc.McpExecCarrierError):
-        client.list_tools(timeout=10.0)
+        await client.alist_tools(timeout=10.0)
     assert not any("install" in cmd for cmd in backend.execs)
 
 
-def test_truncated_exec_output_is_an_error():
+async def test_truncated_exec_output_is_an_error():
     cp, eo, obc = _mcp()
     class _TruncatingSandbox:
         is_sandbox = True
@@ -224,7 +224,7 @@ def test_truncated_exec_output_is_an_error():
         os_backend=_TruncatingSandbox(),
     )
     with pytest.raises(obc.McpExecCarrierError):
-        client.list_tools(timeout=10.0)
+        await client.alist_tools(timeout=10.0)
 
 
 def test_tls_material_on_os_backend_is_a_config_error():
@@ -238,7 +238,7 @@ def test_tls_material_on_os_backend_is_a_config_error():
         )
 
 
-def test_mixed_config_keeps_both_servers_alive():
+async def test_mixed_config_keeps_both_servers_alive():
     cp, eo, obc = _mcp()
     backend = _Sandbox([
         _ok({"result": {}}, {"mcp-session-id": "sid"}),
@@ -257,4 +257,4 @@ def test_mixed_config_keeps_both_servers_alive():
     )
     assert isinstance(agent_client, cp.AgentRuntimeClient)
     assert isinstance(sidecar_client, obc.OsBackendStatelessClient)
-    assert sidecar_client.list_tools(timeout=10.0) == [{"name": "ask_user"}]
+    assert await sidecar_client.alist_tools(timeout=10.0) == [{"name": "ask_user"}]

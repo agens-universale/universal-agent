@@ -2,10 +2,14 @@
 import threading
 import types
 
+from gc_core.thread_store_async import athread_store
+from gc_core.thread_store_file import FileThreadStore
+
 import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
 from gc_core.thread_store import load_thread_meta
 from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
+from gc_testkit import run_coro
 
 
 def test_cost_survives_meta_write_and_read():
@@ -21,6 +25,12 @@ def test_cost_survives_meta_write_and_read():
 
 
 class _UsageState:
+    # Прод строит состояние фабрикой: сбор данных о проекте — файловый
+    # ввод-вывод, а конструктор ждать не умеет. Дабл повторяет форму.
+    @classmethod
+    async def acreate(cls, **kw):
+        return cls(**kw)
+
     """State-заглушка с .usage (реальный конструктор State тяжёл/WMI-хэнг)."""
 
     def __init__(self, **kw):
@@ -38,10 +48,18 @@ class _UsageState:
 
 
 class _Coord:
-    """Координатор-заглушка: force_compact_once — no-op, кумулятив не трогаем."""
+    """Координатор-заглушка: компакция — no-op, кумулятив не трогаем.
+
+    Двойник нужен асинхронный: ``manual_compaction.acompact_thread`` зовёт
+    ``aforce_compact_once``. Синхронное имя оставлено — на нём сидят прямые
+    вызывающие вне цикла.
+    """
 
     def __init__(self, **kw):
         self.state = kw["state"]
+
+    async def aforce_compact_once(self, **kw):
+        pass
 
     def force_compact_once(self, **kw):
         pass
@@ -55,13 +73,21 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     baseline = UsageAccount()
     baseline.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
 
-    monkeypatch.setattr(
-        mc, "ThreadSession",
-        types.SimpleNamespace(from_config=lambda **kw: types.SimpleNamespace(
+    _store = FileThreadStore(str(tmp_path))
+
+    async def _afrom_config(**kw):
+        return types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta={"token_usage": baseline.to_meta()}, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
-        )),
+            # Ручная компакция пишет token_usage через хранилище сессии — и
+            # ходит туда через асинхронный порт: тред может лежать в базе.
+            store=_store,
+            port=athread_store(_store),
+        )
+
+    monkeypatch.setattr(
+        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom_config),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
@@ -78,7 +104,7 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     ex._state = None
     ex._stop_pending = False
 
-    assert ex.compact_thread("t1", system="cli") is True
+    assert run_coro(ex.acompact_thread("t1", system="cli")) is True
 
     saved = load_thread_meta(str(tmp_path), "cli", "t1") or {}
     persisted = UsageAccount.from_meta(saved.get("token_usage"))

@@ -409,8 +409,8 @@ def test_get_output_list_persist_copies_openrouter_reasoning_alias():
     assert msg["reasoning_content"] == "secret"
 
 
-def test_salvaged_think_is_not_text_answer_even_in_allow():
-    from gc_core.intent_guard.text_answer_judge import should_return_text_answer
+async def test_salvaged_think_is_not_text_answer_even_in_allow():
+    from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
     from gc_core.message_policy.no_tool_call_bounce import extract_last_assistant_text
     from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
 
@@ -420,7 +420,7 @@ def test_salvaged_think_is_not_text_answer_even_in_allow():
     projected = extract_last_assistant_text(out)
     assert projected == ""
     ctx = type("C", (), {"config_dict": {"text_answer_mode": "allow"}})()
-    assert should_return_text_answer(ctx, object(), projected).accept is False
+    assert (await ashould_return_text_answer(ctx, object(), projected)).accept is False
 
     outbound = format_message_chat_completions_to_send_backend(out[0])
     assert outbound["content"] == "<think>search the leaderboard</think>"

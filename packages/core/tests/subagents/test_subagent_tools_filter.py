@@ -120,16 +120,16 @@ class TestWarnings:
 
 
 class TestReachesSpec:
-    def test_filtered_set_reaches_tools_spec(self, tmp_path):
+    async def test_filtered_set_reaches_tools_spec(self, tmp_path):
         """Модель не должна видеть в схеме тул, который не сможет вызвать."""
-        from gc_core.tools import build_tools_data
+        from gc_core.tools import abuild_tools_data
 
         cfg = {
             "launch_root": str(tmp_path),
             "backend_api_mode": "chat_completions",
             SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", *REQUIRED),
         }
-        _data, spec, _descr, _mcp = build_tools_data(cfg)
+        _data, spec, _descr, _mcp = await abuild_tools_data(cfg)
         spec_names = {s.get("name") for s in spec}
         assert "fs_read_file" in spec_names
         assert "exec_command" not in spec_names

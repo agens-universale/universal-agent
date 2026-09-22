@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from gc_core.states import SharedStateData, State
-from gc_core.tools import apply_tool
+from gc_core.tools import aapply_tool
 from gc_core.tools.subagents.progress import NOOP_SUBAGENT_PROGRESS_SINK, QueueSubagentProgressSink, SubagentProgressEvent, resolve_progress_sink
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit import run_coro
 
 
 def _make_event(**overrides) -> SubagentProgressEvent:
@@ -142,7 +143,7 @@ def _make_ctx(tools_data, *, sink=None):
 
 
 class TestApplyToolPassesCallId:
-    def test_call_id_forwarded_as_parent_call_id(self):
+    async def test_call_id_forwarded_as_parent_call_id(self):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         sub_data = get_subagents_tools_data()
@@ -152,8 +153,12 @@ class TestApplyToolPassesCallId:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
-            instance.run.return_value = "ok"
-            apply_tool(
+            # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
+            async def _arun(*_a, **_kw):
+                return "ok"
+
+            instance.arun.side_effect = _arun
+            await aapply_tool(
                 tool_name="subagent_worker",
                 arguments=json.dumps({"task": "do", "reason": "r"}),
                 ctx=ctx,
@@ -162,14 +167,14 @@ class TestApplyToolPassesCallId:
                 call_id="fc_abc",
             )
 
-        instance.run.assert_called_once_with(
+        instance.arun.assert_called_once_with(
             "subagent_worker",
             {"task": "do", "reason": "r"},
             run_agent_func,
             parent_call_id="fc_abc",
         )
 
-    def test_missing_call_id_forwards_none(self):
+    async def test_missing_call_id_forwards_none(self):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         sub_data = get_subagents_tools_data()
@@ -179,8 +184,12 @@ class TestApplyToolPassesCallId:
 
         with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
             instance = MockRunner.return_value
-            instance.run.return_value = "ok"
-            apply_tool(
+            # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
+            async def _arun(*_a, **_kw):
+                return "ok"
+
+            instance.arun.side_effect = _arun
+            await aapply_tool(
                 tool_name="subagent_worker",
                 arguments=json.dumps({"task": "do", "reason": "r"}),
                 ctx=ctx,
@@ -188,7 +197,7 @@ class TestApplyToolPassesCallId:
                 run_agent_func=run_agent_func,
             )
 
-        kwargs = instance.run.call_args.kwargs
+        kwargs = instance.arun.call_args.kwargs
         assert kwargs.get("parent_call_id") is None
 
 
@@ -212,18 +221,18 @@ def _make_runner_config(tmp_path):
 
 class TestProcessToolCallsForwardsCallId:
     def test_apply_tool_receives_call_id(self, monkeypatch):
-        from gc_core.processing_responses import process_tool_calls
+        from gc_core.processing_responses import aprocess_tool_calls
 
         state = _make_state()
         ctx = SimpleNamespace(config_dict={})
         seen: dict = {}
 
-        def _fake_apply_tool(**kwargs):
+        async def _fake_apply_tool(**kwargs):
             seen.update(kwargs)
             return '{"ok": true}'
 
-        monkeypatch.setattr("gc_core.processing_responses.apply_tool", _fake_apply_tool)
-        process_tool_calls(
+        monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
+        run_coro(aprocess_tool_calls(
             messages=[
                 {
                     "id": "fc_1",
@@ -236,12 +245,12 @@ class TestProcessToolCallsForwardsCallId:
             state=state,
             ctx=ctx,
             run_agent_func=lambda *_a, **_k: None,
-        )
+        ))
         assert seen.get("call_id") == "call_xyz"
 
 
 class TestRunnerWiresSinkOntoChildCtx:
-    def test_child_ctx_gets_parent_call_id_and_sink(self, tmp_path):
+    async def test_child_ctx_gets_parent_call_id_and_sink(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
 
         orch = _make_state()
@@ -260,11 +269,11 @@ class TestRunnerWiresSinkOntoChildCtx:
         runner = SubagentRunner(parent_ctx, orch, cfg)
         captured: dict = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["child_ctx"] = child_ctx
             return "done"
 
-        result = runner.run(
+        result = await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,
@@ -276,7 +285,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         assert child_ctx.subagent_progress_sink is sink
         assert json.loads(result)["ok"] is True
 
-    def test_child_ctx_sink_none_when_parent_has_no_sink(self, tmp_path):
+    async def test_child_ctx_sink_none_when_parent_has_no_sink(self, tmp_path):
         from gc_testkit.helpers.tool_ctx import local_ctx
 
         orch = _make_state()
@@ -293,11 +302,11 @@ class TestRunnerWiresSinkOntoChildCtx:
         runner = SubagentRunner(parent_ctx, orch, cfg)
         captured: dict = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured["child_ctx"] = child_ctx
             return "done"
 
-        runner.run(
+        await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,

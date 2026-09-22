@@ -64,7 +64,7 @@ async def test_submit_with_attachment_sends_pair(tmp_path):
     captured = {}
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
             self._evt = threading.Event()
@@ -162,7 +162,7 @@ async def test_submit_without_attachment_single_message(tmp_path):
     captured = {}
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             captured["messages"] = list(messages)
             import threading
             self._evt = threading.Event()

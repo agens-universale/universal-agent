@@ -11,6 +11,7 @@ import pytest
 from gc_core.summarize import limit_trace_summary as lts
 from gc_core.summarize import llm as summary_llm
 from gc_core.states import State
+from gc_testkit import run_coro
 
 
 def _make_state(max_steps=2):
@@ -43,10 +44,10 @@ def _make_ctx(**overrides):
 # ---------------------------------------------------------------------------
 
 def test_step_limit_envelope_shape(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
-        lambda **kw: "## Intent\n\nDid stuff.",
-    )
+    async def _fake_llm(**kw):
+        return "## Intent\n\nDid stuff."
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -54,7 +55,7 @@ def test_step_limit_envelope_shape(monkeypatch):
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "working..."},
     ]
-    result = lts.build_limit_envelope(state, "step_limit", _make_ctx())
+    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "step_limit"
@@ -63,14 +64,14 @@ def test_step_limit_envelope_shape(monkeypatch):
 
 
 def test_tool_call_limit_envelope_shape(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
-        lambda **kw: "summary text",
-    )
+    async def _fake_llm(**kw):
+        return "summary text"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=10)
     state.tool_calls = 5
     state.messages = [{"role": "user", "content": "hi"}]
-    result = lts.build_limit_envelope(state, "tool_call_limit", _make_ctx(max_tool_calls=5))
+    result = run_coro(lts.abuild_limit_envelope(state, "tool_call_limit", _make_ctx(max_tool_calls=5)))
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "tool_call_limit"
@@ -79,13 +80,13 @@ def test_tool_call_limit_envelope_shape(monkeypatch):
 
 
 def test_token_limit_envelope_shape(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
-        lambda **kw: "token summary",
-    )
+    async def _fake_llm(**kw):
+        return "token summary"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=10)
     state.messages = [{"role": "user", "content": "hi"}]
-    result = lts.build_limit_envelope(state, "token_limit", _make_ctx(session_token_limit=100))
+    result = run_coro(lts.abuild_limit_envelope(state, "token_limit", _make_ctx(session_token_limit=100)))
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "token_limit"
@@ -100,13 +101,13 @@ def test_token_limit_envelope_shape(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
-    def _boom(**kw):
+    async def _boom(**kw):
         raise RuntimeError("LLM down")
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _boom)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _boom)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
-    result = lts.build_limit_envelope(state, "step_limit", _make_ctx())
+    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "step_limit"
@@ -119,14 +120,14 @@ def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_raw_non_markdown_text_still_in_summary(monkeypatch):
-    monkeypatch.setattr(
-        summary_llm, "request_chat_completion_text",
-        lambda **kw: "not json, just plain text",
-    )
+    async def _fake_llm(**kw):
+        return "not json, just plain text"
+
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
-    result = lts.build_limit_envelope(state, "step_limit", _make_ctx())
+    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
     env = json.loads(result)
     assert env["raw_trace_summary"] == "not json, just plain text"
 
@@ -138,15 +139,15 @@ def test_raw_non_markdown_text_still_in_summary(monkeypatch):
 def test_kill_switch_disables_llm_call(monkeypatch):
     called = {"n": 0}
 
-    def _fake_llm(**kw):
+    async def _fake_llm(**kw):
         called["n"] += 1
         return "should not be called"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
-    result = lts.build_limit_envelope(state, "step_limit", _make_ctx(limit_trace_summary=False))
+    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx(limit_trace_summary=False)))
     env = json.loads(result)
     assert env["raw_trace_summary"] == ""
     assert called["n"] == 0  # LLM never invoked
@@ -159,11 +160,11 @@ def test_kill_switch_disables_llm_call(monkeypatch):
 def test_no_working_memory_in_prompt(monkeypatch):
     captured = {}
 
-    def _capture_llm(**kw):
+    async def _capture_llm(**kw):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -171,7 +172,7 @@ def test_no_working_memory_in_prompt(monkeypatch):
         {"role": "user", "content": "do task"},
         {"role": "assistant", "content": "working..."},
     ]
-    lts.build_limit_envelope(state, "step_limit", _make_ctx())
+    run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
     # The user content sent to LLM should contain the trace but NOT
     # "working_memory" or "shared memory" dump keywords.
     user_content = captured["messages"][1]["content"]
@@ -187,18 +188,18 @@ def test_no_working_memory_in_prompt(monkeypatch):
 def test_system_message_not_in_trace(monkeypatch):
     captured = {}
 
-    def _capture_llm(**kw):
+    async def _capture_llm(**kw):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
         {"role": "system", "content": "SECRET_SYSTEM_PROMPT"},
         {"role": "user", "content": "hello"},
     ]
-    lts.build_limit_envelope(state, "step_limit", _make_ctx())
+    run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
     user_content = captured["messages"][1]["content"]
     assert "SECRET_SYSTEM_PROMPT" not in user_content
     assert "hello" in user_content
@@ -211,11 +212,11 @@ def test_system_message_not_in_trace(monkeypatch):
 def test_function_call_serialized_in_trace(monkeypatch):
     captured = {}
 
-    def _capture_llm(**kw):
+    async def _capture_llm(**kw):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "request_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -237,7 +238,7 @@ def test_function_call_serialized_in_trace(monkeypatch):
         },
         {"role": "assistant", "content": "Found 2 files."},
     ]
-    lts.build_limit_envelope(state, "step_limit", _make_ctx())
+    run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
     user_content = captured["messages"][1]["content"]
 
     # Tool call name and arguments must be present

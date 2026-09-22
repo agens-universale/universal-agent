@@ -20,7 +20,7 @@ async def test_send_records_pending_in_meta(tmp_path):
     from gc_tui.app import TuiApp
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),
                 encoding="utf-8")
@@ -54,7 +54,7 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),
                 encoding="utf-8")
@@ -86,7 +86,7 @@ async def test_polling_user_event_promotes_pending(tmp_path):
 
     class _Fake:
         """Stub-executor, который реально пишет user-сообщение в .jsonl."""
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import time
             time.sleep(0.4)  # pending mount до появления .jsonl (auto-create гонка)
             data_path = Path(tmp_path) / f"data_cli_{thread_id}.jsonl"
@@ -147,7 +147,7 @@ async def test_pending_cap_drops_oldest(tmp_path):
     from gc_tui.app import TuiApp
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),
                 encoding="utf-8")
@@ -206,7 +206,7 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),
                 encoding="utf-8")
@@ -242,7 +242,7 @@ async def test_error_shown_resets_between_runs(tmp_path):
     call = {"n": 0}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             call["n"] += 1
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
                 json.dumps({"thread_id": thread_id, "messages_count": 0}),

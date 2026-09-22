@@ -93,7 +93,8 @@ Usage:
 - Hard limit: 4096 characters in `answer`.
 """
 
-    def __call__(self, answer: str, artifact_path: str | None = None, **kwargs) -> str:
+
+    async def acall(self, answer: str, artifact_path: str | None = None, **kwargs) -> str:
         if not isinstance(answer, str):
             return self._result(
                 ok=False,

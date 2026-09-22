@@ -8,9 +8,11 @@ from gc_core.intent_scope.agent_logging import log_intent_scope_delta_appended, 
 from gc_core.config_modules.intent_scope import intent_scope_active, intent_scope_tool_record, intent_scope_tool_store_flags
 from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
-from gc_core.intent_scope.summarizer import build_fallback_aggregated_content, summarize_tool_intent_line
+from gc_core.intent_scope.summarizer import asummarize_tool_intent_line, build_fallback_aggregated_content
 
 _logger = logging.getLogger(__name__)
+
+
 
 
 def _parse_tool_arguments(raw: str) -> dict[str, Any]:
@@ -36,7 +38,7 @@ def _parse_tool_output(raw: str) -> Any | None:
         return text
 
 
-def _append_aggregated_tool_intent(
+async def _aappend_aggregated_tool_intent(
     *,
     tool_name: str,
     tool_output_raw: str,
@@ -45,8 +47,15 @@ def _append_aggregated_tool_intent(
     ctx: Any,
     log: Any,
 ) -> None:
+    """
+    Основная (и единственная) реализация ветки aggregated.
+
+    Внутри — суммаризация тула, то есть сетевой вызов на десятки секунд.
+    Держать ради него поток из пула незачем, поэтому цикл агента ждёт эту
+    корутину напрямую. Синхронное имя ниже — шим поверх неё.
+    """
     scope_cfg = getattr(ctx, "intent_scope", None)
-    summary_line = summarize_tool_intent_line(
+    summary_line = await asummarize_tool_intent_line(
         ctx=ctx,
         state=state,
         tool_name=tool_name,
@@ -121,7 +130,7 @@ def _append_raw_tool_intent(
         )
 
 
-def maybe_update_intent_scope_from_tool(
+async def amaybe_update_intent_scope_from_tool(
     *,
     tool_name: str,
     tool_output_raw: str,
@@ -132,6 +141,10 @@ def maybe_update_intent_scope_from_tool(
     """
     Post-tool hook: optional intent log append into ``current_user_intent`` (fail-open).
     Does not modify tool output.
+
+    Основная (и единственная) реализация. Ветка aggregated ходит в LLM, поэтому
+    хук ждётся из асинхронного цикла напрямую — без потока из пула. Синхронное
+    имя ниже — шим поверх этой корутины.
     """
     log = getattr(ctx, "logger", None) or _logger
     scope_cfg = getattr(ctx, "intent_scope", None)
@@ -177,7 +190,7 @@ def maybe_update_intent_scope_from_tool(
         )
         return
 
-    _append_aggregated_tool_intent(
+    await _aappend_aggregated_tool_intent(
         tool_name=tool_name,
         tool_output_raw=tool_output_raw,
         tool_arguments=tool_arguments,
@@ -185,3 +198,5 @@ def maybe_update_intent_scope_from_tool(
         ctx=ctx,
         log=log,
     )
+
+

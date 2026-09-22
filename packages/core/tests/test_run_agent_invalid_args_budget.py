@@ -5,12 +5,14 @@
 """
 
 from __future__ import annotations
+from gc_testkit import as_coro
 
 import json
 
 import pytest
 
 from gc_core import processing_responses as pr
+from gc_testkit import run_coro
 
 
 def _state():
@@ -53,14 +55,14 @@ def test_invalid_args_reach_the_model_as_tool_output_and_exhaust_the_budget(monk
         raise pr.WrongFunctionArgumentsException("Unexpected field 'bogus'", received_args=kw["arguments"],
                                                  tool_name="session_think")
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
-    monkeypatch.setattr(pr, "process_tool_outputs", _fake_tool_outputs)
-    monkeypatch.setattr(pr, "apply_tool", _apply_tool)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_user_ask))
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", as_coro(_fake_tool_outputs))
+    monkeypatch.setattr(pr, "aapply_tool", as_coro(_apply_tool))
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None))
 
     state = _state()
-    result = pr.run_agent([{"role": "user", "content": "сделай", "id": "u1"}], state, _run_ctx())
+    result = run_coro(pr.arun_agent([{"role": "user", "content": "сделай", "id": "u1"}], state, _run_ctx()))
 
     assert result == "Agent tools call errors."
     assert state.terminal_outcome == "tool_errors"
@@ -105,16 +107,16 @@ def _run_two_bad_turns(monkeypatch, apply_tool, tool_name):
         received_by_model.append(list(messages))
         return _bad_batch_many([f"d{len(received_by_model)}"], tool_name), "resp_next"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
-    monkeypatch.setattr(pr, "process_tool_outputs", _fake_tool_outputs)
-    monkeypatch.setattr(pr, "apply_tool", apply_tool)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_user_ask))
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", as_coro(_fake_tool_outputs))
+    monkeypatch.setattr(pr, "aapply_tool", as_coro(apply_tool))
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None))
 
     ctx = _run_ctx()
     ctx.config_dict["max_unknown_tool_repeats"] = 100  # повтор одного имени — отдельный сторож, не о нём
     state = _state()
-    result = pr.run_agent([{"role": "user", "content": "сделай", "id": "u1"}], state, ctx)
+    result = run_coro(pr.arun_agent([{"role": "user", "content": "сделай", "id": "u1"}], state, ctx))
     return result, state, received_by_model
 
 
@@ -144,14 +146,14 @@ def test_run_agent_resets_a_stale_invalid_arguments_count_at_entry(monkeypatch):
     def _fake_tool_outputs(messages, state, ctx):
         return _bad_batch("c2"), "resp_2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
-    monkeypatch.setattr(pr, "process_tool_outputs", _fake_tool_outputs)
-    monkeypatch.setattr(pr, "apply_tool", _raise_invalid)
+    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_user_ask))
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", as_coro(_fake_tool_outputs))
+    monkeypatch.setattr(pr, "aapply_tool", as_coro(_raise_invalid))
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None))
 
     state = _state()
     state.last_batch_invalid_arguments_count = 7  # хвост прошлого прогона
-    pr.run_agent([{"role": "user", "content": "сделай", "id": "u1"}], state, _run_ctx())
+    run_coro(pr.arun_agent([{"role": "user", "content": "сделай", "id": "u1"}], state, _run_ctx()))
 
     assert seen == [0]

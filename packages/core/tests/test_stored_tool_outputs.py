@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 import sys
 import types
@@ -26,12 +27,13 @@ def _stub_optional_web_parsers() -> None:
 
 _stub_optional_web_parsers()
 
-from gc_core.processing_responses import process_tool_calls
+from gc_core.processing_responses import aprocess_tool_calls
 from gc_core.persistence.state_repository import StateRepository
 from gc_core.states import State
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
 from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
 from gc_core.tools.session.stored_outputs.wrapping import maybe_store_and_wrap_tool_output
+from gc_testkit import run_coro
 
 
 def _assert_pagination_metadata(payload: dict, *, expect_truncated: bool) -> None:
@@ -230,7 +232,7 @@ def test_session_read_stored_tool_output_pagination_and_unicode():
             text="A😀BC",
         )
     )
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 2})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 2}))
     page1 = json.loads(tool(output_ref="ref-1", offset=0, limit=10))
     assert page1["ok"] is True
     assert page1["limit"] == 2
@@ -270,7 +272,7 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
     )
 
     # Read r1 through the tool: this must move r1 to MRU.
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     page = json.loads(tool(output_ref="r1", offset=0, limit=2))
     assert page["ok"] is True
     assert page["output_ref"] == "r1"
@@ -294,7 +296,7 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
 
 def test_session_read_stored_tool_output_invalid_and_not_found():
     state = _make_state()
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     bad = json.loads(tool(output_ref="", offset=0, limit=1))
     assert bad["ok"] is False
     assert bad["error"]["type"] == "invalid_argument"
@@ -309,7 +311,7 @@ def test_session_read_stored_tool_output_invalid_and_not_found():
 def test_session_read_stored_tool_output_not_found_when_store_missing_has_recover_by():
     # Simulate a "state without store" (store is None in the tool).
     state = SimpleNamespace()
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     payload = json.loads(tool(output_ref="missing", offset=0, limit=1))
     assert payload["ok"] is False
     assert payload["stored"] is False
@@ -321,7 +323,7 @@ def test_session_read_stored_tool_output_not_found_when_store_missing_has_recove
 
 def test_session_read_stored_tool_output_error_paths_have_zero_next_offset():
     state = _make_state()
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
 
     not_int_limit = json.loads(tool(output_ref="ref", offset=1, limit="x"))  # type: ignore[arg-type]
     assert not_int_limit["ok"] is False
@@ -362,7 +364,7 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
         )
     )
 
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     payload = json.loads(tool(output_ref="evicted_ref", offset=0, limit=5))
 
     assert payload["tool"] == "session_read_stored_tool_output"
@@ -387,11 +389,11 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
         }
     )
 
-    def _fake_apply_tool(**kwargs):
+    async def _fake_apply_tool(**kwargs):
         return "abcdefghij"
 
-    monkeypatch.setattr("gc_core.processing_responses.apply_tool", _fake_apply_tool)
-    out = process_tool_calls(
+    monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
+    out = run_coro(aprocess_tool_calls(
         messages=[
             {
                 "id": "fc_1",
@@ -404,7 +406,7 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
         state=state,
         ctx=ctx,
         run_agent_func=lambda *_args, **_kwargs: None,
-    )
+    ))
     assert len(out) == 1
     payload = json.loads(out[0]["output"])
     assert payload["type"] == "stored_tool_output"
@@ -476,7 +478,7 @@ def test_feature_off_k_zero_clears_store_and_disables_read():
     assert len(state.tool_call_outputs_store) == 0
     assert state.tool_call_outputs_store.is_disabled() is True
 
-    tool = ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5})
+    tool = CallableTool(ReadStoredToolOutput(state=state, config_dict={"tool_output_inline_max_chars": 5}))
     payload = json.loads(tool(output_ref="ref-1", offset=0, limit=1))
     assert payload["ok"] is False
     assert payload["stored"] is False

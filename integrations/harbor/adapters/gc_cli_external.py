@@ -16,6 +16,7 @@ Usage:
         --model openai/MiniMaxAI/MiniMax-M2.7
 """
 import asyncio
+import threading
 import json
 import os
 import re
@@ -187,6 +188,12 @@ class GcCliExternal(BaseAgent):
         self._api_base = api_base
         self._session_id = session_id
         self._overrides = dict(gc_cli_config or {})
+        # Отмену трайла могут попросить, пока идёт сборка контекста (дискавери
+        # до 120 с), — то есть ДО того, как появится executor, которому можно
+        # сказать stop_run(). Флаг закрывает это окно; лок нужен потому, что
+        # ставит его loop Harbor, а читает рабочий поток агента.
+        self._cancel_lock = threading.Lock()
+        self._cancelled = False
 
     @staticmethod
     def name() -> str:
@@ -343,7 +350,7 @@ class GcCliExternal(BaseAgent):
             sources[skill_dir.name] = "profile"
         return root, sources
 
-    def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
+    async def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
         """Dump the skills the registry actually loaded to ``logs_dir/skills.json``.
 
         Authoritative by construction: the listing comes from the same registry and
@@ -357,7 +364,7 @@ class GcCliExternal(BaseAgent):
             config_dict = getattr(ctx, "config_dict", {}) or {}
             root = config_dict.get("skills_data_path")
             registry = get_skills_registry(config_dict, backend=ctx.os_backend)
-            loaded = sorted(str(s["id"]) for s in registry.list_skills())
+            loaded = sorted(str(s["id"]) for s in await registry.list_skills())
             payload = {
                 "skills_root": root,
                 # A name in `sources` mapped to "skipped" means the profile's copy was
@@ -563,7 +570,7 @@ class GcCliExternal(BaseAgent):
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        from gc_core.run_context import create_run_context
+        from gc_core.run_context import acreate_run_context
         from gc_core.agent_executor import AgentExecutor
 
         loop = asyncio.get_running_loop()
@@ -593,34 +600,68 @@ class GcCliExternal(BaseAgent):
             # Host-side archive for ATIF dump; core State does not retain these.
             self._evicted_messages.extend(dropped)
 
-        def _run_loop():
+        async def _agent_run():
             nonlocal executor
-            timings.attach()  # sink routing is per thread — bind inside the worker
-            ctx = create_run_context(
-                config_dict,
-                environment=environment,
-                loop=loop,
-                on_messages_evicted=_on_messages_evicted,
-            )
-            self._write_skills_debug(ctx, skill_sources)
-            executor = AgentExecutor(ctx)
-            executor.run([instruction])
-            return executor.get_state()
+            from gc_core.utils.async_http import aclose_clients
+            from gc_core.utils.logging_module import release_run_logger
 
-        # Run the synchronous gc-cli loop off the event loop so backend bridging works,
-        # then dump the final message history as ATIF trajectory.json.
+            ctx = None
+            try:
+                ctx = await acreate_run_context(
+                    config_dict,
+                    environment=environment,
+                    loop=loop,
+                    on_messages_evicted=_on_messages_evicted,
+                )
+                await self._write_skills_debug(ctx, skill_sources)
+                executor = AgentExecutor(ctx)
+                # Отмену могли попросить, пока шла дискавери (до 120 с): тогда
+                # `stop_run()` звать было НЕ НА ЧЁМ — `executor` ещё не был
+                # присвоен, — и поток спокойно уходил в `arun` уже после того,
+                # как его отменили. Флаг ставится под тем же локом, что и
+                # чтение здесь.
+                with self._cancel_lock:
+                    if self._cancelled:
+                        return executor.get_state()
+                await executor.arun([instruction])
+                return executor.get_state()
+            finally:
+                # Пул httpx этого loop закрываем ЗДЕСЬ: `asyncio.run` ниже
+                # убьёт loop, а реестр клиентов ключуется по нему. Без этого
+                # клиент трайла жил до сборщика и всплывал «Event loop is
+                # closed» в чужом месте.
+                #
+                # Логгер трайла — туда же: Harbor ведёт много трайлов в одном
+                # процессе, а `logging` держит каждый логгер до конца процесса
+                # вместе с открытым файлом.
+                release_run_logger(getattr(ctx, "logger", None))
+                await aclose_clients()
+
+        def _run_loop():
+            timings.attach()  # sink routing is per thread — bind inside the worker
+            return asyncio.run(_agent_run())
+
+        # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
+        # на loop Harbor.
         #
-        # asyncio.to_thread's future can't be cancelled: on a Harbor timeout,
-        # asyncio.wait_for(...) raises CancelledError here but the worker thread keeps
-        # running unattended (up to the pod's infra time limit) since nothing tells the
-        # executor to stop. Use run_in_executor instead so we hold the underlying future
-        # and, on cancellation, call executor.stop_run() (cooperative flag checked by the
-        # step loop) and give the thread a grace period to exit before re-raising.
+        # Раньше поток был обязателен: файловый API `FsBackend` был синхронным и
+        # у `HarborBackend` ждал через `run_coroutine_threadsafe(...).result()`
+        # на loop Harbor — с самого этого loop вечный дедлок. Теперь файловый и
+        # exec-порты корутинные, и `HarborBackend._aawait` сам выбирает: прямой
+        # `await` на loop Harbor или `wrap_future` с чужого loop, — дедлока нет
+        # ни там, ни там. Поток оставлен как есть: перенос агента на loop Harbor
+        # поменял бы модель отмены ниже, а на стенде она не проверена.
+        #
+        # Отменяемость не изменилась: future от `run_in_executor` по-прежнему не
+        # отменить, поэтому на таймауте зовём `stop_run()` (кооперативный флаг,
+        # который проверяет цикл) и даём потоку время выйти.
         state = None
         fut = loop.run_in_executor(None, _run_loop)
         try:
             state = await fut
         except asyncio.CancelledError:
+            with self._cancel_lock:
+                self._cancelled = True
             if executor is not None:
                 executor.stop_run()
             try:

@@ -9,6 +9,7 @@ import pytest
 
 from gc_core import run_summary_coordinator as rsc
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_testkit import run_coro
 
 
 def _minimal_state(*, messages: list, backend_api_mode: str = "chat_completions"):
@@ -33,7 +34,7 @@ def test_turn_end_skips_when_volume_below_threshold(monkeypatch, ctx_stub):
     state = _minimal_state(messages=[{"role": "user", "content": "x", "id": "1"}])
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: False)
     compaction = MagicMock()
-    monkeypatch.setattr(rsc, "run_summary_compaction", compaction)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compaction)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -44,7 +45,7 @@ def test_turn_end_skips_when_volume_below_threshold(monkeypatch, ctx_stub):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    coord.turn_end_compact_if_needed()
+    run_coro(coord.aturn_end_compact_if_needed())
     compaction.assert_not_called()
 
 
@@ -59,7 +60,7 @@ def test_turn_end_runs_compaction_with_reason(monkeypatch, ctx_stub):
         state.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
-    monkeypatch.setattr(rsc, "run_summary_compaction", capture)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", capture)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -70,7 +71,7 @@ def test_turn_end_runs_compaction_with_reason(monkeypatch, ctx_stub):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    coord.turn_end_compact_if_needed()
+    run_coro(coord.aturn_end_compact_if_needed())
 
     assert captured.get("trigger_reason") == "turn_end"
     assert captured.get("state") is state
@@ -83,7 +84,7 @@ def test_turn_end_swallows_compaction_errors(monkeypatch, ctx_stub, capsys):
         raise RuntimeError("summary down")
 
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
-    monkeypatch.setattr(rsc, "run_summary_compaction", boom)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -94,7 +95,7 @@ def test_turn_end_swallows_compaction_errors(monkeypatch, ctx_stub, capsys):
         is_cli_mode=True,
         pre_backend_trigger_reason="pre_backend",
     )
-    coord.turn_end_compact_if_needed()
+    run_coro(coord.aturn_end_compact_if_needed())
     out = capsys.readouterr().out
     assert "Ошибка суммаризации" in out
     assert "turn_finish" in out
@@ -104,7 +105,7 @@ def test_turn_end_disabled_when_trigger_zero(monkeypatch, ctx_stub):
     state = _minimal_state(messages=[{"role": "user", "content": "x", "id": "1"}])
     compaction = MagicMock()
     monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
-    monkeypatch.setattr(rsc, "run_summary_compaction", compaction)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", compaction)
 
     coord = RunSummaryCoordinator(
         ctx=ctx_stub,
@@ -115,5 +116,5 @@ def test_turn_end_disabled_when_trigger_zero(monkeypatch, ctx_stub):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    coord.turn_end_compact_if_needed()
+    run_coro(coord.aturn_end_compact_if_needed())
     compaction.assert_not_called()

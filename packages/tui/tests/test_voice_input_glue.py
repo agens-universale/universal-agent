@@ -136,7 +136,7 @@ async def test_paste_chip_survives_enter_stop_of_recording(monkeypatch, tmp_path
     from gc_tui.widgets.command_input import CommandTextArea
 
     class _Fake:                                      # no-op executor: финальный Enter
-        def run(self, messages, *, thread_id, **kw):  # не строит реальный AgentExecutor
+        async def arun(self, messages, *, thread_id, **kw):  # не строит реальный AgentExecutor
             pass
 
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: True)

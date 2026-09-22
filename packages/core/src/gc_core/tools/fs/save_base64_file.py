@@ -83,8 +83,9 @@ class SaveBase64File(AbstractSimpleTool):
     ) -> str:
         return self._result(ok=False, path=path, error=error)
 
+
     @enforce_write_guard(path_arg="path", operation="write")
-    def __call__(self, path: str, data: str, **kwargs) -> str:
+    async def acall(self, path: str, data: str, **kwargs) -> str:
         if not isinstance(path, str) or not path.strip():
             return self._result(ok=False, path=str(path), error={"type": "invalid_argument", "field": "path"})
 
@@ -100,11 +101,11 @@ class SaveBase64File(AbstractSimpleTool):
             return self._result(ok=False, path=path, error={"type": "decode_failed", "message": str(e)})
 
         parent = os.path.dirname(path) or "."
-        if not self._backend.is_dir(parent):
+        if not await self._backend.is_dir(parent):
             return self._result(ok=False, path=path, error={"type": "parent_not_found"})
 
         try:
-            self._backend.write_bytes(path, raw)
+            await self._backend.write_bytes(path, raw)
         except Exception as e:
             return self._result(ok=False, path=path, error={"type": "write_failed", "message": str(e)})
 

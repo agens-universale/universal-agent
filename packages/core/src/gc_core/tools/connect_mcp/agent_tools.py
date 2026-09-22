@@ -4,10 +4,10 @@
 """
 import copy
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
-from gc_core.tools.connect_mcp.api import call_mcp_tool
+from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
 from gc_core.tools.schema_optional import apply_openai_strict_object
 from gc_core.trace_id import trace_id_from_config, trace_header_name
@@ -38,8 +38,15 @@ class MCPToolWrapper:
         self._default_use_retry = default_use_retry
         self._os_backend = os_backend
 
-    def __call__(self, **arguments: Any) -> Any:
-        return call_mcp_tool(
+    async def acall(self, **arguments: Any) -> Any:
+        """Быстрый путь для цикла агента: диспетчер зовёт его без потока.
+
+        Форма из docs/async.md — тул с парой ``acall``/``__call__``.
+        Для SDK-транспортов вызов идёт прямо на loop вызывающего; легаси
+        (свои http/stdio на requests и subprocess) уходят в поток внутри
+        ``acall_mcp_tool``, потому что прервать их всё равно нечем.
+        """
+        return await acall_mcp_tool(
             full_tool_name=self._full_tool_name,
             arguments=arguments,
             servers_cfg=self._servers_cfg,
@@ -443,21 +450,33 @@ def _servers_cfg_with_trace(
     return out
 
 
-def get_mcp_tools_data_for_config(
+def _prepare_mcp_tools_data(
     config_dict: Dict[str, Any],
-    on_progress=None,
     *,
+    tools_cache: Optional[ToolsCache] = None,
     os_backend: Any = None,
-) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """
-    Собрать словарь MCP-инструментов в формате tools_data для заданного config_dict.
+):
+    """Подготовить кэш и конфиг серверов перед дискавери.
 
-    Возвращает `(tools_data, status_map)`, где `status_map` — per-server статус
-    дискавери из `ToolsCache.get_status()`.
+    Отдаёт ``(tools_cache, servers_cfg)`` либо ``None``, если MCP не настроен.
+    Вынесено, чтобы асинхронная и синхронная точки входа делили ОДНУ подготовку:
+    отличаются они ровно тем, как дождаться дискавери.
+
+    ``tools_cache`` — кэш, которым владеет ВЫЗЫВАЮЩИЙ. Не передан — заводится
+    свой, одноразовый: ровно прежнее поведение, каждая сборка платит полную
+    дискавери (866–1405 мс на реальном конфиге). Передан — попадания считаются
+    по ``mcp-servers`` и TTL, и повторные сборки уже бесплатны.
+
+    Кэш прокидывается, а не сделан процессным синглтоном, намеренно. Такой
+    синглтон мы только что лечили в другом месте: ``PersistentStdioRegistry``
+    был общим на процесс, и первый доигравший агент закрывал сессии остальных.
+    У глобального кэша те же три беды — скрытое время жизни (никто не владеет,
+    некому чистить), протечка между арендаторами сервера с разными наборами
+    серверов, и переживание между тестами.
     """
     servers_cfg = config_dict.get("mcp-servers") or {}
     if not servers_cfg:
-        return {}, {}
+        return None
     # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
     # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
     # для сабагентов через build_tools_data(child_config).
@@ -469,15 +488,74 @@ def get_mcp_tools_data_for_config(
         "use_retry": bool(config_dict.get("use_retry", False)),
     }
 
-    tools_cache = ToolsCache(cfg, os_backend=os_backend)
+    if tools_cache is None:
+        # `os_backend` приехал с develop: через него говорят клиенты
+        # `execute_on: os_backend`. У ЧУЖОГО кэша бэкенд уже свой — владелец
+        # завёл его вместе с кэшем, и переопределять его здесь нельзя.
+        tools_cache = ToolsCache(cfg, os_backend=os_backend)
+    else:
+        # Чужой кэш адресуется по СОДЕРЖИМОМУ mcp-servers (_make_cache_key), а
+        # cfg здесь пересобран из config_dict — поэтому обновляем ссылку, чтобы
+        # ключ считался от актуального набора серверов, а не от того, с которым
+        # кэш когда-то создали.
+        _warn_if_cache_misses_the_sandbox(tools_cache, servers_cfg, os_backend)
+        tools_cache.rebind(cfg)
+    return tools_cache, servers_cfg
 
-    try:
-        mcp_registry = tools_cache.get_tools(on_progress=on_progress)
-        status_map = tools_cache.get_status()
-    except Exception:
-        logger.error("Failed to load MCP tools", exc_info=True)
-        return {}, {}
 
+def _warn_if_cache_misses_the_sandbox(
+    tools_cache: ToolsCache, servers_cfg: Dict[str, Any], os_backend: Any
+) -> None:
+    """Сказать вслух, что дискавери уйдёт мимо песочницы.
+
+    Бэкенд кэш получает только при создании: `rebind` перепривязывает конфиг,
+    а бэкенд принять ему нечем. Кэш без бэкенда считает `execute_on: os_backend`
+    «своим», и для stdio это запуск команды сервера в процессе агента — мимо
+    песочницы, тогда как вызовы тулов уходят в неё. Расхождение молчит: внизу,
+    в `resolve_mcp_client`, об этом сказано в debug.
+
+    Доложить можно только ЗДЕСЬ: лишь в этой точке видно обе стороны — что
+    песочница у нас есть и что у кэша её нет. Ниже, где выбирается клиент,
+    отсутствие бэкенда неотличимо от честного запуска без песочницы (CLI на
+    хосте), и предупреждение сыпалось бы там на каждый вызов тула.
+
+    Чинить за владельца нельзя: бэкенд — его выбор и его время жизни.
+    """
+    if not getattr(os_backend, "is_sandbox", False):
+        return
+    if getattr(tools_cache, "os_backend", None) is not None:
+        return
+    orphaned = sorted(
+        name
+        for name, server_cfg in (servers_cfg or {}).items()
+        if isinstance(server_cfg, dict)
+        and str(server_cfg.get("execute_on") or "agent") == "os_backend"
+    )
+    if not orphaned:
+        return
+    logger.warning(
+        "ToolsCache was created without os_backend, so discovery for %s "
+        "(execute_on: os_backend) runs in the agent process instead of the "
+        "sandbox — for stdio that starts the server's command on the host. "
+        "Pass the backend when creating the cache: ToolsCache(cfg, os_backend=…)",
+        ", ".join(orphaned),
+    )
+
+
+def _assemble_mcp_tools_data(
+    mcp_registry: Dict[str, Any],
+    status_map: Dict[str, Dict[str, Any]],
+    config_dict: Dict[str, Any],
+    servers_cfg: Dict[str, Any],
+    os_backend: Any = None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Собрать tools_data из результата дискавери. Ни сети, ни ожидания.
+
+    Вынесено, чтобы у сборки был ОДИН экземпляр на обе формы вызова:
+    асинхронную и синхронную. Между ними отличается ровно одна строка — как
+    дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
+    нормализации схем не за что.
+    """
     timeout = (
         config_dict.get("mcp-meta", {}).get("request_timeout_sec")
         or 600
@@ -534,7 +612,36 @@ def get_mcp_tools_data_for_config(
     return result, status_map
 
 
+async def aget_mcp_tools_data_for_config(
+    config_dict: Dict[str, Any],
+    on_progress=None,
+    *,
+    tools_cache: Optional[ToolsCache] = None,
+    os_backend: Any = None,
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """MCP-тулы в формате tools_data, без потока на дискавери.
+
+    Форма одна. Синхронного имени нет: единственный вызывающий — сборка
+    набора тулов, и она корутинная.
+    """
+    prepared = _prepare_mcp_tools_data(
+        config_dict, tools_cache=tools_cache, os_backend=os_backend
+    )
+    if prepared is None:
+        return {}, {}
+    cache, servers_cfg = prepared
+    try:
+        mcp_registry = await cache.aget_tools(on_progress=on_progress)
+        status_map = cache.get_status()
+    except Exception:
+        logger.error("Failed to load MCP tools", exc_info=True)
+        return {}, {}
+    return _assemble_mcp_tools_data(
+        mcp_registry, status_map, config_dict, servers_cfg, os_backend=os_backend
+    )
+
+
 __all__ = [
     "MCPToolWrapper",
-    "get_mcp_tools_data_for_config",
+    "aget_mcp_tools_data_for_config",
 ]

@@ -84,7 +84,7 @@ async def test_mcp_screen_esc_returns_to_main(tmp_path):
     from gc_tui.screens.main import TraceScreen
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
     async with app.run_test() as pilot:
-        pilot.app.screen._handle_command("mcp")
+        await pilot.app.screen._handle_command("mcp")
         await pilot.pause()
         from gc_tui.screens.mcp import McpScreen
         assert isinstance(app.screen, McpScreen)

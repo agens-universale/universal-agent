@@ -246,7 +246,8 @@ Success return format (compact JSON ack): {"tool":"turn_finish","ok":true,"statu
 Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rejected","message":"...","error":{...},"task_report":""}
 '''
 
-    def __call__(
+
+    async def acall(
         self,
         solution_type: str,
         task_report: str,

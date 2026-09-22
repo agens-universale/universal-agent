@@ -3901,7 +3901,7 @@ class TraceScreen(Screen):
             event.stop()
             event.prevent_default()
 
-    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+    async def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id != "cmdinput":
             return
         # Печать в input после 1-го Esc сбрасывает pending hint — клавиша уже
@@ -3963,7 +3963,7 @@ class TraceScreen(Screen):
                 # /skill <валидный_id> <текст> → скилл зафиксирован, дальше промпт:
                 # закрываем picker (его фильтр по 'id текст' бессмыслен).
                 if self._skills_cache is None:
-                    self._skills_cache = self._load_skills_safe()
+                    self._skills_cache = await self._load_skills_safe()
                 skill_first, _, skill_rest = rest.partition(" ")
                 if skill_rest.strip() and any(
                     str(s.get("id")) == skill_first for s in self._skills_cache
@@ -3977,7 +3977,7 @@ class TraceScreen(Screen):
                 if self._palette is not None:
                     self._close_palette()
                 if self._skill_picker is None:
-                    self._open_skill_picker(prefix=rest)
+                    await self._open_skill_picker(prefix=rest)
                 else:
                     self._skill_picker.set_filter(rest)
                 return
@@ -4090,11 +4090,11 @@ class TraceScreen(Screen):
         self._palette.remove()
         self._palette = None
 
-    def _open_skill_picker(self, *, prefix: str) -> None:
+    async def _open_skill_picker(self, *, prefix: str) -> None:
         if self._skill_picker is not None:
             return
         if self._skills_cache is None:
-            self._skills_cache = self._load_skills_safe()
+            self._skills_cache = await self._load_skills_safe()
         from gc_tui.widgets.skill_picker import SkillPicker
         picker = SkillPicker(self._skills_cache, initial_filter=prefix)
         self._skill_picker = picker
@@ -4227,7 +4227,7 @@ class TraceScreen(Screen):
         else:
             self._close_file_picker()
 
-    def on_command_text_area_submitted(
+    async def on_command_text_area_submitted(
         self, event: CommandTextArea.Submitted
     ) -> None:
         inp = self.query_one("#cmdinput", CommandTextArea)
@@ -4246,10 +4246,10 @@ class TraceScreen(Screen):
                 parts = text.split(None, 1)
                 first = parts[0] if parts else "/skill"
                 cmd_name = first[1:] if first.startswith("/") else first
-                self._handle_command(f"{cmd_name} {skill['id']}")
+                await self._handle_command(f"{cmd_name} {skill['id']}")
             elif text.startswith("/"):
                 # Пустой результат фильтра — выполнить ввод как обычную команду.
-                self._handle_command(text[1:])
+                await self._handle_command(text[1:])
             return
 
         # File picker открыт → Enter достраивает путь (не сабмитит сообщение).
@@ -4273,7 +4273,7 @@ class TraceScreen(Screen):
                 cmd_name = parts[0][1:]
                 typed_arg = parts[1].strip() if len(parts) > 1 else ""
                 arg = value if value is not None else typed_arg
-                self._handle_command(f"{cmd_name} {arg}".strip())
+                await self._handle_command(f"{cmd_name} {arg}".strip())
             return
 
         # Если открыта палитра — Enter выполняет выбранную/набранную команду
@@ -4311,13 +4311,13 @@ class TraceScreen(Screen):
                     return
                 self._close_palette()
                 inp.text = ""
-                self._handle_command(cmd.name)
+                await self._handle_command(cmd.name)
                 return
             # Свободный ввод с / — выполнить (например, /view path/to/file)
             if typed.startswith("/"):
                 self._close_palette()
                 inp.text = ""
-                self._handle_command(typed[1:])
+                await self._handle_command(typed[1:])
                 return
             # Всё остальное — закрыть палитру и очистить ввод
             self._close_palette()
@@ -4369,7 +4369,7 @@ class TraceScreen(Screen):
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
         if text.startswith("/"):
-            self._handle_command(text[1:])
+            await self._handle_command(text[1:])
             return
 
         if text.startswith("!"):
@@ -4388,7 +4388,7 @@ class TraceScreen(Screen):
             # Применяем pre-stage: pending_skill_id встраиваем в первое
             # сообщение и фиксируем в meta.tui.
             tid = self._begin_auto_created_task()
-            full_query, patch = self._consume_pending_prefix(text)
+            full_query, patch = await self._consume_pending_prefix(text)
             display_query, skill_loaded = self._skill_display_args(text)
             technical = self._build_attachment_technical(text)
             self._prepare_for_new_run()
@@ -4419,13 +4419,11 @@ class TraceScreen(Screen):
             return
 
         if runner.is_running():
-            from gc_core.tools.subagents.active_scope import is_child_input_active
-
             self._reset_thinking_timer()
             self._on_user_text_submitted(text)
             # Active subagent → nested under subagent_* (progress/sidecar); иначе
             # parent pending + обычная user-строка в трейсе.
-            if not is_child_input_active():
+            if not runner.is_child_input_active():
                 client_id = self._track_pending(display_text=text, wire_content=text)
                 self._mount_user_reply(text, state="pending", client_id=client_id)
             runner.add_message({"role": "user", "content": text, "id": msg_id})
@@ -4436,7 +4434,7 @@ class TraceScreen(Screen):
 
         # Задача есть, но run завершился (или открыта через /sessions) — продолжаем тот же
         # thread, применяя отложенные skill/cwd к этому сообщению.
-        full_query, patch = self._consume_pending_prefix(text)
+        full_query, patch = await self._consume_pending_prefix(text)
         display_query, skill_loaded = self._skill_display_args(text)
         if patch and self._store is not None:
             self._store.update_tui_meta(self.app.tui_state.active_task_id, patch)
@@ -4455,7 +4453,7 @@ class TraceScreen(Screen):
     ) -> None:
         self._show_footer_hint(_PASTE_HINT_TEXT, seconds=5.0)
 
-    def _consume_pending_prefix(self, text: str) -> tuple[str, dict]:
+    async def _consume_pending_prefix(self, text: str) -> tuple[str, dict]:
         """Встроить отложенный skill в сообщение; вернуть (query, meta-patch).
 
         Сбрасывает pending_skill_id. Используется и при auto-create,
@@ -4469,9 +4467,9 @@ class TraceScreen(Screen):
             from gc_core.tools.skills.registry import get_skills_registry
             from gc_core.tools.skills.skill_delivery import build_skill_delivery, skill_is_available
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
-            prefix.append(build_skill_delivery(pending_skill, reg))
+            prefix.append(await build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
-            self._pending_skill_marker = (pending_skill, skill_is_available(pending_skill, reg))
+            self._pending_skill_marker = (pending_skill, await skill_is_available(pending_skill, reg))
         return ("\n".join(prefix + [text]) if prefix else text), patch
 
     def _skill_display_args(self, clean_text: str) -> tuple[str | None, str | None]:
@@ -4816,6 +4814,10 @@ class TraceScreen(Screen):
                 self.app.last_stop_requested = True
             runner.stop()
             runner._marked_stopped = True
+            # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
+            release = getattr(runner, "release", None)
+            if callable(release):
+                release()
         self.app.active_runner = None
 
     def _stop_for_ask_human(self) -> None:
@@ -5008,7 +5010,7 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
-    def _cmd_use_skill(self, skill_id: str, *, prompt: str = "") -> None:
+    async def _cmd_use_skill(self, skill_id: str, *, prompt: str = "") -> None:
         if not skill_id:
             self._mount_trace_row(
                 prefix="[!] ", content="/skill: укажите id навыка",
@@ -5016,7 +5018,7 @@ class TraceScreen(Screen):
             )
             return
         if prompt:
-            self._deliver_skill_with_prompt(skill_id, prompt)
+            await self._deliver_skill_with_prompt(skill_id, prompt)
             return
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
@@ -5024,8 +5026,8 @@ class TraceScreen(Screen):
             from gc_core.tools.skills.registry import get_skills_registry
             from gc_core.tools.skills.skill_delivery import build_skill_delivery, skill_is_available
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
-            loaded = skill_is_available(skill_id, reg)
-            msg = {"role": "user", "content": build_skill_delivery(skill_id, reg),
+            loaded = await skill_is_available(skill_id, reg)
+            msg = {"role": "user", "content": await build_skill_delivery(skill_id, reg),
                    "display_content": ""}
             if loaded:
                 msg["skill_loaded"] = skill_id
@@ -5043,28 +5045,26 @@ class TraceScreen(Screen):
             kind_class="line-meta",
         )
 
-    def _deliver_skill_with_prompt(self, skill_id: str, prompt: str) -> None:
+    async def _deliver_skill_with_prompt(self, skill_id: str, prompt: str) -> None:
         """Inline /skill <id> <prompt>: префикс «Используй skill …» встраивается в
         реплику тем же _consume_pending_prefix, что и pending-путь — единая форма
         доставки. Technical-обёртка не используется: системный промпт трактует
         technical-блоки как контекст, не команды, и слабые модели вправе их
         игнорировать. Дисплей: маркер [skill] + реплика с чистым промптом."""
         self.app.tui_state.pending_skill_id = skill_id
-        full_query, _ = self._consume_pending_prefix(prompt)
+        full_query, _ = await self._consume_pending_prefix(prompt)
         _, skill_loaded = self._skill_display_args(prompt)
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id
 
         runner = self.app.active_runner
         if runner is not None and runner.is_running():
-            from gc_core.tools.subagents.active_scope import is_child_input_active
-
             msg = {"role": "user", "content": full_query, "id": msg_id,
                    "display_content": prompt}
             if skill_loaded:
                 msg["skill_loaded"] = skill_loaded
             runner.add_message(msg)
-            if not is_child_input_active():
+            if not runner.is_child_input_active():
                 client_id = self._track_pending(
                     display_text=prompt, wire_content=full_query
                 )
@@ -5324,7 +5324,7 @@ class TraceScreen(Screen):
         )
         self._close_bang_block()
 
-    def _handle_command(self, raw: str) -> None:
+    async def _handle_command(self, raw: str) -> None:
         """Диспетчеризовать команду и, если она что-то дописала в трейс,
         форсировать скролл вниз. Команда — прямое действие пользователя, поэтому
         её результат показываем безусловно, даже если юзер отскроллен вверх
@@ -5332,12 +5332,12 @@ class TraceScreen(Screen):
         растят → счётчик не меняется → позиция чтения истории не сбивается."""
         trace = self.query_one("#trace", VerticalScroll)
         before = len(trace.children)
-        self._dispatch_command(raw)
+        await self._dispatch_command(raw)
         if len(trace.children) > before:
             self._stick_bottom = True   # команда юзера = re-engage
             self._scroll_trace_end()
 
-    def _dispatch_command(self, raw: str) -> None:
+    async def _dispatch_command(self, raw: str) -> None:
         # Имя команды + остаток строки как единственный аргумент, дословно.
         # Без shlex: путь (D:\dev\...) берётся как есть, без escape/кавычек.
         raw = raw.strip()
@@ -5363,16 +5363,16 @@ class TraceScreen(Screen):
             return
         if name == "skill":
             if self._skills_cache is None:
-                self._skills_cache = self._load_skills_safe()
+                self._skills_cache = await self._load_skills_safe()
             first, _, rest = arg.partition(" ")
             rest = rest.strip()
             if rest and any(str(s.get("id")) == first for s in self._skills_cache):
                 # /skill <валидный_id> <промпт> → немедленная пара
-                self._cmd_use_skill(first, prompt=rest)
+                await self._cmd_use_skill(first, prompt=rest)
             else:
                 # первый токен не валидный id → весь arg = id (может содержать
                 # пробелы/слэши), промпта нет → штатный pending/running путь
-                self._cmd_use_skill(arg.strip(), prompt="")
+                await self._cmd_use_skill(arg.strip(), prompt="")
             return
         if name == "help":
             from gc_tui.screens.help import HelpScreen
@@ -5381,7 +5381,7 @@ class TraceScreen(Screen):
         if name == "skills":
             from gc_tui.screens.skills import SkillsScreen
             self.app.push_screen(SkillsScreen(
-                skills=self._load_skills_safe(),
+                skills=await self._load_skills_safe(),
                 config=self.app.screen_config(),
             ))
             return
@@ -5574,13 +5574,13 @@ class TraceScreen(Screen):
             return None, None
         return trace_events_from_nested_detail(call_id, detail)
 
-    def _load_skills_safe(self) -> list[dict]:
+    async def _load_skills_safe(self) -> list[dict]:
         """Загрузить список скиллов из core-реестра; на ошибке вернуть []."""
         try:
             from gc_core.tools.skills.registry import get_skills_registry
             reg = get_skills_registry(getattr(self.app, "_config", None) or {})
             # include_all=True — показываем и внутренние скиллы паков, не только bootstrap.
-            return reg.list_skills(include_all=True)
+            return await reg.list_skills(include_all=True)
         except Exception as exc:
             self._mount_trace_row(
                 prefix="[!] ", content=f"/skills: не удалось загрузить ({exc})",

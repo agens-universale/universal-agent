@@ -1,4 +1,5 @@
 """Finish gate для subagent: assignment в scope, не CLI user оркестратора."""
+import pytest
 
 import logging
 from types import SimpleNamespace
@@ -59,11 +60,12 @@ def _user_msg(content: str) -> dict:
     return {"role": "user", "content": content, "id": "m_user_sub"}
 
 
-def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
+@pytest.mark.asyncio
+async def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     orch = _make_orchestrator_state()
     cfg = _make_config()
     runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-    child = runner._build_child_state("worker")
+    child = await runner._build_child_state("worker")
     assignment = "измени foo.py"
     user_message = _user_msg(assignment)
     runner._build_initial_messages(child, "worker", user_message)
@@ -71,7 +73,7 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
 
     captured: dict[str, object] = {}
 
-    def _continue_work(**kwargs):
+    async def _continue_work(**kwargs):
         captured["current_user_requests"] = list(kwargs.get("current_user_requests") or [])
         return ValidationResult(
             ok=False,
@@ -88,11 +90,13 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
 
     with patch.object(
         intent_guard_guard,
-        "validate_final_report_vs_user_intent",
+        "avalidate_final_report_vs_user_intent",
         _continue_work,
     ):
         guard = FinishGateGuard(ctx=_make_ctx(cfg), state=child)
-        decision = guard.evaluate_turn_finish(
+        # Форма у гейта одна и корутинная: синхронного имени у него больше
+        # нет — оно ушло вместе с порталом.
+        decision = await guard.aevaluate_turn_finish(
             finish_handoff_arguments={"solution_type": "full_solution", "task_report": "bar"},
         )
 
@@ -108,12 +112,13 @@ def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assert "foo.py" in decision.feedback_text
 
 
-def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
+@pytest.mark.asyncio
+async def test_subagent_seed_keeps_orchestrator_cli_scope_unchanged():
     """Как SubagentRunner.run: assignment только у child, CLI intent — у orch."""
     orch = _make_orchestrator_state()
     cfg = _make_config()
     runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-    child = runner._build_child_state("worker")
+    child = await runner._build_child_state("worker")
     task_text = "добавь тесты в foo.py"
     user_message = _user_msg(task_text)
     runner._build_initial_messages(child, "worker", user_message)

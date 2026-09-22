@@ -12,9 +12,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gc_core.intent_guard.final_report_consistency import _load_guard_prompt, validate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import _load_guard_prompt, avalidate_final_report_vs_user_intent
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_testkit import run_coro
 
 _DIGEST_HANDOFF = {"artifacts": ["report.md"]}
 
@@ -157,12 +158,12 @@ class TestNormalizeHandoffInFinishArgs:
 class TestValidatorPayloadHandoffNormalized:
     """Интеграция: `validate_final_report_vs_user_intent` кладёт в LLM-payload object."""
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_string_handoff_in_args_becomes_object_in_payload(self, mock_llm) -> None:
         """В payload к LLM `handoff` уже dict, а не JSON-строка — нет ложного string vs object."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -172,17 +173,17 @@ class TestValidatorPayloadHandoffNormalized:
                 "handoff": '{"artifacts":["report.md"]}',
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert isinstance(finish_args["handoff"], dict)
         assert finish_args["handoff"] == {"artifacts": ["report.md"]}
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_empty_object_string_in_payload(self, mock_llm) -> None:
         """Пустой handoff `"{}"` в аргументах доходит до LLM как пустой object `{}`."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -192,11 +193,11 @@ class TestValidatorPayloadHandoffNormalized:
                 "handoff": "{}",
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {}
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_args_as_json_string_with_string_handoff(self, mock_llm) -> None:
         """Сырые args тула одной JSON-строкой: внутри handoff-строка → в payload всё равно dict."""
         mock_llm.return_value = _validator_json()
@@ -209,22 +210,22 @@ class TestValidatorPayloadHandoffNormalized:
             },
             ensure_ascii=False,
         )
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
             finish_handoff_arguments=raw_args,
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {"artifacts": ["out.txt"]}
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_object_handoff_still_object_in_payload(self, mock_llm) -> None:
         """Если handoff уже пришёл object — в payload остаётся тот же object (идемпотентность)."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -234,17 +235,17 @@ class TestValidatorPayloadHandoffNormalized:
                 "handoff": {"artifacts": ["report.md"]},
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {"artifacts": ["report.md"]}
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_broken_handoff_string_left_for_validator(self, mock_llm) -> None:
         """Битый handoff не «чиним»: в payload уходит исходная строка для Axis B."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
         broken = '{"artifacts":'
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -254,7 +255,7 @@ class TestValidatorPayloadHandoffNormalized:
                 "handoff": broken,
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == broken
 
@@ -265,12 +266,12 @@ class TestValidatorPayloadHandoffNormalized:
 class TestStringVsObjectEquivalence:
     """Одинаковое содержимое, разная форма → после A1 валидатор видит object↔object."""
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_payload_does_not_expose_handoff_as_json_string(self, mock_llm) -> None:
         """В `finish_handoff_arguments` поле `handoff` — nested object, не JSON-строка."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -280,7 +281,7 @@ class TestStringVsObjectEquivalence:
                 "handoff": '{"artifacts":["report.md"]}',
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert isinstance(finish_args["handoff"], dict)
         assert finish_args["handoff"]["artifacts"] == ["report.md"]
@@ -289,14 +290,14 @@ class TestStringVsObjectEquivalence:
         assert '"handoff": {' in args_block
         assert '"handoff": "{' not in args_block
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_normalized_args_handoff_matches_digest_object_content(
         self, mock_llm
     ) -> None:
         """Цель 2: после нормализации args.handoff == содержимому object в digest (эквивалентность форм)."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest(digest_handoff=_DIGEST_HANDOFF)
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -306,7 +307,7 @@ class TestStringVsObjectEquivalence:
                 "handoff": json.dumps(_DIGEST_HANDOFF, ensure_ascii=False),
             },
             trace_digest=digest,
-        )
+        ))
         payload = _full_payload(mock_llm)
         args_handoff = payload["finish_handoff_arguments"]["handoff"]
         assert isinstance(args_handoff, dict)
@@ -323,7 +324,7 @@ class TestStringVsObjectEquivalence:
 class TestContentMismatchStillRejected:
     """Фикс формы не должен ломать Axis B: content-mismatch всё ещё виден и reject'ится."""
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_content_divergence_preserved_in_normalized_payload(
         self, mock_llm
     ) -> None:
@@ -332,7 +333,7 @@ class TestContentMismatchStillRejected:
         ctx, state, digest = _ctx_state_digest(
             digest_handoff={"artifacts": ["report.md"]}
         )
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -342,14 +343,14 @@ class TestContentMismatchStillRejected:
                 "handoff": '{"artifacts":["wrong.md"]}',
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert finish_args["handoff"] == {"artifacts": ["wrong.md"]}
         payload = _full_payload(mock_llm)
         assert "report.md" in payload["trace_digest_text"]
         assert finish_args["handoff"] != {"artifacts": ["report.md"]}
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_llm_content_mismatch_still_rejects(self, mock_llm) -> None:
         """Приёмка 2: если LLM нашёл расхождение содержимого — результат reject (`fix_report`), не accept."""
         mock_llm.return_value = _validator_json(
@@ -363,7 +364,7 @@ class TestContentMismatchStillRejected:
         ctx, state, digest = _ctx_state_digest(
             digest_handoff={"artifacts": ["report.md"]}
         )
-        result = validate_final_report_vs_user_intent(
+        result = run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -373,20 +374,20 @@ class TestContentMismatchStillRejected:
                 "handoff": '{"artifacts":["wrong.md"]}',
             },
             trace_digest=digest,
-        )
+        ))
         assert result.ok is False
         assert result.action == "fix_report"
         assert result.report_ok is False
         assert any("wrong.md" in m or "artifacts" in m for m in result.report_mismatches)
 
-    @patch("gc_core.summarize.llm.request_chat_completion_text")
+    @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_form_only_mismatch_claim_is_not_forced_by_payload(
         self, mock_llm
     ) -> None:
         """Приёмка 1: при корректном string-handoff payload уже object — нет повода для form-only mismatch."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
-        validate_final_report_vs_user_intent(
+        run_coro(avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
             current_user_requests=["done?"],
@@ -396,7 +397,7 @@ class TestContentMismatchStillRejected:
                 "handoff": '{"artifacts":["report.md"]}',
             },
             trace_digest=digest,
-        )
+        ))
         finish_args = _finish_args_payload(mock_llm)
         assert not isinstance(finish_args["handoff"], str)
         assert finish_args["handoff"] == _DIGEST_HANDOFF

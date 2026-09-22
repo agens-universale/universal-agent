@@ -66,7 +66,7 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(tmp_path, monkeypatch
     stop_called = {"flag": False}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -111,7 +111,7 @@ async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
     stop_called = {"flag": False}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             import threading
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)

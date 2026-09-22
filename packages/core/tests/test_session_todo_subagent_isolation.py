@@ -5,6 +5,7 @@ replace-семантика — субагент затирал план орке
 маршрутизируется по ``parent_state_id``: у оркестратора — общий ``shared``
 (персистится), у субагента — собственное поле (живёт только его прогон).
 """
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
@@ -76,10 +77,10 @@ def test_subagent_starts_with_empty_checklist():
 
 def test_tool_call_from_subagent_preserves_parent_checklist():
     parent = _state()
-    SessionTodo(state=parent)(todos=list(PARENT_ITEMS))
+    CallableTool(SessionTodo(state=parent))(todos=list(PARENT_ITEMS))
     child = _child_of(parent)
 
-    out = json.loads(SessionTodo(state=child)(todos=list(CHILD_ITEMS)))
+    out = json.loads(CallableTool(SessionTodo(state=child))(todos=list(CHILD_ITEMS)))
 
     assert out["ok"] is True
     assert out["count"] == 2
@@ -89,11 +90,11 @@ def test_tool_call_from_subagent_preserves_parent_checklist():
 
 def test_tool_error_from_subagent_reports_own_counts():
     parent = _state()
-    SessionTodo(state=parent)(todos=list(PARENT_ITEMS))
+    CallableTool(SessionTodo(state=parent))(todos=list(PARENT_ITEMS))
     child = _child_of(parent)
-    SessionTodo(state=child)(todos=list(CHILD_ITEMS))
+    CallableTool(SessionTodo(state=child))(todos=list(CHILD_ITEMS))
 
-    out = json.loads(SessionTodo(state=child)(todos="не список"))
+    out = json.loads(CallableTool(SessionTodo(state=child))(todos="не список"))
 
     assert out["ok"] is False
     assert out["count"] == 2, "в ошибке отдаём текущий чек-лист субагента, не родителя"

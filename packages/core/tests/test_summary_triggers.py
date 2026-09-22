@@ -28,7 +28,7 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = (
             real_tools.WrongFunctionArgumentsException
         )
@@ -44,7 +44,7 @@ def setup_module(_module) -> None:
     tools_pkg = sys.modules["gc_core.tools"]
     from gc_core import processing_responses as pr
 
-    pr.apply_tool = tools_pkg.apply_tool
+    pr.aapply_tool = tools_pkg.aapply_tool
     pr.WrongFunctionArgumentsException = tools_pkg.WrongFunctionArgumentsException
 
     for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
@@ -67,35 +67,48 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         return "ok"
 
     def _build_tools_data(_config_dict):
         return {}, [], []
 
-    tools_pkg.apply_tool = _apply_tool
-    tools_pkg.build_tools_data = _build_tools_data
+    tools_pkg.aapply_tool = _apply_tool
+    tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_dir = module_dir("tools")
+    # `processing_responses` импортирует эти имена на уровне модуля. Без них
+    # подмена пакета даёт ImportError, и файл падает целиком — но только
+    # когда реальные модули не подтянул сосед по прогону. При случайном
+    # порядке (pytest-randomly) это молчащая мина, а не свойство файла.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_kw: False
+    tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
     skills_pkg = types.ModuleType("gc_core.tools.skills")
-    skills_pkg.__path__ = []
+    # На РЕАЛЬНЫЙ каталог, а не пустой список: `states` импортирует
+    # `gc_core.tools.skills.skills_policy`, и с пустым __path__ настоящий
+    # подмодуль не находится. Подменён ниже только `registry`.
+    skills_pkg.__path__ = [str(tools_dir / "skills")]
     sys.modules["gc_core.tools.skills"] = skills_pkg
 
     registry_mod = types.ModuleType("gc_core.tools.skills.registry")
     registry_mod.get_skills_registry = lambda _cfg, **_kw: _SkillsRegistryStub()
+    # `run_context` импортирует и сам класс — без него подмена даёт ImportError.
+    registry_mod.SkillsRegistry = _SkillsRegistryStub
     sys.modules["gc_core.tools.skills.registry"] = registry_mod
 
 
 class _SkillsRegistryStub:
-    def list_skills(self):
+    async def list_skills(self):
         return []
 
 
-class SummaryTriggersTest(unittest.TestCase):
-    def _make_ctx(self, tmp_dir: str, backend_api_mode: str) -> SimpleNamespace:
+class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
+    # Корутинные тесты: `unittest.TestCase` их не запускает — метод
+    # просто возвращает корутину, и проверка молча не выполняется.
+    async def _make_ctx(self, tmp_dir: str, backend_api_mode: str) -> SimpleNamespace:
         prompt_path = os.path.join(tmp_dir, "chat_completions_system_prompt.md")
         with open(prompt_path, "w", encoding="utf-8") as fd:
             fd.write("SYSTEM PROMPT")
@@ -135,22 +148,23 @@ class SummaryTriggersTest(unittest.TestCase):
             skills_registry=_SkillsRegistryStub(),
         )
 
-    def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
+    async def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             call_order: list[str] = []
             truth = deque([True, False, True])
 
             def _hist_exceeds(**_kwargs):
                 return truth.popleft() if truth else False
 
-            def _fake_run_agent(messages, state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 call_order.append("run_agent")
                 # Как в processing_responses.run_agent: сначала коммит батча в state.
                 state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
-                    pre_backend_hook(messages, "user_ask")
+                    # Хук корутинный (agent_executor передаёт a-двойник) — ждём.
+                    await pre_backend_hook(messages, "user_ask")
                 return "ok"
 
             def _record_summary_call(**kwargs):
@@ -171,38 +185,39 @@ class SummaryTriggersTest(unittest.TestCase):
                 st.messages = [sys_m] if sys_m else []
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
                 side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
-                "run_summary_compaction",
+                "arun_summary_compaction",
                 side_effect=_record_summary_call,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)
+                result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             self.assertEqual(call_order[0], "summary:pre_run")
             self.assertIn("run_agent", call_order)
             self.assertIn("summary:pre_backend", call_order)
 
-    def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(self):
+    async def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             calls: list[str] = []
             truth = deque([True, False, True])
 
             def _hist_exceeds(**_kwargs):
                 return truth.popleft() if truth else False
 
-            def _fake_run_agent(messages, state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 state.messages += list(messages)
                 pre_backend_hook = kwargs.get("pre_backend_compaction_hook")
                 if pre_backend_hook is not None:
-                    pre_backend_hook(messages, "user_ask")
+                    # Хук корутинный (agent_executor передаёт a-двойник) — ждём.
+                    await pre_backend_hook(messages, "user_ask")
                 return "ok"
 
             def _record(**kwargs):
@@ -222,56 +237,56 @@ class SummaryTriggersTest(unittest.TestCase):
                 st.messages = [sys_m] if sys_m else []
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
                 side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
-                "run_summary_compaction",
+                "arun_summary_compaction",
                 side_effect=_record,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run(["hello"], system="cli", verbose=False)
+                result = await executor.arun(["hello"], system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             self.assertEqual(calls, ["pre_run", "pre_backend"])
 
-    def test_responses_mode_does_not_call_summary(self):
+    async def test_responses_mode_does_not_call_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="responses")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="responses")
 
             with patch.object(
-                agent_executor_module, "run_agent", return_value="ok"
+                agent_executor_module, "arun_agent", return_value="ok"
             ), patch.object(
-                run_summary_coordinator_module, "run_summary_compaction"
+                run_summary_coordinator_module, "arun_summary_compaction"
             ) as compaction_mock:
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run(["hello"], thread_id="thr1", system="cli", verbose=False)
+                result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
 
-    def test_chat_completions_passes_pre_backend_hook_to_run_agent(self):
+    async def test_chat_completions_passes_pre_backend_hook_to_run_agent(self):
         """Wiring: chat/completions должен передавать pre_backend_compaction_hook в run_agent (spec Step 0)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             captured: dict = {}
 
-            def _fake_run_agent(messages, state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 captured.update(kwargs)
                 return "ok"
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run(["hello"], system="cli", verbose=False)
+                result = await executor.arun(["hello"], system="cli", verbose=False)
                 self.assertEqual(result, "ok")
 
             hook = captured.get("pre_backend_compaction_hook")
@@ -279,9 +294,9 @@ class SummaryTriggersTest(unittest.TestCase):
             turn_end_hook = captured.get("turn_end_compaction_hook")
             self.assertTrue(callable(turn_end_hook))
 
-    def test_thread_history_not_readded_into_current_user_intent(self):
+    async def test_thread_history_not_readded_into_current_user_intent(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
             thread_id = "thr_hist"
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
             meta_path = os.path.join(tmp_dir, f"meta_cli_{thread_id}.json")
@@ -324,23 +339,29 @@ class SummaryTriggersTest(unittest.TestCase):
                     indent=2,
                 )
 
-            def _fake_run_agent(messages, _state, _ctx, **kwargs):
+            async def _fake_run_agent(messages, _state, _ctx, **kwargs):
                 persist_cb = kwargs.get("persist_messages_callback")
                 if callable(persist_cb):
                     # Реплика реального run_agent: первый persist в chat_completions
                     # получает весь батч (история + новый user message).
-                    persist_cb(messages)
+                    # Колбэк корутинный — ждём его, как ждёт настоящий цикл.
+                    # Без этого запись не происходила, а тест был зелёным.
+                    # Импорт локальный: модуль стабит `gc_core.tools` в
+                    # setup_module, и импорт ядра на уровне файла ломает порядок.
+                    from gc_core.utils.aio_compat import await_callback
+
+                    await await_callback(persist_cb(messages))
                 return "ok"
 
             with patch.object(
-                agent_executor_module, "run_agent", side_effect=_fake_run_agent
+                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
                 "history_exceeds_summary_trigger",
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = executor.run(
+                result = await executor.arun(
                     ["новый вопрос"],
                     thread_id=thread_id,
                     system="cli",

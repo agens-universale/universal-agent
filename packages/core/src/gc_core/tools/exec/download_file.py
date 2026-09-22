@@ -1,10 +1,10 @@
+import asyncio
 import json
 import os
-import time
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-import requests
+import httpx
 
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
 from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, normalize_path_for_policy, resolve_tool_context
@@ -12,12 +12,19 @@ from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, v
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
+from contextlib import asynccontextmanager
+from gc_core.tools.exec.redirect_policy import (
+    DEFAULT_MAX_REDIRECTS,
+    RedirectBlocked as _SharedRedirectBlocked,
+    TooManyRedirects as _TooManyRedirects,
+    stream_validating_redirects,
+)
 
 
-class _RedirectBlocked(Exception):
-    def __init__(self, decision: UrlPolicyDecision) -> None:
-        super().__init__(decision.reason or "redirect blocked")
-        self.decision = decision
+#: Псевдоним общего исключения — см. ``tools/exec/redirect_policy``.
+_RedirectBlocked = _SharedRedirectBlocked
 
 
 class DownloadFile(AbstractSimpleTool):
@@ -33,7 +40,6 @@ class DownloadFile(AbstractSimpleTool):
         ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
         ".txt", ".md", ".json",
     })
-    _MAX_REDIRECTS = 10
     _BOM_PREFIXES = (
         b"\xef\xbb\xbf",
         b"\xff\xfe",
@@ -243,40 +249,58 @@ class DownloadFile(AbstractSimpleTool):
         )
         return None
 
-    def _fetch_with_redirect_validation(
+    def _stream_with_redirect_validation(
         self,
-        session: requests.Session,
+        session: "httpx.AsyncClient",
         start_url: str,
         headers: Dict[str, str],
         timeout: int,
         *,
         allowed_schemes: list[str],
         url_blacklist: list[str],
-    ) -> requests.Response:
-        current = start_url
-        for _ in range(self._MAX_REDIRECTS + 1):
-            response = session.get(current, headers=headers, timeout=timeout, allow_redirects=False)
-            status = getattr(response, "status_code", 0) or 0
-            if not (300 <= status < 400):
-                return response
-            next_url = getattr(response, "headers", {}).get("Location") if hasattr(response, "headers") else None
-            if not next_url:
-                return response
-            next_abs = urljoin(current, next_url)
-            decision = validate_url_policy(next_abs, allowed_schemes, url_blacklist)
-            if not decision.allowed:
-                raise _RedirectBlocked(decision)
-            current = next_abs
-        raise _RedirectBlocked(
-            UrlPolicyDecision(
-                allowed=False,
-                url=current,
-                error_type="too_many_redirects",
-                reason=f"Exceeded {self._MAX_REDIRECTS} redirects.",
-            )
+    ):
+        """Общая потоковая петля из ``redirect_policy``.
+
+        Тело НЕ читается: файл может быть гигабайтным, и решение «слишком
+        большой» надо принимать до того, как он приедет в память.
+        """
+        return stream_validating_redirects(
+            session, start_url, headers, timeout,
+            allowed_schemes=allowed_schemes,
+            url_blacklist=url_blacklist,
+            max_redirects=DEFAULT_MAX_REDIRECTS,
         )
 
-    def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
+    async def _read_bounded(
+        self, response: "httpx.Response", max_bytes: int
+    ) -> tuple[bytes, Optional[Dict[str, Any]]]:
+        """Прочитать тело, оборвав его на ``max_bytes``.
+
+        Сначала — заявленный ``Content-Length``: если сервер честно сказал, что
+        файл больше лимита, качать нечего вовсе. Он не обязателен и может
+        врать, поэтому дальше считаем фактически прочитанное и обрываем.
+        """
+        declared = response.headers.get("Content-Length")
+        if declared and declared.isdigit() and int(declared) > max_bytes:
+            return b"", {
+                "type": "file_too_large",
+                "message": f"Response body exceeds max_bytes ({max_bytes}).",
+                "declared_bytes": int(declared),
+            }
+        chunks: list = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                return b"", {
+                    "type": "file_too_large",
+                    "message": f"Response body exceeds max_bytes ({max_bytes}).",
+                }
+            chunks.append(chunk)
+        return b"".join(chunks), None
+
+
+    async def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
         context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
         headers = {
             "User-Agent": self.default_user_agent,
@@ -289,47 +313,55 @@ class DownloadFile(AbstractSimpleTool):
         }
         response = None
         attempts = 1 + self.max_retries
-        with requests.Session() as session:
-            for attempt in range(1, attempts + 1):
-                try:
-                    response = self._fetch_with_redirect_validation(
-                        session,
-                        url,
-                        headers,
-                        self.timeout_seconds,
-                        allowed_schemes=context.url_allowed_schemes,
-                        url_blacklist=context.url_blacklist,
-                    )
+        # Клиент общий и переиспользуемый — закрывать его здесь нельзя.
+        session = get_async_client(
+            proxies=resolve_proxies(None, os.environ, url)
+        )
+        for attempt in range(1, attempts + 1):
+            try:
+                async with self._stream_with_redirect_validation(
+                    session,
+                    url,
+                    headers,
+                    self.timeout_seconds,
+                    allowed_schemes=context.url_allowed_schemes,
+                    url_blacklist=context.url_blacklist,
+                ) as response:
+                    if response.status_code >= 400:
+                        # Тело ошибки читаем: без него у `raise_for_status`
+                        # на стриминговом ответе нет текста.
+                        await response.aread()
                     response.raise_for_status()
-                    break
-                except _RedirectBlocked as redirect_exc:
-                    decision = redirect_exc.decision
+                    return await self._read_bounded(response, max_bytes)
+            except _TooManyRedirects as loop_exc:
+                # Петля редиректов — сетевая проблема, а не запрет политики.
+                return b"", {
+                    "type": "too_many_redirects",
+                    "reason": str(loop_exc),
+                    "limit": loop_exc.limit,
+                }
+            except _RedirectBlocked as redirect_exc:
+                decision = redirect_exc.decision
+                return b"", {
+                    "type": decision.error_type or "url_blocked_by_policy",
+                    "reason": decision.reason,
+                    "matched_rule": decision.matched_rule,
+                    "blocked_on_redirect": True,
+                }
+            except httpx.HTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status is None or status in (429,) or status >= 500
+                if (not retryable) or attempt == attempts:
                     return b"", {
-                        "type": decision.error_type or "url_blocked_by_policy",
-                        "reason": decision.reason,
-                        "matched_rule": decision.matched_rule,
-                        "blocked_on_redirect": True,
+                        "type": "request_failed",
+                        "message": str(exc),
+                        "attempt": attempt,
+                        "attempts_total": attempts,
+                        "retryable": retryable,
                     }
-                except requests.RequestException as exc:
-                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                    retryable = status is None or status in (429,) or status >= 500
-                    if (not retryable) or attempt == attempts:
-                        return b"", {
-                            "type": "request_failed",
-                            "message": str(exc),
-                            "attempt": attempt,
-                            "attempts_total": attempts,
-                            "retryable": retryable,
-                        }
-                    time.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
-        if response is None:
-            return b"", {"type": "request_failed", "message": "Unknown request failure."}
-
-        body = getattr(response, "content", b"") or b""
-        if len(body) > max_bytes:
-            return b"", {"type": "file_too_large", "message": f"Response body exceeds max_bytes ({max_bytes})."}
-        return body, None
+        return b"", {"type": "request_failed", "message": "Unknown request failure."}
 
     def _atomic_write(self, dest: str, body: bytes) -> Optional[Dict[str, Any]]:
         tmp_path = f"{dest}.tmp"
@@ -351,8 +383,9 @@ class DownloadFile(AbstractSimpleTool):
             return {"type": "write_failed", "message": str(exc)}
         return None
 
+
     @enforce_url_policy(url_arg="url")
-    def __call__(self, url: str, filename: str, **kwargs: Any) -> str:
+    async def acall(self, url: str, filename: str, **kwargs: Any) -> str:
         if not isinstance(url, str):
             return self._result(error={"type": "invalid_argument", "field": "url"})
         normalized_url = url.strip()
@@ -376,7 +409,18 @@ class DownloadFile(AbstractSimpleTool):
 
         dest = os.path.join(download_root, validated_filename)
 
-        write_guard_error = self._check_write_guard(dest)
+        # Гард записи в режиме `ask` ждёт человека, а `_check_write_guard`
+        # синхронный: прямой вызов отсюда держал бы event loop вызывающего всё
+        # время ожидания. Уезжаем ТЕМ ЖЕ маршрутом, что гарды-декораторы
+        # (`OffLoop` → `run_abandonable_in`), а не через `asyncio.to_thread`:
+        # только он ставит вызову метку «брошен». Без метки подтверждение,
+        # оставшееся от снятого по Ctrl+C вызова, дожидается следующей строки и
+        # записывает по ней разрешение на запись вне периметра — ровно тот вред,
+        # который закрывали R4.2 и R5.1. Заодно поток берётся из слотов гвардов,
+        # а не из общего пула, который держит выход процесса.
+        from gc_core.security.dual_wrapper import off_loop
+
+        write_guard_error = await off_loop(self._check_write_guard, dest)
         if write_guard_error is not None:
             return self._result(path=dest, filename=validated_filename, error=write_guard_error)
 
@@ -387,7 +431,7 @@ class DownloadFile(AbstractSimpleTool):
                 error={"type": "file_exists", "message": "Destination file already exists."},
             )
 
-        body, request_error = self._http_get_bytes(normalized_url, max_bytes)
+        body, request_error = await self._http_get_bytes(normalized_url, max_bytes)
         if request_error is not None:
             return self._result(path=dest, filename=validated_filename, error=request_error)
 
@@ -407,6 +451,10 @@ class DownloadFile(AbstractSimpleTool):
                 error={"type": "write_failed", "message": str(exc)},
             )
 
+        # Инлайн: нативной асинхронной записи в Python нет (все «async file»
+        # обёрнуты вокруг того же пула), а поток здесь не окупается — замерено
+        # 6.1 мс лага loop против 2.7 мс на записи 32 МиБ при бюджете приёмки
+        # 150 мс. Сеть выше остаётся асинхронной, поток убран только с записи.
         write_error = self._atomic_write(dest, body)
         if write_error is not None:
             return self._result(path=dest, filename=validated_filename, error=write_error)

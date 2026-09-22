@@ -73,7 +73,7 @@ async def test_command_config_opens_screen(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        pilot.app.screen._handle_command("config")
+        await pilot.app.screen._handle_command("config")
         await pilot.pause()
         assert isinstance(app.screen, ConfigScreen)
 
@@ -88,7 +88,7 @@ async def test_config_screen_esc_returns_to_main(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
-        pilot.app.screen._handle_command("config")
+        await pilot.app.screen._handle_command("config")
         await pilot.pause()
         assert isinstance(app.screen, ConfigScreen)
         await pilot.press("escape")

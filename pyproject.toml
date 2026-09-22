@@ -111,3 +111,12 @@ testpaths = [
     "packages/tui/tests",
 ]
 asyncio_mode = "auto"
+
+# Забытый `await` — ошибка, а не предупреждение. Нужны ОБА фильтра: один ловит
+# корутину, освобождённую сборщиком мусора после теста, другой — по счётчику
+# ссылок внутри теста. Обоснование и замер — в `packages/core/pyproject.toml`.
+filterwarnings = [
+    "error::pytest.PytestUnraisableExceptionWarning",
+    "error::RuntimeWarning",
+]
+

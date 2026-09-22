@@ -98,7 +98,7 @@ def test_reference_file_present(skill_id, slug):
     assert len(body.strip()) > 100
 
 
-def test_registry_default_list_returns_only_bootstrap(tmp_path):
+async def test_registry_default_list_returns_only_bootstrap(tmp_path):
     """default list_skills() возвращает bootstrap supercoder + flat-скиллы. Internal скрыты."""
     from gc_core.tools.skills.registry import SkillsRegistry
 
@@ -108,14 +108,14 @@ def test_registry_default_list_returns_only_bootstrap(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = {i["id"]: i for i in reg.list_skills() if i.get("pack_id") == "supercoder"}
+    items = {i["id"]: i for i in await reg.list_skills() if i.get("pack_id") == "supercoder"}
     assert set(items.keys()) == {"supercoder:using-supercoder"}
     bootstrap = items["supercoder:using-supercoder"]
     assert bootstrap["is_pack_bootstrap"] is True
     assert bootstrap["pack_size"] == 10
 
 
-def test_registry_pack_param_returns_all_10_internals(tmp_path):
+async def test_registry_pack_param_returns_all_10_internals(tmp_path):
     """list_skills(pack='supercoder') возвращает все 10 internal."""
     from gc_core.tools.skills.registry import SkillsRegistry
 
@@ -125,6 +125,6 @@ def test_registry_pack_param_returns_all_10_internals(tmp_path):
         user_root=str(tmp_path / "u_empty"),
         project_root=str(tmp_path / "p_empty"),
     )
-    items = reg.list_skills(pack="supercoder")
+    items = await reg.list_skills(pack="supercoder")
     canonical_ids = {f"supercoder:{sid}" for sid in EXPECTED_SKILL_IDS}
     assert {i["id"] for i in items} == canonical_ids

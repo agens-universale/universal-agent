@@ -1,5 +1,6 @@
 """Tests for deprecated tools.deprecated.memory_files.MemoryFiles"""
 
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 
@@ -27,7 +28,7 @@ def _parse(raw: str):
 
 
 def _call(state, **kwargs):
-    tool = MemoryFiles(state=state)
+    tool = CallableTool(MemoryFiles(state=state))
     return _parse(tool(**kwargs))
 
 
@@ -187,7 +188,7 @@ class TestLimits:
         budget = 1000
         files = {"journal": "a" * 600, "arch": "b" * 300}
         state = _make_state(files)
-        tool = MemoryFiles(state=state)
+        tool = CallableTool(MemoryFiles(state=state))
         tool.TOTAL_BUDGET_CHARS = budget
         res = _parse(tool(action="write", file_name="extra", content="c" * 200))
         assert res["ok"] is False
@@ -203,7 +204,7 @@ class TestLimits:
     def test_budget_from_config(self):
         ctx = SimpleNamespace(config_dict={"memory_files_total_budget_chars": 500})
         state = _make_state({"journal": "a" * 400})
-        tool = MemoryFiles(ctx=ctx, state=state)
+        tool = CallableTool(MemoryFiles(ctx=ctx, state=state))
         res = _parse(tool(action="write", file_name="extra", content="b" * 200))
         assert res["ok"] is False
         assert res["error"]["type"] == "total_budget_exceeded"
@@ -211,7 +212,7 @@ class TestLimits:
     def test_max_file_chars_from_config(self):
         ctx = SimpleNamespace(config_dict={"memory_files_max_file_chars": 100})
         state = _make_state()
-        tool = MemoryFiles(ctx=ctx, state=state)
+        tool = CallableTool(MemoryFiles(ctx=ctx, state=state))
         res = _parse(tool(action="write", file_name="big", content="x" * 101))
         assert res["ok"] is False
         assert res["error"]["type"] == "file_limit_exceeded"
@@ -219,7 +220,7 @@ class TestLimits:
     def test_max_files_from_config(self):
         ctx = SimpleNamespace(config_dict={"memory_files_max_files": 2})
         state = _make_state({"journal": "j", "arch": "a"})
-        tool = MemoryFiles(ctx=ctx, state=state)
+        tool = CallableTool(MemoryFiles(ctx=ctx, state=state))
         res = _parse(tool(action="write", file_name="third", content="x"))
         assert res["ok"] is False
         assert res["error"]["type"] == "max_files_exceeded"
@@ -231,7 +232,7 @@ class TestLimits:
             "memory_files_max_files": 5,
         })
         state = _make_state()
-        tool = MemoryFiles(ctx=ctx, state=state)
+        tool = CallableTool(MemoryFiles(ctx=ctx, state=state))
         assert tool.MAX_FILE_CHARS == 200
         assert tool.TOTAL_BUDGET_CHARS == 300
         assert tool.MAX_FILES == 5
@@ -244,7 +245,7 @@ class TestLimits:
 
 class TestEdgeCases:
     def test_no_state(self):
-        tool = MemoryFiles(state=None)
+        tool = CallableTool(MemoryFiles(state=None))
         res = _parse(tool(action="list"))
         assert res["ok"] is False
         assert res["error"]["type"] == "no_state"
@@ -269,7 +270,7 @@ class TestEdgeCases:
 
     def test_state_without_shared_attr(self):
         state = SimpleNamespace()
-        tool = MemoryFiles(state=state)
+        tool = CallableTool(MemoryFiles(state=state))
         res = _parse(tool(action="list"))
         assert res["ok"] is True
         assert res["files"] == {}

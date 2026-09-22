@@ -7,6 +7,7 @@
 """
 import json
 import logging
+from gc_testkit import as_coro, run_coro
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -15,8 +16,23 @@ from gc_core.utils import llm_chat_client
 from gc_core.utils.connect_backend import (
     create_call_data_completions,
     create_call_data_responses,
-    create_call_headers,
+    acreate_call_headers,
+    build_call_headers,
 )
+
+
+def _canonical_once(processing_module, *args, **kwargs):
+    """Позвать канонический шов запроса к бэкенду.
+
+    Шов приватный и асинхронный: синхронные двойники в этой ветке заведены
+    только для публичных входов (``run_agent``, ``process_user_ask`` и т.п.),
+    заводить ещё один ради теста — значит держать вторую реализацию.
+    """
+    import asyncio
+
+    return asyncio.run(
+        processing_module._arequest_backend_canonical_once(*args, **kwargs)
+    )
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -53,12 +69,12 @@ def _state(**overrides) -> SimpleNamespace:
 # ---------------------------------------------------------------------------
 
 
-def test_create_call_headers_authorization_none_inherits_effective_header():
+async def test_create_call_headers_authorization_none_inherits_effective_header():
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
+    headers = await acreate_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
     assert headers["Authorization"] == "Bearer tok-123"
 
 
@@ -67,7 +83,7 @@ def test_create_call_headers_authorization_empty_string_omits_header():
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
     assert "Authorization" not in headers
 
 
@@ -76,19 +92,19 @@ def test_create_call_headers_authorization_value_used_as_is():
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer model-token"
 
 
-def test_create_call_headers_responses_mode_ignores_resolved_authorization():
+async def test_create_call_headers_responses_mode_ignores_resolved_authorization():
     # спека §4: per-model token/url/backend-квирки — chat_completions-only.
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "responses", "x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(
+    headers = await acreate_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer tok-123"
@@ -109,7 +125,7 @@ def test_create_call_headers_model_token_survives_global_chat_completion_headers
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer model-token"
@@ -126,7 +142,7 @@ def test_create_call_headers_empty_token_not_revived_by_global_headers():
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
+    headers = build_call_headers(_state(), ctx, resolved=_resolved(authorization=""))
     assert "Authorization" not in headers
 
 
@@ -139,14 +155,14 @@ def test_create_call_headers_lowercase_global_authorization_also_yields_to_model
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(), ctx, resolved=_resolved(authorization="Bearer model-token")
     )
     assert headers["Authorization"] == "Bearer model-token"
     assert "authorization" not in headers
 
 
-def test_create_call_headers_global_authorization_applies_without_model_token():
+async def test_create_call_headers_global_authorization_applies_without_model_token():
     # Охранный: без per-model решения (authorization=None) поведение прежнее —
     # статический заголовок конфига выигрывает у токена коннектора.
     ctx = SimpleNamespace(
@@ -157,7 +173,7 @@ def test_create_call_headers_global_authorization_applies_without_model_token():
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
-    headers = create_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
+    headers = await acreate_call_headers(_state(), ctx, resolved=_resolved(authorization=None))
     assert headers["Authorization"] == "Bearer corp-token"
 
 
@@ -172,7 +188,7 @@ def test_create_call_headers_model_backend_overlay_authorization_wins_over_token
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(),
         ctx,
         resolved=_resolved(
@@ -209,9 +225,9 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
         captured["payload"] = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "ok"}}]}, captured["payload"]
 
-    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     router = SimpleNamespace(
@@ -229,13 +245,13 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
         model_router=router,
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
     assert captured["url"] == "http://alias.local/v1/chat/completions"
     assert captured["payload"]["model"] == "light-model"
     router.resolve.assert_called_once_with("summary")
@@ -276,7 +292,7 @@ def test_create_call_headers_backend_overrides_chat_completion_headers():
         },
         auth_connector=None,
     )
-    headers = create_call_headers(
+    headers = build_call_headers(
         _state(),
         ctx,
         resolved=_resolved(
@@ -295,9 +311,9 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
         payload = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "ok"}}]}, payload
 
-    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     router = SimpleNamespace(
@@ -316,13 +332,13 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
         model_router=router,
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
     assert captured["verify"] is False
     assert captured["timeout"] == 42.0
 
@@ -375,17 +391,21 @@ def _patch_llm_transport(monkeypatch, response_text: str) -> list:
         captured.append(payload)
         return {"choices": [{"message": {"content": response_text}}]}, payload
 
-    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    # Форма у воронки одна — корутинная; синхронного имени в модуле нет.
+    monkeypatch.setattr(
+        llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy)
+    )
     return captured
 
 
-def test_command_judge_declares_own_consumer(monkeypatch):
+async def test_command_judge_declares_own_consumer(monkeypatch):
+    """Судья теперь корутинный: его ждёт loop вызывающего, а не свой одноразовый."""
     from gc_core.security import command_moderation
 
     _patch_llm_transport(monkeypatch, _JUDGE_JSON)
     ctx, router = _router_ctx()
     judge_client = command_moderation._default_judge_client((), {"ctx": ctx, "state": _state()})
-    result = judge_client({"tool_name": "execute_command"})
+    result = await judge_client({"tool_name": "execute_command"})
     assert result["verdict"] == "safe"
     router.resolve.assert_called_once_with("command_judge")
 
@@ -395,25 +415,25 @@ def test_memory_compaction_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "compressed text")
     ctx, router = _router_ctx()
-    res = compaction.compact_text("long text", ctx, _state())
+    res = run_coro(compaction.acompact_text("long text", ctx, _state()))
     assert res.ok is True
     router.resolve.assert_called_once_with("memory_compaction")
 
 
 def test_finish_gate_declares_own_consumer(monkeypatch):
-    from gc_core.intent_guard.final_report_consistency import validate_final_report_vs_user_intent
+    from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
     from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 
     _patch_llm_transport(monkeypatch, _FINISH_GATE_JSON)
     ctx, router = _router_ctx()
     digest = FinishGateTraceDigest(trace_digest_text="<message>...</message>", digest_chars=20)
-    result = validate_final_report_vs_user_intent(
+    result = run_coro(avalidate_final_report_vs_user_intent(
         ctx=ctx,
         state=_state(),
         current_user_requests=["do x"],
         finish_handoff_arguments="done",
         trace_digest=digest,
-    )
+    ))
     assert result.action == "accept"
     router.resolve.assert_called_once_with("finish_gate")
 
@@ -421,12 +441,12 @@ def test_finish_gate_declares_own_consumer(monkeypatch):
 def test_text_answer_judge_declares_own_consumer_not_finish_gate(monkeypatch):
     # спека §5.1: text_answer_judge переиспользует воронку finish_gate, но
     # объявляется СВОИМ id — не должен резолвиться как "finish_gate".
-    from gc_core.intent_guard.text_answer_judge import judge_text_answer
+    from gc_core.intent_guard.text_answer_judge import ajudge_text_answer
 
     _patch_llm_transport(monkeypatch, _FINISH_GATE_JSON)
     ctx, router = _router_ctx()
     state = _state(current_user_intent=[], user_intent_log=[], parent_state_id=None)
-    result = judge_text_answer(ctx, state, "the final answer text")
+    result = run_coro(ajudge_text_answer(ctx, state, "the final answer text"))
     assert result is not None
     assert result.action == "accept"
     router.resolve.assert_called_once_with("text_answer_judge")
@@ -437,13 +457,13 @@ def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "a summary line")
     ctx, router = _router_ctx()
-    line = summarizer.summarize_tool_intent_line(
+    line = run_coro(summarizer.asummarize_tool_intent_line(
         ctx=ctx,
         state=_state(current_user_intent=[]),
         tool_name="turn_ask_human",
         tool_arguments="{}",
         tool_output_raw="raw tool output",
-    )
+    ))
     assert line == "a summary line"
     router.resolve.assert_called_once_with("intent_scope")
 
@@ -453,33 +473,33 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
 
     _patch_llm_transport(monkeypatch, "final answer summary")
     ctx, router = _router_ctx()
-    line = summarizer.summarize_final_answer_line(
+    line = run_coro(summarizer.asummarize_final_answer_line(
         ctx=ctx,
         state=_state(current_user_intent=[]),
         assistant_text="a very long final answer" * 5,
-    )
+    ))
     assert line == "final answer summary"
     router.resolve.assert_called_once_with("intent_scope")
 
 
 def test_summary_compress_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.summary_llm_steps import compress_summary_text
+    from gc_core.summarize.summary_llm_steps import acompress_summary_text
 
     _patch_llm_transport(monkeypatch, "short")
     ctx, router = _router_ctx()
-    out = compress_summary_text(
+    out = run_coro(acompress_summary_text(
         ctx=ctx, state=_state(), summary_text="x" * 100, max_chars=10, max_tokens=50
-    )
+    ))
     assert out == "short"
     router.resolve.assert_called_once_with("summary")
 
 
 def test_summary_repair_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.summary_llm_steps import repair_summary_text
+    from gc_core.summarize.summary_llm_steps import arepair_summary_text
 
     _patch_llm_transport(monkeypatch, "<summary>fixed</summary>")
     ctx, router = _router_ctx()
-    out = repair_summary_text(
+    out = run_coro(arepair_summary_text(
         ctx=ctx,
         state=_state(),
         history_text="history",
@@ -487,29 +507,29 @@ def test_summary_repair_declares_own_consumer(monkeypatch):
         invalid_summary="broken",
         reason="missing tags",
         max_tokens=50,
-    )
+    ))
     assert out == "<summary>fixed</summary>"
     router.resolve.assert_called_once_with("summary")
 
 
 def test_memory_patch_replace_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.memory_suggestions import request_patch_replace
+    from gc_core.summarize.memory_suggestions import arequest_patch_replace
 
     _patch_llm_transport(monkeypatch, "<goal>x</goal>")
     ctx, router = _router_ctx()
-    result = request_patch_replace(
+    result = run_coro(arequest_patch_replace(
         ctx=ctx, state=_state(), history_text="hist", summary_text="sum"
-    )
+    ))
     assert result.raw_response == "<goal>x</goal>"
     router.resolve.assert_called_once_with("summary")
 
 
 def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
-    from gc_core.summarize.memory_suggestions import request_memory_deltas_format_repair
+    from gc_core.summarize.memory_suggestions import arequest_memory_deltas_format_repair
 
     _patch_llm_transport(monkeypatch, "<goal>repaired</goal>")
     ctx, router = _router_ctx()
-    out = request_memory_deltas_format_repair(ctx=ctx, state=_state(), raw_output="broken")
+    out = run_coro(arequest_memory_deltas_format_repair(ctx=ctx, state=_state(), raw_output="broken"))
     assert out == "<goal>repaired</goal>"
     router.resolve.assert_called_once_with("summary")
 
@@ -519,7 +539,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
     объявления consumer="summary" напрямую на вызове request_summary_text (тот же
     паттерн монкипатча, что и в tests/test_thread_summarizer_incremental.py), не
     поднимая весь LLM-транспорт по-настоящему."""
-    from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+    from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
     from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
     captured = {}
@@ -531,15 +551,17 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
     # summary_llm_steps имеет свою привязанную ссылку на request_summary_text
     # (repair-путь вызывается независимо от thread_summarizer) — патчим обе.
     monkeypatch.setattr(
-        "gc_core.summarize.thread_summarizer.request_summary_text", _fake_request_summary_text
+        "gc_core.summarize.thread_summarizer.arequest_summary_text",
+        as_coro(_fake_request_summary_text),
     )
     monkeypatch.setattr(
-        "gc_core.summarize.summary_llm_steps.request_summary_text", _fake_request_summary_text
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text",
+        as_coro(_fake_request_summary_text),
     )
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
-        lambda **_k: SimpleNamespace(request_messages=[], raw_response=""),
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        as_coro(lambda **_k: SimpleNamespace(request_messages=[], raw_response="")),
     )
 
     ctx = SimpleNamespace(
@@ -565,11 +587,11 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
         {"type": "message", "role": "assistant", "content": "first assistant"},
     ]
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=state,
         full_history_messages=history,
-    )
+    ))
     assert captured["consumer"] == "summary"
     assert "batch summary" in result["raw_summary"]
 
@@ -594,8 +616,8 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
 
     monkeypatch.setattr(
         processing_module,
-        "request_chat_completions_with_policy",
-        _fake_request_chat_completions_with_policy,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_request_chat_completions_with_policy),
     )
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved(model="light-model")))
@@ -613,7 +635,7 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
-    processing_module._request_backend_canonical_once([{"role": "user", "content": "hi"}], state, ctx)
+    _canonical_once(processing_module, [{"role": "user", "content": "hi"}], state, ctx)
 
     router.resolve.assert_called_once_with("main")
 
@@ -643,8 +665,8 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
 
     monkeypatch.setattr(
         processing_module,
-        "request_chat_completions_with_policy",
-        _fake_request_chat_completions_with_policy,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_request_chat_completions_with_policy),
     )
 
     router = SimpleNamespace(
@@ -674,7 +696,7 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
-    processing_module._request_backend_canonical_once([{"role": "user", "content": "hi"}], state, ctx)
+    _canonical_once(processing_module, [{"role": "user", "content": "hi"}], state, ctx)
 
     assert captured["verify"] is False
     assert captured["cert"] == ("corp-cert.pem", "corp-key.pem")
@@ -705,8 +727,8 @@ def test_main_trace_legacy_network_params_without_overrides(monkeypatch):
 
     monkeypatch.setattr(
         processing_module,
-        "request_chat_completions_with_policy",
-        _fake_request_chat_completions_with_policy,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_request_chat_completions_with_policy),
     )
 
     ctx = SimpleNamespace(
@@ -722,7 +744,7 @@ def test_main_trace_legacy_network_params_without_overrides(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
-    processing_module._request_backend_canonical_once([{"role": "user", "content": "hi"}], state, ctx)
+    _canonical_once(processing_module, [{"role": "user", "content": "hi"}], state, ctx)
 
     assert captured["verify"] is True
     assert captured["cert"] is None
@@ -743,7 +765,9 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
         )
         return {"id": "resp_1", "output": []}, {}
 
-    monkeypatch.setattr(processing_module, "request_backend", _fake_request_backend)
+    monkeypatch.setattr(
+        processing_module, "arequest_backend", as_coro(_fake_request_backend)
+    )
 
     router = SimpleNamespace(
         resolve=Mock(
@@ -768,7 +792,7 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
-    processing_module._request_backend_canonical_once([{"role": "user", "content": "hi"}], state, ctx)
+    _canonical_once(processing_module, [{"role": "user", "content": "hi"}], state, ctx)
 
     assert captured["verify"] is True
     assert captured["timeout"] == 600.0
@@ -797,12 +821,12 @@ def test_legacy_create_call_data_responses_keeps_state_default_model_without_res
     assert data["model"] == "legacy-model"
 
 
-def test_legacy_create_call_headers_uses_auth_connector_without_resolved():
+async def test_legacy_create_call_headers_uses_auth_connector_without_resolved():
     ctx = SimpleNamespace(
         config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "7"},
         auth_connector=SimpleNamespace(get_token=lambda: "legacy-token"),
     )
-    headers = create_call_headers(_state(), ctx)
+    headers = await acreate_call_headers(_state(), ctx)
     assert headers["Authorization"] == "Bearer legacy-token"
 
 
@@ -816,9 +840,9 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
         captured["payload"] = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "ok"}}]}, captured["payload"]
 
-    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {}
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
     )
 
     ctx = SimpleNamespace(
@@ -828,13 +852,13 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
         },
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(default_model="legacy-model"),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=10,
         consumer="summary",
-    )
+    ))
     assert captured["url"] == "http://legacy.local/v1/chat/completions"
     assert captured["payload"]["model"] == "legacy-model"
 
@@ -857,8 +881,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkey
             "role": "assistant", "content": "hi", "tool_calls": []},
             "finish_reason": "stop"}]}, {}
 
-    monkeypatch.setattr(
-        processing_module, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(processing_module, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved(
         model="tiny-model",
@@ -884,7 +907,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(monkey
         logger=None,
     )
 
-    processing_module._request_backend_canonical_once(
+    _canonical_once(processing_module, 
         [{"role": "user", "content": "hi"}], _state(default_model="legacy-model"), ctx)
 
     assert captured["retry_embedded_choice_errors"] is False
@@ -902,9 +925,9 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
         payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "ok"}}]}, {}
 
-    monkeypatch.setattr(llm_chat_client, "request_chat_completions_with_policy", _fake_policy)
+    monkeypatch.setattr(llm_chat_client, "arequest_chat_completions_with_policy", as_coro(_fake_policy))
     monkeypatch.setattr(
-        llm_chat_client, "create_call_headers", lambda _s, _c, resolved=None: {})
+        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
 
     router = SimpleNamespace(resolve=Mock(return_value=_resolved(
         backend_overrides={"retry_embedded_choice_errors": False})))
@@ -917,9 +940,9 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
         model_router=router,
         logger=None,
     )
-    llm_chat_client.request_chat_completion_text(
+    run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx, state=_state(), messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10, consumer="summary")
+        max_tokens=10, consumer="summary"))
 
     assert captured["retry_embedded_choice_errors"] is False
 
@@ -953,7 +976,7 @@ _GLOBAL_ONLY = {
     "api_mode": "режим прогона: responses/chat_completions выбирается один раз на ран",
     "stream": "флаг TUI-стрима, к модели отношения не имеет",
     "openai_strict_tools_schema": "спека тулов собирается один раз на RunContext",
-    "send_tool_strict": "то же: build_tools_data не знает resolved (бэклог «tools-схема per-model»)",
+    "send_tool_strict": "то же: abuild_tools_data не знает resolved (бэклог «tools-схема per-model»)",
 }
 
 
@@ -1128,13 +1151,13 @@ def test_service_funnel_never_marks_prompt_cache(monkeypatch):
     captured = _patch_llm_transport(monkeypatch, "ok")
     ctx, router = _router_ctx()
     router.resolve = Mock(return_value=_resolved(model="anthropic/claude-opus-5"))
-    text = llm_chat_client.request_chat_completion_text(
+    text = run_coro(llm_chat_client.arequest_chat_completion_text(
         ctx=ctx,
         state=_state(),
         messages=[{"role": "system", "content": "judge"}, {"role": "user", "content": "x"}],
         max_tokens=50,
         consumer="finish_gate",
-    )
+    ))
     assert text == "ok"
     assert captured[0]["model"] == "anthropic/claude-opus-5"
     assert "cache_control" not in json.dumps(captured[0])

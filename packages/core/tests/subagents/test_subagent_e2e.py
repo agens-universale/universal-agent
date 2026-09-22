@@ -56,17 +56,17 @@ def _make_ctx(config_dict=None):
 
 
 class TestSubagentRunnerRun:
-    def test_run_calls_run_agent_func(self):
+    async def test_run_calls_run_agent_func(self):
         """run() should call run_agent_func with (messages, child_state, child_ctx)."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="done")
+        run_agent_func = AsyncMock(return_value="done")
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = runner.run("subagent_worker", {"task": "do X", "reason": "test"}, run_agent_func)
+            result = await runner.arun("subagent_worker", {"task": "do X", "reason": "test"}, run_agent_func)
 
         run_agent_func.assert_called_once()
         args = run_agent_func.call_args
@@ -82,33 +82,33 @@ class TestSubagentRunnerRun:
         assert payload["result"] == "done"
         assert payload["meta"]["tool_name"] == "subagent_worker"
 
-    def test_run_returns_string_result(self):
+    async def test_run_returns_string_result(self):
         """run() returns whatever run_agent_func returns (as string)."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="Task completed successfully")
+        run_agent_func = AsyncMock(return_value="Task completed successfully")
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = runner.run("subagent_worker", {"task": "test"}, run_agent_func)
+            result = await runner.arun("subagent_worker", {"task": "test"}, run_agent_func)
 
         payload = json.loads(result)
         assert payload["ok"] is True
         assert payload["result"] == "Task completed successfully"
 
-    def test_run_returns_fallback_on_none(self):
+    async def test_run_returns_fallback_on_none(self):
         """run() returns fallback message if run_agent_func returns None."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value=None)
+        run_agent_func = AsyncMock(return_value=None)
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = runner.run("subagent_worker", {"task": "test"}, run_agent_func)
+            result = await runner.arun("subagent_worker", {"task": "test"}, run_agent_func)
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -117,13 +117,13 @@ class TestSubagentRunnerRun:
         assert payload["error"]["code"] == "cancelled_by_user"
         assert "interrupted" in payload["error"]["message"].lower()
 
-    def test_shared_mutations_visible_to_orchestrator(self):
+    async def test_shared_mutations_visible_to_orchestrator(self):
         """Subagent mutations on shared.working_memory are visible in orchestrator state."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.shared.working_memory["state"] = "updated by subagent"
             child_state.shared.working_memory["knowledge"] = "created"
             return "Subagent done"
@@ -131,70 +131,70 @@ class TestSubagentRunnerRun:
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "modify memory"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "modify memory"}, fake_run_agent)
 
         assert orch.shared.working_memory["state"] == "updated by subagent"
         assert orch.shared.working_memory["knowledge"] == "created"
 
-    def test_child_state_has_correct_parent_id(self):
+    async def test_child_state_has_correct_parent_id(self):
         """Child state created by run() has parent_state_id == orchestrator state_id."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
         captured_child = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured_child["state"] = child_state
             return "ok"
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         assert captured_child["state"].parent_state_id == orch.state_id
 
-    def test_child_state_passed_to_run_agent(self):
+    async def test_child_state_passed_to_run_agent(self):
         """Child state is created and passed to run_agent_func before execution."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
         captured_child = {}
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             captured_child["state"] = child_state
             return "ok"
 
         runner = SubagentRunner(ctx, orch, cfg)
 
         with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            runner.run("subagent_worker", {"task": "test"}, fake_run_agent)
+            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
 
         child = captured_child["state"]
         assert isinstance(child, State)
         assert child.parent_state_id == orch.state_id
 
-    def test_unknown_subagent_returns_error(self):
+    async def test_unknown_subagent_returns_error(self):
         """run() with unknown tool_name returns error string."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock()
+        run_agent_func = AsyncMock()
 
         runner = SubagentRunner(ctx, orch, cfg)
-        result = runner.run("nonexistent_agent", {"task": "test"}, run_agent_func)
+        result = await runner.arun("nonexistent_agent", {"task": "test"}, run_agent_func)
 
         run_agent_func.assert_not_called()
         payload = json.loads(result)
         assert payload["ok"] is False
         assert payload["error"]["code"] == "subagent_unknown_tool"
 
-    def test_create_instance_called_with_task(self):
+    async def test_create_instance_called_with_task(self):
         """run() passes task from arguments to create_instance."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="ok")
+        run_agent_func = AsyncMock(return_value="ok")
 
         runner = SubagentRunner(ctx, orch, cfg)
 
@@ -209,7 +209,7 @@ class TestSubagentRunnerRun:
             mock_cls.create_instance = AsyncMock(return_value=mock_instance)
             mock_get_cls.return_value = mock_cls
 
-            runner.run("subagent_worker", {"task": "build feature", "reason": "r"}, run_agent_func)
+            await runner.arun("subagent_worker", {"task": "build feature", "reason": "r"}, run_agent_func)
 
         mock_cls.create_instance.assert_awaited_once()
         call_kwargs = mock_cls.create_instance.call_args

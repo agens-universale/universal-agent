@@ -5,6 +5,12 @@ import pytest
 from gc_tui.services import voice_setup as vs
 from gc_tui.voice_runtime.state import SPEACHES_PIN, VoiceState
 
+# Захват ДО фикстур. Autouse `_no_network_model_fetch` из conftest (приехала с
+# develop, коммит 263eb403) подменяет сам `model_picker.fetch_models` на
+# постоянный ответ, и нижний шов транспорта до дела не доходит. Тестовые модули
+# импортируются на СБОРЕ, то есть раньше фикстур, — здесь ещё настоящая функция.
+from gc_core.model_picker import fetch_models as _REAL_FETCH_MODELS
+
 # Версия — ОТ пина, а не литералом: иначе бамп пина превращал бы «установлен и свеж» в
 # «устарел», и падали бы тесты, к обновлению отношения не имеющие.
 ST = VoiceState(version=SPEACHES_PIN, root="/x", port=8735,
@@ -270,6 +276,10 @@ def _stub_model_transport(monkeypatch, handler):
     # Единственный сетевой шов `fetch_models` — `_requests_get_ex`. Прежде рядом
     # подменялся ещё и `_urllib_get` (старый фолбэк): его удалили как мёртвый код,
     # и подмена несуществующего имени роняла бы тест на AttributeError.
+    # Сперва снимаем сетевой намордник набора: без возврата настоящей
+    # реализации наша подмена транспорта не исполнялась бы вовсе — оба теста
+    # получали `test-model` и там, где ждут имена моделей, и там, где ждут None.
+    monkeypatch.setattr(mp, "fetch_models", _REAL_FETCH_MODELS)
     monkeypatch.setattr(mp, "_requests_get_ex", _requests_get_ex)
 
 

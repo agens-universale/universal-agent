@@ -7,10 +7,12 @@ from typing import Any
 
 from gc_core.intent_scope.agent_logging import log_intent_scope_delta_appended, log_intent_scope_skipped
 from gc_core.intent_scope.append import append_final_answer_to_current
-from gc_core.intent_scope.summarizer import summarize_final_answer_line
+from gc_core.intent_scope.summarizer import asummarize_final_answer_line
 
 _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
+
+
 
 
 def _append(state: Any, content: str, log: Any) -> None:
@@ -18,13 +20,17 @@ def _append(state: Any, content: str, log: Any) -> None:
         log_intent_scope_delta_appended(log, tool_name=_LABEL, delta_chars=len(content))
 
 
-def maybe_record_final_answer_intent(*, assistant_text: str, state: Any, ctx: Any) -> None:
+async def amaybe_record_final_answer_intent(*, assistant_text: str, state: Any, ctx: Any) -> None:
     """
     Record an ACCEPTED final prose answer into ``current_user_intent`` (fail-open).
 
     chat_completions only. Short prose (<= threshold) is stored raw as-is;
     long prose is summarized; on summary failure — truncated raw (if fallback) or skip.
     Does not depend on ``intent_scope.tools`` (final answer is not a tool).
+
+    Основная (и единственная) реализация. Ветка со сжатием длинной прозы ходит
+    в LLM на десятки секунд, поэтому цикл агента ждёт эту корутину напрямую —
+    поток из пула ради ожидания сети не занимается. Синхронное имя ниже — шим.
     """
     log = getattr(ctx, "logger", None) or _logger
     text = str(assistant_text or "").strip()
@@ -44,7 +50,7 @@ def maybe_record_final_answer_intent(*, assistant_text: str, state: Any, ctx: An
         _append(state, text, log)
         return
 
-    summary = summarize_final_answer_line(
+    summary = await asummarize_final_answer_line(
         ctx=ctx, state=state, assistant_text=text, logger=log
     )
     if summary:
@@ -58,3 +64,5 @@ def maybe_record_final_answer_intent(*, assistant_text: str, state: Any, ctx: An
         return
 
     log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_summary")
+
+

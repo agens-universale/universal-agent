@@ -5,7 +5,9 @@ import json
 
 import pytest
 
-from gc_core.tools import apply_tool
+from gc_testkit import run_coro
+
+from gc_core.tools import aapply_tool
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
@@ -118,7 +120,9 @@ def test_apply_tool_output_mentions_dropped_fields():
         def __init__(self, **_kwargs):
             pass
 
-        def __call__(self, command: str, timeout: int | None = None) -> str:
+        # Контракт тула в ветке — `acall`; синхронного входа нет ни у одного
+        # настоящего тула, и двойник обязан повторять форму, а не прошлую.
+        async def acall(self, command: str, timeout: int | None = None) -> str:
             return json.dumps({"ok": True, "command": command, "timeout": timeout})
 
     tools = {
@@ -128,11 +132,11 @@ def test_apply_tool_output_mentions_dropped_fields():
             "injected_fields": [],
         }
     }
-    raw = apply_tool(
+    raw = run_coro(aapply_tool(
         "exec_command",
         {"command": "ls", "description": "List dir", "timeout": "3"},
         tools_data_=tools,
-    )
+    ))
     payload = json.loads(raw)
     assert payload["ok"] is True
     assert payload["command"] == "ls"

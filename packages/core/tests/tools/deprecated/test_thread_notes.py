@@ -1,3 +1,4 @@
+from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 from types import SimpleNamespace
 
@@ -6,7 +7,7 @@ from gc_core.tools.deprecated.thread_notes import ThreadNotes
 
 
 def test_thread_notes_no_state():
-    data = json.loads(ThreadNotes(state=None)(action="read"))
+    data = json.loads(CallableTool(ThreadNotes(state=None))(action="read"))
     assert data["ok"] is False
     assert data["error"]["type"] == "no_state"
 
@@ -16,7 +17,7 @@ def test_thread_notes_read_append_write():
         shared=SharedStateData(),
         call_metadata={"promptVariables": {}},
     )
-    tool = ThreadNotes(state=state)
+    tool = CallableTool(ThreadNotes(state=state))
     read_empty = json.loads(tool(action="read"))
     assert read_empty["ok"] is True
     assert "Notes are empty" in read_empty["notes_md"]
@@ -35,7 +36,7 @@ def test_thread_notes_limits_and_validation():
         shared=SharedStateData(),
         call_metadata={"promptVariables": {}},
     )
-    tool = ThreadNotes(state=state)
+    tool = CallableTool(ThreadNotes(state=state))
     bad = json.loads(tool(action="unknown"))
     assert bad["ok"] is False and bad["error"]["type"] == "invalid_action"
     empty = json.loads(tool(action="write", content="   "))

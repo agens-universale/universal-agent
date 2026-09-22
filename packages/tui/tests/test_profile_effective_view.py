@@ -1185,26 +1185,33 @@ async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(
     `InsecureRequestWarning` ВСЕМУ процессу — включая соединения активного
     профиля, который проверку сертификата не отключал.
 
-    Шпион ставится на имя `urllib3` В МОДУЛЕ `config`, а не на сам пакет: пакет
-    зовут и сторонние библиотеки (courlan, htmldate — прямо на импорте), и по
-    общему счётчику свой вызов от чужого не отличить."""
+    Раньше здесь стоял шпион на имя `urllib3` В МОДУЛЕ `config`. Глушилки
+    больше нет вовсе: ядро ходит httpx, своих предупреждений urllib3 не
+    рождает, и вызов удалён вместе с импортом. Проверка от этого стала сильнее
+    — не «не позвали», а «звать нечем»: шпион, поставленный на несуществующее
+    имя, зеленел бы молча и навсегда.
+
+    Спрашивать сам пакет по-прежнему бесполезно: `disable_warnings` зовут
+    сторонние библиотеки (courlan, htmldate — прямо на импорте), и по общему
+    счётчику свой вызов от чужого не отличить."""
+    import pathlib
+
     from gc_core import config as config_mod
 
-    calls = []
+    assert not hasattr(config_mod, "urllib3"), (
+        "в `config` вернулся urllib3 — а с ним вернётся и глушилка на процесс"
+    )
+    source = pathlib.Path(config_mod.__file__).read_text(encoding="utf-8")
+    assert "disable_warnings" not in source, (
+        "в `config` снова глушат предупреждения — это бьёт по всему процессу, "
+        "включая соединения профиля, который проверку сертификата не отключал"
+    )
 
-    class _Urllib3Spy:
-        exceptions = config_mod.urllib3.exceptions
-
-        @staticmethod
-        def disable_warnings(*args, **kwargs):
-            calls.append(args)
-
-    monkeypatch.setattr(config_mod, "urllib3", _Urllib3Spy)
+    # И сам путь остаётся рабочим: профиль с `use_ssl: false` открывается.
     profile = 'backend:\n  use_ssl: false\n'
     async with _profile_view(tmp_path, monkeypatch, profile=profile,
                              base=_BASE_ONE_MODEL) as (_p, scr, _ed):
         scr._open_profile_config("work")
-        assert calls == []
 
 
 # --- тёзка: источник наследования — заслонённая запись (стенд smoke-shadow) ----

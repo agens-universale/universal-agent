@@ -9,6 +9,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
 
 
 @dataclass(frozen=True)
@@ -113,15 +114,14 @@ def enforce_url_policy(
     blocked_result_factory: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]:
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
+        def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
             if not context.url_policy_enabled:
-                return func(*args, **kwargs)
+                return (yield)
             try:
                 url = _extract_url(func, args, kwargs, url_arg, url_extractor)
             except ValueError:
-                return func(*args, **kwargs)
+                return (yield)
             decision = validate_url_policy(
                 url,
                 context.url_allowed_schemes,
@@ -134,7 +134,7 @@ def enforce_url_policy(
                     decision="executed",
                     reason_code="policy_allow",
                 )
-                return func(*args, **kwargs)
+                return (yield)
             error = {
                 "type": decision.error_type,
                 "reason": decision.reason,
@@ -152,10 +152,13 @@ def enforce_url_policy(
                     risk_flags=["out_of_perimeter"],
                     error_type=decision.error_type,
                 )
-                return func(*args, **kwargs)
+                return (yield)
             if mode == "ask":
                 from gc_core.security.confirm_port import request_confirm
-                confirmed = request_confirm(
+                # В поток, а не на event loop: режим `ask` здесь — умолчание, то
+                # есть обычный путь, а не край.
+                confirmed = (yield OffLoop(functools.partial(
+                    request_confirm,
                     title="Политика URL",
                     question=f"Разрешить запрос вне политики URL: {decision.url}?",
                     fields=[
@@ -166,7 +169,7 @@ def enforce_url_policy(
                     ],
                     ctx=context.ctx,
                     decision_key=f"url:{decision.url}",
-                )
+                ), on_interrupt=False))
                 if confirmed:
                     audit_policy_decision(
                         context,
@@ -176,7 +179,7 @@ def enforce_url_policy(
                         risk_flags=["out_of_perimeter"],
                         error_type=decision.error_type,
                     )
-                    return func(*args, **kwargs)
+                    return (yield)
                 error["type"] = "url_blocked_by_policy_cancelled_by_user"
                 error["message"] = (
                     f"User declined the request to '{decision.url}'. Do NOT retry the same "
@@ -204,7 +207,7 @@ def enforce_url_policy(
                 ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator
 

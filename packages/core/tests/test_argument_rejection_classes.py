@@ -2,7 +2,7 @@
 
 import pytest
 
-from gc_core.tools import build_tools_data
+from gc_core.tools import abuild_tools_data
 from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
 
 CONFIG = {
@@ -14,8 +14,8 @@ CONFIG = {
 
 
 @pytest.fixture(scope="module")
-def specs() -> dict:
-    tools_data, _, _, _ = build_tools_data(CONFIG)
+async def specs() -> dict:
+    tools_data, _, _, _ = await abuild_tools_data(CONFIG)
     return {name: entry["spec"] for name, entry in tools_data.items()}
 
 

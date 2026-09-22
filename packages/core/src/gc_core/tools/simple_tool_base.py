@@ -24,7 +24,7 @@ class AbstractSimpleTool(ABC):
         backend = getattr(ctx, "os_backend", None)
         if backend is None:
             raise RuntimeError(
-                f"{type(self).__name__}: ctx.os_backend is missing; use create_run_context()"
+                f"{type(self).__name__}: ctx.os_backend is missing; use acreate_run_context()"
             )
         return backend
 
@@ -41,7 +41,7 @@ class AbstractSimpleTool(ABC):
         if not isinstance(workspace, ExecutionWorkspace):
             raise RuntimeError(
                 f"{type(self).__name__}: ctx.workspace is missing; "
-                f"create_run_context() must assemble ExecutionWorkspace"
+                f"acreate_run_context() must assemble ExecutionWorkspace"
             )
         return workspace
 
@@ -66,8 +66,25 @@ class AbstractSimpleTool(ABC):
         pass
 
     @abstractmethod
-    def __call__(self, *args, **kwargs) -> str:
-        pass
+    async def acall(self, *args, **kwargs) -> str:
+        """Вызов тула. Форма ОДНА — асинхронная.
+
+        Раньше абстрактным был синхронный ``__call__``, а ``acall`` считался
+        необязательной «быстрой формой»: диспетчер смотрел, объявлена ли она, и
+        без неё уводил тул в поток из общего пула. Это создавало две формы у
+        каждого тула и третью ступень в диспетчере — ради возможности, которой
+        нет: зарегистрировать свой Python-класс-тул извне нельзя вовсе,
+        ``build_tools_data`` собирает набор из ``config_dict``, а точка
+        расширения для чужих тулов — MCP, и она асинхронна насквозь.
+
+        Асинхронность формы НЕ означает, что тело обязано что-то ждать.
+        Файловые и короткие тулы исполняют его инлайн на loop, потому что у
+        файлов нативной асинхронной формы нет, а поход в пул стоит дороже
+        самой работы (40 мкс против микросекунд). Разница между «нативно» и
+        «инлайн» живёт внутри ``acall`` и сторожится отдельно
+        (``test_native_async_tools``, ``test_file_tools_run_inline``).
+        """
+        raise NotImplementedError
 
     @classmethod
     def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:

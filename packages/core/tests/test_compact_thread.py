@@ -1,8 +1,12 @@
 """compact_thread: грузит тред + форс-сжатие через координатор."""
 import types
 
+from gc_core.thread_store_async import athread_store
+from gc_core.thread_store_file import FileThreadStore
+
 from gc_core import agent_executor as ae
 from gc_core import manual_compaction as mc
+from gc_testkit import run_coro
 
 
 def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
@@ -18,14 +22,20 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     class _Coord:
         def __init__(self, **kw):
             captured["coord_state"] = kw["state"]
-        def force_compact_once(self, **kw):
+        async def aforce_compact_once(self, **kw):
             captured["forced"] = True
         def on_summary_applied(self, ev):
             pass
 
     class _FakeState:
-        # Мокаем State, чтобы НЕ дёргать реальный конструктор (он зовёт
-        # get_project_data → WMI-хэнг на Windows). Capture messages.
+        # Мокаем State, чтобы НЕ дёргать реальный конструктор. Прежняя причина
+        # («он зовёт get_project_data → WMI-хэнг на Windows») ушла: сбор данных
+        # о проекте переехал в `acreate`, конструктор в файловую систему не
+        # ходит. Мок остаётся ради перехвата сообщений.
+        @classmethod
+        async def acreate(cls, **kw):
+            return cls(**kw)
+
         def __init__(self, **kw):
             self.messages = []
             self.backend_api_mode = "responses"
@@ -37,7 +47,10 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
         def init_user_turn_seq(self, v): pass
         def infer_user_turn_seq_if_missing(self): pass
 
-    monkeypatch.setattr(mc, "ThreadSession", types.SimpleNamespace(from_config=lambda **kw: _TS()))
+    async def _afrom(**kw):
+        return _TS()
+
+    monkeypatch.setattr(mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom))
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
     monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
@@ -53,7 +66,7 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     ex._state = None
     ex._stop_pending = False
 
-    ok = ex.compact_thread("t1", system="cli")
+    ok = run_coro(ex.acompact_thread("t1", system="cli"))
     assert ok is True
     assert captured.get("forced") is True
     # история треда загружена в state, по которому идёт сжатие
@@ -64,13 +77,24 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
     import threading
     # Логика compact_thread живёт в manual_compaction (mc) — патчим ЕГО namespace,
     # а не agent_executor (тот лишь делегирует).
-    monkeypatch.setattr(
-        mc, "ThreadSession",
-        types.SimpleNamespace(from_config=lambda **kw: types.SimpleNamespace(
+    _store = FileThreadStore(str(tmp_path))
+
+    async def _afrom_config(**kw):
+        return types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
             meta=baseline_meta, thread_id="t1", system_id="cli",
             threads_dir=str(tmp_path),
-        )),
+            # Хранилище: ручная компакция пишет token_usage через него, а не
+            # через модульные функции — иначе у встраивающего с базой эта
+            # запись уходила бы на диск мимо остального треда.
+            store=_store,
+            # ...и ходит она туда через асинхронный порт: тред может лежать в
+            # базе, и ждать её надо нативно.
+            port=athread_store(_store),
+        )
+
+    monkeypatch.setattr(
+        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom_config),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", coord_cls)
@@ -90,6 +114,10 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
 
 
 class _UsageState:
+    @classmethod
+    async def acreate(cls, **kw):
+        return cls(**kw)
+
     """State-заглушка с .usage (реальный конструктор State тяжёл/WMI-хэнг)."""
     def __init__(self, **kw):
         from gc_core.usage.account import UsageAccount
@@ -114,7 +142,7 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
 
     class _Coord:
         def __init__(self, **kw): self.state = kw["state"]
-        def force_compact_once(self, **kw):
+        async def aforce_compact_once(self, **kw):
             # имитируем summary LLM-вызов внутри компакции
             self.state.usage.add("summary", 30000, 500)
         def on_summary_applied(self, ev): pass
@@ -124,7 +152,7 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
         baseline_meta={"token_usage": baseline.to_meta()},
         coord_cls=_Coord, state_cls=_UsageState,
     )
-    assert ex.compact_thread("t1", system="cli") is True
+    assert run_coro(ex.acompact_thread("t1", system="cli")) is True
 
     # Читаем РЕАЛЬНО сохранённую meta и проверяем TOP-LEVEL token_usage — именно
     # его гидрирует run() (регресс: писали в meta["tui"], run() его не видит).
@@ -142,7 +170,7 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
 
     class _Coord:
         def __init__(self, **kw): self.state = kw["state"]
-        def force_compact_once(self, **kw):
+        async def aforce_compact_once(self, **kw):
             self.state.usage.add("summary", 30000, 500)
         def on_summary_applied(self, ev): pass
 
@@ -153,7 +181,7 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
     live = _UsageState(thread_id="t1")
     ex._state = live
 
-    ex.compact_thread("t1", system="cli")
+    run_coro(ex.acompact_thread("t1", system="cli"))
     assert ex._state.usage.by_category["summary"]["input"] == 30000
 
 
@@ -166,4 +194,4 @@ def test_compact_thread_noop_in_responses(monkeypatch, tmp_path):
     )
     ex._lock = __import__("threading").Lock()
     ex._state = None
-    assert ex.compact_thread("t1", system="cli") is False
+    assert run_coro(ex.acompact_thread("t1", system="cli")) is False

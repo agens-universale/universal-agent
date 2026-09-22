@@ -3,6 +3,15 @@
 чтение — FinishGateGuard.enabled. CLI/server ключ finish_gate_smart не ставят."""
 import pytest
 from types import SimpleNamespace
+from gc_testkit import run_coro
+
+
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return _wrapped
+
 
 
 def test_schema_default_is_smart():
@@ -131,7 +140,7 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.states import State
 
-    def stub_turn_finish_apply(**kwargs):
+    async def stub_turn_finish_apply(**kwargs):
         tool_name = kwargs.get("tool_name")
         arguments = kwargs.get("arguments")
         if tool_name != "turn_finish":
@@ -155,7 +164,7 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
 
     gate_calls: list = []
 
-    def _capture(**_kwargs):
+    async def _capture(**_kwargs):
         gate_calls.append(1)
         return ValidationResult(
             ok=True, action="accept", trace_ok=True, report_ok=True,
@@ -164,12 +173,12 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         )
 
     monkeypatch.setattr(
-        intent_guard_guard, "validate_final_report_vs_user_intent", _capture
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
     )
 
     phase = {"n": 0}
 
-    def _fake_user_ask(_messages, _state, _ctx):
+    async def _fake_user_ask(_messages, _state, _ctx):
         phase["n"] += 1
         if phase["n"] == 1:
             return [{
@@ -192,10 +201,12 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
             "id": "fc_finish",
         }], "r2"
 
-    monkeypatch.setattr(pr, "process_user_ask", _fake_user_ask)
-    monkeypatch.setattr(pr, "apply_tool", stub_turn_finish_apply)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_user_ask)
+    # Заглушка КОРУТИННАЯ: ядро ждёт `aapply_tool` нативно, синхронная даёт
+    # "object str can't be used in 'await' expression".
+    monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
     monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
 
     state = State(
         verbose=False,
@@ -231,12 +242,12 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         auth_connector=None,
     )
 
-    result = pr.run_agent(
+    result = run_coro(pr.arun_agent(
         [{"role": "user", "content": "сделай X", "id": "m0"}],
         state,
         ctx,
         get_pending_messages=get_pending,
-    )
+    ))
 
     assert pending_sent["done"] is True
     assert counter_when_pending == [1]          # mid-turn не сбросил счётчик

@@ -4,22 +4,27 @@ from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
 from gc_core.message_format.dialog_history import build_history_text, group_into_turns, message_text_limited, split_turns_into_char_batches, trim_history_to_max_dialogue_chars, trim_original_user_messages_to_max_chars
 from gc_core.summarize.compaction import apply_summary_state_patch
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
-from gc_core.summarize.thread_summarizer import summarize_dialog_via_chat_completions
+from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit import run_coro
 
 
 def _patch_chat_completion(monkeypatch, fake):
     """Патчит имя там, где оно связано после `from ... import ...`."""
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.request_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.request_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
+    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
 
 
 def _patch_memory_patch_empty(monkeypatch):
     empty = types.SimpleNamespace(request_messages=[], raw_response="")
+
+    async def _empty_patch(**_k):
+        return empty
+
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
-        lambda **_k: empty,
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        _empty_patch,
     )
 
 
@@ -69,7 +74,7 @@ def _valid_summary(seed: str) -> str:
 def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
     calls = []
 
-    def _never_call(**kwargs):
+    async def _never_call(**kwargs):
         calls.append(kwargs)
         return "should_not_happen"
 
@@ -77,11 +82,11 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
     _patch_chat_completion(monkeypatch, _never_call)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(),
         state=_state(),
         full_history_messages=[],
-    )
+    ))
     assert result["raw_summary"] == ""
     assert result["last_dialog_steps"] == ""
     assert result["num_batches"] == 0
@@ -92,7 +97,7 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     history = _flatten_turns([_make_turn("first user", "first assistant")])
     calls = []
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         calls.append(kwargs)
         return _valid_summary("single-batch")
 
@@ -100,11 +105,11 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert "single-batch" in result["raw_summary"]
     assert result["num_batches"] == 1
     assert len(calls) == 1
@@ -113,10 +118,10 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
 def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch):
     history = _flatten_turns([_make_turn("hi", "hello")])
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         return _valid_summary("with-memory")
 
-    def _fake_replace(**_kwargs):
+    async def _fake_replace(**_kwargs):
         return types.SimpleNamespace(
             request_messages=[],
             raw_response=(
@@ -130,7 +135,7 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_patch_replace",
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         _fake_replace,
     )
 
@@ -141,11 +146,11 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
         dialog_steps_offset=0,
         previous_response_id=None,
     )
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=state,
         full_history_messages=history,
-    )
+    ))
     content = apply_summary_state_patch(
         state=state,
         raw_summary=result["raw_summary"],
@@ -168,10 +173,10 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
     """Smoke §10: replace-patch must drop stale TODO from state register, not append."""
     history = _flatten_turns([_make_turn("done with old task", "ack")])
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         return _valid_summary("replace-state")
 
-    def _fake_replace(**_kwargs):
+    async def _fake_replace(**_kwargs):
         return types.SimpleNamespace(
             request_messages=[],
             raw_response=(
@@ -184,7 +189,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
 
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -200,11 +205,11 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
         user_intent_log=[],
         current_user_intent=[],
     )
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=state,
         full_history_messages=history,
-    )
+    ))
     assert result["num_batches"] == 1
     assert result["trace"]["memory_patch"]["executed"] is True
 
@@ -228,7 +233,7 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
 def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
     history = _flatten_turns([_make_turn("user request", "assistant")])
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         user_content = next((m["content"] for m in kwargs["messages"] if m["role"] == "user"), "")
         assert "<user_intent_log" not in user_content
         assert "<current_user_intent>" not in user_content
@@ -239,13 +244,13 @@ def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    summarize_dialog_via_chat_completions(
+    run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
         user_intent_log=user_ask_records("closed intent", turn=1),
         current_user_intent=user_ask_records("open intent", turn=2),
-    )
+    ))
 
 
 def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
@@ -258,7 +263,7 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
     seen_user_prompts = []
     responses = iter([_valid_summary("batch-1"), _valid_summary("batch-2")])
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         messages = kwargs["messages"]
         user_content = next((m["content"] for m in messages if m["role"] == "user"), "")
         seen_user_prompts.append(user_content)
@@ -266,19 +271,19 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
 
     replace_calls = []
 
-    def _fake_replace(**kwargs):
+    async def _fake_replace(**kwargs):
         replace_calls.append(kwargs)
         return types.SimpleNamespace(request_messages=[], raw_response="")
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=4500),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert result["num_batches"] == 2
     assert "batch-2" in result["raw_summary"]
     assert len(seen_user_prompts) == 2
@@ -448,7 +453,7 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
     seen_user_prompts = []
     calls = {"n": 0}
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         calls["n"] += 1
         messages = kwargs["messages"]
         user_content = next((m["content"] for m in messages if m["role"] == "user"), "")
@@ -465,11 +470,11 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
 
     ctx = _ctx(trigger_chars=4500)
     ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=ctx,
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert "final-summary" in result["raw_summary"]
     assert calls["n"] >= 3
     assert any("compressed-summary" in prompt for prompt in seen_user_prompts)
@@ -531,7 +536,7 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         wrapped,
     )
 
-    def _fake_request(**_kwargs):
+    async def _fake_request(**_kwargs):
         return valid_summary_xml_for_tests(seed="x")
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
@@ -542,11 +547,11 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
     ]
-    summarize_dialog_via_chat_completions(
+    run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=types.SimpleNamespace(default_model="m"),
         full_history_messages=history,
-    )
+    ))
     assert captured
     assert all(k.get("max_chars") == 0 for k in captured)
 
@@ -554,19 +559,19 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
 def test_summarize_merges_existing_user_intent_log(monkeypatch):
     history = _flatten_turns([_make_turn("new user request", "assistant reply")])
 
-    def _fake_request(**_kwargs):
+    async def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
         user_intent_log=user_ask_records("older user request", "new user request", turn=1),
-    )
+    ))
     assert result["user_intent_log"] == meta_intent_log(
         "older user request",
         "new user request",
@@ -596,14 +601,14 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
         ]
     )
 
-    def _fake_request(**_kwargs):
+    async def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
@@ -614,7 +619,7 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
             "fourth user request",
             turn=1,
         ),
-    )
+    ))
 
     assert result["user_intent_log"] == meta_intent_log(
         "first user request",
@@ -627,19 +632,19 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
 def test_summarize_filters_technical_messages_from_user_intent_log(monkeypatch):
     history = _flatten_turns([_make_turn("real request", "assistant")])
 
-    def _fake_request(**_kwargs):
+    async def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
         user_intent_log=user_ask_records("real request", turn=1),
-    )
+    ))
     assert result["user_intent_log"] == meta_intent_log("real request")
 
 
@@ -647,7 +652,7 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
     history = _flatten_turns([_make_turn("u1", "a1")])
     calls = {"n": 0}
 
-    def _fake_request(**kwargs):
+    async def _fake_request(**kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             return "[assistant] raw transcript"
@@ -657,11 +662,11 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert "repaired" in result["raw_summary"]
     assert calls["n"] == 2
 
@@ -670,33 +675,33 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(m
     history = _flatten_turns([_make_turn("u1", "a1")])
     llm_calls = {"repair": 0}
 
-    def _fake_summary(**_kwargs):
+    async def _fake_summary(**_kwargs):
         return _valid_summary("single-batch")
 
-    def _fake_replace(**_kwargs):
+    async def _fake_replace(**_kwargs):
         return types.SimpleNamespace(
             request_messages=[{"role": "user", "content": "memory-step"}],
             raw_response=("narrative output without xml tags " + ("x" * 150)),
         )
 
-    def _fake_repair(**_kwargs):
+    async def _fake_repair(**_kwargs):
         llm_calls["repair"] += 1
         return "<goal>repaired memory body</goal>"
 
     monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
     _patch_chat_completion(monkeypatch, _fake_summary)
     _patch_memory_patch_empty(monkeypatch)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.request_patch_replace", _fake_replace)
+    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
     monkeypatch.setattr(
-        "gc_core.summarize.memory_suggestions.request_memory_deltas_format_repair",
+        "gc_core.summarize.memory_suggestions.arequest_memory_deltas_format_repair",
         _fake_repair,
     )
 
-    result = summarize_dialog_via_chat_completions(
+    result = run_coro(asummarize_dialog_via_chat_completions(
         ctx=_ctx(trigger_chars=999999),
         state=_state(),
         full_history_messages=history,
-    )
+    ))
     assert result["memory_replace_deltas"].goal == "repaired memory body"
     assert result["trace"]["memory_patch"]["replace"]["format_repair_attempted"] is True
     assert result["trace"]["memory_patch"]["replace"]["format_repair_success"] is True

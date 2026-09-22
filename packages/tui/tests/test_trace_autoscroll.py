@@ -144,7 +144,7 @@ async def test_command_output_forces_scroll(tmp_path):
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._stick_bottom = False                          # отскроллен вверх читать
-        scr._handle_command("такой-команды-нет")           # пишет error-строку в трейс
+        await scr._handle_command("такой-команды-нет")           # пишет error-строку в трейс
         await pilot.pause(0.1)                             # скролл отложен (call_after_refresh)
         assert calls    # результат команды (force) форсит скролл вниз
 
@@ -164,7 +164,7 @@ async def test_command_opening_screen_does_not_scroll(tmp_path):
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._stick_bottom = False                          # отскроллен вверх читать
         scr._trace_is_at_bottom = lambda: False
-        scr._handle_command("help")                        # push_screen, трейс не растёт
+        await scr._handle_command("help")                        # push_screen, трейс не растёт
         await pilot.pause()
         assert calls == []     # экран-команда не трогает скролл трейса
 

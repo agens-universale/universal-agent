@@ -6,6 +6,7 @@ import pytest
 
 from gc_core import request_backend_policy as policy
 from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_testkit import run_coro
 
 
 def _embedded_504_response():
@@ -27,15 +28,24 @@ def _ok_response():
 
 
 def _patch_transport(monkeypatch, responder):
-    monkeypatch.setattr(policy.time, "sleep", lambda *_a, **_k: None)  # без задержек
+    """Подменить транспорт политики.
+
+    С Задачи 11 политика зовёт асинхронный транспорт (сама она тоже
+    асинхронна, синхронный вход — шим через портал), поэтому и фейк
+    корутинный, и пауза между попытками — asyncio.sleep.
+    """
+    async def _no_sleep(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(policy.asyncio, "sleep", _no_sleep)  # без задержек
     calls = {"n": 0}
 
-    def _fake_request(payload, headers, url, verify, use_retry, logger,
-                      on_delta, cert=None, timeout=600, config_proxy=None):
+    async def _fake_request(payload, headers, url, verify, use_retry, logger,
+                            on_delta, cert=None, timeout=600, config_proxy=None):
         calls["n"] += 1
         return responder(calls["n"])
 
-    monkeypatch.setattr(policy, "request_backend_chat_completions", _fake_request)
+    monkeypatch.setattr(policy, "arequest_backend_chat_completions", _fake_request)
     return calls
 
 
@@ -50,7 +60,7 @@ def _run_policy(**overrides):
         use_retry=False,
     )
     kwargs.update(overrides)
-    return policy.request_chat_completions_with_policy(**kwargs)
+    return run_coro(policy.arequest_chat_completions_with_policy(**kwargs))
 
 
 def test_embedded_504_retried_then_succeeds(monkeypatch):

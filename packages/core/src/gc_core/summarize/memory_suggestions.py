@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from gc_core.summarize.llm import request_summary_text
+from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.prompt_loading import load_memory_patch_replace_prompt
 from gc_core.summarize.working_memory_gateway import MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL, build_memory_deltas_format_repair_messages
 from gc_core.bundled_assets import bundled_root
@@ -14,6 +14,8 @@ _PROJECT_ROOT = str(bundled_root())
 DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
     os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md")
 )
+
+
 
 
 @dataclass
@@ -39,7 +41,7 @@ def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
     return os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
 
 
-def _request_patch(
+async def _arequest_patch(
     *,
     ctx: Any,
     state: Any,
@@ -47,13 +49,17 @@ def _request_patch(
     user_prompt: str,
     request_label: str,
 ) -> MemoryPatchLlmResult:
+    """Транспорт memory-patch шага: собрать messages и сходить в aux-LLM.
+
+    Реализация одна и она здесь; ``_request_patch`` — синхронный шим над ней.
+    """
     logger = getattr(ctx, "logger", None)
     request_messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    # Dirty logged inside request_summary_text / aux choke; return is projected.
-    projected = request_summary_text(
+    # Dirty logged inside arequest_summary_text / aux choke; return is projected.
+    projected = await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,
@@ -72,7 +78,7 @@ def _is_subagent_state(state: Any) -> bool:
     return getattr(state, "parent_state_id", None) is not None
 
 
-def request_patch_replace(
+async def arequest_patch_replace(
     *,
     ctx: Any,
     state: Any,
@@ -80,7 +86,10 @@ def request_patch_replace(
     summary_text: str,
     persistent_state_block: str = "",
 ) -> MemoryPatchLlmResult:
-    """LLM step: full replace snapshots for all working_memory registers."""
+    """LLM step: full replace snapshots for all working_memory registers.
+
+    Основная реализация шага; ``request_patch_replace`` — синхронный шим.
+    """
     prompt_path = _resolve_prompt_path(
         ctx,
         "chat_completions_memory_patch_replace_prompt_path",
@@ -99,7 +108,7 @@ def request_patch_replace(
         "</current_summary>\n\n"
         f"{str(persistent_state_block or '').strip()}\n"
     )
-    return _request_patch(
+    return await _arequest_patch(
         ctx=ctx,
         state=state,
         system_prompt=system,
@@ -108,7 +117,7 @@ def request_patch_replace(
     )
 
 
-def request_memory_deltas_format_repair(
+async def arequest_memory_deltas_format_repair(
     *,
     ctx: Any,
     state: Any,
@@ -116,11 +125,14 @@ def request_memory_deltas_format_repair(
     max_tokens: int | None = None,
     full_replace: bool = False,
 ) -> str:
-    """LLM transport: переформатировать сырой ответ memory-step в register-теги."""
+    """LLM transport: переформатировать сырой ответ memory-step в register-теги.
+
+    Основная реализация починки формата; синхронное имя оставлено шимом.
+    """
     request_messages = build_memory_deltas_format_repair_messages(
         raw_output, full_replace=full_replace
     )
-    return request_summary_text(
+    return await arequest_summary_text(
         ctx=ctx,
         state=state,
         messages=request_messages,

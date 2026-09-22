@@ -333,7 +333,7 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
         # Имитируем submit event Textual'а напрямую — в Pilot Enter в TextArea
         # обработывается, но дёргаем хендлер явно ради изоляции.
         submitted = CommandTextArea.Submitted(value="да, поехали")
-        screen.on_command_text_area_submitted(submitted)
+        await screen.on_command_text_area_submitted(submitted)
         await pilot.pause()
         # Runner получил текст.
         assert runner.submitted == ["да, поехали"]
@@ -381,7 +381,7 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
         from gc_tui.widgets.command_input import CommandTextArea
         inp = screen.query_one("#cmdinput", CommandTextArea)
         inp.text = "go"
-        screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="go"))
+        await screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="go"))
         await pilot.pause()
         # Симулируем приход output-а через тот же путь, что и polling.
         ev_out = map_message(

@@ -1,4 +1,4 @@
-"""Проводка гварда в нативную ветку: предикат уходит ВНУТРЬ run_native_grep.
+"""Проводка гварда в нативную ветку: предикат уходит ВНУТРЬ arun_native_grep.
 
 Если фильтровать то, что вернулось, фильтруется уже обрезанный по limit список:
 запрещённые совпадения съедают бюджет, разрешённые молча теряются. Тест
@@ -10,6 +10,7 @@ import json
 from gc_core.utils import native_fs_search as native_fs_search
 from gc_core.utils.native_fs_search import NativeGrepResult
 from gc_core.tools.fs.find_in_files import FindInFiles
+from gc_testkit import as_coro
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
@@ -35,7 +36,7 @@ def test_native_branch_hands_the_predicate_to_run_native_grep(tmp_path, monkeypa
         seen.update(kwargs)
         return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=False)
 
-    monkeypatch.setattr(native_fs_search, "run_native_grep", spy)
+    monkeypatch.setattr(native_fs_search, "arun_native_grep", as_coro(spy))
 
     tool = with_local_ctx(FindInFiles, config_dict=_cfg(tmp_path))
     backend_cls = type(tool._backend)
@@ -67,7 +68,7 @@ def test_capture_cap_below_limit_stays_native_with_output_capped(tmp_path, monke
             hit_capture_cap=True,
         )
 
-    monkeypatch.setattr(native_fs_search, "run_native_grep", spy)
+    monkeypatch.setattr(native_fs_search, "arun_native_grep", as_coro(spy))
 
     tool = with_local_ctx(FindInFiles, config_dict=_cfg(tmp_path))
     backend_cls = type(tool._backend)

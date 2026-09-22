@@ -1,8 +1,14 @@
 """transcribe(): multipart WAV на /v1/audio/transcriptions — реальная payload-форма."""
+import socket
+
+import httpx
 import pytest
+
+from gc_testkit.net_support import tls_failure
 
 from gc_tui.voice import transcriber as tr
 from gc_tui.voice.errors import VoiceError
+from gc_tui.voice_runtime import net as net
 
 
 class FakeResponse:
@@ -70,3 +76,51 @@ def test_non_object_payload_becomes_human_error(monkeypatch):
     monkeypatch.setattr(tr, "voice_post", lambda url, **kw: FakeResponse(200, ["oops"]))
     with pytest.raises(VoiceError, match="не по протоколу"):
         tr.transcribe(b"\x00", OPENAI_CFG)
+
+
+def test_network_failure_becomes_human_error(monkeypatch):
+    """Сеть отказала — человеку «STT недоступен», а не сырой httpx.
+
+    Ловились `requests.RequestException`, а POST давно идёт клиентом ядра на
+    httpx: не совпадало ни одно, и наружу летел `httpx.ConnectError`."""
+    def boom(url, **kw):
+        raise httpx.ConnectError("[Errno 61] Connection refused")
+
+    monkeypatch.setattr(tr, "voice_post", boom)
+    with pytest.raises(VoiceError, match="STT недоступен"):
+        tr.transcribe(b"\x00", OPENAI_CFG)
+
+
+def test_real_refused_connection_becomes_human_error():
+    """То же без подмен: закрытый порт на этой же машине, настоящий httpx.
+
+    Порт занимаем и тут же отпускаем — так отказ приходит сразу и наверняка.
+    Фиксированный номер (вроде 9) в нагруженной среде даёт таймаут вместо
+    отказа, и тест начинает мигать: так он и упал в полном прогоне."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    cfg = dict(OPENAI_CFG, url=f"http://127.0.0.1:{port}/v1/audio/transcriptions",
+               timeout_seconds=5)
+    with pytest.raises(VoiceError, match="STT недоступен"):
+        tr.transcribe(b"\x00" * 320, cfg)
+
+
+def test_tls_error_is_not_swallowed(monkeypatch):
+    """TLS — не отказ сервиса: его обязан увидеть corp-retry, а не VoiceError.
+
+    Иначе однократная инъекция системного траста не случится, и за корп-прокси с
+    собственным CA голос будет молча «недоступен»."""
+    net.reset_for_tests()
+    monkeypatch.setattr(net, "_inject", lambda: None)
+    calls = {"n": 0}
+
+    def boom(url, **kw):
+        calls["n"] += 1
+        raise tls_failure()
+
+    monkeypatch.setattr(tr, "voice_post", boom)
+    with pytest.raises(httpx.ConnectError):
+        tr.transcribe(b"\x00", OPENAI_CFG)
+    assert calls["n"] == 2                     # инъекция траста и повтор

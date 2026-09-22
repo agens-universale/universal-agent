@@ -1,10 +1,13 @@
 import glob
 import json
+import logging
 import os
 import re
 import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Any, Set, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
@@ -15,6 +18,7 @@ from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.aio_compat import await_callback
 
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -287,6 +291,37 @@ def append_subagent_trace_record(
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return record
+
+
+def restore_subagent_trace_records(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    records: List[Dict[str, Any]],
+) -> None:
+    """Записать трассу КАК ЕСТЬ: со своими ``ts`` и ``seq``.
+
+    Нужно ровно одному сценарию — возврату трассы на место после того, как
+    ``reset`` снёс её вместе с историей (см. ``replace_messages``). Обычный
+    ``append_subagent_trace_record`` там не годится: он безусловно ставит
+    свежее время и следующий номер, и после каждой компакции у ВСЕЙ трассы
+    дата равнялась моменту компакции, а нумерация начиналась заново. Трасса
+    переставала быть хронологией — ровно тем, ради чего её и спасали.
+
+    Кэш номеров подводится под максимум записанного: иначе следующий append
+    выдал бы номер, который уже занят.
+    """
+    path = subagent_trace_path(threads_dir, system_id, thread_id)
+    if not records:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _sidecar_seq_lock:
+        with open(path, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _sidecar_last_seq[path] = max(
+            (int(r.get("seq") or 0) for r in records), default=0
+        )
 
 
 def read_subagent_trace(
@@ -564,14 +599,77 @@ def append_new_thread_messages(
             known_message_keys.add(key)
             written_payloads.append(message)
             wrote += 1
-    if wrote:
-        sys_norm = sanitize_system_id(system_id)
-        meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
-        bump_live_volume_for_messages(
-            meta, written_payloads, tags=tags, strip_think=strip_think
-        )
-        save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    # Счётчики живого объёма ЗДЕСЬ НЕ БАМПАЮТСЯ: это делает `ThreadSession`,
+    # одинаково для любого хранилища. Пока бампал файловый слой, у хранилища
+    # в базе ключей `live_*` не появлялось вовсе, а TUI их читает.
+    #
+    # Параметры `tags` / `strip_think` остаются в сигнатуре ради совместимости
+    # (их передаёт develop и зовут тесты), но здесь не используются: сам бамп,
+    # которому они нужны, переехал в `ThreadSession._persist_batch_meta` — там
+    # он и получает их из конфигурации проекции.
     return wrote
+
+
+def archive_and_replace_thread_files(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    messages: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Отложить файлы треда в архив и записать вместо них ``messages``.
+
+    Файловая часть компакции. Жила прямо в ``ThreadSession`` и работала с
+    ``self.threads_dir`` мимо контракта: у хранилища без файлов эта строка
+    пустая, и запись уходила в относительный путь от текущего каталога — молча,
+    без ошибки. Здесь она стала необязательной СПОСОБНОСТЬЮ файлового
+    хранилища, а сессия, не найдя её, замещает историю через ``reset`` +
+    ``append_messages``.
+
+    Перенос файлов — с откатом: если переехал только meta, он возвращается на
+    место, иначе тред остался бы без метаданных при целой истории.
+    """
+    data_path, meta_path = _thread_paths(threads_dir, system_id, thread_id)
+    ts_suffix = _utc_now_suffix()
+    archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
+    archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
+
+    data_exists = os.path.exists(data_path)
+    meta_exists = os.path.exists(meta_path)
+    moved_data = False
+    moved_meta = False
+    try:
+        if data_exists:
+            atomic_replace(data_path, archive_data_path)
+            moved_data = True
+        if meta_exists:
+            atomic_replace(meta_path, archive_meta_path)
+            moved_meta = True
+    except Exception:
+        if moved_meta and not os.path.exists(meta_path):
+            atomic_replace(archive_meta_path, meta_path)
+        if moved_data and not os.path.exists(data_path):
+            atomic_replace(archive_data_path, data_path)
+        raise
+
+    seq = 0
+    with open(data_path, "w", encoding="utf-8") as fd:
+        for message in messages:
+            seq += 1
+            record = {
+                "type": "message",
+                "thread_id": thread_id,
+                "system": sanitize_system_id(system_id),
+                "seq": seq,
+                "ts": _utc_now_iso(),
+                "payload": message,
+            }
+            fd.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    return {
+        "archive_suffix": ts_suffix,
+        "archive_data_path": archive_data_path if data_exists else None,
+        "archive_meta_path": archive_meta_path if meta_exists else None,
+    }
 
 
 class ThreadSession:
@@ -580,6 +678,7 @@ class ThreadSession:
         *,
         threads_dir: str,
         system_id: str,
+        store: Any = None,
         thread_id: str,
         history_messages: List[Dict[str, Any]],
         known_message_keys: Set[str],
@@ -591,6 +690,13 @@ class ThreadSession:
         strip_think: bool = True,
     ):
         self.threads_dir = threads_dir
+        # Хранилище сессии. None — файловое по умолчанию: сессию собирают и
+        # напрямую (тесты, ручные сценарии), и ломать их не за что.
+        if store is None:
+            from gc_core.thread_store_file import FileThreadStore
+
+            store = FileThreadStore(threads_dir)
+        self.store = store
         self.system_id = sanitize_system_id(system_id)
         self.thread_id = thread_id
         self.history_messages = history_messages
@@ -604,20 +710,85 @@ class ThreadSession:
         self.runtime_messages: List[Dict[str, Any]] = []
         # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
         self.known_keys_snapshot_before_last_batch: Optional[frozenset[str]] = None
+        self._port: Any = None
+
+    @property
+    def port(self) -> Any:
+        """Асинхронный порт хранилища. Резолвится ОДИН раз, при первом обращении.
+
+        Лениво, а не в ``__init__``, намеренно: синхронные вызывающие (тесты,
+        ручные сценарии, TUI) не должны платить за проверку, которая им не
+        нужна. Громкий отказ на негодном хранилище стоит в
+        ``create_run_context`` — это и есть точка проводки, где встраивающий
+        передаёт своё хранилище.
+        """
+        if self._port is None:
+            from gc_core.thread_store_async import athread_store
+
+            self._port = athread_store(self.store)
+        return self._port
 
     @classmethod
-    def from_config(
-        cls, *, config_dict: Dict[str, Any], system_id: str, thread_id: str
+    async def afrom_config(
+        cls,
+        *,
+        config_dict: Dict[str, Any],
+        system_id: str,
+        thread_id: str,
+        store: Any = None,
     ) -> "ThreadSession":
+        """Загрузить тред. ``store`` не передан — файловое хранилище, как раньше.
+
+        ЕДИНСТВЕННАЯ форма. Параметр ``store`` — точка подмены для
+        встраивающего: своя реализация (например поверх базы) передаётся сюда,
+        и сессия больше нигде диска не касается.
+
+        Синхронный близнец снят: производственных вызывающих у него не было ни
+        одного (ядро читает тред только этим путём), а 56 обращений жили в
+        тестах. Держать его значило держать вторую дорогу к тому же треду —
+        мимо порта, то есть мимо адаптера, который и решает, синхронное
+        хранилище или нет.
+        """
+        from gc_core.thread_store_async import athread_store
+
         sys_norm = sanitize_system_id(system_id)
         normalized_thread_id = validate_thread_id(thread_id)
-        threads_dir = resolve_threads_dir(config_dict)
-        ensure_threads_dir(threads_dir)
+        store, threads_dir = cls._resolve_store(config_dict, store)
 
-        meta = load_thread_meta(threads_dir, sys_norm, normalized_thread_id)
-        history_messages, known_message_keys, max_seq = load_thread_messages(
-            threads_dir, sys_norm, normalized_thread_id
+        port = athread_store(store)
+        meta = await port.aload_meta(sys_norm, normalized_thread_id)
+        state = await port.aload_thread_state(sys_norm, normalized_thread_id)
+        session = cls._build(
+            config_dict=config_dict,
+            threads_dir=threads_dir, store=store, sys_norm=sys_norm,
+            thread_id=normalized_thread_id, meta=meta, state=state,
         )
+        session._port = port          # порт уже разрешён — не резолвить второй раз
+        return session
+
+    @staticmethod
+    def _resolve_store(config_dict: Dict[str, Any], store: Any) -> "tuple[Any, str]":
+        """Хранилище и каталог. Чистая часть, общая для sync и async."""
+        if store is not None:
+            return store, getattr(store, "threads_dir", "")
+        # Путь к каталогу нужен ТОЛЬКО файловому хранилищу. Резолвить его
+        # безусловно значило бы требовать `threads_data_path` от того, кто
+        # держит историю в базе и файлов не заводит вовсе — а он и не
+        # обязан его настраивать. Поймано гейтом на in-memory хранилище.
+        from gc_core.thread_store_file import FileThreadStore
+
+        threads_dir = resolve_threads_dir(config_dict)
+        store = FileThreadStore(threads_dir)
+        store.ensure_ready()
+        return store, threads_dir
+
+    @classmethod
+    def _build(
+        cls, *, config_dict: Dict[str, Any], threads_dir: str, store: Any,
+        sys_norm: str, thread_id: str, meta: Dict[str, Any], state: Any,
+    ) -> "ThreadSession":
+        """Собрать сессию из прочитанного. Чистая часть, общая для sync и async."""
+        history_messages, known_message_keys, max_seq = state
         previous_response_id = meta.get("previous_response_id")
         if not isinstance(previous_response_id, str) or len(previous_response_id) == 0:
             previous_response_id = None
@@ -629,8 +800,9 @@ class ThreadSession:
 
         return cls(
             threads_dir=threads_dir,
+            store=store,
             system_id=sys_norm,
-            thread_id=normalized_thread_id,
+            thread_id=thread_id,
             history_messages=history_messages,
             known_message_keys=known_message_keys,
             persisted_messages_count=max_seq,
@@ -656,24 +828,20 @@ class ThreadSession:
             combined.append(item)
         return combined
 
-    def persist_batch(
-        self,
-        step_messages: List[Dict[str, Any]],
-        *,
-        previous_response_id: Optional[str],
-    ) -> None:
+    def _persist_batch_begin(self, step_messages: List[Dict[str, Any]]) -> Set[str]:
+        """Снимок ключей ДО записи. Чистая часть — общая для sync и async."""
         known_before = set(self.known_message_keys)
         self.known_keys_snapshot_before_last_batch = frozenset(known_before)
-        written = append_new_thread_messages(
-            self.threads_dir,
-            self.system_id,
-            self.thread_id,
-            step_messages,
-            self.known_message_keys,
-            start_seq=self.persisted_messages_count,
-            tags=self._proj_tags,
-            strip_think=self._proj_strip_think,
-        )
+        return known_before
+
+    def _persist_batch_apply(
+        self,
+        step_messages: List[Dict[str, Any]],
+        known_before: Set[str],
+        written: int,
+        previous_response_id: Optional[str],
+    ) -> None:
+        """Обновить состояние сессии по итогам записи. Чистая часть."""
         self.persisted_messages_count += written
         known_seen = set(known_before)
         for message in step_messages:
@@ -683,11 +851,40 @@ class ThreadSession:
             self.history_messages.append(message)
             known_seen.add(key)
         self.previous_response_id = previous_response_id
-        # Preserve arbitrary meta fields (e.g. shared.working_memory), otherwise tools that
-        # update meta would get their data wiped on the next persist_batch().
-        base_meta = (
-            load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
-        )
+
+    def _persist_batch_meta(
+        self,
+        base_meta: Dict[str, Any],
+        step_messages: Optional[List[Dict[str, Any]]] = None,
+        known_before: Optional[Set[str]] = None,
+    ) -> Dict[str, Any]:
+        """Собрать meta для записи. Чистая часть.
+
+        Вынесено, чтобы синхронный и асинхронный пути не могли разойтись: у них
+        различается ТОЛЬКО последовательность обращений к хранилищу, а вся
+        логика — здесь, в одном экземпляре.
+
+        Счётчики живого объёма (``live_history_chars`` / ``live_msg_count``)
+        считаются ЗДЕСЬ, а не в файловом слое. Раньше их бампал
+        ``append_new_thread_messages``, то есть только файловая реализация:
+        у хранилища в базе этих ключей не появлялось вовсе, а TUI их читает
+        (индикатор объёма контекста). Это производная от сообщений, а не
+        деталь хранения, и место ей в сессии.
+        """
+        base_meta = dict(base_meta or {})
+        if step_messages is not None and known_before is not None:
+            fresh = [
+                m for m in step_messages
+                if make_message_key(m) not in known_before
+            ]
+            if fresh:
+                # Параметры проекции — с develop: без них счётчик считал бы
+                # служебные теги и рассуждения, которых модель не видит.
+                bump_live_volume_for_messages(
+                    base_meta, fresh,
+                    tags=self._proj_tags,
+                    strip_think=self._proj_strip_think,
+                )
         base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["backend_api_mode"] = self.backend_api_mode
@@ -720,74 +917,64 @@ class ThreadSession:
         else:
             base_meta.pop("chat_completions_system_prompt_rendered", None)
         merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
-        save_thread_meta(self.threads_dir, self.system_id, self.thread_id, base_meta)
+        return base_meta
 
-    def archive_and_compact_summary_payload(
+    async def apersist_batch(
         self,
-        summary_payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        step_messages: List[Dict[str, Any]],
+        *,
+        previous_response_id: Optional[str],
+    ) -> None:
+        """Записать батч сообщений и meta. ЕДИНСТВЕННАЯ форма.
+
+        Самый горячий шов контракта: раз за итерацию ``while True`` и раз за
+        тул-колл. Синхронный близнец снят — производственных вызывающих у него
+        не было, а порядок обращений к хранилищу у обоих был один и тот же
+        (сторож этого порядка — в тестах базы хранилища).
+        """
+        known_before = self._persist_batch_begin(step_messages)
+        written = await self.port.aappend_messages(
+            self.system_id,
+            self.thread_id,
+            step_messages,
+            known_keys=self.known_message_keys,
+            start_seq=self.persisted_messages_count,
+        )
+        self._persist_batch_apply(
+            step_messages, known_before, written, previous_response_id
+        )
+        base_meta = await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        await self.port.asave_meta(
+            self.system_id,
+            self.thread_id,
+            self._persist_batch_meta(base_meta, step_messages, known_before),
+        )
+
+    def _compact_summary_message(self, summary_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Сообщение-сводка, которым замещается история. Чистая часть."""
         summary_text = str(summary_payload.get("summary_message_content") or "").strip()
-        user_intent_log = summary_payload.get("user_intent_log")
-        dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
-        data_path, meta_path = _thread_paths(self.threads_dir, self.system_id, self.thread_id)
-        # Diff touched-journal не трогаем: это operational state сессии (как
-        # data_subagents_*), не история диалога. Удаляется только с тредом.
-        # До переноса meta в архив: снимок disk tui/runtime (TUI-ключи не клобберить).
-        disk_meta = load_thread_meta(self.threads_dir, self.system_id, self.thread_id) or {}
-        disk_tui = dict(disk_meta.get("tui") or {})
-        disk_runtime = dict(disk_meta.get("runtime") or {})
-        ts_suffix = _utc_now_suffix()
-        archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
-        archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
-
-        data_exists = os.path.exists(data_path)
-        meta_exists = os.path.exists(meta_path)
-        moved_data = False
-        moved_meta = False
-        try:
-            if data_exists:
-                atomic_replace(data_path, archive_data_path)
-                moved_data = True
-            if meta_exists:
-                atomic_replace(meta_path, archive_meta_path)
-                moved_meta = True
-        except Exception:
-            if moved_meta and not os.path.exists(meta_path):
-                atomic_replace(archive_meta_path, meta_path)
-            if moved_data and not os.path.exists(data_path):
-                atomic_replace(archive_data_path, data_path)
-            raise
-
-        summary_message = {
+        return {
             "role": "user",
             "content": wrap_technical_user_content(
-                (
-                    "Summarized context from previous dialogue.\n"
-                    f"{summary_text}"
-                ),
+                f"Summarized context from previous dialogue.\n{summary_text}",
                 technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
             ),
             "id": generate_message_id_func("m_sum"),
         }
-        compact_messages: List[Dict[str, Any]] = [summary_message]
 
-        known_message_keys: Set[str] = set()
-        seq = 0
-        with open(data_path, "w", encoding="utf-8") as fd:
-            for message in compact_messages:
-                seq += 1
-                record = {
-                    "type": "message",
-                    "thread_id": self.thread_id,
-                    "system": self.system_id,
-                    "seq": seq,
-                    "ts": _utc_now_iso(),
-                    "payload": message,
-                }
-                fd.write(json.dumps(record, ensure_ascii=False) + "\n")
-                known_message_keys.add(make_message_key(message))
-
+    def _compact_meta(
+        self,
+        summary_payload: Dict[str, Any],
+        compact_messages: List[Dict[str, Any]],
+        disk_meta: Dict[str, Any],
+        ts_suffix: str,
+    ) -> Dict[str, Any]:
+        """Собрать meta после компакции. Чистая часть, общая для sync и async."""
         existing_meta = dict(self.meta) if isinstance(self.meta, dict) else {}
+        user_intent_log = summary_payload.get("user_intent_log")
+        dialog_steps_offset = summary_payload.get("dialog_steps_offset", 0)
+        disk_tui = dict(disk_meta.get("tui") or {})
+        disk_runtime = dict(disk_meta.get("runtime") or {})
         shared_data = summary_payload.get("shared")
         now_iso = _utc_now_iso()
         # created_at — birth of the thread; never reset on summary.
@@ -854,18 +1041,146 @@ class ThreadSession:
             )
         )
         new_meta["runtime"] = merged_runtime
-        save_thread_meta(self.threads_dir, self.system_id, self.thread_id, new_meta)
+        return new_meta
 
+    def _compact_apply(
+        self,
+        compact_messages: List[Dict[str, Any]],
+        known_message_keys: Set[str],
+        new_meta: Dict[str, Any],
+    ) -> None:
+        """Перевести сессию в состояние после компакции. Чистая часть."""
         self.history_messages = compact_messages
         self.runtime_messages = []
         self.known_message_keys = known_message_keys
         self.persisted_messages_count = len(compact_messages)
         self.previous_response_id = None
         self.meta = new_meta
+
+    async def _aarchive_via_store(
+        self, compact_messages: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Замещение истории без архива — для хранилищ без файлов.
+
+        Резервный путь, когда хранилище не объявляет способность
+        ``archive_and_replace``. Архива нет, и это честно: «отложить прежнюю
+        историю рядом» осмысленно для файлов, а у базы это либо отдельная
+        таблица, либо не нужно вовсе.
+
+        Через ``areplace_messages``, а не ``areset`` + ``aappend_messages``:
+        ``reset`` по контракту сносит ВЕСЬ тред, включая ``subagent_trace`` —
+        каждая компакция теряла историю вызовов субагентов, — и между ним и
+        последующим ``save_meta`` треда не существовало вовсе. Хранилищу без
+        этого метода (структурная реализация мимо базы) остаётся прежняя пара.
+        """
+        replace = getattr(self.port, "areplace_messages", None)
+        if callable(replace):
+            await replace(self.system_id, self.thread_id, compact_messages)
+        else:
+            await self._areplace_keeping_trace(compact_messages)
         return {
-            "archive_suffix": ts_suffix,
-            "archive_data_path": archive_data_path if data_exists else None,
-            "archive_meta_path": archive_meta_path if meta_exists else None,
+            "archive_suffix": _utc_now_suffix(),
+            "archive_data_path": None,
+            "archive_meta_path": None,
+        }
+
+    async def _areplace_keeping_trace(
+        self, compact_messages: List[Dict[str, Any]]
+    ) -> None:
+        """Пара ``areset`` + ``aappend_messages`` для хранилища без
+        ``areplace_messages`` — но с трассой субагентов, спасённой вокруг сброса.
+
+        ``replace_messages`` НЕ входит в контракт: он объявлен умолчанием базы,
+        а ``CONTRACT_METHODS`` выводятся из абстрактных методов. Хранилище,
+        принятое «по сигнатурам» (законный путь, см. ``docs/thread-store.md``),
+        этого метода не имеет — и сюда попадает каждая его компакция. Пока
+        трассу не спасали, ``areset`` уносил её целиком, молча и всякий раз.
+
+        То же самое делает умолчание базы (``ThreadStoreBase.replace_messages``),
+        и с той же оговоркой: штампы записей поедут. ``aappend_subagent_trace``
+        безусловно ставит свежее время и следующий номер, поэтому после
+        компакции у всей трассы будет дата компакции, а нумерация начнётся
+        заново. Спасённая хронология лучше стёртой, но правильный выход —
+        реализовать ``replace_messages`` одной операцией (у SQL это
+        ``DELETE … INSERT`` в транзакции), о чём и говорит предупреждение.
+        """
+        logger.warning(
+            "thread_store_replace_messages_missing store=%s thread=%s: компакция "
+            "идёт через reset — трасса субагентов переписывается со свежими "
+            "штампами. Реализуйте replace_messages/areplace_messages или "
+            "унаследуйте ThreadStoreBase",
+            type(getattr(self.port, "_store", self.port)).__name__, self.thread_id,
+            extra={"event": "thread_store_replace_messages_missing"},
+        )
+        trace = list(
+            await self.port.aread_subagent_trace(self.system_id, self.thread_id) or []
+        )
+        await self.port.areset(self.system_id, self.thread_id)
+        await self.port.aappend_messages(
+            self.system_id, self.thread_id, compact_messages
+        )
+        for record in trace:
+            await self.port.aappend_subagent_trace(
+                self.system_id, self.thread_id,
+                parent_call_id=record.get("parent_call_id", ""),
+                child_run_id=record.get("child_run_id", ""),
+                kind=record.get("kind"),
+                payload=record.get("payload") or {},
+            )
+
+    def _compact_result(
+        self,
+        archived: Dict[str, Any],
+        compact_messages: List[Dict[str, Any]],
+        summary_message: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "archive_suffix": archived.get("archive_suffix"),
+            "archive_data_path": archived.get("archive_data_path"),
+            "archive_meta_path": archived.get("archive_meta_path"),
             "new_messages_count": len(compact_messages),
             "newly_summarized_message_id": summary_message.get("id"),
         }
+
+    async def aarchive_and_compact_summary_payload(
+        self,
+        summary_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Отложить историю в архив и заместить её сводкой. ЕДИНСТВЕННАЯ форма.
+
+        Синхронный близнец снят: производственных вызывающих не было, а
+        расходились эти два тела как раз в самом опасном месте — синхронный
+        искал ТОЛЬКО синхронное ``archive_and_replace`` и звал его прямо на
+        loop.
+        """
+        disk_meta = await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        summary_message = self._compact_summary_message(summary_payload)
+        compact_messages = [summary_message]
+
+        # Асинхронное имя ИЩЕМ ПЕРВЫМ. Раньше здесь искали только синхронное и
+        # звали его прямо на loop: у `AsyncThreadStore` с корутинным
+        # `aarchive_and_replace` синхронного имени нет вовсе, а если бы кто-то
+        # объявил `async def archive_and_replace`, вызов вернул бы корутину и
+        # `archived.get` упал бы уже ПОСЛЕ того, как патч применён к
+        # `state.messages` — память и хранилище разошлись бы.
+        aarchiver = getattr(self.port, "aarchive_and_replace", None)
+        archiver = getattr(self.store, "archive_and_replace", None)
+        if callable(aarchiver):
+            archived = await aarchiver(
+                self.system_id, self.thread_id, compact_messages
+            )
+        elif callable(archiver):
+            archived = await await_callback(
+                archiver(self.system_id, self.thread_id, compact_messages)
+            )
+        else:
+            archived = await self._aarchive_via_store(compact_messages)
+
+        known_message_keys = {make_message_key(m) for m in compact_messages}
+        new_meta = self._compact_meta(
+            summary_payload, compact_messages, disk_meta,
+            archived.get("archive_suffix") or "",
+        )
+        await self.port.asave_meta(self.system_id, self.thread_id, new_meta)
+        self._compact_apply(compact_messages, known_message_keys, new_meta)
+        return self._compact_result(archived, compact_messages, summary_message)

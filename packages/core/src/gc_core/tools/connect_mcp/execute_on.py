@@ -22,6 +22,30 @@ class McpExecuteOnError(ValueError):
     """Configuration cannot be honoured at the requested locus."""
 
 
+def runs_in_agent_runtime(
+    server_cfg: Dict[str, Any],
+    *,
+    os_backend: Optional[Any] = None,
+) -> bool:
+    """True, если сервер исполняется В НАШЕМ процессе, а не внутри песочницы.
+
+    То же правило, по которому ``resolve_mcp_client`` выбирает реализацию, —
+    выделено предикатом, чтобы дискавери могла спросить «говорим ли мы с
+    хоста?», не повторяя разбор. Два места, знающие одно правило, разъезжаются
+    молча: ровно так и получилось у дискавери, где вместо этого вопроса стояло
+    ``os_backend is None``. Условие грубее правила: объект бэкенда есть
+    ВСЕГДА (его ставит ``acreate_run_context``), поэтому нативная ветка не
+    исполнялась никогда, и обход серверов уходил в поток даже для
+    ``execute_on: agent``.
+    """
+    cfg = server_cfg if isinstance(server_cfg, dict) else {}
+    if str(cfg.get("execute_on") or "agent") == "agent":
+        return True
+    # execute_on: os_backend, но песочницы нет — сервер всё равно поднимется
+    # в нашем процессе (см. ветку с тем же условием в `resolve_mcp_client`).
+    return os_backend is None or not getattr(os_backend, "is_sandbox", False)
+
+
 def resolve_mcp_client(
     server_name: str,
     server_cfg: Dict[str, Any],
@@ -78,4 +102,9 @@ def resolve_mcp_client(
     return OsBackendStatelessClient(server_name, cfg, os_backend=os_backend)
 
 
-__all__ = ["McpExecuteOnError", "OS_BACKEND_TRANSPORTS", "resolve_mcp_client"]
+__all__ = [
+    "McpExecuteOnError",
+    "OS_BACKEND_TRANSPORTS",
+    "resolve_mcp_client",
+    "runs_in_agent_runtime",
+]

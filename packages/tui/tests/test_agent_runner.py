@@ -17,7 +17,7 @@ class _FakeExecutor:
         self._event = threading.Event()
         self.started = threading.Event()   # выставляется, когда run реально начался
 
-    def run(self, messages, *, thread_id, start_new_thread=False,
+    async def arun(self, messages, *, thread_id, start_new_thread=False,
             system=None, verbose=None, discard_writes_after_stop=False,
             message_ids=None, display_contents=None, skills_loaded=None):
         self.run_called_with = {
@@ -77,7 +77,7 @@ def test_submit_ask_human_reply_terminates_real_read_loop():
     captured = {}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             # Воспроизводим точную логику ask_human.__call__ read-loop
             lines = []
             while True:
@@ -103,7 +103,7 @@ def test_cancel_ask_human_yields_empty_response():
     captured = {}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             lines = []
             while True:
                 line = input()
@@ -126,7 +126,7 @@ def test_start_passes_message_id_as_message_ids():
     seen = []
 
     class _Stub:
-        def run(self, messages, *, thread_id, start_new_thread=False, system=None,
+        async def arun(self, messages, *, thread_id, start_new_thread=False, system=None,
                 verbose=None, discard_writes_after_stop=False, message_ids=None,
                 display_contents=None, skills_loaded=None):
             seen.append(message_ids)
@@ -147,7 +147,7 @@ async def test_runner_start_passes_discard_writes_after_stop_kwarg():
 
     calls = []
     class _StubExec:
-        def run(self, messages, *, thread_id, start_new_thread, system,
+        async def arun(self, messages, *, thread_id, start_new_thread, system,
                 discard_writes_after_stop=False, message_ids=None,
                 display_contents=None, skills_loaded=None):
             calls.append({
@@ -172,7 +172,7 @@ def test_run_exception_calls_on_error_with_exception():
     called = threading.Event()
 
     class _Boom:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             raise RuntimeError("упало в run")
         def stop_run(self): pass
         def add_message(self, m): pass
@@ -199,7 +199,7 @@ def test_marked_stopped_skips_on_error():
     release = threading.Event()
 
     class _BoomAfterHold:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             entered.set()
             assert release.wait(timeout=5.0)
             raise RuntimeError("хвост после replace")
@@ -227,7 +227,7 @@ def test_stop_requested_skips_on_error():
     release = threading.Event()
 
     class _BoomAfterHold:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             entered.set()
             assert release.wait(timeout=5.0)
             raise RuntimeError("ошибка во время stop")
@@ -253,7 +253,7 @@ def test_stop_during_factory_build_skips_run():
     run_calls: list = []
 
     class _Ex:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             run_calls.append(messages)
         def stop_run(self): pass
         def add_message(self, m): pass
@@ -334,7 +334,7 @@ def test_warm_idempotent():
 
 class _SimpleStub:
     """Минимальный stub-executor для тестов confirm-канала (без блокирующего run)."""
-    def run(self, messages, *, thread_id, **kw): pass
+    async def arun(self, messages, *, thread_id, **kw): pass
     def stop_run(self): pass
     def add_message(self, m): pass
 

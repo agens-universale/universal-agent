@@ -8,7 +8,7 @@ from gc_core.intent_scope.agent_logging import log_intent_scope_summary_done, lo
 from gc_core.config_modules.intent_scope import IntentScopeConfig
 from gc_core.intent_log.serialize import deserialize_list, records_to_jsonl_lines
 from gc_core.message_format.dialog_history import truncate_text
-from gc_core.summarize.llm import request_summary_text
+from gc_core.summarize.llm import arequest_summary_text
 from gc_core.bundled_assets import bundled_root
 from gc_core.utils.user_text import read_user_text
 
@@ -22,6 +22,8 @@ _DEFAULT_PROMPT_PATH = os.path.join(
 _DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
     _PROJECT_ROOT, "prompts", "intent_scope_final_answer_summary_prompt.md"
 )
+
+
 
 
 def _resolve_final_answer_prompt_path(ctx: Any) -> str:
@@ -99,7 +101,7 @@ def _build_user_prompt(
     )
 
 
-def summarize_tool_intent_line(
+async def asummarize_tool_intent_line(
     *,
     ctx: Any,
     state: Any,
@@ -110,6 +112,10 @@ def summarize_tool_intent_line(
 ) -> str:
     """
     LLM extraction of one intent line from raw tool output. Fail-open: returns '' on error.
+
+    Основная (и единственная) реализация. Суммаризация — сетевой вызов на
+    десятки секунд; держать ради него поток из пула незачем, поэтому цикл
+    агента зовёт эту корутину напрямую. Синхронное имя ниже — шим поверх неё.
     """
     log = logger if logger is not None else _logger
     scope_cfg = _scope_cfg(ctx)
@@ -137,7 +143,7 @@ def summarize_tool_intent_line(
     ]
     request_label = f"intent_scope:{tool_name}"
     try:
-        line = request_summary_text(
+        line = await arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
@@ -165,6 +171,8 @@ def summarize_tool_intent_line(
     return line
 
 
+
+
 def build_fallback_aggregated_content(
     *,
     ctx: Any,
@@ -185,14 +193,18 @@ def build_fallback_aggregated_content(
     return body
 
 
-def summarize_final_answer_line(
+async def asummarize_final_answer_line(
     *,
     ctx: Any,
     state: Any,
     assistant_text: str,
     logger: Any | None = None,
 ) -> str:
-    """LLM compression of a long final prose answer into 1–3 sentences. Fail-open: '' on error."""
+    """LLM compression of a long final prose answer into 1–3 sentences. Fail-open: '' on error.
+
+    Основная (и единственная) реализация — по тем же причинам, что и у
+    ``asummarize_tool_intent_line``. Синхронное имя ниже — шим поверх неё.
+    """
     log = logger if logger is not None else _logger
     scope_cfg = _scope_cfg(ctx)
     text = str(assistant_text or "").strip()
@@ -215,7 +227,7 @@ def summarize_final_answer_line(
                 ),
             },
         ]
-        line = request_summary_text(
+        line = await arequest_summary_text(
             ctx=ctx,
             state=state,
             messages=request_messages,
@@ -236,3 +248,5 @@ def summarize_final_answer_line(
         line = truncate_text(line, scope_cfg.max_summary_chars)
     log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=len(line))
     return line
+
+

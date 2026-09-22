@@ -9,7 +9,7 @@ import json
 import threading
 from typing import Callable, List, Optional
 
-import requests
+import httpx
 
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
@@ -55,6 +55,15 @@ def register_runtime_notices_listener(callback: Callable[[], None]) -> None:
     with _lock:
         if callback not in _listeners:
             _listeners.append(callback)
+
+
+def unregister_runtime_notices_listener(callback: Callable[[], None]) -> None:
+    """Снять подписку. Список модульный, и подписчик в нём живёт до конца
+    процесса: TUI подписывает связанный метод приложения, и без отписки на
+    выходе каждое приложение оставалось в памяти целиком."""
+    with _lock:
+        if callback in _listeners:
+            _listeners.remove(callback)
 
 
 def clear_runtime_notices(*, listeners: bool = False) -> None:
@@ -128,7 +137,10 @@ def push_runtime_notice(notice: Notice) -> None:
 def _extract_http_detail(exc: BaseException) -> tuple[Optional[int], str]:
     status: Optional[int] = None
     body = ""
-    if isinstance(exc, requests.exceptions.HTTPError):
+    # `httpx`, а не `requests`: ядро ходит в сеть только через него. У обоих
+    # исключений форма одинаковая (`exc.response.status_code` / `.text`), но
+    # вторая библиотека держалась в зависимостях ровно ради этой строки.
+    if isinstance(exc, httpx.HTTPStatusError):
         resp = getattr(exc, "response", None)
         status = getattr(resp, "status_code", None)
         try:

@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.summarize.compaction import (
+    arun_summary_compaction,
     history_exceeds_summary_trigger,
-    run_summary_compaction,
 )
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
@@ -23,7 +23,7 @@ from gc_core.summarize.summary_logging import (
     log_pre_run_max_rounds,
 )
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
-from gc_core.thread_store import load_thread_meta, make_message_key, patch_runtime_flag
+from gc_core.thread_store import make_message_key
 
 if TYPE_CHECKING:
     from gc_core.run_context import RunContext
@@ -37,11 +37,27 @@ _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
-def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
-    """Прокси в thread_store.patch_runtime_flag (I1: не clobber tui)."""
+
+
+async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
+    """Прокси в хранилище сессии (I1: не clobber tui).
+
+    Через ``ts.port``, а не через модульную функцию: у сессии хранилище своё —
+    файловое по умолчанию или переданное встраивающим. Прямой вызов уводил бы
+    флаг на диск даже тогда, когда весь остальной тред лежит в базе.
+
+    ЕДИНСТВЕННАЯ форма: синхронного близнеца звал только синхронный
+    ``_summarizing_flag``, а того — только его собственный тест. В проде оба
+    были мертвы, и держать их значило держать вторую дорогу к тому же meta.
+
+    Через этот шов идут ТРИ индикатора TUI — ``summarizing``, ``finalizing`` и
+    ``finish_gate_checking``, — и возврат у него не используется вовсе. Для
+    асинхронного хранилища это самый тихий из отказов: корутина создаётся и
+    выбрасывается, исключения нет, в базу не уходит ничего. Индикаторы просто
+    никогда не загораются.
+    """
     ts = thread_session
-    patch_runtime_flag(
-        ts.threads_dir,
+    await ts.port.apatch_runtime_flag(
         ts.system_id,
         ts.thread_id,
         flag,
@@ -50,8 +66,8 @@ def _set_runtime_flag(thread_session, flag: str, active: bool) -> None:
     )
 
 
-@contextlib.contextmanager
-def _summarizing_flag(thread_session):
+@contextlib.asynccontextmanager
+async def _asummarizing_flag(thread_session):
     """Помечает тред как «идёт суммаризация» для TUI-индикатора.
 
     Флаг ``meta.runtime.summarizing`` + немедленный flush (TUI поллит meta).
@@ -63,55 +79,36 @@ def _summarizing_flag(thread_session):
         return
     ts = thread_session
     try:
-        _set_runtime_flag(ts, "summarizing", True)
+        await _aset_runtime_flag(ts, "summarizing", True)
         yield
     finally:
-        _set_runtime_flag(ts, "summarizing", False)
+        await _aset_runtime_flag(ts, "summarizing", False)
 
 
-def reset_stale_summarizing_flag(thread_session) -> None:
-    """Снять протухший ``runtime.summarizing`` на старте run'а.
-
-    Флаг транзиентный (живёт только на время компакции внутри ``_summarizing_flag``),
-    но персистится в meta. Если прошлый run был прерван посреди компакции (закрытие
-    TUI/выход процесса убивает daemon-поток до finally, либо зависание summary-вызова
-    на нездоровом бэкенде), флаг остаётся на диске навсегда — и TUI вечно
-    показывает «сжимаю контекст» вместо «думаю». На старте нового run'а компакция
-    точно не идёт, поэтому сбрасываем. ``thread_session=None`` → no-op.
-    """
+async def areset_stale_summarizing_flag(thread_session) -> None:
+    """Снять залипший ``summarizing`` при старте: форма одна, синхронной нет."""
     if thread_session is None:
         return
     ts = thread_session
-    disk = load_thread_meta(ts.threads_dir, ts.system_id, ts.thread_id) or {}
+    disk = await ts.port.aload_meta(ts.system_id, ts.thread_id) or {}
     rt = (ts.meta.get("runtime") or {}) if isinstance(ts.meta.get("runtime"), dict) else {}
     disk_rt = disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
     if rt.get("summarizing") or disk_rt.get("summarizing"):
-        _set_runtime_flag(ts, "summarizing", False)
+        await _aset_runtime_flag(ts, "summarizing", False)
 
 
-def set_tui_finalizing(thread_session, active: bool) -> None:
-    """TUI-индикатор: ``meta.runtime.finalizing`` (+ flush).
-
-    Ставится на время записи/саммари финальной прозы в accept-ветке run_agent,
-    снимается строго в finally. ``active=False`` также снимает протухший флаг на старте
-    run'а. ``thread_session=None`` (CLI без треда) → no-op.
-    """
+async def aset_tui_finalizing(thread_session, active: bool) -> None:
+    """Асинхронный двойник ``set_tui_finalizing``."""
     if thread_session is None:
         return
-    _set_runtime_flag(thread_session, "finalizing", active)
+    await _aset_runtime_flag(thread_session, "finalizing", active)
 
 
-def set_tui_finish_gate_checking(thread_session, active: bool) -> None:
-    """TUI-индикатор: ``meta.runtime.finish_gate_checking`` (+ flush).
-
-    В turn_finish-ветке run_agent ставится только при ``FinishGateGuard.enabled``
-    (судья реально пойдёт в LLM); smart-skip / выключенный гейт флаг не трогают.
-    Снимается строго в finally. ``active=False`` также снимает протухший флаг на
-    старте run'а. ``thread_session=None`` (CLI без треда) → no-op.
-    """
+async def aset_tui_finish_gate_checking(thread_session, active: bool) -> None:
+    """Асинхронный двойник ``set_tui_finish_gate_checking``."""
     if thread_session is None:
         return
-    _set_runtime_flag(thread_session, "finish_gate_checking", active)
+    await _aset_runtime_flag(thread_session, "finish_gate_checking", active)
 
 
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
@@ -285,9 +282,9 @@ class RunSummaryCoordinator:
             getattr(ctx, "config_dict", None)
         )
 
-    def on_summary_applied(self, event: dict[str, Any]) -> None:
+    async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
-            archive_result = self._thread_session.archive_and_compact_summary_payload(
+            archive_result = await self._thread_session.aarchive_and_compact_summary_payload(
                 event.get("summary_payload", {})
             )
             suffix = archive_result.get("archive_suffix")
@@ -302,7 +299,13 @@ class RunSummaryCoordinator:
             ),
         )
 
-    def pre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
+    async def apre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
+        """Догнать историю до порога перед стартом run'а.
+
+        Единственная форма: сетевой шаг внутри ``arun_summary_compaction``
+        ждётся нативно, поэтому компакция не занимает поток из пула на всё
+        время суммаризации.
+        """
         logger = self._logger
         state = self._state
         if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
@@ -323,8 +326,8 @@ class RunSummaryCoordinator:
                         max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
                     )
                     break
-                with _summarizing_flag(self._thread_session):
-                    run_summary_compaction(
+                async with _asummarizing_flag(self._thread_session):
+                    await arun_summary_compaction(
                         ctx=self._ctx,
                         state=state,
                         trigger_reason=trigger_reason,
@@ -347,14 +350,17 @@ class RunSummaryCoordinator:
                 summarize_exc,
             )
 
-    def force_compact_once(self, *, trigger_reason: str = "manual") -> None:
+
+    async def aforce_compact_once(self, *, trigger_reason: str = "manual") -> None:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
-        Та же машинерия, что и автосжатие; персист через on_summary_applied."""
+        Та же машинерия, что и автосжатие; персист через on_summary_applied.
+
+        Основная и единственная реализация; синхронное имя ``force_compact_once``"""
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
-        with _summarizing_flag(self._thread_session):
-            run_summary_compaction(
+        async with _asummarizing_flag(self._thread_session):
+            await arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
                 trigger_reason=trigger_reason,
@@ -365,11 +371,17 @@ class RunSummaryCoordinator:
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         gc.collect()
 
-    def pre_backend_compaction_hook(
+
+    async def apre_backend_compaction_hook(
         self,
         current_messages: list[dict],
         mode: str,
     ) -> None:
+        """Компакция прямо перед вызовом backend'а (основная реализация).
+
+        Уезжает в ``arun_agent`` аргументом ``pre_backend_compaction_hook``:
+        корутинную функцию цикл ждёт нативно, без потока из пула.
+        """
         state = self._state
         if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
             return
@@ -404,8 +416,8 @@ class RunSummaryCoordinator:
 
         # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
         # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
-        with _summarizing_flag(self._thread_session):
-            run_summary_compaction(
+        async with _asummarizing_flag(self._thread_session):
+            await arun_summary_compaction(
                 ctx=self._ctx,
                 state=state,
                 trigger_reason=self._pre_backend_trigger_reason,
@@ -418,7 +430,7 @@ class RunSummaryCoordinator:
             msgs.extend(preserved_batch)
 
         if self._thread_session is not None and preserved_batch:
-            self._thread_session.persist_batch(
+            await self._thread_session.apersist_batch(
                 preserved_batch,
                 previous_response_id=state.previous_response_id,
             )
@@ -428,8 +440,13 @@ class RunSummaryCoordinator:
         # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
         gc.collect()
 
-    def turn_end_compact_if_needed(self) -> None:
-        """Compaction после accept ``turn_finish`` (turn-end trigger)."""
+
+    async def aturn_end_compact_if_needed(self) -> None:
+        """Compaction после accept ``turn_finish`` (turn-end trigger).
+
+        Основная и единственная реализация; в ``arun_agent`` уезжает аргументом
+        ``turn_end_compaction_hook`` и ждётся нативно.
+        """
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
@@ -445,8 +462,8 @@ class RunSummaryCoordinator:
 
         logger = self._logger
         try:
-            with _summarizing_flag(self._thread_session):
-                run_summary_compaction(
+            async with _asummarizing_flag(self._thread_session):
+                await arun_summary_compaction(
                     ctx=self._ctx,
                     state=state,
                     trigger_reason="turn_end",
@@ -467,3 +484,4 @@ class RunSummaryCoordinator:
                 ),
                 summarize_exc,
             )
+

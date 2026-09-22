@@ -156,8 +156,13 @@ def test_timeout_returns_observed_edges():
     assert r["preview"]["stdout"]["head"] == "A" * EDGE
 
 
-def test_backend_result_without_stream_structure_still_builds_envelope():
-    """Backend вправе вернуть свой результат-подобный объект без CapturedStream."""
+async def test_backend_result_without_stream_structure_still_builds_envelope():
+    """Backend вправе вернуть свой результат-подобный объект без CapturedStream.
+
+    Форма вызова — `acall`: синхронного входа у exec-тулов нет, его сторожит
+    `test_tools_are_async_only`. Утиный бэкенд объявляет только синхронный
+    `exec` — его завернёт `SyncExecAdapter`, и это тоже часть проверки.
+    """
 
     class _DuckBackend:
         is_sandbox = True
@@ -168,7 +173,7 @@ def test_backend_result_without_stream_structure_still_builds_envelope():
                 stdout="hi", stderr="", return_code=0, timed_out=False
             )
 
-        def is_dir(self, path):
+        async def is_dir(self, path):
             return True
 
         def default_cwd(self):
@@ -180,6 +185,6 @@ def test_backend_result_without_stream_structure_still_builds_envelope():
     tool._config_dict = _cfg()
     bind_os_backend(tool, _DuckBackend(), config_dict=_cfg())
 
-    r = json.loads(tool(command="x"))
+    r = json.loads(await tool.acall(command="x"))
     assert r["ok"] is True
     assert r["stdout"] == {"content": "hi", "total_chars": 2}

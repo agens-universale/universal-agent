@@ -6,14 +6,14 @@ from gc_core.utils.local_render_system_prompt import render_system_prompt
 TEMPLATE = "System rules.\n<user_info>\n</user_info>\n<specific_role>\n</specific_role>"
 
 
-def test_env_block_describes_container_not_runner(tmp_path, monkeypatch):
+async def test_env_block_describes_container_not_runner(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)                    # runner cwd — must NOT leak into the prompt
     backend = FakeSandboxBackend(
         cwd="/testbed",
         tree={"/testbed": [("django", True), ("setup.py", False)]},
         git=True,
     )
-    state = State(
+    state = await State.acreate(
         verbose=False,
         model="m",
         tools_spec=[],

@@ -4,15 +4,17 @@ import json
 from typing import Any, Dict, List, Optional
 
 from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
-from gc_core.request_backend_policy import request_chat_completions_with_policy
+from gc_core.request_backend_policy import arequest_chat_completions_with_policy
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
 from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     backend_override_value,
-    create_call_headers,
+    acreate_call_headers,
     resolve_network_params,
 )
+from gc_core.usage.account import category_for_request_label
+from gc_core.usage.context import usage_scope
 from gc_core.usage.account import category_for_request_label
 from gc_core.usage.context import usage_scope
 
@@ -193,7 +195,7 @@ def _build_chat_completion_payload(
     return payload
 
 
-def _send_chat_completion_text(
+async def _asend_chat_completion_text(
     *,
     ctx: Any,
     state: Any,
@@ -230,14 +232,14 @@ def _send_chat_completion_text(
         else _min_response_tokens_override,
         default=1024,
     )
-    headers = create_call_headers(state, ctx, resolved=resolved)
+    headers = await acreate_call_headers(state, ctx, resolved=resolved)
     url = resolved.url if resolved is not None else cfg["completions_url"]
     (verify, cert, use_retry, timeout, config_proxy,
      retry_embedded_choice_errors) = resolve_network_params(cfg, resolved)
 
     usage_category = category_for_request_label(request_label)
     with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
-        res, _call_data = request_chat_completions_with_policy(
+        res, _call_data = await arequest_chat_completions_with_policy(
             payload_factory=_payload_factory,
             initial_max_tokens=max_tokens,
             min_response_tokens=min_response_tokens,
@@ -266,7 +268,7 @@ def _send_chat_completion_text(
     return (text or "").strip()
 
 
-def request_chat_completion_text(
+async def arequest_chat_completion_text(
     *,
     ctx: Any,
     state: Any,
@@ -291,7 +293,7 @@ def request_chat_completion_text(
 
     router = getattr(ctx, "model_router", None)
     if router is None:
-        return _send_chat_completion_text(
+        return await _asend_chat_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
@@ -312,7 +314,7 @@ def request_chat_completion_text(
         primary_exc = exc
     else:
         try:
-            return _send_chat_completion_text(
+            return await _asend_chat_completion_text(
                 ctx=ctx,
                 state=state,
                 messages=messages,
@@ -357,7 +359,7 @@ def request_chat_completion_text(
         enabled=bool(getattr(ctx, "is_tui", False)),
     )
     try:
-        return _send_chat_completion_text(
+        return await _asend_chat_completion_text(
             ctx=ctx,
             state=state,
             messages=messages,
@@ -372,3 +374,5 @@ def request_chat_completion_text(
                 active_resolved.alias, str(exc).strip()[:300] or exc.__class__.__name__
             )
         raise
+
+

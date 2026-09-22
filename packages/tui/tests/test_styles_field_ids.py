@@ -3,6 +3,10 @@
 from pathlib import Path
 from gc_testkit.paths import TUI_PKG
 
+# Путь — из gc_testkit.paths: исходники TUI лежат в packages/tui/src/gc_tui,
+# и арифметика уровней от __file__ здесь уже ломалась.
+from gc_testkit.paths import TUI_PKG
+
 _STYLES = TUI_PKG / "styles.tcss"
 
 # id полей, которые обязаны иметь и плоский, и framed-стиль

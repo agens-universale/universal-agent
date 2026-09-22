@@ -10,6 +10,7 @@ import pytest
 
 from gc_core.states import State
 from gc_testkit.paths import module_dir
+from gc_testkit import run_coro
 
 
 def _make_state(max_steps=2):
@@ -36,22 +37,22 @@ def teardown_module(_module) -> None:
     real_tools = importlib.import_module("gc_core.tools")
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
-        proc.apply_tool = real_tools.apply_tool
+        proc.aapply_tool = real_tools.aapply_tool
         proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
 
 
 processing_module = None
-run_agent = None
+arun_agent = None
 
 
 def setup_module(_module) -> None:
-    global processing_module, run_agent
+    global processing_module, arun_agent
     _stub_tools_modules()
     from gc_core import processing_responses as pm
-    from gc_core.processing_responses import run_agent as ra
+    from gc_core.processing_responses import arun_agent as ra
     processing_module = pm
-    run_agent = ra
-    pm.apply_tool = sys.modules["gc_core.tools"].apply_tool
+    arun_agent = ra
+    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
 
 
 def _stub_tools_modules() -> None:
@@ -65,16 +66,21 @@ def _stub_tools_modules() -> None:
         def to_llm_feedback(self):
             return str(self)
 
-    def _apply_tool(*_args, **_kwargs):
+    async def _apply_tool(*_args, **_kwargs):
         raise AssertionError("apply_tool should not be called in this test")
 
     def _is_unknown_tool_output(_output):
         return False
 
-    tools_pkg.apply_tool = _apply_tool
+    tools_pkg.aapply_tool = _apply_tool
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
     tools_pkg.is_unknown_tool_output = _is_unknown_tool_output
     tools_dir = module_dir("tools")
+    # `processing_responses` импортирует эти имена на уровне модуля. Без них
+    # подмена пакета даёт ImportError, и файл падает целиком — но только
+    # когда реальные модули не подтянул сосед по прогону. При случайном
+    # порядке (pytest-randomly) это молчащая мина, а не свойство файла.
+    tools_pkg.is_internal_tool_error_output = lambda *_a, **_kw: False
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
 
@@ -112,18 +118,18 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
     """Когда шаги исчерпаны, run_agent выставляет terminal_outcome='step_limit'."""
     call_count = {"n": 0}
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         call_count["n"] += 1
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     state = _make_state(max_steps=1)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(),
-    )
+    ))
 
     _env = json.loads(result)
     assert _env["ok"] is False
@@ -143,19 +149,19 @@ def test_step_limit_still_executes_pending_function_calls(monkeypatch):
     """
     applied = []
 
-    def _apply_tool(*, tool_name, arguments, **_kw):
+    async def _apply_tool(*, tool_name, arguments, **_kw):
         applied.append((tool_name, arguments))
         return json.dumps({"ok": True, "tool": tool_name})
 
-    def _fake_process_tool_outputs(*_a, **_k):
+    async def _fake_process_tool_outputs(*_a, **_k):
         raise AssertionError(
             "process_tool_outputs must not run after step_limit "
             "(no extra LLM round once budget is exhausted)"
         )
 
-    monkeypatch.setattr(processing_module, "apply_tool", _apply_tool)
+    monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
     monkeypatch.setattr(
-        processing_module, "process_tool_outputs", _fake_process_tool_outputs
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
     )
 
     state = _make_state(max_steps=1)
@@ -181,7 +187,7 @@ def test_step_limit_still_executes_pending_function_calls(monkeypatch):
         },
     ]
 
-    result = run_agent(pending_batch, state, _make_ctx())
+    result = run_coro(arun_agent(pending_batch, state, _make_ctx()))
 
     assert len(applied) == 2, f"both pending tools must run, got {applied!r}"
     assert applied[0][0] == "session_think"
@@ -214,31 +220,31 @@ def test_step_counts_completed_model_turn_not_half_turn(monkeypatch):
     llm_rounds = {"n": 0}
     applied = []
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         llm_rounds["n"] += 1
         return _function_call_batch(1, llm_rounds["n"]), "resp_stub"
 
-    def _fake_process_tool_outputs(_messages, _state, _ctx):
+    async def _fake_process_tool_outputs(_messages, _state, _ctx):
         llm_rounds["n"] += 1
         # После tool outputs снова tool call, пока step budget позволяет.
         return _function_call_batch(1, llm_rounds["n"]), "resp_stub"
 
-    def _apply_tool(*, tool_name, arguments, **_kw):
+    async def _apply_tool(*, tool_name, arguments, **_kw):
         applied.append(tool_name)
         return json.dumps({"ok": True, "tool": tool_name})
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
     monkeypatch.setattr(
-        processing_module, "process_tool_outputs", _fake_process_tool_outputs
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
     )
-    monkeypatch.setattr(processing_module, "apply_tool", _apply_tool)
+    monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=2)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(),
-    )
+    ))
 
     _env = json.loads(result)
     assert _env["status"] == "step_limit"
@@ -265,18 +271,22 @@ def _function_call_batch(n: int, step: int) -> list:
 
 
 def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         return _function_call_batch(2, 1), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
-    monkeypatch.setattr(processing_module, "apply_tool", lambda **_kw: "ok")
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+
+    async def _apply_tool(**_kw):
+        return "ok"
+
+    monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=10)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(max_tool_calls=2),
-    )
+    ))
     _env = json.loads(result)
     assert _env["ok"] is False
     assert _env["status"] == "tool_call_limit"
@@ -290,41 +300,45 @@ def test_tool_calls_counter_counts_batch_none_limit(monkeypatch):
     """max_tool_calls отсутствует: батч из 3 считается, останова по вызовам нет."""
     calls = {"n": 0}
 
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         calls["n"] += 1
         return _function_call_batch(3, calls["n"]), "resp_stub"
 
-    def _fake_process_tool_outputs(_messages, _state, _ctx):
+    async def _fake_process_tool_outputs(_messages, _state, _ctx):
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
-    monkeypatch.setattr(processing_module, "process_tool_outputs", _fake_process_tool_outputs)
-    monkeypatch.setattr(processing_module, "apply_tool", lambda **_kw: "ok")
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs)
+
+    async def _apply_tool(**_kw):
+        return "ok"
+
+    monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=2)
-    run_agent(
+    run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(),
-    )
+    ))
     assert state.tool_calls == 3
     assert state.terminal_outcome == "step_limit"  # лимит вызовов не сработал
 
 
 def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
     """Бюджет тратят и aux-категории (summary), не только main."""
-    def _fake_process_user_ask(_messages, state, _ctx):
+    async def _fake_process_user_ask(_messages, state, _ctx):
         state.usage.add("summary", input_tokens=100, output_tokens=5)
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     state = _make_state(max_steps=5)
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(session_token_limit=10),
-    )
+    ))
     _env = json.loads(result)
     assert _env["ok"] is False
     assert _env["status"] == "token_limit"
@@ -335,19 +349,19 @@ def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
 
 def test_token_limit_ignores_thread_cumulative(monkeypatch):
     """Resume-кейс: накопленный до рана usage не съедает бюджет рана."""
-    def _fake_process_user_ask(_messages, _state, _ctx):
+    async def _fake_process_user_ask(_messages, _state, _ctx):
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "process_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
 
     state = _make_state(max_steps=1)
     state.usage.add("main", input_tokens=900, output_tokens=100)  # «прошлые» раны треда
     state.run_start_usage_meta = state.usage.to_meta()  # как делает agent_executor
-    result = run_agent(
+    result = run_coro(arun_agent(
         [{"role": "user", "content": "привет", "id": "m1"}],
         state,
         _make_ctx(session_token_limit=500),
-    )
+    ))
     # ран ничего не потратил → до token_limit не дошли, упёрлись в шаги
     _env = json.loads(result)
     assert _env["status"] == "step_limit"

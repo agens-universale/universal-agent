@@ -1,18 +1,34 @@
 import html as html_lib
+import asyncio
 import functools
 import json
+import os
 import re
-import time
 from collections import OrderedDict
 from typing import Optional, Dict, Any, Tuple
 
-import requests
+import httpx
 import trafilatura
 from readability import Document
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.security.url_policy import enforce_url_policy
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.tools.exec.redirect_policy import (
+    RedirectBlocked,
+    TooManyRedirects,
+    fetch_validating_redirects,
+)
+from gc_core.security.path_policy import resolve_tool_context
+
+
+def _response_url(exc: Exception) -> "str | None":
+    """URL из ответа-ошибки строкой: httpx.URL в JSON не сериализуется."""
+    response = getattr(exc, "response", None)
+    url = getattr(response, "url", None)
+    return str(url) if url is not None else None
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
@@ -428,8 +444,33 @@ Usage:
             error=error,
         )
 
+    def _parse_primary(self, text: str, url: str) -> tuple:
+        """Метаданные + основной текст. Синхронно и дорого — звать через to_thread."""
+        return self._extract_meta(text), trafilatura.extract(
+            text,
+            url=url,
+            include_links=True,
+            include_images=False,
+            favor_recall=True,
+        )
+
+    def _parse_readability(self, text: str, url: str) -> tuple:
+        """Запасной разбор через readability. Синхронно и дорого — через to_thread."""
+        sanitized_text = self._sanitize_for_xml(text)
+        readable_doc = Document(sanitized_text, url=url)
+        summary_html = readable_doc.summary(html_partial=True) or ""
+        fallback_text = trafilatura.extract(
+            summary_html,
+            url=url,
+            include_links=False,
+            include_images=False,
+            favor_recall=True,
+        )
+        return summary_html, fallback_text
+
+
     @enforce_url_policy(url_arg="url")
-    def __call__(
+    async def acall(
         self,
         url: str,
         timeout: Optional[int] = None,
@@ -547,29 +588,77 @@ Usage:
             "sec-ch-ua-platform": '"Linux"',
         }
 
+        # Контекст политики нужен на КАЖДОМ переходе редиректа, а не только
+        # на стартовом адресе (его проверил гвард `enforce_url_policy`).
+        policy_context = resolve_tool_context(self, ctx=self._ctx, state=self._state)
+
         response = None
         last_exc = None
         attempts = 1 + self.max_retries
         for attempt in range(1, attempts + 1):
             try:
-                request_kwargs: Dict[str, Any] = {
-                    "headers": headers,
-                    "timeout": effective_timeout,
-                    "allow_redirects": True,
-                }
-                if proxies is not None:
-                    request_kwargs["proxies"] = proxies
-                response = requests.get(normalized_url, **request_kwargs)
+                # Таймаут — на запрос: клиент общий и переиспользуется.
+                # Явный `proxy` тула идёт ПЕРВЫМ аргументом: он и должен
+                # побеждать окружение (D2/D3 в resolve_proxies). Здесь стоял
+                # None — аргумент, который человек передал в вызове, молча
+                # игнорировался, и запрос уходил напрямую или через env-прокси.
+                # Аргумент приехал с develop, async-форма его не знала.
+                client = get_async_client(
+                    proxies=resolve_proxies(
+                        normalized_proxy, os.environ, normalized_url
+                    )
+                )
+                # Каждый переход проверяется политикой. Раньше здесь стоял
+                # `follow_redirects=True`, то есть проверялся ТОЛЬКО стартовый
+                # адрес — а сервер вправе ответить 302 куда угодно, и запрет
+                # «не ходить во внутреннюю сеть» обходился одним заголовком
+                # `Location`. У двух соседних HTTP-тулов такая петля была, у
+                # этого — регистрируемого по умолчанию — нет.
+                response = await fetch_validating_redirects(
+                    client,
+                    normalized_url,
+                    headers,
+                    effective_timeout,
+                    allowed_schemes=policy_context.url_allowed_schemes,
+                    url_blacklist=policy_context.url_blacklist,
+                )
                 response.raise_for_status()
                 break
-            except requests.RequestException as exc:
+            except TooManyRedirects as loop_exc:
+                # НЕ политика: это петля редиректов. Раньше превышение
+                # отдавалось тем же конвертом, что и запрет, и модель делала
+                # неверный вывод — что адрес под запретом.
+                return _result(
+                    ok=False,
+                    final_url=loop_exc.url,
+                    status_code=None,
+                    content_type=None,
+                    result_type="error",
+                    error={
+                        "type": "too_many_redirects",
+                        "message": str(loop_exc),
+                        "limit": loop_exc.limit,
+                    },
+                )
+            except RedirectBlocked as redirect_exc:
+                decision = redirect_exc.decision
+                return self._url_policy_blocked_result(
+                    {
+                        "type": decision.error_type or "url_blocked_by_policy",
+                        "reason": decision.reason,
+                        "matched_rule": decision.matched_rule,
+                        "blocked_on_redirect": True,
+                    },
+                    normalized_url,
+                )
+            except httpx.HTTPError as exc:
                 last_exc = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 retryable = status is None or status in (429,) or status >= 500
                 if (not retryable) or attempt == attempts:
                     return _result(
                         ok=False,
-                        final_url=getattr(getattr(exc, "response", None), "url", None),
+                        final_url=_response_url(exc),
                         status_code=status,
                         content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
                         if getattr(exc, "response", None) is not None
@@ -583,7 +672,7 @@ Usage:
                             "retryable": retryable,
                         },
                     )
-                time.sleep(self.retry_backoff_seconds * attempt)
+                await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
         if response is None:
             return _result(
@@ -597,7 +686,7 @@ Usage:
             )
 
         content_type = response.headers.get("Content-Type", "")
-        final_url = response.url
+        final_url = str(response.url)
         status_code = response.status_code
         raw_content = getattr(response, "content", b"")
         content_type_binary = self._is_binary_content_type(content_type)
@@ -642,14 +731,12 @@ Usage:
                 error={"type": "decode_failed", "message": str(e)},
             )
 
-        page_meta = self._extract_meta(text)
-
-        extracted_text = trafilatura.extract(
-            text,
-            url=response.url,
-            include_links=True,
-            include_images=False,
-            favor_recall=True,
+        # Разбор — в поток: он синхронный, тяжёлый (trafilatura/lxml) и на
+        # больших страницах занимает секунды. Пока __call__ был синхронным,
+        # диспетчер уводил в поток весь тул; теперь тул корутинный, и без
+        # to_thread разбор встал бы на event loop вызывающего.
+        page_meta, extracted_text = await asyncio.to_thread(
+            self._parse_primary, text, str(response.url)
         )
 
         if extracted_text and extracted_text.strip():
@@ -679,15 +766,8 @@ Usage:
                 )
 
         try:
-            sanitized_text = self._sanitize_for_xml(text)
-            readable_doc = Document(sanitized_text, url=response.url)
-            summary_html = readable_doc.summary(html_partial=True) or ""
-            fallback_text = trafilatura.extract(
-                summary_html,
-                url=response.url,
-                include_links=False,
-                include_images=False,
-                favor_recall=True,
+            summary_html, fallback_text = await asyncio.to_thread(
+                self._parse_readability, text, str(response.url)
             )
             if fallback_text and fallback_text.strip():
                 c = fallback_text.strip()

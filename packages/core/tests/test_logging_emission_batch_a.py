@@ -6,6 +6,7 @@
 Each test drives the real code path with a jsonl-mode per-run logger and
 asserts the expected event line was written.
 """
+from gc_testkit.helpers.tool_ctx import CallableTool
 import builtins
 import json
 
@@ -15,6 +16,7 @@ from gc_core import run_context as rc
 from gc_core.tools.turn.ask_human import AskHuman
 from gc_core.tools.turn.intermediate_reply import IntermediateReply
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit import as_coro
 
 
 def _jsonl_cfg(tmp_path, **extra):
@@ -48,7 +50,7 @@ def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
     answers = iter(["hello", ""])
     monkeypatch.setattr(builtins, "input", lambda: next(answers))
 
-    tool = AskHuman(ctx=_FakeCtx(logger))
+    tool = CallableTool(AskHuman(ctx=_FakeCtx(logger)))
     out = json.loads(tool(question="Q?"))
     assert out["ok"] is True
 
@@ -67,7 +69,7 @@ def test_ask_human_interrupted_event(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "input", _raise)
 
-    tool = AskHuman(ctx=_FakeCtx(logger))
+    tool = CallableTool(AskHuman(ctx=_FakeCtx(logger)))
     out = json.loads(tool(question="Q?"))
     assert out["ok"] is False
 
@@ -85,7 +87,7 @@ def test_ask_human_error_event(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "input", _raise)
 
-    tool = AskHuman(ctx=_FakeCtx(logger))
+    tool = CallableTool(AskHuman(ctx=_FakeCtx(logger)))
     out = json.loads(tool(question="Q?"))
     assert out["ok"] is False
 
@@ -102,7 +104,7 @@ def test_ask_human_error_event(tmp_path, monkeypatch):
 def test_intermediate_reply_event(tmp_path):
     logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ir1", agent_kind="main")
 
-    tool = IntermediateReply(ctx=_FakeCtx(logger))
+    tool = CallableTool(IntermediateReply(ctx=_FakeCtx(logger)))
     out = json.loads(tool(answer="status update", artifact_path="report.md"))
     assert out["ok"] is True
 
@@ -122,13 +124,13 @@ def test_intermediate_reply_event(tmp_path):
 def minimal_config_dict(monkeypatch, tmp_path):
     monkeypatch.setattr(
         rc,
-        "build_tools_data",
-        lambda cfg, on_progress=None, **_kwargs: (
+        "abuild_tools_data",
+        as_coro(lambda cfg, on_progress=None, **_kwargs: (
             {"tool_a": {}, "tool_b": {}},
             [],
             [],
             {},
-        ),
+        )),
     )
     return _jsonl_cfg(
         tmp_path,
@@ -139,8 +141,8 @@ def minimal_config_dict(monkeypatch, tmp_path):
     )
 
 
-def test_agent_start_and_agent_tools_events(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict, run_id="rc1")
+async def test_agent_start_and_agent_tools_events(minimal_config_dict):
+    ctx = await rc.acreate_run_context(minimal_config_dict, run_id="rc1")
 
     for h in ctx.logger.handlers:
         h.flush()

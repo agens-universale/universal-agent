@@ -24,6 +24,13 @@ class LoggingConfig(BaseModel):
     # Уровень per-run логгера (актуален для jsonl-режима). На debug добавляются
     # объёмные события backend_request/backend_response/agent_tools.
     log_level: str = "info"
+    # Всплывать ли записям в корневой логгер приложения.
+    #
+    # Дефолт false — историческое поведение: ран пишет в свой файл и не
+    # засоряет чужие хендлеры. Встраивающему, который настроил logging по-своему
+    # и хочет видеть жизнь агента у себя, нужен true: без него он не увидит
+    # НИЧЕГО, потому что per-run логгер обрывает цепочку.
+    propagate: bool = False
     # Маскировка секретов перед записью в лог (stdout и файл). По умолчанию выкл.
     redact_secrets: RedactSecretsConfig = Field(default_factory=RedactSecretsConfig)
 

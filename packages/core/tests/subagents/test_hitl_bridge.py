@@ -1,5 +1,8 @@
 """Step 5: child HITL emit (ask_human / confirm) + tui_confirm on child ctx."""
 from __future__ import annotations
+import pytest
+
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 import json
 from types import SimpleNamespace
@@ -21,7 +24,8 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
 
 
 class TestChildCtxCopiesTuiConfirm:
-    def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
         from gc_core.states import SharedStateData, State
         from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -68,12 +72,18 @@ class TestChildCtxCopiesTuiConfirm:
         parent.is_tui = True
         parent.tui_confirm = confirm
         parent.permission_store = object()
+        # Порт «спросить человека»: без него дочерний `turn_ask_human` читал
+        # `input()` в потоке пула, а подмена stdin в TUI потоко-локальна —
+        # поток делил настоящую консоль с Textual, и ход висел навсегда.
+        ask_port = MagicMock(return_value="синий")
+        parent.ask_human = ask_port
         runner = SubagentRunner(parent, state, cfg)
         runner._parent_call_id = "call_x"
-        child = runner._build_child_ctx(tool_name="subagent_worker")
+        child = await runner._build_child_ctx(tool_name="subagent_worker")
         assert child.tui_confirm is confirm
         assert child.subagent_tool_name == "subagent_worker"
         assert getattr(child, "permission_store", None) is parent.permission_store
+        assert getattr(child, "ask_human", None) is ask_port
 
 
 class TestAskHumanEmit:
@@ -83,7 +93,7 @@ class TestAskHumanEmit:
         sink = QueueSubagentProgressSink()
         ctx = _child_ctx(sink)
         state = SimpleNamespace(steps=3, max_steps=50)
-        tool = AskHuman(ctx=ctx, state=state)
+        tool = CallableTool(AskHuman(ctx=ctx, state=state))
 
         answers = iter(["yes", ""])
         monkeypatch.setattr("builtins.input", lambda: next(answers))
@@ -109,7 +119,7 @@ class TestAskHumanEmit:
             logger=None,
         )
         assert not child_progress_enabled(ctx)
-        tool = AskHuman(ctx=ctx, state=SimpleNamespace(steps=1, max_steps=10))
+        tool = CallableTool(AskHuman(ctx=ctx, state=SimpleNamespace(steps=1, max_steps=10)))
         answers = iter(["a", ""])
         monkeypatch.setattr("builtins.input", lambda: next(answers))
         tool(question="Parent ask?")

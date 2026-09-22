@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from gc_core.utils.connect_backend import create_call_headers
+from gc_core.utils.connect_backend import acreate_call_headers, build_call_headers
 
 
 class _StateStub:
@@ -9,7 +9,7 @@ class _StateStub:
     x_target = None
 
 
-class ChatCompletionsHeadersTest(unittest.TestCase):
+class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_generic_chat_completion_headers(self):
         ctx = SimpleNamespace(
             config_dict={
@@ -23,7 +23,7 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             },
             auth_connector=None,
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("HTTP-Referer"), "https://example.org")
         self.assertEqual(headers.get("X-OpenRouter-Title"), "mini-cli")
         self.assertEqual(headers.get("X-Custom"), "v1")
@@ -42,13 +42,13 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             },
             auth_connector=None,
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("Authorization"), "Bearer sk-or-v1-token")
         self.assertEqual(headers.get("HTTP-Referer"), "https://example.org")
         self.assertEqual(headers.get("X-OpenRouter-Title"), "mini-cli")
         self.assertEqual(headers.get("X-Title"), "mini-cli")
 
-    def test_prefers_chat_completions_token_over_auth_connector(self):
+    async def test_prefers_chat_completions_token_over_auth_connector(self):
         class _AuthStub:
             def get_token(self):
                 return "auth-token"
@@ -61,7 +61,9 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             },
             auth_connector=_AuthStub(),
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        # Коннектор задан — значит идём единственной формой операции: токен
+        # берётся вне loop, и только потом оверлей заголовков его перебивает.
+        headers = await acreate_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("Authorization"), "Bearer chat-token")
 
     def test_chat_completion_headers_override_session_id(self):
@@ -77,7 +79,7 @@ class ChatCompletionsHeadersTest(unittest.TestCase):
             },
             auth_connector=None,
         )
-        headers = create_call_headers(_StateStub(), ctx)
+        headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("x-session-id"), "sympy__sympy-12419")
         self.assertEqual(
             [k for k in headers if k.lower() == "x-session-id"], ["x-session-id"]

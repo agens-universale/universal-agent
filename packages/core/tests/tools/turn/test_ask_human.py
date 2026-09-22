@@ -1,6 +1,8 @@
 import builtins
 import json
 
+from gc_testkit.helpers.tool_ctx import CallableTool
+
 import pytest
 
 from gc_core.tools.turn.ask_human import AskHuman
@@ -9,14 +11,14 @@ from gc_core.tools.turn.ask_human import AskHuman
 def test_ask_human_multiline(monkeypatch):
     answers = iter(["first", "second", ""])
     monkeypatch.setattr(builtins, "input", lambda: next(answers))
-    out = json.loads(AskHuman()(question="Q?"))
+    out = json.loads(CallableTool(AskHuman())(question="Q?"))
     assert out["ok"] is True
     assert out["response"] == "first\nsecond"
 
 
 def test_ask_human_empty_and_interrupt(monkeypatch):
     monkeypatch.setattr(builtins, "input", lambda: "")
-    out = json.loads(AskHuman()(question="Q?"))
+    out = json.loads(CallableTool(AskHuman())(question="Q?"))
     assert out["ok"] is True
     assert out["response"] == "(empty response)"
 
@@ -24,13 +26,13 @@ def test_ask_human_empty_and_interrupt(monkeypatch):
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(builtins, "input", _raise)
-    out2 = json.loads(AskHuman()(question="Q?"))
+    out2 = json.loads(CallableTool(AskHuman())(question="Q?"))
     assert out2["ok"] is False
     assert out2["response"] == "(user interrupted)"
 
 
 def test_ask_human_validation():
-    tool = AskHuman()
+    tool = CallableTool(AskHuman())
     empty = json.loads(tool(question=""))
     assert empty["ok"] is False and empty["error"]["field"] == "question"
     bad_type = json.loads(tool(question=1))  # type: ignore[arg-type]
@@ -65,7 +67,7 @@ def test_prompt_description_is_full_reference_doc():
 def test_success_result_includes_hint(monkeypatch):
     answers = iter(["yes", ""])
     monkeypatch.setattr(builtins, "input", lambda: next(answers))
-    out = json.loads(AskHuman()(question="Proceed?"))
+    out = json.loads(CallableTool(AskHuman())(question="Proceed?"))
     assert out["ok"] is True
     assert "hint" in out
     assert "insufficient" in out["hint"].lower()

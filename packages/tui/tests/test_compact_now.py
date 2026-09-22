@@ -8,7 +8,7 @@ def test_compact_now_runs_off_thread():
     seen = {}
 
     class _Ex:
-        def compact_thread(self, tid, system=None):
+        async def acompact_thread(self, tid, system=None):
             seen["args"] = (tid, system)
             return True
 
@@ -27,7 +27,7 @@ def test_compact_now_rejects_when_busy():
     import threading
 
     class _Ex:
-        def compact_thread(self, tid, system=None):
+        async def acompact_thread(self, tid, system=None):
             return True
 
     runner = AgentRunner(executor=_Ex())

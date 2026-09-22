@@ -240,11 +240,20 @@ def preload_minimal_tools_package() -> None:
 
 
 def _real_tools_loaded() -> bool:
+    """Загружен ли НАСТОЯЩИЙ пакет `gc_core.tools`, а не заглушка.
+
+    Признак — файл модуля: заглушки собираются как `types.ModuleType` и файла
+    не имеют, даже когда повторяют имена пакета (`abuild_tools_data` ставит,
+    например, заглушка finish-gate). Прежний признак — `build_tools_data` —
+    снят вместе с синхронной сборкой, и ответ стал «не загружен» ВСЕГДА:
+    фикстура перезагружала весь пакет после каждого теста.
+    """
     tools = sys.modules.get("gc_core.tools")
     if tools is None:
         return False
     return (
-        callable(getattr(tools, "build_tools_data", None))
+        getattr(tools, "__file__", None) is not None
+        and callable(getattr(tools, "abuild_tools_data", None))
         and "gc_core.tools.connect_mcp" in sys.modules
         and "gc_core.tools.skills" in sys.modules
         and isinstance(getattr(sys.modules.get("gc_core.tools.skills"), "__path__", None), list)

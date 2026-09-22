@@ -21,11 +21,20 @@ from gc_core.security.command_moderation import ModerationContext, build_judge_p
 
 
 def test_judge_unavailable_deny_mode_asks_when_confirm_available(monkeypatch):
-    """deny + судья недоступен + confirm доступен → пользователь подтвердил → allow."""
+    """deny + судья недоступен + confirm доступен → сначала «нужно подтверждение»,
+    по «да» — allow.
+
+    Протокол двухшаговый, как у ask: сама функция человека не спрашивает, ожидание
+    — дело драйвера гарда (OffLoop). Раньше она звала confirm-порт сама, а тело
+    гарда зовёт её инлайн, и в асинхронном пути ожидание шло на event loop.
+    """
     monkeypatch.setattr(cm, "confirm_available", lambda ctx: True)
-    monkeypatch.setattr(cm, "request_confirm", lambda **k: True)
     ctx = object()
-    dec = decide_command_execution("deny", None, False, None, ctx=ctx)
+    asked = decide_command_execution("deny", None, False, None, ctx=ctx)
+    assert asked.allowed is False
+    assert asked.requires_confirmation is True
+    assert asked.reason_code == cm.JUDGE_UNAVAILABLE_CONFIRM_REQUIRED
+    dec = decide_command_execution("deny", None, False, True, ctx=ctx)
     assert dec.allowed is True
     assert dec.reason_code == "judge_unavailable_user_confirmed"
 
@@ -40,12 +49,22 @@ def test_judge_unavailable_deny_mode_blocks_when_no_confirm(monkeypatch):
 
 
 def test_judge_unavailable_deny_mode_blocks_when_confirm_rejected(monkeypatch):
-    """deny + судья недоступен + confirm доступен, но пользователь отказал → deny."""
+    """deny + судья недоступен + пользователь отказал → fail-closed."""
     monkeypatch.setattr(cm, "confirm_available", lambda ctx: True)
-    monkeypatch.setattr(cm, "request_confirm", lambda **k: False)
-    ctx = object()
-    dec = decide_command_execution("deny", None, False, None, ctx=ctx)
+    dec = decide_command_execution("deny", None, False, False, ctx=object())
     assert dec.allowed is False
+    assert dec.reason_code == "judge_unavailable"
+
+
+def test_decision_never_asks_the_human_itself(monkeypatch):
+    """Решение чистое: ожидание человека уходит в поток через драйвер гарда."""
+    def _boom(**_k):
+        raise AssertionError("decide_command_execution сама спросила человека — на loop'е")
+
+    monkeypatch.setattr(cm, "request_confirm", _boom)
+    monkeypatch.setattr(cm, "confirm_available", lambda ctx: True)
+    for mode in ("ask", "deny"):
+        decide_command_execution(mode, None, False, None, ctx=object())
 
 
 def test_judge_unavailable_allow_mode_skips_confirm(monkeypatch):
@@ -139,7 +158,16 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     monkeypatch.setattr(cm, "confirm_available", fake_confirm_available)
     monkeypatch.setattr(cm, "request_confirm", lambda **k: True)
     # Судья всегда недоступен — кидаем исключение.
-    monkeypatch.setattr(cm, "run_command_judge_with_retry", lambda *a, **k: (_ for _ in ()).throw(cm.JudgeUnavailable("test")))
+    #
+    # Подменять надо ШОВ, через который ходит ТЕЛО гварда. Здесь стояла
+    # подмена `run_command_judge_with_retry` — она перестала что-либо делать,
+    # когда тело перешло на `judge_with_retry_flow` (судья теперь ждётся на
+    # loop вызывающего). Тест остался зелёным по совпадению: судья в этом
+    # конфиге и так недоступен, то есть fail-closed он больше НЕ проверял.
+    async def _judge_is_down(_payload):
+        raise cm.JudgeUnavailable("test")
+
+    monkeypatch.setattr(cm, "_default_judge_client", lambda *a, **k: _judge_is_down)
 
     fake_ctx = SimpleNamespace(
         config_dict={

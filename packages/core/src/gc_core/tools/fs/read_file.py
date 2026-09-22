@@ -86,10 +86,10 @@ class ReadFile(AbstractSimpleTool):
             payload.update(extra_fields)
         return json.dumps(payload, ensure_ascii=False)
 
-    def _lookup_file_size_bytes(self, path: str) -> Optional[int]:
+    async def _lookup_file_size_bytes(self, path: str) -> Optional[int]:
         try:
-            if self._backend.is_file(path):
-                return self._backend.getsize(path)
+            if await self._backend.is_file(path):
+                return await self._backend.getsize(path)
         except OSError:
             return None
         return None
@@ -181,8 +181,9 @@ Usage:
 '''
         return description
 
+
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         offset: Optional[int] = None,
@@ -200,7 +201,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        file_size_bytes = self._lookup_file_size_bytes(path)
+        file_size_bytes = await self._lookup_file_size_bytes(path)
 
         if offset is not None and not isinstance(offset, int):
             return self._error_result(
@@ -220,7 +221,7 @@ Usage:
                 file_size_bytes=file_size_bytes,
             )
 
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return self._error_result(
                 path=path,
                 error_type="not_found",
@@ -228,7 +229,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        if self._backend.is_dir(path):
+        if await self._backend.is_dir(path):
             return self._error_result(
                 path=path,
                 error_type="not_a_file",
@@ -237,7 +238,7 @@ Usage:
             )
 
         max_bytes = fs_read_max_bytes(self._config_dict)
-        if file_size_bytes is None and self._backend.exists(path):
+        if file_size_bytes is None and await self._backend.exists(path):
             return self._error_result(
                 path=path,
                 error_type="io_error",
@@ -264,7 +265,7 @@ Usage:
                 )
 
         try:
-            raw = self._backend.read_bytes(path)
+            raw = await self._backend.read_bytes(path)
         except OSError as e:
             return self._error_result(
                 path=path,
