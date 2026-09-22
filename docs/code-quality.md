@@ -3,10 +3,15 @@
 # Качество кода: pre-commit, ruff, complexipy, локальный Sonar
 
 Гейт качества один и тот же у человека и у CI — `scripts/lint.sh`. Внутри него
-pre-commit со всеми хуками из `.pre-commit-config.yaml`: гигиена файлов, ruff
-(линт + формат), complexipy (когнитивная сложность) и
-`scripts/sonar_like_check.py` — локальный аналог правил Sonar, которых нет ни
-у кого другого.
+pre-commit со всеми хуками из `.pre-commit-config.yaml`:
+
+* гигиена файлов (маркеры конфликтов, YAML/TOML, ключи, пробелы, большие файлы);
+* ruff — линтер и форматтер;
+* complexipy — когнитивная сложность (S3776);
+* `scripts/sonar_like_check.py` — правила Sonar, которых нет ни у кого другого;
+* `scripts/dead_code_check.py` — мёртвый код (vulture);
+* pylint `duplicate-code` — дублирование кода (аналог Duplications/CPD Sonar);
+* `uv lock --check` — лок-файл согласован с манифестами.
 
 Смысл затеи: замечание Sonar не должно быть новостью. Всё, что видит скан,
 ловится на машине разработчика до коммита; что НЕ ловится — перечислено ниже
@@ -18,6 +23,10 @@ pre-commit со всеми хуками из `.pre-commit-config.yaml`: гиги
 uv sync --group lint
 uv run --group lint pre-commit install     # или: uvx prek install
 ```
+
+Ставятся два хука: `pre-commit` (всё, кроме дублирования) и `pre-push`
+(дублирование кода: оно сравнивает файлы между собой и идёт ~45 с — на каждый
+коммит тяжело).
 
 `prek` — совместимая реализация того же формата: быстрее и не требует Python.
 Гонять им:
@@ -38,8 +47,10 @@ scripts/lint.sh packages/core/src     # только указанные пути
 ```
 uv run --group lint ruff check .                 # линтер
 uv run --group lint ruff format .                # форматтер
-uv run --group lint complexipy --quiet           # S3776, порог 15 + снимок
+uv run --group lint complexipy --failed         # S3776, порог 15 + снимок
 uv run python scripts/sonar_like_check.py packages/*/src packages/core/assets scripts integrations docs
+uv run --group lint python scripts/dead_code_check.py                       # мёртвый код
+uv run --group lint pylint --disable=all --enable=duplicate-code packages/*/src   # дубли
 ```
 
 ## Область и строгость
@@ -53,10 +64,13 @@ uv run python scripts/sonar_like_check.py packages/*/src packages/core/assets sc
 | `ruff check` | весь репозиторий **кроме** `**/tests/**` и `conftest.py` | ноль нарушений |
 | complexipy (S3776) | `packages/*/src`, `packages/core/assets/skills/*/scripts`, `scripts/`, `integrations/` | core, cli, scripts, integrations — ноль; tui, server, mcp, testkit — снимок (см. ниже) |
 | `sonar_like_check.py` | тот же прод-код плюс `docs/*.html` | ноль нарушений во всех модулях |
+| мёртвый код (vulture) | тот же прод-код; тесты учитываются как места использования | ноль находок во всех модулях |
+| дублирование (pylint) | тот же прод-код | ноль блоков ≥ 10 строк во всех модулях |
 
 Не проверяется нигде: `external/`, `packages/*/external/` — вендорный код.
-`packages/core/src/gc_core/tools/deprecated/` исключён из проверки сложности:
-это мёртвый код, он ниоткуда не импортируется.
+Бывший `packages/core/src/gc_core/tools/deprecated/` (старые `fs_search_files`,
+`memory_files`, `thread_notes`, `update_plan`) удалён: ниоткуда не
+импортировался и в реестр тулов не входил.
 
 ## Правило Sonar → чем ловится локально
 
@@ -84,6 +98,9 @@ uv run python scripts/sonar_like_check.py packages/*/src packages/core/assets sc
 | S5780 | дубль ключа словаря | ruff `F601` |
 | S116 | поле в стиле mixedCase | ruff `N815` |
 | S107 | больше 13 параметров | ruff `PLR0913` (`max-args = 13`) |
+| S1144 | неиспользуемый приватный метод/функция/класс | `dead_code_check` (vulture) |
+| S1763 | недостижимый код после `return`/`raise` | `dead_code_check` (vulture) |
+| Duplications (CPD) | блок кода ≥ 10 строк повторяется в другом месте | pylint `duplicate-code` |
 | **S2589** | выражение всегда истинно | **не ловится** — нужен тайпчекер или Sonar |
 | **S7507** | доступ к возможно отсутствующему ключу | **не ловится** |
 | **S3403** | сравнение значений несовместимых типов | **не ловится** |
@@ -120,6 +137,36 @@ uv run python scripts/sonar_like_check.py packages/*/src packages/core/assets sc
 
 Форматтер по тестам идёт как и по остальному коду: единый стиль нужен и им, а
 переписать код `ruff format` не может.
+
+## Мёртвый код
+
+`scripts/dead_code_check.py` — обёртка над vulture. Гейт строгий, но берёт
+только то, где ложных срабатываний почти не бывает:
+
+* всё, в чём vulture уверен на ≥ 80 %: неиспользуемые импорты и переменные,
+  недостижимый код после `return`/`raise`;
+* неиспользуемые **приватные** функции, методы, классы, свойства (`_name`) —
+  от 60 %. Публичные имена не проверяются: их зовут фреймворки (Textual,
+  pydantic, FastAPI, pytest) и внешние пользователи пакета.
+
+Тесты считаются местом использования: функция, которую зовёт только тест, —
+живая. Соглашения фреймворков (`on_*`, `_on_*`, `action_*`, `watch_*`,
+`compose`, `pytest_*`, декораторы валидаторов и маршрутов) отсеяны в самом
+скрипте. Если имя живо по причине, которую статический анализ не видит (вызов по
+строке, сигнатура чужого колбэка), — строка в `scripts/dead_code_whitelist.py`
+с пояснением. Всё остальное мёртвое удаляется.
+
+## Дублирование кода
+
+pylint с единственной включённой проверкой `duplicate-code`. Порог — 10 строк
+подряд (как у CPD Sonar); комментарии, докстроки, импорты и сигнатуры в
+сравнение не входят. Настройки — `[tool.pylint.*]` в `pyproject.toml`. Проверка
+межфайловая, поэтому идёт по всему прод-коду сразу: на `pre-push` и в
+`scripts/lint.sh`, а не на каждый коммит.
+
+Общее выносится в одно место, а не глушится: две версии `fetch_url`, пара
+файловых тулов правки, `retry`/`aretry`, пикеры палитры в TUI и фейк
+Harbor-бэкенда из `gc_testkit` получили общих предков и хелперы.
 
 ## Снимок complexipy: замороженный долг
 
@@ -168,8 +215,9 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 ## CI
 
 Отдельный шаг CI — тот же `scripts/lint.sh` (он же `pre-commit run
---all-files`). Конфигурации CI в репозитории сейчас нет; когда она появится,
-шаг добавляется дословно:
+--all-files --hook-stage manual`: все хуки, включая дублирование).
+Конфигурации CI в репозитории сейчас нет; когда она появится, шаг добавляется
+дословно:
 
 ```yaml
 - run: uv sync --group lint

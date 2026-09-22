@@ -4,8 +4,11 @@
 #   scripts/lint.sh              — весь репозиторий (как в CI)
 #   scripts/lint.sh <пути...>    — только указанные файлы/каталоги
 #
-# Внутри — pre-commit со всеми хуками из .pre-commit-config.yaml: гигиена,
-# ruff (линт + формат), complexipy (S3776) и scripts/sonar_like_check.py.
+# Внутри — pre-commit со ВСЕМИ хуками из .pre-commit-config.yaml, включая
+# стадию manual: гигиена, ruff (линт + формат), complexipy (S3776),
+# scripts/sonar_like_check.py, мёртвый код (scripts/dead_code_check.py) и
+# дублирование кода (pylint duplicate-code — при коммите не гоняется, только
+# pre-push и здесь).
 # Раньше этот скрипт звал инструменты сам и проверял ТОЛЬКО gc-core; теперь
 # область — весь репозиторий, а список проверок один и тот же у всех.
 #
@@ -23,6 +26,6 @@ else
 fi
 
 if [ $# -eq 0 ]; then
-  exec "${RUN[@]}" --all-files --show-diff-on-failure
+  exec "${RUN[@]}" --all-files --hook-stage manual --show-diff-on-failure
 fi
-exec "${RUN[@]}" --files "$@"
+exec "${RUN[@]}" --hook-stage manual --files "$@"

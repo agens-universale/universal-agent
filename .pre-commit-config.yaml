@@ -7,7 +7,8 @@
 # Все хуки `repo: local` + `language: system` и запускаются через
 # `uv run --group lint …`: версии инструментов берутся из uv.lock, а за самими
 # хуками не нужно ходить на GitHub — в корпоративной сети он бывает закрыт.
-default_install_hook_types: [pre-commit]
+# pre-push — для тяжёлой проверки дублирования (см. хук duplicate-code).
+default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit, manual]
 # Вендорный код, лок-файл, бинарные артефакты и снапшоты TUI не трогаем.
 exclude: |
@@ -86,12 +87,14 @@ repos:
         require_serial: true
       # Снимок (complexipy-snapshot.json) держит старый долг замороженным:
       # новые нарушения блокируются, замороженные — нет.
+      # `--failed` печатает только нарушителей (файл, функция, сложность) и
+      # возвращает ненулевой код; `--quiet` падал молча, без имени функции.
       - id: complexipy
         name: cognitive complexity <= 15 (S3776)
-        entry: uv run --group lint complexipy --max-complexity-allowed 15 --quiet
+        entry: uv run --group lint complexipy --max-complexity-allowed 15 --failed --plain --color no
         language: system
         types: [python]
-        exclude: '(^|/)tests/|/tools/deprecated/|conftest\.py$'
+        exclude: '(^|/)tests/|conftest\.py$'
         require_serial: true
       - id: sonar-like
         name: правила Sonar (sonar_like_check)
@@ -99,6 +102,30 @@ repos:
         language: system
         types_or: [python, html]
         exclude: '(^|/)tests/|conftest\.py$'
+      # Мёртвый код (S1144, S1763, S1481): анализ межмодульный, поэтому по
+      # всему прод-коду сразу, а не по индексу. ~3 с — годится на каждый коммит.
+      - id: dead-code
+        name: мёртвый код (vulture, scripts/dead_code_check.py)
+        entry: uv run --group lint python scripts/dead_code_check.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+      # Дублирование кода (аналог Sonar Duplications/CPD): pylint сравнивает
+      # файлы МЕЖДУ собой, поэтому тоже по всему прод-коду. ~45 с — на коммит
+      # тяжело, поэтому стадия pre-push и ручной прогон (scripts/lint.sh, CI).
+      # Настройки — [tool.pylint.*] в pyproject.toml.
+      - id: duplicate-code
+        name: дублирование кода (pylint duplicate-code)
+        entry: >-
+          uv run --group lint pylint --disable=all --enable=duplicate-code --score=n
+          packages/cli/src packages/core/src packages/mcp/src packages/server/src
+          packages/testkit/src packages/tui/src packages/core/assets/skills scripts integrations
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-push, manual]
       - id: uv-lock-check
         name: uv.lock согласован с манифестами
         entry: uv lock --check

@@ -55,6 +55,11 @@ lint = [
     # скачиваются с GitHub (в корпоративной сети он бывает закрыт).
     "pre-commit>=4",
     "pre-commit-hooks>=5",
+    # Только ради одной проверки — дублирования кода (duplicate-code, аналог
+    # CPD/Duplications у Sonar). Остальные правила pylint выключены: их роль
+    # играет ruff. Настройки — [tool.pylint.*] ниже.
+    "pylint>=3.3",
+    "vulture>=2.14",
 ]
 test = [
     # Раньше жили в runtime-dependencies и приезжали каждому пользователю.
@@ -208,6 +213,11 @@ ignore = [
 # PLC0415 (импорт не на верхнем уровне) не включён: ленивые импорты здесь
 # осознаны и их ~7 тысяч. S101 (assert) и PLR2004 (магические числа) — шум.
 
+[tool.ruff.lint.per-file-ignores]
+# Белый список vulture (scripts/dead_code_check.py): голые имена там — пометки
+# «используется», файл никто не исполняет и не импортирует.
+"scripts/dead_code_whitelist.py" = ["F821", "B018"]
+
 [tool.ruff.lint.pylint]
 # S107 у Sonar: больше 13 параметров. Для существующего кода — won't fix
 # построчным `# noqa: PLR0913`, новые функции правило ловит.
@@ -227,13 +237,33 @@ paths = [
     "integrations",
 ]
 max-complexity-allowed = 15
-# Тесты исключены как в sonar.exclusions; tools/deprecated — мёртвый код,
-# не импортируется ниоткуда; external — вендорное.
+# Тесты исключены как в sonar.exclusions; external — вендорное.
 exclude = [
     "**/tests/**",
     "tests/**",
     "**/conftest.py",
-    "**/tools/deprecated/**",
     "external/**",
     "**/external/**",
 ]
+
+# --- Дублирование кода (аналог Sonar Duplications / CPD) ---------------------
+# pylint здесь — только детектор копипасты: `pylint --disable=all
+# --enable=duplicate-code`. Область та же, что у complexipy (прод-код без
+# тестов). Порог 10 строк — как у CPD Sonar для
+# Python (блок от 10 строк подряд). Комментарии, докстроки, импорты и сигнатуры
+# в сравнение не входят: одинаковый заголовок функции копипастой не считается.
+[tool.pylint.main]
+ignore-paths = [
+    ".*/tests/.*",
+    "^tests/.*",
+    ".*/conftest\\.py$",
+    "^external/.*",
+    ".*/external/.*",
+]
+
+[tool.pylint.similarities]
+min-similarity-lines = 10
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
