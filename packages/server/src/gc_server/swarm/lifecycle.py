@@ -83,7 +83,7 @@ def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> N
         return
     try:
         os.killpg(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
+    except OSError:
         # Группа уже не существует (или нет прав) — выход без ошибки.
         return
 
@@ -97,7 +97,7 @@ def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> N
     # Время вышло — добиваем.
     try:
         os.killpg(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
+    except OSError:
         pass
 
 

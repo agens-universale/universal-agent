@@ -43,7 +43,7 @@ def in_tracking_perimeter(
     try:
         target = normalize_path_for_policy(path, launch_root)
         root, extras = _normalize_roots(launch_root, extra_paths)
-    except (ValueError, FileNotFoundError, OSError):
+    except (ValueError, OSError):
         return False
     return is_within_any_root(
         target,
@@ -90,7 +90,7 @@ def canonical_path_key(
     try:
         resolved = normalize_path_for_policy(path, launch_root)
         root, extras = _normalize_roots(launch_root, extra_paths)
-    except (ValueError, FileNotFoundError, OSError):
+    except (ValueError, OSError):
         return None
 
     ci = _case_insensitive()

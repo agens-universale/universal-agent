@@ -105,6 +105,16 @@ from gc_tui.widgets.thinking_indicator import (
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_PREFIX_EXPORTED = "[exported] "
+_SEL_CMDINPUT = "#cmdinput"
+_SEL_FOOTER_LEFT = "#footer-left"
+_SEL_INDICATOR_BAR = "#indicator-bar"
+_SEL_INPUT_ROW = "#input-row"
+_SEL_ROOT = "#root"
+_SEL_TRACE = "#trace"
+
+
 _log = logging.getLogger(__name__)
 
 
@@ -242,6 +252,13 @@ _UNRESOLVED = object()
 # transition — (цвет_нового_уровня_или_None, новая_модель) или None (переход
 # не нужен). См. `TraceScreen._footer_head_snapshot`.
 _FooterHeadSnapshot = namedtuple("_FooterHeadSnapshot", ("profile", "level_color", "model", "transition"))
+
+
+def _profile_source_label(ref) -> str | None:
+    """Откуда пришёл активный профиль: проектный указатель, глобальный или его нет."""
+    if ref is None:
+        return None
+    return "проектный" if ref.root_kind == "project" else "глобальный"
 
 
 def _truncate_profile_name(name: str, max_cols: int) -> str:
@@ -489,7 +506,7 @@ class TraceScreen(Screen):
         останавливают событие в своём on_click (self.focus() + event.stop()).
         Клик вне трейса (инпут/футер) фокус трейса не трогает."""
         try:
-            trace = self.query_one("#trace", VerticalScroll)
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         if not trace.has_focus and trace.region.contains(event.screen_x, event.screen_y):
@@ -499,7 +516,7 @@ class TraceScreen(Screen):
         """Ctrl+V → всегда в #cmdinput, даже если фокус ушёл в трейс (клик/Tab
         во время run). Иначе хоткей «мёртв»: у строк трейса нет action_paste."""
         try:
-            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except Exception:
             return
         if inp.disabled:
@@ -516,7 +533,7 @@ class TraceScreen(Screen):
         if isinstance(focused, CommandTextArea):
             return  # CommandTextArea._on_paste сам разберёт
         try:
-            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except Exception:
             return
         if inp.disabled or inp.read_only:
@@ -986,7 +1003,7 @@ class TraceScreen(Screen):
         base = self._footer_left_commands()
         badge = format_notices_badge(self._collect_footer_notices())
         try:
-            width = self.query_one("#footer-left", Static).content_size.width
+            width = self.query_one(_SEL_FOOTER_LEFT, Static).content_size.width
         except Exception:
             width = 0
         return footer_left_with_badge(base, badge, width=width)
@@ -1000,7 +1017,7 @@ class TraceScreen(Screen):
         if self._voice is not None and self._voice.state != "idle":
             return
         try:
-            self.query_one("#footer-left", Static).update(self._footer_left_text())
+            self.query_one(_SEL_FOOTER_LEFT, Static).update(self._footer_left_text())
         except Exception:
             pass
 
@@ -1017,7 +1034,7 @@ class TraceScreen(Screen):
         except Exception:
             pass
         try:
-            left = self.query_one("#footer-left", Static)
+            left = self.query_one(_SEL_FOOTER_LEFT, Static)
         except Exception:
             return
         # Голосовая пилюля вытесняет остальной footer-left, пока стадия активна.
@@ -1072,7 +1089,7 @@ class TraceScreen(Screen):
         # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
         self._footer_refusal_active = False
         self._footer_hint_active = True
-        self.query_one("#footer-left").update(text)
+        self.query_one(_SEL_FOOTER_LEFT).update(text)
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
         self._footer_hint_timer = self.set_timer(seconds, self._clear_footer_hint)
@@ -1166,7 +1183,7 @@ class TraceScreen(Screen):
         from gc_core.config_modules.voice import voice_enabled
 
         try:
-            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except Exception:
             return
         if inp.disabled or self._any_picker_open:
@@ -1279,7 +1296,7 @@ class TraceScreen(Screen):
 
     def _on_voice_state(self, state: str) -> None:
         try:
-            row = self.query_one("#input-row", Horizontal)
+            row = self.query_one(_SEL_INPUT_ROW, Horizontal)
             row.set_class(state == "recording", "recording")
         except Exception:
             pass
@@ -1313,7 +1330,7 @@ class TraceScreen(Screen):
     def _insert_transcribed(self, text: str) -> None:
         """Вставить распознанный текст в позицию курсора (+ авто-пробел)."""
         try:
-            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except Exception:
             return
         row, col = inp.cursor_location
@@ -1325,7 +1342,7 @@ class TraceScreen(Screen):
         inp.focus()
 
     def on_mount(self) -> None:
-        self.query_one("#cmdinput", CommandTextArea).focus()
+        self.query_one(_SEL_CMDINPUT, CommandTextArea).focus()
         self._show_brand()
         self._render_startup_notices()
         # Per-project история input-реплик: project_dir известен со старта
@@ -1693,7 +1710,7 @@ class TraceScreen(Screen):
             reasoning_clock=self._reasoning_clock,
         )
         self._thinking = indicator
-        self.query_one("#indicator-bar", Vertical).mount(indicator)
+        self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(indicator)
 
     def _restore_terminal_indicator(self) -> None:
         """На resume сессии: смонтировать строку-итог прошлого хода. Только если
@@ -1725,7 +1742,7 @@ class TraceScreen(Screen):
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
         )
         self._thinking = ind
-        self.query_one("#indicator-bar", Vertical).mount(ind)
+        self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
 
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя — анимация продолжает идти."""
@@ -1850,8 +1867,8 @@ class TraceScreen(Screen):
         Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
         раздувает chrome и выдавливает поле ввода за край экрана."""
         try:
-            root = self.query_one("#root", Vertical)
-            trace = self.query_one("#trace", VerticalScroll)
+            root = self.query_one(_SEL_ROOT, Vertical)
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         overlay = self._open_overlay_widget()
@@ -1892,7 +1909,7 @@ class TraceScreen(Screen):
         """Сырой замер: трейс прокручен в самый низ (с допуском). Используется в
         _update_stick_state для повторного «прилипания», когда юзер вернулся к низу."""
         try:
-            trace = self.query_one("#trace", VerticalScroll)
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return True
         return trace.scroll_offset.y >= trace.max_scroll_y - self._STICK_TOL
@@ -1905,7 +1922,7 @@ class TraceScreen(Screen):
         низу — возвращает. Вызывать ПЕРЕД прижатием (детект всегда предшествует
         скроллу → юзера не «дёргает» назад при уходе вверх)."""
         try:
-            trace = self.query_one("#trace", VerticalScroll)
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         if self._stick_bottom:
@@ -1920,7 +1937,7 @@ class TraceScreen(Screen):
 
         def _do() -> None:
             try:
-                trace = self.query_one("#trace", VerticalScroll)
+                trace = self.query_one(_SEL_TRACE, VerticalScroll)
             except Exception:
                 return
             trace.scroll_end(animate=False)
@@ -1934,7 +1951,7 @@ class TraceScreen(Screen):
         scroll=True: прокрутить вниз, но только если юзер уже внизу
         (`_trace_is_at_bottom`) — иначе не дёргаем его прокрутку. force_scroll=True
         прокручивает безусловно (отправка своего сообщения = re-engage)."""
-        trace = self.query_one("#trace", VerticalScroll)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
         trace.mount(widget)
@@ -2280,7 +2297,7 @@ class TraceScreen(Screen):
             )
             # Первый tool в группе (предыдущий ряд — не tool) получает верхний
             # отступ; подряд идущие tool-строки остаются компактными.
-            if is_tool_group_start(self.query_one("#trace", VerticalScroll)):
+            if is_tool_group_start(self.query_one(_SEL_TRACE, VerticalScroll)):
                 row.add_class("tool-group-start")
             self._active_calls[row.call_id] = row
             # Durable anchor for nested (reopen / after parent result pop).
@@ -2442,7 +2459,7 @@ class TraceScreen(Screen):
         parent = self._nested_parent_row(parent_call_id)
         if parent is None:
             return
-        trace = self.query_one("#trace", VerticalScroll)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         anchor = self._nested_anchor.get(parent_call_id, parent)
         try:
             trace.mount(widget, after=anchor)
@@ -2619,9 +2636,9 @@ class TraceScreen(Screen):
         parent_row = self._active_calls.get(parent_call_id)
         if parent_row is not None:
             parent_row.pause()
-        inp_row = self.query_one("#input-row", Horizontal)
-        self.query_one("#root", Vertical).mount(banner, before=inp_row)
-        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
+        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         inp.placeholder = "ваш ответ агенту…"
         inp.add_class("ask-human-mode")
         self._refresh_header()
@@ -2703,11 +2720,11 @@ class TraceScreen(Screen):
         )
         # mount banner before #input-row; потолок высоты — после layout
         # (_cap_sticky_banner), иначе длинный вопрос выдавливает input/footer.
-        inp_row = self.query_one("#input-row", Horizontal)
-        self.query_one("#root", Vertical).mount(banner, before=inp_row)
+        inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
+        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
         self.call_after_refresh(self._sync_trace_max_height)
         # switch input to ask-human mode
-        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         inp.placeholder = "ваш ответ агенту…"
         inp.add_class("ask-human-mode")
         self._refresh_header()
@@ -2732,7 +2749,7 @@ class TraceScreen(Screen):
         self._ask_human_banner = None
         self._ask_human_call_id = None
         self.app.tui_state.ask_human_state = None
-        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         inp.placeholder = _PLACEHOLDER_READY
         inp.remove_class("ask-human-mode")
         self._refresh_header()
@@ -2767,8 +2784,8 @@ class TraceScreen(Screen):
         )
         self._confirm_banner = banner
         self._confirm_active = True
-        inp_row = self.query_one("#input-row", Horizontal)
-        self.query_one("#root", Vertical).mount(banner, before=inp_row)
+        inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
+        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
         self.call_after_refresh(self._sync_trace_max_height)
         inp_row.add_class("hidden")
         # Инпут на время confirm: СИНХРОННО disabled (иначе «y» утекает в TextArea).
@@ -2776,7 +2793,7 @@ class TraceScreen(Screen):
         # по running ToolCallRow перехватывает Enter и открывает tool detail
         # вместо _answer_confirm (Key идёт focused→bubble, Screen.on_key позже).
         try:
-            self.query_one("#cmdinput", CommandTextArea).disabled = True
+            self.query_one(_SEL_CMDINPUT, CommandTextArea).disabled = True
         except Exception:
             pass
         self.set_focus(banner)
@@ -2793,11 +2810,11 @@ class TraceScreen(Screen):
                 pass
             self._confirm_banner = None
         try:
-            self.query_one("#input-row", Horizontal).remove_class("hidden")
+            self.query_one(_SEL_INPUT_ROW, Horizontal).remove_class("hidden")
         except Exception:
             pass
         try:
-            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             inp.disabled = False  # снять disable ДО focus (фокус не идёт на disabled)
             inp.focus()
         except Exception:
@@ -3460,7 +3477,7 @@ class TraceScreen(Screen):
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
             return
-        trace = self.query_one("#trace", VerticalScroll)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         # без класса line-meta: его margin-top:1 опускал бы MCP-блок ниже логотипа;
         # цвет MCP-колонки задаёт #brand-mcp (color: $deep-dim).
         self._mcp_status_row = Static("", id="brand-mcp", markup=False)
@@ -3637,7 +3654,7 @@ class TraceScreen(Screen):
         «снести всё + ремоунт» не работает: guard видит ещё живой parent,
         а немедленный ремоунт с тем же id дал бы DuplicateIds. Виджеты шапки
         просто не удаляем."""
-        trace = self.query_one("#trace", VerticalScroll)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         trace.remove_children([c for c in trace.children if c.id not in self._TRACE_HEADER_IDS])
         self._show_brand()  # defensive: монтирует, только если шапки ещё нет
 
@@ -3736,7 +3753,7 @@ class TraceScreen(Screen):
         # колесо мыши шлётся как ↑/↓ — гейт ограничивает его влияние полем ввода.
         if event.key == "up" and not self._any_picker_open:
             try:
-                input_field = self.query_one("#cmdinput", CommandTextArea)
+                input_field = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                 if input_field.has_focus and input_field.cursor_on_first_visual_line():
                     self._history_prev()
                     event.stop()
@@ -3747,7 +3764,7 @@ class TraceScreen(Screen):
 
         if event.key == "down" and not self._any_picker_open:
             try:
-                input_field = self.query_one("#cmdinput", CommandTextArea)
+                input_field = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                 if input_field.has_focus and input_field.cursor_on_last_visual_line():
                     self._history_next()
                     event.stop()
@@ -3791,7 +3808,7 @@ class TraceScreen(Screen):
                 self._clear_footer_hint()
                 if kind == "clear":
                     try:
-                        inp = self.query_one("#cmdinput", CommandTextArea)
+                        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                         inp.text = ""
                         inp._clear_chip_state()
                     except Exception:
@@ -3804,7 +3821,7 @@ class TraceScreen(Screen):
 
             input_text = ""
             try:
-                input_text = self.query_one("#cmdinput").text
+                input_text = self.query_one(_SEL_CMDINPUT).text
             except Exception:
                 pass
 
@@ -3866,7 +3883,7 @@ class TraceScreen(Screen):
             if event.key == "tab":
                 skill = self._skill_picker.selected_skill()
                 if skill is not None:
-                    inp = self.query_one("#cmdinput", CommandTextArea)
+                    inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                     parts = inp.text.split(None, 1)
                     first = parts[0] if parts else "/skill"
                     self._suppress_picker_reopen = True
@@ -3895,7 +3912,7 @@ class TraceScreen(Screen):
             if event.key == "tab":
                 value = self._arg_picker.selected_value()
                 if value is not None:
-                    inp = self.query_one("#cmdinput", CommandTextArea)
+                    inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                     parts = inp.text.split(None, 1)
                     first = parts[0] if parts else "/export"
                     self._suppress_picker_reopen = True
@@ -3932,7 +3949,7 @@ class TraceScreen(Screen):
             return
         if event.key == "escape":
             self._close_palette()
-            inp = self.query_one("#cmdinput", CommandTextArea)
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             inp.text = ""
             event.stop()
             event.prevent_default()
@@ -3968,7 +3985,7 @@ class TraceScreen(Screen):
         elif event.key == "tab":
             cmd = self._palette.selected_command()
             if cmd is not None:
-                inp = self.query_one("#cmdinput", CommandTextArea)
+                inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                 inp.text = f"/{cmd.name} "
                 inp.move_cursor(inp.document.end)
                 self._close_palette()
@@ -4138,7 +4155,7 @@ class TraceScreen(Screen):
         контентом, под ним есть место). Потолок оверлея и ужатие #trace под его
         желаемую высоту считает _sync_trace_max_height (по virtual_size оверлея);
         отложенный вызов даёт это сразу, не дожидаясь poll-тика."""
-        self.query_one("#root", Vertical).mount(widget, after=self.query_one("#input-row", Horizontal))
+        self.query_one(_SEL_ROOT, Vertical).mount(widget, after=self.query_one(_SEL_INPUT_ROW, Horizontal))
         self.call_after_refresh(self._sync_trace_max_height)
 
     def _open_palette(self, *, prefix: str) -> None:
@@ -4191,7 +4208,7 @@ class TraceScreen(Screen):
         """Раскрыть пикер /profiles (спека §12.1, ревизия 2026-07-28): текст
         `/profiles ` в input → on_text_area_changed (состояние 3) сам откроет
         ArgPicker с динамическими опциями и хинтом состава слотов."""
-        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         if self._palette is not None:
             self._close_palette()
         inp.text = f"/{name} "
@@ -4346,7 +4363,7 @@ class TraceScreen(Screen):
         entry = self._file_picker.selected_entry()
         if entry is None:
             return
-        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         row, col = inp.cursor_location
         lines = inp.text.split("\n")
         line = lines[row]
@@ -4393,7 +4410,7 @@ class TraceScreen(Screen):
             self._close_file_picker()
 
     async def on_command_text_area_submitted(self, event: CommandTextArea.Submitted) -> None:
-        inp = self.query_one("#cmdinput", CommandTextArea)
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         # Запись голосом: Enter = стоп+распознать (НЕ отправка сообщения).
         if self._voice is not None and self._voice.state == "recording":
             self._voice.stop_and_transcribe()
@@ -4988,7 +5005,7 @@ class TraceScreen(Screen):
         # Cancel-with-undo (агент не успел ничего выдать + input пустой) — отдельно.
         input_text = ""
         try:
-            input_text = self.query_one("#cmdinput").text
+            input_text = self.query_one(_SEL_CMDINPUT).text
         except Exception:
             pass
         if self._events_since_last_user_send == 0 and not input_text:
@@ -5090,7 +5107,7 @@ class TraceScreen(Screen):
         # Восстановить текст в input + поставить курсор в конец, чтобы
         # юзер мог сразу продолжить печатать (а не правил с начала строки).
         try:
-            input_field = self.query_one("#cmdinput")
+            input_field = self.query_one(_SEL_CMDINPUT)
             input_field.text = self._last_user_send_text
             input_field.cursor_location = input_field.document.end
         except Exception:
@@ -5163,7 +5180,7 @@ class TraceScreen(Screen):
             return
         if self._history_index is None:
             try:
-                input_field = self.query_one("#cmdinput")
+                input_field = self.query_one(_SEL_CMDINPUT)
                 self._history_draft = input_field.text
             except Exception:
                 self._history_draft = ""
@@ -5175,7 +5192,7 @@ class TraceScreen(Screen):
         self._history_index = new_index
         self._history_last_programmatic_text = text
         try:
-            input_field = self.query_one("#cmdinput")
+            input_field = self.query_one(_SEL_CMDINPUT)
             input_field.text = text
             input_field.cursor_location = input_field.document.end
         except Exception:
@@ -5192,7 +5209,7 @@ class TraceScreen(Screen):
             # но Changed для draft-текста придёт ПОСЛЕ обнуления state
             # → ничего не нужно ловить, элиф ниже его игнорирует.
             try:
-                input_field = self.query_one("#cmdinput")
+                input_field = self.query_one(_SEL_CMDINPUT)
                 input_field.text = draft_text
                 input_field.cursor_location = input_field.document.end
             except Exception:
@@ -5205,7 +5222,7 @@ class TraceScreen(Screen):
         self._history_index = new_index
         self._history_last_programmatic_text = text
         try:
-            input_field = self.query_one("#cmdinput")
+            input_field = self.query_one(_SEL_CMDINPUT)
             input_field.text = text
             input_field.cursor_location = input_field.document.end
         except Exception:
@@ -5346,7 +5363,7 @@ class TraceScreen(Screen):
         индикатором), 2 на пустом старте (без задачи) — чтобы чистый экран не нёс
         лишнюю строку. В пределах состояния высота фиксирована → нет «прыжка»."""
         try:
-            bar = self.query_one("#indicator-bar", Vertical)
+            bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
         except Exception:
             return
         bar.styles.height = 3 if self._active_task_id is not None else 2
@@ -5539,7 +5556,7 @@ class TraceScreen(Screen):
         её результат показываем безусловно, даже если юзер отскроллен вверх
         (в отличие от агентских событий). Команды, открывающие экран, трейс не
         растят → счётчик не меняется → позиция чтения истории не сбивается."""
-        trace = self.query_one("#trace", VerticalScroll)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         before = len(trace.children)
         await self._dispatch_command(raw)
         if len(trace.children) > before:
@@ -5840,7 +5857,7 @@ class TraceScreen(Screen):
             path = Path.cwd() / f"export-{tid}-{stamp}-log.jsonl"
             path.write_text(raw, encoding="utf-8")
             self._mount_trace_row(
-                prefix="[exported] ",
+                prefix=_PREFIX_EXPORTED,
                 content=str(path),
                 kind_class="line-meta",
             )
@@ -5851,7 +5868,7 @@ class TraceScreen(Screen):
         path = Path.cwd() / f"export-{tid}-{stamp}.{fmt}"
         path.write_text(text, encoding="utf-8")
         self._mount_trace_row(
-            prefix="[exported] ",
+            prefix=_PREFIX_EXPORTED,
             content=str(path),
             kind_class="line-meta",
         )
@@ -5883,7 +5900,7 @@ class TraceScreen(Screen):
         dst = Path.cwd() / f"export-{tid}-{stamp}-{src.name}"
         dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
         self._mount_trace_row(
-            prefix="[exported] ",
+            prefix=_PREFIX_EXPORTED,
             content=str(dst),
             kind_class="line-meta",
         )
@@ -5923,13 +5940,7 @@ class TraceScreen(Screen):
             "last_runner_error": getattr(self.app, "last_runner_error", None),
             "profile": {
                 "name": cfg.get("profile") or None,
-                "source": (
-                    "проектный"
-                    if ref is not None and ref.root_kind == "project"
-                    else "глобальный"
-                    if ref is not None
-                    else None
-                ),
+                "source": _profile_source_label(ref),
                 "level": router.active_level(),
                 "model": resolved.alias or resolved.model,
                 "circuit_breaker_open": breaker_open,
@@ -6040,7 +6051,7 @@ class TraceScreen(Screen):
         from gc_tui.widgets.trace_row import TraceRow
 
         try:
-            trace = self.query_one("#trace", VerticalScroll)
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return None
         # Смотрим ровно ПОСЛЕДНЕГО ребёнка (дедуп CTA сравнивает с ним): цикл «иду с

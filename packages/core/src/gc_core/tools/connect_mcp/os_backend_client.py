@@ -106,7 +106,7 @@ _HTTP_CARRIER = '''
 import base64, json, ssl, sys, urllib.error, urllib.parse, urllib.request
 
 _req = json.loads(base64.b64decode("{payload_b64}").decode("utf-8"))
-_ctx = ssl._create_unverified_context() if not _req.get("verify_ssl", True) else None
+_ctx = ssl._create_unverified_context() if not _req.get("verify_ssl", True) else None  # NOSONAR: verify_ssl из конфига сервера — осознанный opt-in
 
 
 def _open(request, timeout):

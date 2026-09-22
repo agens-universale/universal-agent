@@ -83,7 +83,8 @@ def build_block_widgets(
             focus_set = True
             continue
         kind_class = kind_class_base if not first_prose_seen else f"{kind_class_base} line-agent-cont"
-        prefix = (bullet if not first_prose_seen else "  ") if prose_bullet else ""
+        marker = bullet if not first_prose_seen else "  "
+        prefix = marker if prose_bullet else ""
         first_prose_seen = True
         widgets.append(
             TraceRow(

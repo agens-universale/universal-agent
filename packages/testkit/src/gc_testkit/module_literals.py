@@ -119,7 +119,7 @@ def _top_level_names() -> set[str]:
     return names
 
 
-_DOTTED = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*\.?$")
+_DOTTED = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*\.?$", re.ASCII)
 
 
 def _looks_like_our_module(lit: str, ours: set[str], *, strict: bool = False) -> bool:

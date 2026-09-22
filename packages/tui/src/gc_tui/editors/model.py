@@ -28,6 +28,9 @@ from gc_tui.editors.field_list import LIST_FAILED, LIST_LOADING, FieldListContro
 from gc_tui.palette import ACCENT, DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_CLS_ONB_HINT_ONB_DYN = "onb-hint onb-dyn"
+
 
 class _Row(NamedTuple):
     kind: str  # "current" | "model"
@@ -97,7 +100,7 @@ class ModelEditor(Vertical):
         )
 
     def compose(self) -> ComposeResult:
-        yield Static(LIST_LOADING, classes="onb-hint onb-dyn", id="onb-model-loading")
+        yield Static(LIST_LOADING, classes=_CLS_ONB_HINT_ONB_DYN, id="onb-model-loading")
 
     def on_mount(self) -> None:
         self._start_fetch()
@@ -341,7 +344,7 @@ class ModelEditor(Vertical):
                 value=self._current, placeholder="имя модели", id=self._input_id, classes="onb-dyn set-framed"
             )
             self.mount(inp)
-            self.mount(Static(LIST_FAILED, id=self._source_id(), classes="onb-hint onb-dyn"))
+            self.mount(Static(LIST_FAILED, id=self._source_id(), classes=_CLS_ONB_HINT_ONB_DYN))
             inp.focus()
             return
         # Поле и его список — под одной рамкой (спека §3.1): поле само себе фильтр,
@@ -382,11 +385,11 @@ class ModelEditor(Vertical):
         # Счётчик, «ничего не найдено», ⚠ и источник — ПОД рамкой (§3.2.2/§3.2.4:
         # внутри неё только выбор). Монтируются раз и навсегда, дальше меняется
         # только их текст: пересборка сносила бы поле, в котором печатают.
-        self.mount(Static("", id=self._count_id(), classes="onb-hint onb-dyn"))
-        self.mount(Static("", id=self._nomatch_id(), classes="onb-hint onb-dyn"))
+        self.mount(Static("", id=self._count_id(), classes=_CLS_ONB_HINT_ONB_DYN))
+        self.mount(Static("", id=self._nomatch_id(), classes=_CLS_ONB_HINT_ONB_DYN))
         self.mount(Static("", id=self._warn_id(), classes="onb-warn onb-dyn"))
         self.mount(
-            Static(LIST_FAILED if self._synthetic else _SOURCE_OK, id=self._source_id(), classes="onb-hint onb-dyn")
+            Static(LIST_FAILED if self._synthetic else _SOURCE_OK, id=self._source_id(), classes=_CLS_ONB_HINT_ONB_DYN)
         )
         self._refresh_status()
         # Поле — внук (лежит в группе), а внуки монтируются отдельным проходом:

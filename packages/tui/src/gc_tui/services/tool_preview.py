@@ -93,7 +93,7 @@ def _try_parse_truncated_json(s: str) -> Any:
     closing = "".join("]" if c == "[" else "}" for c in reversed(stack2))
     try:
         return json.loads(sub + closing)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
 
@@ -114,14 +114,14 @@ def unwrap_tool_output_dict(raw_output: str) -> Optional[dict]:
         return None
     try:
         parsed = json.loads(raw_output)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
     # Двойная JSON-кодировка: некоторые pipeline'ы делают json.dumps дважды.
     if isinstance(parsed, str):
         try:
             parsed = json.loads(parsed)
-        except (json.JSONDecodeError, ValueError):
+        except ValueError:
             return None
 
     # List-обёртка: некоторые тулы возвращают [{ok, content, ...}].
@@ -139,7 +139,7 @@ def unwrap_tool_output_dict(raw_output: str) -> Optional[dict]:
                 inner = json.loads(inner_str)
                 if isinstance(inner, dict):
                     return inner
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 partial = _try_parse_truncated_json(inner_str)
                 if isinstance(partial, dict):
                     return partial

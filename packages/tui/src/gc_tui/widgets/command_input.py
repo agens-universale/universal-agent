@@ -9,6 +9,9 @@ from textual.widgets import TextArea
 
 from gc_tui.services.paste_chips import ChipStore, expand, should_collapse, token_spans
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_ACT_SELECT_ALL = "выделить всё"
+
 
 class CommandTextArea(TextArea):
     """Multi-line input. Enter submits; Ctrl+J / Shift+Enter / Ctrl+Enter insert newline.
@@ -20,10 +23,10 @@ class CommandTextArea(TextArea):
     # Textual TextArea: ctrl+a = cursor_line_start. Нам нужен select-all
     # (Backspace/копирование); priority перебивает дефолт + ЙЦУКЕН.
     BINDINGS = [
-        Binding("ctrl+a", "select_all", "выделить всё", show=False, priority=True),
-        Binding("ctrl+ф", "select_all", "выделить всё", show=False, priority=True),
-        Binding("ctrl+A", "select_all", "выделить всё", show=False, priority=True),
-        Binding("ctrl+Ф", "select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+a", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding("ctrl+ф", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding("ctrl+A", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding("ctrl+Ф", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
         # macOS: option+backspace (терминал в режиме Option-as-Meta шлёт alt+backspace).
         # В дефолтах TextArea клавиша не занята; Win/Linux — прежнее поведение контрактом.
         Binding("alt+backspace", "delete_word_left", "удалить слово", show=False),

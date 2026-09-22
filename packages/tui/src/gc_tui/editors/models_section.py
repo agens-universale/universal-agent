@@ -46,6 +46,11 @@ from gc_tui.editors.model_entry_form import CTRL_U_PAIR, ModelEntryForm, entry_h
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_CLS_SET_HINT_SET_DYN = "set-hint set-dyn"
+_SEL_MODELS_ROW = ".models-row"
+
+
 # --- футеры секции (позиционные: Enter значит разное на разных строках) --------
 #
 # Регистрируются в стражах `tests/tui/test_footer_contract.py` этой же задачей
@@ -1080,7 +1085,7 @@ class ModelsSectionEditor(Vertical):
         """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же рода,
         что `_modes_row_width` экрана: региона нет до layout-прохода, 0 читается как
         «не измерено» и усечения не даёт. Последний матч — свежесмонтированная строка."""
-        widgets = list(self.query(".models-row"))
+        widgets = list(self.query(_SEL_MODELS_ROW))
         if not widgets:
             return 0
         return max(0, widgets[-1].region.width - 2)
@@ -1391,7 +1396,7 @@ class ModelsSectionEditor(Vertical):
             return
         if self._legacy_open:
             if self.registry_empty:
-                yield Static(_EMPTY_HINT, classes="set-hint set-dyn", markup=False)
+                yield Static(_EMPTY_HINT, classes=_CLS_SET_HINT_SET_DYN, markup=False)
             else:
                 yield Static(f"{_RESERVE_LABEL} · {_RESERVE_HINT}", classes="onb-hint onb-dyn", markup=False)
             self._legacy = self._make_legacy_editor()
@@ -1408,7 +1413,7 @@ class ModelsSectionEditor(Vertical):
 
             yield Static(
                 _EMPTY_UNDER_OVERLAY_HINT.format(source=overlay_label(overlay)),
-                classes="set-hint set-dyn",
+                classes=_CLS_SET_HINT_SET_DYN,
                 markup=False,
             )
             return
@@ -1421,7 +1426,7 @@ class ModelsSectionEditor(Vertical):
             # Реестр здесь ЭФФЕКТИВНЫЙ (§10), а значит пуст и основной конфиг —
             # обе половины факта называет сама подсказка: иначе экран объяснял бы
             # пустоту одним лишь профилем и обещал модели оттуда, где их нет.
-            yield Static(_PROFILE_EMPTY_HINT, classes="set-hint set-dyn", markup=False)
+            yield Static(_PROFILE_EMPTY_HINT, classes=_CLS_SET_HINT_SET_DYN, markup=False)
             return
         rows = self._rows()
         # Цель записи — константа всей секции, а не факт строки: одной статичной
@@ -1596,7 +1601,7 @@ class ModelsSectionEditor(Vertical):
         if self._form is not None or self._legacy_open:
             return  # на экране под-форма — строк списка нет и быть не должно
         rows = self._rows()
-        widgets = list(self.query(".models-row"))
+        widgets = list(self.query(_SEL_MODELS_ROW))
         if len(widgets) != len(rows):
             self._rebuild()
             return
@@ -2332,7 +2337,7 @@ class ModelsSectionEditor(Vertical):
 
     # --- инлайн-пикер значений (решение 9: свой механизм раскрытия) -----------
     def _row_widget(self, idx: int):
-        widgets = list(self.query(".models-row"))
+        widgets = list(self.query(_SEL_MODELS_ROW))
         return widgets[idx] if 0 <= idx < len(widgets) else None
 
     def _picker_alias_item(self, alias: str, model_w: int) -> dict:

@@ -8,6 +8,10 @@ from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_a
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.utils.user_text import read_user_text
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SERVER_CONFIG_NAME = "config_server.yml"
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,13 +31,13 @@ def _server_config_candidates() -> list[str]:
     поднимался на минимальном дефолте — **с `auth_token: None`, то есть без
     авторизации**. Ни строки в лог.
     """
-    candidates = [os.path.join(os.getcwd(), "config_server.yml")]
+    candidates = [os.path.join(os.getcwd(), _SERVER_CONFIG_NAME)]
     root = repo_root()
     if root is not None:
-        candidates.append(str(root / "config_server.yml"))
+        candidates.append(str(root / _SERVER_CONFIG_NAME))
     # Исторический путь: рядом с ассетами. Оставлен, чтобы не сломать установки,
     # где файл действительно положили туда.
-    candidates.append(os.path.join(PROJECT_ROOT, "config_server.yml"))
+    candidates.append(os.path.join(PROJECT_ROOT, _SERVER_CONFIG_NAME))
     seen: set[str] = set()
     return [c for c in candidates if not (c in seen or seen.add(c))]
 

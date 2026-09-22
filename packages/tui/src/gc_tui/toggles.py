@@ -14,6 +14,10 @@ from rich.text import Text
 from gc_tui import palette as _pal
 from gc_tui.session_settings import SESSION_KEYS, effective_finish_gate_mode, effective_text_answer_mode
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_TUI_FINISH_GATE_MODE = "tui.finish_gate_mode"
+_TUI_TEXT_ANSWER_MODE = "tui.text_answer_mode"
+
 
 def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
     """TUI-wiring: спроецировать эффективный режим /gate в runtime-ключи судьи.
@@ -31,13 +35,13 @@ def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
 # --- /rigor: пресет как витрина над двумя ключами (спека §2, §6) --------------
 # Пресет НЕ хранится (производная). Пара — те же два существующих ключа сессии/
 # глобала; SESSION_KEYS их не расширяет — /rigor лишь ставит и резолвит.
-RIGOR_KEYS = ("tui.finish_gate_mode", "tui.text_answer_mode")
+RIGOR_KEYS = (_TUI_FINISH_GATE_MODE, _TUI_TEXT_ANSWER_MODE)
 PRESET_CUSTOM = "custom"
 
 PRESETS: Dict[str, Dict[str, str]] = {
-    "low": {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"},
-    "medium": {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"},
-    "high": {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"},
+    "low": {_TUI_FINISH_GATE_MODE: "off", _TUI_TEXT_ANSWER_MODE: "allow"},
+    "medium": {_TUI_FINISH_GATE_MODE: "smart", _TUI_TEXT_ANSWER_MODE: "judge"},
+    "high": {_TUI_FINISH_GATE_MODE: "on", _TUI_TEXT_ANSWER_MODE: "deny"},
 }
 
 
@@ -493,7 +497,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         palette_default=True,
     ),
     "gate": ToggleSpec(
-        dotted="tui.finish_gate_mode",
+        dotted=_TUI_FINISH_GATE_MODE,
         values=(
             ToggleValue(
                 "off",
@@ -517,7 +521,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         palette_default=False,
     ),
     "answers": ToggleSpec(
-        dotted="tui.text_answer_mode",
+        dotted=_TUI_TEXT_ANSWER_MODE,
         values=(
             ToggleValue(
                 "allow",

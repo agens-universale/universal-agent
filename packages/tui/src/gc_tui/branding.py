@@ -50,7 +50,7 @@ def _lerp(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[i
 
 def gradient_color(frac: float) -> str:
     """Цвет колонки на нормированной позиции frac∈[0,1]: WARM→OLIVE→TEAL."""
-    frac = 0.0 if frac < 0 else 1.0 if frac > 1 else frac
+    frac = min(1.0, max(0.0, frac))
     warm, olive, teal = _hex_to_rgb(_WARM), _hex_to_rgb(_OLIVE), _hex_to_rgb(_TEAL)
     if frac <= 0.5:
         return _rgb_to_hex(_lerp(warm, olive, frac / 0.5))

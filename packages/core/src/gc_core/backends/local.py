@@ -896,6 +896,7 @@ def _read_until_eof(end: int) -> None:
         return
     try:
         while os.read(end, _READ_CHUNK):
+            # Прочитанное выбрасываем намеренно: нужен сам факт чтения (см. докстроку).
             pass
     except OSError:
         pass
@@ -964,7 +965,7 @@ def _terminate_quietly(proc) -> bool:
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
             return True
-        except (ProcessLookupError, PermissionError, OSError):
+        except OSError:
             return False
     try:
         proc.terminate()
@@ -1009,7 +1010,7 @@ def _kill_quietly(proc) -> None:
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return
-        except (ProcessLookupError, PermissionError, OSError):
+        except OSError:
             pass  # группы уже нет либо она не наша
     try:
         proc.kill()

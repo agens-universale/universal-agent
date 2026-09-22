@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Tuple
 
 from gc_core.utils.atomic_io import atomic_replace
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MESSAGES_FILE = "messages.jsonl"
+
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -20,7 +23,7 @@ def _swarm_paths(threads_dir: str, swarm_id: str) -> Tuple[str, str, str, str]:
     для указанного swarm_id.
     """
     base_dir = os.path.join(threads_dir, swarm_id)
-    data_path = os.path.join(base_dir, "messages.jsonl")
+    data_path = os.path.join(base_dir, _MESSAGES_FILE)
     meta_path = os.path.join(base_dir, "meta.json")
     stdout_path = os.path.join(base_dir, "stdout.log")
     stderr_path = os.path.join(base_dir, "stderr.log")
@@ -149,11 +152,11 @@ def _resolve_messages_path(
             ".gc",
             "threads",
             swarm_id,
-            "messages.jsonl",
+            _MESSAGES_FILE,
         )
         if os.path.exists(sandbox_messages):
             return sandbox_messages
-    return os.path.join(threads_dir, swarm_id, "messages.jsonl")
+    return os.path.join(threads_dir, swarm_id, _MESSAGES_FILE)
 
 
 def load_swarm_messages(

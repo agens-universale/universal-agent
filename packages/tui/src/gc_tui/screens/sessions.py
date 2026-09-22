@@ -34,6 +34,10 @@ from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.usage_meter import format_nonzero_cost
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_ACT_SELECT_ALL = "выделить всё"
+
+
 _PAGE_SIZE = 25
 _PATH_MAXLEN = 48
 
@@ -66,10 +70,10 @@ class SessionsScreen(Screen):
 
     # Input: ctrl+a = home. Нужен select-all в фильтре (ЙЦУКЕН / Caps).
     BINDINGS = [
-        Binding("ctrl+a", "filter_select_all", "выделить всё", show=False, priority=True),
-        Binding("ctrl+ф", "filter_select_all", "выделить всё", show=False, priority=True),
-        Binding("ctrl+A", "filter_select_all", "выделить всё", show=False, priority=True),
-        Binding("ctrl+Ф", "filter_select_all", "выделить всё", show=False, priority=True),
+        Binding("ctrl+a", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding("ctrl+ф", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding("ctrl+A", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding("ctrl+Ф", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
     ]
 
     def __init__(self, *, threads_dir: str, system: str = "cli", **kwargs) -> None:

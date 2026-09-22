@@ -55,7 +55,7 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
         if s.startswith(("{", "[")):
             try:
                 parsed = json.loads(s)
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 parsed = _parse_truncated_json(s)
                 if parsed is None:
                     return content
@@ -119,7 +119,7 @@ def _parse_truncated_json(s: str) -> Optional[Any]:
     for cand in candidates:
         try:
             return json.loads(cand + closers)
-        except (json.JSONDecodeError, ValueError):
+        except ValueError:
             continue
     return None
 

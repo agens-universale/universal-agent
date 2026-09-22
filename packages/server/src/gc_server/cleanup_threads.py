@@ -5,6 +5,9 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_EXT_JSON = ".json"
+
 
 def _parse_datetime_maybe(value: Any) -> Optional[datetime]:
     if not isinstance(value, str) or not value.strip():
@@ -23,8 +26,8 @@ def _meta_to_data_path(meta_path: str) -> str:
       threads/meta_<tail>.json -> threads/data_<tail>.jsonl
     """
     base = os.path.basename(meta_path)
-    if base.startswith("meta_") and base.endswith(".json"):
-        tail = base[len("meta_") : -len(".json")]
+    if base.startswith("meta_") and base.endswith(_EXT_JSON):
+        tail = base[len("meta_") : -len(_EXT_JSON)]
         return os.path.join(os.path.dirname(meta_path), f"data_{tail}.jsonl")
 
     # На случай неожиданного формата оставим "как есть".
@@ -64,7 +67,7 @@ def cleanup_threads(
     meta_paths = [
         os.path.join(threads_dir, name)
         for name in os.listdir(threads_dir)
-        if name.startswith("meta_") and name.endswith(".json")
+        if name.startswith("meta_") and name.endswith(_EXT_JSON)
     ]
 
     for meta_path in sorted(meta_paths):

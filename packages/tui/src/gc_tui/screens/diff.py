@@ -25,6 +25,11 @@ from gc_tui.diff_tui.visual import VISUAL_MODES, build_created_file_diff
 from gc_tui.palette import ACCENT, ERR, INK, MUTED, OK
 from gc_tui.services.diff_render import render_unified_diff_widget
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_KEY_CTRL_A = "ctrl+a"
+_KEY_CTRL_R = "ctrl+r"
+
+
 _FOOTER = (
     "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
 )
@@ -51,14 +56,14 @@ _KEY_ALIASES = {
     "R": "r",
     "к": "r",
     "К": "r",
-    "ctrl+a": "ctrl+a",
-    "ctrl+A": "ctrl+a",
-    "ctrl+ф": "ctrl+a",
-    "ctrl+Ф": "ctrl+a",
-    "ctrl+r": "ctrl+r",
-    "ctrl+R": "ctrl+r",
-    "ctrl+к": "ctrl+r",
-    "ctrl+К": "ctrl+r",
+    _KEY_CTRL_A: _KEY_CTRL_A,
+    "ctrl+A": _KEY_CTRL_A,
+    "ctrl+ф": _KEY_CTRL_A,
+    "ctrl+Ф": _KEY_CTRL_A,
+    _KEY_CTRL_R: _KEY_CTRL_R,
+    "ctrl+R": _KEY_CTRL_R,
+    "ctrl+к": _KEY_CTRL_R,
+    "ctrl+К": _KEY_CTRL_R,
     # `f` — полный файл; ЙЦУКЕН-псевдоним «а» (физическая клавиша F в RU-раскладке).
     "f": "f",
     "F": "f",
@@ -181,10 +186,10 @@ class DiffViewerScreen(Screen):
         elif key == "r":
             self._on_undo()
             event.stop()
-        elif key == "ctrl+a":
+        elif key == _KEY_CTRL_A:
             self._on_approve_all()
             event.stop()
-        elif key == "ctrl+r":
+        elif key == _KEY_CTRL_R:
             self._on_undo_all()
             event.stop()
         elif key == "f":
@@ -344,10 +349,10 @@ class DiffScreen(Screen):
         elif key == "r":
             self._undo_selected()
             event.stop()
-        elif key == "ctrl+a":
+        elif key == _KEY_CTRL_A:
             self._approve_all()
             event.stop()
-        elif key == "ctrl+r":
+        elif key == _KEY_CTRL_R:
             self._undo_all()
             event.stop()
         elif key == "escape":

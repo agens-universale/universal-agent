@@ -21,6 +21,11 @@ from gc_tui import branding
 from gc_tui.form_frame import cap_frame_height, reveal
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_CLS_SELECTED = " selected"
+_SEL_ONB_BODY = "#onb-body"
+
+
 # Именованные шаги мастера. Состав статичен, но шаг адресуется ИМЕНЕМ, а не
 # номером: числовые сравнения врали бы при любой правке состава.
 STEP_CONNECTION = "connection"
@@ -623,7 +628,7 @@ class OnboardingScreen(Screen):
                 self._mcp_installed = set()
             cur = self._idx[STEP_MCP]
             for i, name in enumerate(names):
-                cls = "onb-option onb-dyn set-spaced onb-mcp-row" + (" selected" if i == cur else "")
+                cls = "onb-option onb-dyn set-spaced onb-mcp-row" + (_CLS_SELECTED if i == cur else "")
                 body.mount(Static(self._mcp_row_text(i == cur, name), classes=cls))
         elif step == STEP_VOICE:
             self._prefill_voice_from_config()
@@ -657,7 +662,7 @@ class OnboardingScreen(Screen):
                 # Со второй строкой воздух уходит ПОД неё, иначе она отрывается от своей
                 # опции и прилипает к следующей.
                 if owner and self._voice_highlight_variants():
-                    cls += " selected"
+                    cls += _CLS_SELECTED
                 body.mount(Static(self._voice_row_text(owner, key, title, desc, installed=installed), classes=cls))
                 if second is not None:
                     body.mount(self._voice_second_line(second, col))
@@ -758,7 +763,7 @@ class OnboardingScreen(Screen):
         self.query_one("#header-left", Static).update(self._title_text())
         self.query_one("#onb-stepper", Static).update(self._stepper_text())
         self.query_one("#onb-summary", Static).update(self._summary_text())
-        self.query_one("#onb-body", Static).update(self._body_placeholder())
+        self.query_one(_SEL_ONB_BODY, Static).update(self._body_placeholder())
         # Футер здесь НЕ обновляем: он описывает тело, которого ещё нет. Посчитанный
         # до монтажа, он видит одну группу вместо двух и молчит про Tab ровно там, где
         # тот нужен, — «поля вижу, войти нечем». Его обновляет сам `_mount_step_body`.
@@ -855,12 +860,14 @@ class OnboardingScreen(Screen):
             # список читается как один выбор, разреженный — как отдельные пункты.
             body.mount(Static(_of.LEVELS_QUESTION, classes="onb-hint onb-dyn set-spaced", markup=False))
             for i, level in enumerate(_LEVEL_ROWS):
-                cls = "onb-option onb-dyn" + (" selected" if i == self._levels_idx else "")
+                cls = "onb-option onb-dyn" + (_CLS_SELECTED if i == self._levels_idx else "")
                 body.mount(Static(self._level_row_text(i == self._levels_idx, level), classes=cls))
             cont = Text()
             cont.append("▸ " if self._levels_on_continue() else "  ", style=ACCENT)
             cont.append(_LEVELS_CONTINUE_LABEL, style=DIM)
-            body.mount(Static(cont, classes="onb-option onb-dyn" + (" selected" if self._levels_on_continue() else "")))
+            body.mount(
+                Static(cont, classes="onb-option onb-dyn" + (_CLS_SELECTED if self._levels_on_continue() else ""))
+            )
             return
         from gc_tui.editors.model import ModelEditor
 
@@ -1645,7 +1652,7 @@ class OnboardingScreen(Screen):
             # (`written`): своя редакция состава называла реестр и там, где ушёл один
             # указатель профиля, — человек оставался уверен, что профиль активен,
             # пока следующий старт не шёл без него. Слова — общие с плоским мастером.
-            self.query_one("#onb-body", Static).update(
+            self.query_one(_SEL_ONB_BODY, Static).update(
                 f"✗ остальное не записано: {exc} — при этом уже: "
                 + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written)
             )
@@ -1653,7 +1660,7 @@ class OnboardingScreen(Screen):
         except (ValueError, OSError) as exc:
             # OSError — штатный отказ записи (диск, права, win-лок открытого
             # файла): мимо перехвата он ронял весь Textual (ревью L33).
-            self.query_one("#onb-body", Static).update(f"✗ конфиг не записан: {exc}")
+            self.query_one(_SEL_ONB_BODY, Static).update(f"✗ конфиг не записан: {exc}")
             return False
         if missing:
             # Непустой список значит, что ПЛОСКАЯ запись не состоялась целиком
@@ -1661,11 +1668,11 @@ class OnboardingScreen(Screen):
             # ОТДЕЛЬНОЙ транзакцией и первыми, поэтому обещать «конфиг не записан»
             # нельзя: человек пошёл бы искать нетронутый файл, а там уже модели.
             # Называем ровно то, чего не хватает.
-            self.query_one("#onb-body", Static).update(
+            self.query_one(_SEL_ONB_BODY, Static).update(
                 f"✗ не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную"
             )
             return False
-        self.query_one("#onb-body", Static).update("✓ конфиг записан")
+        self.query_one(_SEL_ONB_BODY, Static).update("✓ конфиг записан")
         return True
 
     def _commit(self) -> None:

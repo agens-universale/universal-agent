@@ -56,6 +56,11 @@ from recommended_mcp.runtime.venv import (
     query_installed_version,
 )
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_EXT_TAR_GZ = "tar.gz"
+_MANIFEST_NAME = "pyproject.toml"
+
+
 NODE_VERSION = "18.0.0"
 _NODE_DIST_BASE = "https://nodejs.org/dist"
 
@@ -131,7 +136,7 @@ def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
         return _pypi_distribution_name(entry.install.package)
     if itype == "source" and entry.install.source is not None:
         for cand in _vendor_candidates(_source_dir_name(entry.install.source), root):
-            pyproject = cand / "pyproject.toml"
+            pyproject = cand / _MANIFEST_NAME
             if not pyproject.is_file():
                 continue
             try:
@@ -406,8 +411,8 @@ def _install_source(
         raise InstallError(f"mcp {name!r}: install.type=source requires install.source")
     name_dir = _source_dir_name(source)
     tried = _vendor_candidates(name_dir, root)
-    src_path = next((c for c in tried if (c / "pyproject.toml").exists()), tried[0])
-    if (src_path / "pyproject.toml").exists():
+    src_path = next((c for c in tried if (c / _MANIFEST_NAME).exists()), tried[0])
+    if (src_path / _MANIFEST_NAME).exists():
         # method-1: локальные исходники из клона
         cmd = [str(active_pip_python()), "-m", "pip", "install"]
         if editable:
@@ -457,7 +462,7 @@ def _node_archive_basename() -> Tuple[str, str]:
     machine = (os.uname().machine if hasattr(os, "uname") else os.environ.get("PROCESSOR_ARCHITECTURE", "")).lower()
     if sys.platform == "darwin":
         arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
-        return f"node-v{NODE_VERSION}-darwin-{arch}.tar.gz", "tar.gz"
+        return f"node-v{NODE_VERSION}-darwin-{arch}.tar.gz", _EXT_TAR_GZ
     if sys.platform == "win32":
         arch = "arm64" if "arm64" in machine else "x64"
         return f"node-v{NODE_VERSION}-win-{arch}.zip", "zip"
@@ -567,8 +572,8 @@ def _extract_archive(archive_path: Path, ext: str, dest_parent: Path) -> Path:
         with zipfile.ZipFile(archive_path) as zf:
             zf.extractall(dest_parent)
             top = zf.namelist()[0].split("/", 1)[0]
-    elif ext in ("tar.gz", "tar.xz"):
-        mode = "r:gz" if ext == "tar.gz" else "r:xz"
+    elif ext in (_EXT_TAR_GZ, "tar.xz"):
+        mode = "r:gz" if ext == _EXT_TAR_GZ else "r:xz"
         with tarfile.open(archive_path, mode=mode) as tf:
             tf.extractall(dest_parent)
             top = tf.getnames()[0].split("/", 1)[0]
@@ -674,6 +679,39 @@ def _install_npx(
         subprocess.run(argv, check=True)
 
 
+def _install_manifest(manifest, manifest_path, root, agent_dep_dir, mcp_py, *, editable: bool) -> None:
+    """Поставить объявленные MCP и напечатать сводку."""
+    repo_url, repo_ref = load_repo_url(manifest_path)
+    with pip_install_target(mcp_py):
+        results = run_install_entries(
+            manifest, root, agent_dep_dir, editable=editable, repo_url=repo_url, repo_ref=repo_ref
+        )
+    installed = [n for n, s, _ in results if s == "installed"]
+    skipped = [(n, d) for n, s, d in results if s == "skipped"]
+    failed = [(n, d) for n, s, d in results if s == "failed"]
+    print(f"[summary] установлено: {', '.join(installed) or '—'}")
+    for n, d in skipped:
+        print(f"[summary] пропущено ({d}): {n}")
+    for n, d in failed:
+        print(f"[summary] НЕ установлено: {n} — {d}")
+    if failed:
+        print(
+            f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+            f"поставь вручную или используй совместимый Python"
+        )
+    state = save_runtime_state(manifest_path=manifest_path)
+    print(f"[state] {state.bin_dir}")
+    paths = _node_install_paths(agent_dep_dir)
+    if paths["npx"].exists():
+        from gc_core.config_modules.env_vars import gc_paths
+
+        cache = gc_paths()["cache"]
+        print(f"[paths] config command: {paths['npx']}")
+        print(f"[paths] playwright --output-dir: {cache / 'playwright-mcp'}")
+        print(f"[paths] MCP media (agent default): {cache / 'mcp-media'}")
+    print("[done] install complete")
+
+
 def main() -> int:
     import argparse
 
@@ -708,36 +746,8 @@ def main() -> int:
     manifest = load_manifest(manifest_path)
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to install")
-        return 0
-    repo_url, repo_ref = load_repo_url(manifest_path)
-    with pip_install_target(mcp_py):
-        results = run_install_entries(
-            manifest, root, agent_dep_dir, editable=args.editable, repo_url=repo_url, repo_ref=repo_ref
-        )
-    installed = [n for n, s, _ in results if s == "installed"]
-    skipped = [(n, d) for n, s, d in results if s == "skipped"]
-    failed = [(n, d) for n, s, d in results if s == "failed"]
-    print(f"[summary] установлено: {', '.join(installed) or '—'}")
-    for n, d in skipped:
-        print(f"[summary] пропущено ({d}): {n}")
-    for n, d in failed:
-        print(f"[summary] НЕ установлено: {n} — {d}")
-    if failed:
-        print(
-            f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
-            f"поставь вручную или используй совместимый Python"
-        )
-    state = save_runtime_state(manifest_path=manifest_path)
-    print(f"[state] {state.bin_dir}")
-    paths = _node_install_paths(agent_dep_dir)
-    if paths["npx"].exists():
-        from gc_core.config_modules.env_vars import gc_paths
-
-        cache = gc_paths()["cache"]
-        print(f"[paths] config command: {paths['npx']}")
-        print(f"[paths] playwright --output-dir: {cache / 'playwright-mcp'}")
-        print(f"[paths] MCP media (agent default): {cache / 'mcp-media'}")
-    print("[done] install complete")
+    else:
+        _install_manifest(manifest, manifest_path, root, agent_dep_dir, mcp_py, editable=args.editable)
     return 0
 
 

@@ -203,14 +203,14 @@ def _kill_process(proc: subprocess.Popen) -> None:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
                 return
-            except (ProcessLookupError, PermissionError, OSError):
+            except OSError:
                 pass
         proc.terminate()
         try:
             proc.wait(timeout=1.0)
         except subprocess.TimeoutExpired:
             proc.kill()
-    except (ProcessLookupError, OSError):
+    except OSError:
         pass
 
 

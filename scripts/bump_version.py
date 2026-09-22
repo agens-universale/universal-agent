@@ -23,16 +23,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MANIFEST_NAME = "pyproject.toml"
+
+
 ROOT = Path(__file__).resolve().parent.parent
 
 MANIFESTS = [
-    ROOT / "pyproject.toml",
-    ROOT / "packages" / "core" / "pyproject.toml",
-    ROOT / "packages" / "cli" / "pyproject.toml",
-    ROOT / "packages" / "tui" / "pyproject.toml",
-    ROOT / "packages" / "server" / "pyproject.toml",
-    ROOT / "packages" / "mcp" / "pyproject.toml",
-    ROOT / "packages" / "testkit" / "pyproject.toml",
+    ROOT / _MANIFEST_NAME,
+    ROOT / "packages" / "core" / _MANIFEST_NAME,
+    ROOT / "packages" / "cli" / _MANIFEST_NAME,
+    ROOT / "packages" / "tui" / _MANIFEST_NAME,
+    ROOT / "packages" / "server" / _MANIFEST_NAME,
+    ROOT / "packages" / "mcp" / _MANIFEST_NAME,
+    ROOT / "packages" / "testkit" / _MANIFEST_NAME,
 ]
 
 PIN_RE = re.compile(r'"(gc-[a-z]+)==\d+\.\d+\.\d+"')

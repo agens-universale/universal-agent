@@ -49,7 +49,7 @@ def _ensure_user_skills_dir() -> None:
         from gc_core.config_modules.env_vars import gc_paths
 
         os.makedirs(gc_paths()["data"] / "skills", exist_ok=True)
-    except (PermissionError, OSError):
+    except OSError:
         pass
 
 
@@ -299,11 +299,11 @@ def _run_reset_config() -> int:
     return 0
 
 
-def _run_check_update() -> int:
-    """`gc-cli --check-update`: разовая проверка обновлений и выход.
+def _updater_source_or_hint():
+    """Источник обновления либо None — с объяснением в stderr.
 
-    Работает и при ``update.check: off`` в config.yml — это ручная команда,
-    троттлинг авто-чека её не касается.
+    Общая часть `--check-update` и `--update`: обе команды одинаково молчат про
+    dev-установку и одинаково отдают 0.
     """
     src = updater_source.resolved_source()
     if src is None:
@@ -311,18 +311,28 @@ def _run_check_update() -> int:
             "[gc] обновление недоступно для этой установки — обновляйтесь через git (dev-установка)",
             file=sys.stderr,
         )
-        return 0
-    result = updater_check.check_for_update(src)
-    # ASCII-only маркеры ([update]\[ok]\[--]), не $ok/$warn-глифы (✓\⚠\—):
-    # консоль, в которую печатает CLI, может быть не-UTF8 (напр. Windows
-    # cp1251) — такие глифы вне её кодовой страницы валят print() с
-    # UnicodeEncodeError.
-    if result.status == "update":
-        print(f"[gc] [update] {result.detail}", file=sys.stderr)
-    elif result.status == "current":
-        print(f"[gc] [ok] {result.detail}", file=sys.stderr)
-    else:
-        print(f"[gc] [--] {result.detail}", file=sys.stderr)
+    return src
+
+
+def _run_check_update() -> int:
+    """`gc-cli --check-update`: разовая проверка обновлений и выход.
+
+    Работает и при ``update.check: off`` в config.yml — это ручная команда,
+    троттлинг авто-чека её не касается.
+    """
+    src = _updater_source_or_hint()
+    if src is not None:
+        result = updater_check.check_for_update(src)
+        # ASCII-only маркеры ([update]\[ok]\[--]), не $ok/$warn-глифы (✓\⚠\—):
+        # консоль, в которую печатает CLI, может быть не-UTF8 (напр. Windows
+        # cp1251) — такие глифы вне её кодовой страницы валят print() с
+        # UnicodeEncodeError.
+        if result.status == "update":
+            print(f"[gc] [update] {result.detail}", file=sys.stderr)
+        elif result.status == "current":
+            print(f"[gc] [ok] {result.detail}", file=sys.stderr)
+        else:
+            print(f"[gc] [--] {result.detail}", file=sys.stderr)
     return 0
 
 
@@ -333,21 +343,16 @@ def _run_update() -> int:
     CLI короткоживущий — без авто-рестарта (``restart_cmd=None``); по
     завершении пользователь сам запускает gc-cli/gc-ua заново.
     """
-    src = updater_source.resolved_source()
-    if src is None:
+    src = _updater_source_or_hint()
+    if src is not None:
+        config_dict = load_config(arg_parser.run_args.config)
+        command = updater_runner.build_install_command(src, updater_check.extra_args(config_dict))
+        updater_runner.spawn_detached_update(command, parent_pid=os.getpid(), restart_cmd=None)
         print(
-            "[gc] обновление недоступно для этой установки — обновляйтесь через git (dev-установка)",
+            f"[gc] установка запущена {updater_runner.install_location_phrase()} — "
+            "по завершении запустите gc-cli/gc-ua заново",
             file=sys.stderr,
         )
-        return 0
-    config_dict = load_config(arg_parser.run_args.config)
-    command = updater_runner.build_install_command(src, updater_check.extra_args(config_dict))
-    updater_runner.spawn_detached_update(command, parent_pid=os.getpid(), restart_cmd=None)
-    print(
-        f"[gc] установка запущена {updater_runner.install_location_phrase()} — "
-        "по завершении запустите gc-cli/gc-ua заново",
-        file=sys.stderr,
-    )
     return 0
 
 
@@ -388,6 +393,28 @@ async def _run_init_agents_md() -> int:
     return 0
 
 
+async def _run_service_command() -> int | None:
+    """Сервисные флаги (`--init-config`, `--sync-config`, …): код выхода или None.
+
+    Вынесено из `arun_cli` не ради красоты: шесть сторожевых ветвей подряд и
+    давали ту самую когнитивную сложность, на которую ругался Sonar S3776.
+    """
+    run_args = arg_parser.run_args
+    if getattr(run_args, "init_config", False):
+        return _run_init()
+    if getattr(run_args, "sync_config", False):
+        return _run_sync_config()
+    if getattr(run_args, "reset_config", False):
+        return _run_reset_config()
+    if getattr(run_args, "check_update", False):
+        return _run_check_update()
+    if getattr(run_args, "update", False):
+        return _run_update()
+    if getattr(run_args, "init", False):
+        return await _run_init_agents_md()
+    return None
+
+
 async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -399,23 +426,9 @@ async def arun_cli() -> int:
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
 
-    if getattr(arg_parser.run_args, "init_config", False):
-        return _run_init()
-
-    if getattr(arg_parser.run_args, "sync_config", False):
-        return _run_sync_config()
-
-    if getattr(arg_parser.run_args, "reset_config", False):
-        return _run_reset_config()
-
-    if getattr(arg_parser.run_args, "check_update", False):
-        return _run_check_update()
-
-    if getattr(arg_parser.run_args, "update", False):
-        return _run_update()
-
-    if getattr(arg_parser.run_args, "init", False):
-        return await _run_init_agents_md()
+    service_exit = await _run_service_command()
+    if service_exit is not None:
+        return service_exit
 
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)

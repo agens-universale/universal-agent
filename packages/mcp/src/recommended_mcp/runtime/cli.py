@@ -194,7 +194,9 @@ def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
         if not pkg:
             return "?"
         res = _inst().npm_global_has(pkg, agent_dep_dir)
-        return "?" if res is None else ("yes" if res else "—")
+        if res is None:
+            return "?"
+        return "yes" if res else "—"
     return "?"
 
 

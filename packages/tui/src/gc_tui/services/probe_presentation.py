@@ -13,6 +13,9 @@ from rich.text import Text
 
 from gc_tui.palette import DEEP_DIM, ERR, OK, WARN
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MSG_SERVER_OK = "✓ сервер доступен · "
+
 
 def plural_models(n: int) -> str:
     """1 модель · 2-4 модели · 5+ моделей (11-14 — исключение: «моделей»)."""
@@ -48,7 +51,7 @@ def connection_line_text(result) -> Text:
         # Сырой config-probe (auth_state=None, без differential auth) «ок» читаем
         # нейтрально — токен не проверяли, утверждать «принят» нечестно.
         if result.auth_state == "accepted":
-            t = Text("✓ сервер доступен · ", style=OK)
+            t = Text(_MSG_SERVER_OK, style=OK)
             t.append("✓ токен принят", style=OK)
             return t
         if result.auth_state == "not_required":
@@ -58,10 +61,10 @@ def connection_line_text(result) -> Text:
         if result.auth_state == "required":
             # токена не было вовсе (сервер отклонил control-запрос без него) —
             # не «токен отклонён» (нечего было отклонять)
-            t = Text("✓ сервер доступен · ", style=OK)
+            t = Text(_MSG_SERVER_OK, style=OK)
             t.append(f"⚠ {result.detail}", style=WARN)
             return t
-        t = Text("✓ сервер доступен · ", style=OK)
+        t = Text(_MSG_SERVER_OK, style=OK)
         t.append("✗ токен отклонён (401)", style=WARN)
         return t
     if result.offline:

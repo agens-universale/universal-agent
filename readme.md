@@ -1,7 +1,7 @@
 # GigaCode Universal Agent
 
-Background и CLI-клиент для работы с агентом GigaCode: отправка запросов, вызов инструментов и MCP-серверов. Требуется запущенный бэкенд агента 
-- с API `v1/responses` (deprecated) 
+Background и CLI-клиент для работы с агентом GigaCode: отправка запросов, вызов инструментов и MCP-серверов. Требуется запущенный бэкенд агента
+- с API `v1/responses` (deprecated)
 - или режимом `chat_completions` (активно поддерживается) с доступом к модели (chat/completions — openrouter, vllm и др.).
 
 **Требования:** Python 3.11 или новее.

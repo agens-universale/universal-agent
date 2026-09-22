@@ -656,7 +656,13 @@ def group_messages(messages: List[Dict]) -> Dict[str, List[Dict]]:
     return {"tool_calls": tool_calls, "text_messages": text_messages, "tool_outputs": tool_outputs}
 
 
-async def aprocess_user_ask(messages, state: State, ctx: Any):
+async def _aask_backend_and_record(messages, state: State, ctx: Any):
+    """Сходить в бэкенд каноническим путём и запомнить заголовки ответа.
+
+    Общее тело `aprocess_user_ask` и `aprocess_tool_outputs`: точки вызова у них
+    разные (вопрос пользователя и выдача тулов), и тесты подменяют каждую по
+    имени, поэтому обе остаются, а повтор тела ушёл сюда.
+    """
     resp_messages, response_id, res_headers = await _arequest_backend_canonical(
         messages,
         state,
@@ -664,6 +670,11 @@ async def aprocess_user_ask(messages, state: State, ctx: Any):
     )
     state.set_resp_headers_metadata(res_headers or {})
     return resp_messages, response_id
+
+
+async def aprocess_user_ask(messages, state: State, ctx: Any):
+    """Ход по сообщению пользователя."""
+    return await _aask_backend_and_record(messages, state, ctx)
 
 
 def partition_work_then_finish(
@@ -1178,13 +1189,8 @@ async def aprocess_tool_calls(
 
 
 async def aprocess_tool_outputs(messages, state: State, ctx: Any):
-    resp_messages, response_id, res_headers = await _arequest_backend_canonical(
-        messages,
-        state,
-        ctx,
-    )
-    state.set_resp_headers_metadata(res_headers or {})
-    return resp_messages, response_id
+    """Ход по выдаче тулов."""
+    return await _aask_backend_and_record(messages, state, ctx)
 
 
 def _pickup_pending_as_new_turn(

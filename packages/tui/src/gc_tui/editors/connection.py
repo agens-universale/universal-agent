@@ -35,6 +35,10 @@ from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_CONN_TOKEN = "#conn-token"
+
+
 _TOKEN_EMPTY = "введите токен"
 _TOKEN_PH_CREATE = "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
 _TOKEN_PH_CLEARED = "токен очищен · будет удалён при сохранении"
@@ -138,7 +142,7 @@ class ConnectionEditor(Vertical):
         if self._no_auth or not self.on_token_field_with_saved():
             return False  # не то поле или стирать нечего — клавиша не наша
         self._token_cleared = True
-        inp = self.query_one("#conn-token", Input)
+        inp = self.query_one(_SEL_CONN_TOKEN, Input)
         inp.value = ""
         inp.placeholder = self._token_placeholder()
         inp.set_class(False, "has-saved")
@@ -265,7 +269,7 @@ class ConnectionEditor(Vertical):
         пустое, placeholder «не используется» (смок 2026-07-30 — вместо
         плашки-заглушки). ○ — поле оживает с прежним placeholder (маска
         действующего/хинт)."""
-        inp = self.query_one("#conn-token", Input)
+        inp = self.query_one(_SEL_CONN_TOKEN, Input)
         inp.disabled = self._no_auth
         if self._no_auth:
             inp.value = ""
@@ -475,7 +479,7 @@ class ConnectionEditor(Vertical):
         """(url_field, auth_idx, token_raw, proxy) — без сайд-эффектов, для probe и dirty.
         auth_idx — производное от галки «без авторизации» (1=●, 0=○)."""
         url = self.query_one("#conn-url", Input).value.strip()
-        token = self.query_one("#conn-token", Input).value.strip()
+        token = self.query_one(_SEL_CONN_TOKEN, Input).value.strip()
         proxy = self.query_one("#conn-proxy", Input).value.strip()
         auth_idx = 1 if self._no_auth else 0
         return url, auth_idx, token, proxy

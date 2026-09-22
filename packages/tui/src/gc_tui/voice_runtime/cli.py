@@ -56,31 +56,29 @@ def _cmd_status() -> int:
     state = load_state()
     if state is None:
         print("[voice] не установлен. Установка: gc-voice install")
-        return 0
-    # Устаревание называем прямо здесь: раньше status печатал версию, но ни с чем её не
-    # сравнивал — узнать, что движок отстал, было неоткуда, кроме экрана после апгрейда.
-    upd = available_update(state)
-    print(f"[voice] установлен: speaches {state.version} → {state.root}" + (f"  · доступно {upd}" if upd else ""))
-    if upd:
-        print("[voice] обновить: /settings → Голосовой ввод → Ctrl+U (или gc-voice install)")
-    print(f"[voice] порт {state.port}, модель {state.model}")
-    pid = read_pid(SERVICE_NAME, voice_pids_dir())
-    running = pid is not None and is_pid_alive(pid)
-    if running:
-        print(f"[voice] сервис: жив (pid {pid}){', порт отвечает' if port_alive(state) else ''}")
-    elif port_alive(state):
-        # pid-файла нет, а порт занят: сервис подняли снаружи (gc-voice serve в другом
-        # окне) либо его pid-файл потерян. Сказать «не запущен» — соврать в глаза.
-        print(
-            f"[voice] сервис: порт {state.port} отвечает, но pid-файла нет — "
-            "поднят снаружи; остановите его там, где запускали (Ctrl+C)"
-        )
     else:
-        print("[voice] сервис: не запущен")
-    clients = live_leases()
-    print(f"[voice] клиенты (lease): {clients if clients else 'нет'}")
-    wired = managed_voice()
-    print(f"[voice] конфиг (managed): {wired['url'] if wired else 'не прописан'}")
+        upd = available_update(state)
+        print(f"[voice] установлен: speaches {state.version} → {state.root}" + (f"  · доступно {upd}" if upd else ""))
+        if upd:
+            print("[voice] обновить: /settings → Голосовой ввод → Ctrl+U (или gc-voice install)")
+        print(f"[voice] порт {state.port}, модель {state.model}")
+        pid = read_pid(SERVICE_NAME, voice_pids_dir())
+        running = pid is not None and is_pid_alive(pid)
+        if running:
+            print(f"[voice] сервис: жив (pid {pid}){', порт отвечает' if port_alive(state) else ''}")
+        elif port_alive(state):
+            # pid-файла нет, а порт занят: сервис подняли снаружи (gc-voice serve в другом
+            # окне) либо его pid-файл потерян. Сказать «не запущен» — соврать в глаза.
+            print(
+                f"[voice] сервис: порт {state.port} отвечает, но pid-файла нет — "
+                "поднят снаружи; остановите его там, где запускали (Ctrl+C)"
+            )
+        else:
+            print("[voice] сервис: не запущен")
+        clients = live_leases()
+        print(f"[voice] клиенты (lease): {clients if clients else 'нет'}")
+        wired = managed_voice()
+        print(f"[voice] конфиг (managed): {wired['url'] if wired else 'не прописан'}")
     return 0
 
 

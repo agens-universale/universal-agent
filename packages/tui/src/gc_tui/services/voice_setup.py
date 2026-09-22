@@ -94,7 +94,10 @@ def status_cheap(config_dict: dict) -> VoiceStatus:
     if st is not None:
         from gc_tui.voice_runtime.autostart import url_is_ours
 
-        mode = "local" if url_is_ours(config_dict, st.port) else ("cloud" if url else "off")
+        if url_is_ours(config_dict, st.port):
+            mode = "local"
+        else:
+            mode = "cloud" if url else "off"
         return VoiceStatus(
             installed=True,
             service_alive=None,

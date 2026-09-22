@@ -69,7 +69,10 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     aligns: list[str] = []
     for c in _split_table_row(sep_line):
         left, right = c.startswith(":"), c.endswith(":")
-        aligns.append("center" if left and right else "right" if right else "left")
+        if left and right:
+            aligns.append("center")
+        else:
+            aligns.append("right" if right else "left")
     return (aligns + ["left"] * ncols)[:ncols]
 
 
@@ -225,7 +228,10 @@ def table_block_to_markdown(headers: list[str], rows: list[list[str]], aligns: l
     lines = ["| " + " | ".join(esc(h) for h in headers) + " |"]
     sep: list[str] = []
     for a in aligns:
-        sep.append(":---:" if a == "center" else "---:" if a == "right" else "---")
+        if a == "center":
+            sep.append(":---:")
+        else:
+            sep.append("---:" if a == "right" else "---")
     lines.append("| " + " | ".join(sep) + " |")
     for row in rows:
         lines.append("| " + " | ".join(esc(c) for c in row) + " |")

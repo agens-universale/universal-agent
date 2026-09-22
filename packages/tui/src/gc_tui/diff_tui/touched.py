@@ -39,7 +39,7 @@ class TouchedJournal:
             return self._empty()
         try:
             raw = json.loads(self._file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError):
             return self._empty()
         if not isinstance(raw, dict) or not isinstance(raw.get("paths"), dict):
             return self._empty()

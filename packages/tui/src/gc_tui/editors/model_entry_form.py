@@ -64,6 +64,13 @@ from gc_tui.palette import ACCENT, DEEP_DIM, WARN
 from gc_tui.services.probe_presentation import connection_line_text, plural_models
 from gc_tui.widgets.paste_input import PasteInput
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_CLS_ONB_HINT_ONB_DYN = "onb-hint onb-dyn"
+_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP = "onb-hint onb-dyn set-group-gap"
+_SEL_MEF_NOAUTH = "#mef-noauth"
+_SEL_MEF_URL = "#mef-url"
+
+
 # Хинты списков формы. Клавиши названы канон-словарём (спека 2026-08-06 §2.1):
 # «перечитать список» — глагол сетевого источника, и он один в обоих состояниях
 # списка, свёрнут тот или раскрыт. Сторож словаря — tests/tui/test_footer_contract.
@@ -764,20 +771,20 @@ class ModelEntryForm(Vertical):
         icls = "onb-dyn set-framed"
         # Строка состояния пары — НАД парой полей (§4): она про оба сразу, и пометки у
         # каждого поля разнесли бы одно состояние по двум подписям.
-        yield Static(_PAIR_SHARED, id="mef-pair", classes="onb-hint onb-dyn")
-        yield Static(_URL_LABEL, classes="onb-hint onb-dyn")
+        yield Static(_PAIR_SHARED, id="mef-pair", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(_URL_LABEL, classes=_CLS_ONB_HINT_ONB_DYN)
         self._url_input = PasteInput(
             value="", placeholder=self._url_placeholder(), id="mef-url", classes="onb-dyn group-field"
         )
         with Vertical(classes="field-group onb-dyn", id="mef-url-group"):
             yield self._url_input
-        yield Static(self._token_label(), id="mef-token-label", classes="onb-hint onb-dyn set-group-gap")
+        yield Static(self._token_label(), id="mef-token-label", classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         # has-saved: placeholder говорит одно из двух (маска действующего значения /
         # подсказка-объяснение), и различать их надо не вчитываясь (спека §3.4).
         tcls = icls + (" has-saved" if self._token_is_mask() else "")
         yield PasteInput(value="", placeholder=self._token_placeholder(), password=True, id="mef-token", classes=tcls)
         yield Static(self._noauth_text(), id="mef-noauth", classes=self._noauth_cls())
-        yield Static(_MODEL_LABEL, classes="onb-hint onb-dyn set-group-gap")
+        yield Static(_MODEL_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         # Поле id — со списком моделей (автоподгрузка при входе, Alt+↓ — перечитать),
         # значит внутри рамки-группы: рамка одна на поле и его список (спека §3.1).
         with Vertical(classes="field-group onb-dyn", id="mef-model-group"):
@@ -786,14 +793,14 @@ class ModelEntryForm(Vertical):
             )
         # Строка состояния списка (загрузка/сбой/счётчик) — пустая не занимает места
         # (`display`), как статусы `ModelEditor`.
-        status = Static("", id="mef-model-status", classes="onb-hint onb-dyn")
+        status = Static("", id="mef-model-status", classes=_CLS_ONB_HINT_ONB_DYN)
         status.display = False
         yield status
-        yield Static(_ALIAS_LABEL, classes="onb-hint onb-dyn set-group-gap")
+        yield Static(_ALIAS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield PasteInput(
             value=self._alias0, placeholder=self._alias_placeholder(self._model0), id="mef-alias", classes=icls
         )
-        yield Static(self._alias_hint(), classes="onb-hint onb-dyn")
+        yield Static(self._alias_hint(), classes=_CLS_ONB_HINT_ONB_DYN)
         yield Static(connection_line_text(None), id="mef-probe-line", classes="set-hint set-dyn")
         # Строка ошибки монтируется сразу и пустой (display гасит место под неё):
         # remove()+mount() с тем же id в одном такте даёт DuplicateIds, если форма
@@ -836,7 +843,7 @@ class ModelEntryForm(Vertical):
         # пары («задан свой адрес…», «задан свой токен…») с её сменой перестают быть
         # правдой, и оставленная строка спорила бы со строкой над полями.
         self._clear_error()
-        for w in self.query("#mef-noauth"):
+        for w in self.query(_SEL_MEF_NOAUTH):
             w.update(self._noauth_text())
         self._sync_token_visibility()
 
@@ -977,7 +984,7 @@ class ModelEntryForm(Vertical):
             # Счётчик/ошибка списка — про поле, с которого курсор ушёл: «2 модели»
             # под чужим полем не про что.
             self._set_status("")
-        row = self.query_one("#mef-noauth", Static)
+        row = self.query_one(_SEL_MEF_NOAUTH, Static)
         (row.add_class if target is None else row.remove_class)("selected")
         if target is None:
             # Галка — не Input: снять фокус явно, иначе прежний фокусный Input
@@ -1009,7 +1016,7 @@ class ModelEntryForm(Vertical):
         if self._positions[self._idx] is not None or not self.own_connection():
             return False
         self._no_auth = not self._no_auth
-        self.query_one("#mef-noauth", Static).update(self._noauth_text())
+        self.query_one(_SEL_MEF_NOAUTH, Static).update(self._noauth_text())
         self._sync_token_visibility()
         self._sync_pair_state()
         return True
@@ -1068,11 +1075,11 @@ class ModelEntryForm(Vertical):
         Токен помечается снятым только если в записи он есть: `None` в `submit()` —
         просьба УДАЛИТЬ ключ, и на записи без него это была бы правка из ничего
         (форма показала бы «изменено» там, где менять нечего)."""
-        write_field(self.query_one("#mef-url", Input), "")
+        write_field(self.query_one(_SEL_MEF_URL, Input), "")
         write_field(self.query_one("#mef-token", Input), "")
         self._no_auth = False
         self._token_cleared = self._token_current is not None
-        self.query_one("#mef-noauth", Static).update(self._noauth_text())
+        self.query_one(_SEL_MEF_NOAUTH, Static).update(self._noauth_text())
         self._sync_token_visibility()
         self._sync_pair_state()
         # Позиция под курсором могла ЗАМЁРЗНУТЬ этим же действием (токен при общей паре):
@@ -1087,7 +1094,7 @@ class ModelEntryForm(Vertical):
         # списка вместо сохранения.
         if self._skip_position(self._positions[self._idx]):
             self._idx = self._positions.index("mef-url")
-            self.query_one("#mef-url", Input).focus()
+            self.query_one(_SEL_MEF_URL, Input).focus()
         # Связь, по которой ходила проба, изменилась (`_current_url`/`_current_auth_
         # header` с этого момента отдают унаследованные), а `Input.Changed` по
         # программной записи не летит — обесценивать вердикт приходится руками, иначе
@@ -1106,7 +1113,7 @@ class ModelEntryForm(Vertical):
             # нечем. Уходят разом набранное, галка и сохранённый ключ записи.
             self._return_shared_pair()
             return
-        write_field(self.query_one("#mef-url", Input), preset.url)
+        write_field(self.query_one(_SEL_MEF_URL, Input), preset.url)
         self._sync_pair_state()
         self._invalidate_probe()
 
@@ -1151,28 +1158,28 @@ class ModelEntryForm(Vertical):
         url = self._current_url()
         if not url:
             self._set_status(_LIST_NO_URL)
-            return True
-        env_missing = _env_missing_line(url, self._current_token_raw())
-        if env_missing:
-            self._set_status(env_missing)
-            return True
-        auth = self._current_auth_header()
-        # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
-        # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
-        # свежего (идиома `ModelEditor._start_fetch`).
-        self._list_gen += 1
-        gen = self._list_gen
-        self._set_status(LIST_LOADING)
-        # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
-        # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
-        # клавиши разведены по ролям, значит и по воркерам.
-        self.run_worker(
-            lambda: self._fetch_blocking(url, auth, gen, refresh),
-            thread=True,
-            exclusive=True,
-            group="model-entry-list",
-            name="model-entry-list-fetch",
-        )
+        else:
+            env_missing = _env_missing_line(url, self._current_token_raw())
+            if env_missing:
+                self._set_status(env_missing)
+            else:
+                auth = self._current_auth_header()
+                # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
+                # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
+                # свежего (идиома `ModelEditor._start_fetch`).
+                self._list_gen += 1
+                gen = self._list_gen
+                self._set_status(LIST_LOADING)
+                # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
+                # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
+                # клавиши разведены по ролям, значит и по воркерам.
+                self.run_worker(
+                    lambda: self._fetch_blocking(url, auth, gen, refresh),
+                    thread=True,
+                    exclusive=True,
+                    group="model-entry-list",
+                    name="model-entry-list-fetch",
+                )
         return True
 
     def _fetch_blocking(self, url: str, auth: str | None, gen: int, refresh: bool) -> None:
@@ -1368,23 +1375,23 @@ class ModelEntryForm(Vertical):
         url = self._current_url()
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
-            return True
-        env_missing = _env_missing_line(url, self._current_token_raw())
-        if env_missing:
-            self._set_probe_line(Text(env_missing, style=WARN))
-            return True
-        auth = self._current_auth_header()
-        model = self._model_value()
-        self._probe_gen += 1
-        gen = self._probe_gen
-        self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
-        self.run_worker(
-            lambda: self._probe_blocking(url, auth, model, gen),
-            thread=True,
-            exclusive=True,
-            group="model-entry-probe",
-            name="model-entry-probe",
-        )
+        else:
+            env_missing = _env_missing_line(url, self._current_token_raw())
+            if env_missing:
+                self._set_probe_line(Text(env_missing, style=WARN))
+            else:
+                auth = self._current_auth_header()
+                model = self._model_value()
+                self._probe_gen += 1
+                gen = self._probe_gen
+                self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
+                self.run_worker(
+                    lambda: self._probe_blocking(url, auth, model, gen),
+                    thread=True,
+                    exclusive=True,
+                    group="model-entry-probe",
+                    name="model-entry-probe",
+                )
         return True
 
     def _probe_blocking(self, url: str, auth: str | None, model: str, gen: int) -> None:

@@ -205,6 +205,7 @@ def _sse_debug() -> bool:
 def _fix_sse_encoding(resp: "httpx.Response") -> None:
     """SSE почти всегда UTF-8; без явного указания httpx может взять заявленную
     сервером кодировку и сломать JSON с кириллицей."""
+    # NOSONAR: Response.encoding — str | None, сервер может не прислать кодировку
     if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):
         resp.encoding = "utf-8"
 

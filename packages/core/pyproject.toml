@@ -83,4 +83,3 @@ filterwarnings = [
     "error::pytest.PytestUnraisableExceptionWarning",
     "error::RuntimeWarning",
 ]
-

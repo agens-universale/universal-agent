@@ -126,7 +126,7 @@ def _parse_stripped_args(
     else:
         try:
             parsed = json.loads(raw_arguments or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             return None
     if not isinstance(parsed, dict):
         return None

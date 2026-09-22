@@ -119,4 +119,3 @@ scripts/lint.sh packages/core/src/gc_core/tools/fs   # точечно
 алгоритм, что у Sonar) и `scripts/sonar_like_check.py` для дублей строковых
 литералов (S1192) и regex-подсказок (`\w`, `\d`, ленивый квантификатор).
 Набор правил живёт в `[tool.ruff]` в корневом `pyproject.toml`.
-

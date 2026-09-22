@@ -25,6 +25,22 @@ from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_CLS_SELECTED = " selected"
+_CLS_SET_HINT_SET_DYN = "set-hint set-dyn"
+_CLS_SET_HINT_SET_DYN_SET_PROBE = "set-hint set-dyn set-probe"
+_KEY_ALT_DOWN = "alt+down"
+_KEY_CTRL_AT = "ctrl+at"
+_KEY_CTRL_AT_SIGN = "ctrl+@"
+_KEY_CTRL_DOWN = "ctrl+down"
+_KEY_CTRL_SPACE = "ctrl+space"
+_KEY_CTRL_U = "ctrl+u"
+_MSG_APPLIES_NEXT_TURN = "применится со следующего хода агента"
+_MSG_NOTHING_CHANGED = "ничего не изменено"
+_SEL_SET_FRAME = "#set-frame"
+_SEL_SET_MENUROW = ".set-menurow"
+
+
 SECTIONS = ("Подключение", "Модели", "Профили", "MCP-серверы", "Голосовой ввод", "Режимы работы", "Обновление")
 
 _CONNECTION, _MODELS, _PROFILES, _MCP, _VOICE, _MODES, _UPDATE = 0, 1, 2, 3, 4, 5, 6
@@ -890,7 +906,7 @@ class SettingsScreen(Screen):
         превью целыми парами (fit_mode_pairs). До монтирования этой строки меню
         (первый рендер) региона ещё нет — 0, что трактуется как «без усечения»."""
         try:
-            rows = list(self.query(".set-menurow"))
+            rows = list(self.query(_SEL_SET_MENUROW))
             return rows[_MODES].query_one(".set-rowtext", Static).region.width
         except (NoMatches, IndexError):
             return 0
@@ -906,7 +922,7 @@ class SettingsScreen(Screen):
         return t
 
     def _mount_menu_row(self, frame: Vertical, i: int) -> None:
-        cls = "set-menurow set-dyn" + (" selected" if i == self._menu_idx else "")
+        cls = "set-menurow set-dyn" + (_CLS_SELECTED if i == self._menu_idx else "")
         frame.mount(
             Horizontal(
                 Static(self._menu_rowtext(i, i == self._menu_idx), classes="set-rowtext"),
@@ -950,7 +966,7 @@ class SettingsScreen(Screen):
             self._stop_wave()
 
     def _refresh_wave_glyphs(self) -> None:
-        for i, row in enumerate(self.query(".set-menurow")):
+        for i, row in enumerate(self.query(_SEL_SET_MENUROW)):
             if i not in _EDITOR_SECTIONS:
                 continue
             try:
@@ -1185,7 +1201,7 @@ class SettingsScreen(Screen):
             self._report_text = None
             self._report_section = None
         self.query_one("#header-left", Static).update(self._title_text())
-        frame = self.query_one("#set-frame", Vertical)
+        frame = self.query_one(_SEL_SET_FRAME, Vertical)
         title = self.query_one("#set-title", Static)
         # Снять фокус ДО remove: detached focused-виджет рвёт последующую доставку
         # клавиш (тот же баг и то же лекарство, что у OnboardingScreen._mount_step_body —
@@ -1409,7 +1425,7 @@ class SettingsScreen(Screen):
         if self._view != "menu":
             return
         self._menu_pass_snapshot = None  # новый проход — цель перечитывается один раз
-        for i, row in enumerate(self.query(".set-menurow")):
+        for i, row in enumerate(self.query(_SEL_SET_MENUROW)):
             if i >= len(SECTIONS):
                 # Транзиентный двойной комплект строк: отложенный call_after_refresh
                 # (carry-fix выше) может сработать ДО того, как Prune старых 5 строк
@@ -1490,10 +1506,10 @@ class SettingsScreen(Screen):
         except NoMatches:
             pass
         try:
-            frame = self.query_one("#set-frame", Vertical)
+            frame = self.query_one(_SEL_SET_FRAME, Vertical)
         except NoMatches:
             return
-        frame.mount(Static(text, classes="set-hint set-dyn set-probe"))
+        frame.mount(Static(text, classes=_CLS_SET_HINT_SET_DYN_SET_PROBE))
 
     def _reset_draft_state(self) -> None:
         self._draft_checked = None
@@ -1519,7 +1535,7 @@ class SettingsScreen(Screen):
         секции и глифа хаба), и оно уже разъехалось — «rejected» объявлялось
         отклонённым токеном даже когда сервер писал про имя модели."""
         if not values:
-            self._title_note("ничего не изменено")
+            self._title_note(_MSG_NOTHING_CHANGED)
             return
         from gc_tui.services.probe_presentation import save_warning
 
@@ -1601,7 +1617,7 @@ class SettingsScreen(Screen):
         specs: list[tuple[str, str]] = []
         raw = self._raw_value(key)
         if env_ref_status(raw):
-            specs.append((display_value(raw), "set-hint set-dyn"))
+            specs.append((display_value(raw), _CLS_SET_HINT_SET_DYN))
         origin = self._origin(key)
         if origin is not None and origin.is_overridden:
             from gc_core.config_origin import overlay_label
@@ -1623,7 +1639,7 @@ class SettingsScreen(Screen):
                 Static(
                     "конфиг недоступен для записи: используется пакетный шаблон "
                     "(настройте GC_HOME или запустите gc-ua --init-config)",
-                    classes="set-hint set-dyn",
+                    classes=_CLS_SET_HINT_SET_DYN,
                 )
             )
             return
@@ -1646,7 +1662,7 @@ class SettingsScreen(Screen):
             self._mount_field_hints(frame, "Authorization")
             self._mount_field_hints(frame, "proxy")
             self._mount_shadow_hint(frame)
-            frame.mount(Static(connection_line_text(self._probe_config), classes="set-hint set-dyn set-probe"))
+            frame.mount(Static(connection_line_text(self._probe_config), classes=_CLS_SET_HINT_SET_DYN_SET_PROBE))
         elif section == _MODELS:
             from gc_core.config import _default_config_path
             from gc_core.config_modules.endpoint_presets import endpoint_presets_from_config
@@ -1744,7 +1760,7 @@ class SettingsScreen(Screen):
             ed.move(-1 if event.key == "up" else 1)
             self._refresh_footer()
             return True
-        if event.key in ("alt+down", "ctrl+down"):
+        if event.key in (_KEY_ALT_DOWN, _KEY_CTRL_DOWN):
             # Карта проб §2.5: подбор списка (форма — свой, легаси-редактор —
             # свой). Клавиша съедается безусловно: свёртывания у списка
             # моделей нет, обещание в футере гейтится позицией курсора.
@@ -1752,13 +1768,13 @@ class SettingsScreen(Screen):
             ed.alt_down()
             self._refresh_footer()
             return True
-        if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
+        if event.key in (_KEY_CTRL_AT, _KEY_CTRL_SPACE, _KEY_CTRL_AT_SIGN):
             # Проба есть только у формы записи; на списке и в легаси-редакторе
             # её нет (§5.2) — клавиша съедается молча, ничего не обещая.
             event.stop()
             ed.probe()
             return True
-        if event.key == "ctrl+u":
+        if event.key == _KEY_CTRL_U:
             # Вернуть записи общее подключение — адрес, токен и галку разом (§5).
             # Перехватывать приходится здесь по той же причине, что и в
             # «Подключении»: `Input` держит на клавише `delete_left_all`, а поле
@@ -1855,7 +1871,7 @@ class SettingsScreen(Screen):
             # его вместе с отступом — тело прыгнуло бы на два ряда вниз и обратно
             # прямо под курсором, которым только что нажали Enter. Отказом записи
             # двумя строками выше секция отвечает тем же `_notice`.
-            self._notice("ничего не изменено")
+            self._notice(_MSG_NOTHING_CHANGED)
             return
         # Пустое состояние — это САМА секция, и запись из неё завершает работу с ней
         # (возврат в хаб, как у прежней «Модели»). Под-форма резервной открыта из
@@ -1915,7 +1931,7 @@ class SettingsScreen(Screen):
     def _mount_shadow_hint(self, frame: Vertical) -> None:
         text = self._shadow_hint_text()
         if text is not None:
-            frame.mount(Static(text, classes="set-hint set-dyn"))
+            frame.mount(Static(text, classes=_CLS_SET_HINT_SET_DYN))
 
     # --- секция «Голосовой ввод»: статус + две строки режима + поля своего endpoint ---
     _VOICE_REMOVE_CONFIRM = (
@@ -2049,7 +2065,7 @@ class SettingsScreen(Screen):
             # Подсветка — строго по курсору (ушёл в поля — её нет ни у одной строки);
             # ▸ живёт по владельцу панели, см. `_voice_row_text`.
             cls = "set-row set-dyn set-spaced set-voicerow" + (
-                " selected" if i == self._voice_row and highlight else ""
+                _CLS_SELECTED if i == self._voice_row and highlight else ""
             )
             frame.mount(Static(self._voice_row_text(i, s), classes=cls))
         # Один слот под курсором: подсказка строки ИЛИ confirm удаления — они сменяют
@@ -2139,7 +2155,7 @@ class SettingsScreen(Screen):
             # Только облачная панель: локальный сервис на этой же машине и идёт мимо
             # прокси — упоминать его там было бы неправдой.
             frame.mount(Static(_VOICE_PROXY_HINT, classes="set-hint set-dyn set-voiceproxy"))
-        frame.mount(Static(self._voice_probe_line(), classes="set-hint set-dyn set-probe"))
+        frame.mount(Static(self._voice_probe_line(), classes=_CLS_SET_HINT_SET_DYN_SET_PROBE))
 
     def _voice_verify_ssl(self):
         """voice.verify_ssl ДЕЙСТВУЮЩЕГО конфига (там ключ уже нормализован из
@@ -2265,7 +2281,7 @@ class SettingsScreen(Screen):
         rows = self._voice_row_widgets()
         if len(rows) != len(_VOICE_ROWS):
             return
-        self.query_one("#set-frame", Vertical).mount(Static(text, classes=_VOICE_OVERRIDE_CLASSES), before=rows[0])
+        self.query_one(_SEL_SET_FRAME, Vertical).mount(Static(text, classes=_VOICE_OVERRIDE_CLASSES), before=rows[0])
 
     def _voice_row_text(self, i: int, s) -> Text:
         """Строка режима в языке опций мастера (onboarding._voice_row_text): курсор ▸
@@ -2299,7 +2315,10 @@ class SettingsScreen(Screen):
             # None — живость ещё едет из воркера (первый кадр): честная пауза «…»
             # вместо мгновенного «не запущен», который через полсекунды дёргался бы
             # в «запущен» на живом сервисе.
-            alive = "…" if s.service_alive is None else "запущен" if s.service_alive else "не запущен"
+            if s.service_alive is None:
+                alive = "…"
+            else:
+                alive = "запущен" if s.service_alive else "не запущен"
             return f"установлен · {alive} · порт {s.port}"
         return ""
 
@@ -3261,7 +3280,7 @@ class SettingsScreen(Screen):
                 frame.mount(Rule(classes="set-group-sep"))
             # Без set-spaced: плотность B — тогглы группы впритык (общий пульт),
             # воздух даёт разделитель групп (margin-top .set-group-sep).
-            cls = "set-row set-dyn" + (" selected" if selected else "")
+            cls = "set-row set-dyn" + (_CLS_SELECTED if selected else "")
             frame.mount(Static(self._mode_row_text(name, selected), classes=cls))
         # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
         # пояснительная строка в карточке под строками-опциями, класс set-hint).
@@ -3704,7 +3723,7 @@ class SettingsScreen(Screen):
         if session_name:
             effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
         else:
-            effect = self._launch_profile_effect("") or "применится со следующего хода агента"
+            effect = self._launch_profile_effect("") or _MSG_APPLIES_NEXT_TURN
         self._render_view()
         self._flash(f"Профиль деактивирован — {target}. {effect}")
 
@@ -3742,7 +3761,7 @@ class SettingsScreen(Screen):
         if session_name and session_name != name:
             effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
         else:
-            effect = self._launch_profile_effect(name) or "применится со следующего хода агента"
+            effect = self._launch_profile_effect(name) or _MSG_APPLIES_NEXT_TURN
         self._render_view()
         self._flash(f"Профиль «{name}» активирован — {target}. {effect}")
 
@@ -4116,7 +4135,7 @@ class SettingsScreen(Screen):
             # плашке рядом со строкой о тёзке читалось как «применится тень» —
             # снятие называется снятием, обещание про следующий ход остаётся.
             return "Выбор снят: со следующего хода агента — без профиля."
-        return "применится со следующего хода агента"
+        return _MSG_APPLIES_NEXT_TURN
 
     def _rename_profile(self, original: str, new_name: str) -> None:
         """`r` → новое имя: переименовываются файл И указатель в КАЖДОМ файловом
@@ -4561,7 +4580,7 @@ class SettingsScreen(Screen):
                 Static(
                     "Профиль — отдельный файл-конфиг: переключаемый набор ЛЮБЫХ "
                     "настроек — модели, уровни, гварды и любые другие секции конфига",
-                    classes="set-hint set-dyn",
+                    classes=_CLS_SET_HINT_SET_DYN,
                 )
             )
             # Ни клавиши, ни пути здесь больше нет — оба уже названы, и точнее:
@@ -4577,7 +4596,7 @@ class SettingsScreen(Screen):
         # строка-действие под подсказкой о сути профиля.
         for i, row in enumerate(rows):
             selected = i == self._profiles_idx
-            cls = "set-row set-dyn set-profiles-row" + (" selected" if selected else "")
+            cls = "set-row set-dyn set-profiles-row" + (_CLS_SELECTED if selected else "")
             if row["kind"] == "none":
                 text = self._none_row_text(rows, selected)
             elif row["kind"] == "add":
@@ -4647,7 +4666,7 @@ class SettingsScreen(Screen):
                             "там, иначе следующий запуск не соберётся",
                             style=WARN,
                         ),
-                        classes="set-hint set-dyn",
+                        classes=_CLS_SET_HINT_SET_DYN,
                         markup=False,
                     )
                 )
@@ -5107,7 +5126,7 @@ class SettingsScreen(Screen):
             # первая строка-действие — один класс с top+bottom margin (раздельные
             # .set-gap+.set-spaced Textual перетирает → пропадал воздух под первым действием)
             spacing = "set-spaced-gap" if i == 0 else "set-spaced"
-            cls = f"set-row set-dyn {spacing}" + (" selected" if selected else "")
+            cls = f"set-row set-dyn {spacing}" + (_CLS_SELECTED if selected else "")
             frame.mount(Static(row, classes=cls))
         if self._update_awaiting_confirm:
             frame.mount(
@@ -5118,7 +5137,9 @@ class SettingsScreen(Screen):
                 Static(Text(self._reset_confirm_text(), style=WARN), classes=f"set-confirm set-dyn {KEEP_IN_VIEW}")
             )
         else:
-            frame.mount(Static(self._update_hint_text(actions[self._update_idx], resolved), classes="set-hint set-dyn"))
+            frame.mount(
+                Static(self._update_hint_text(actions[self._update_idx], resolved), classes=_CLS_SET_HINT_SET_DYN)
+            )
 
     def _checked_line_text(self) -> Text:
         """Строка «Проверено» секции «Обновление» (Task 7): исходное состояние /
@@ -5425,7 +5446,7 @@ class SettingsScreen(Screen):
             reveal(w)
             return
         slot = Vertical(Static(text, id=wid, classes=cls, markup=False), classes="set-dyn set-slot")
-        self.query_one("#set-frame", Vertical).mount(slot)
+        self.query_one(_SEL_SET_FRAME, Vertical).mount(slot)
         reveal(slot)
 
     def _notice(self, text: str) -> None:
@@ -5973,7 +5994,7 @@ class SettingsScreen(Screen):
                 # Enter и Esc — курсор при незаданном вопросе не ходит.
                 self._move_group(1 if event.key == "tab" else -1)
             return
-        if event.key in ("alt+down", "ctrl+down") and self._view in _PROBE_SECTIONS:
+        if event.key in (_KEY_ALT_DOWN, _KEY_CTRL_DOWN) and self._view in _PROBE_SECTIONS:
             # Развод клавиш (спека 2026-08-06 §2): раскрытие списка — теперь ЦЕЛИКОМ
             # на Alt+↓ (и тихом синониме Ctrl+↓), Ctrl+Space ниже про список больше не
             # спрашивает. У адреса список есть (пресеты) — свёрнутый раскрываем,
@@ -5987,7 +6008,7 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._refresh_footer()  # обещания клавиш меняются вместе со списком
             return
-        if event.key in ("ctrl+at", "ctrl+space", "ctrl+@") and self._view in _PROBE_SECTIONS:
+        if event.key in (_KEY_CTRL_AT, _KEY_CTRL_SPACE, _KEY_CTRL_AT_SIGN) and self._view in _PROBE_SECTIONS:
             # Развод §2: клавиша больше не спрашивает список (см. ветку Alt+↓ выше) —
             # порядок неважен, она всегда «перепроверить связь» (§2.2 спеки). Проба
             # уходит при ЛЮБЫХ полях, в том числе нетронутых: ради этого случая она и
@@ -6049,7 +6070,7 @@ class SettingsScreen(Screen):
             if values is None:
                 return
             if not values:
-                self._title_note("ничего не изменено")
+                self._title_note(_MSG_NOTHING_CHANGED)
                 return
             if self._draft_checked is not None:  # уже проверено: решаем по вердикту
                 self._smart_enter_decide(section, values, self._draft_checked)
@@ -6082,7 +6103,7 @@ class SettingsScreen(Screen):
                 elif event.key in ("up", "down"):
                     self._move_voice(-1 if event.key == "up" else 1)  # навигация отменяет
                 return  # прочие клавиши — no-op, пока висит confirm
-            if event.key in ("alt+down", "ctrl+down"):
+            if event.key in (_KEY_ALT_DOWN, _KEY_CTRL_DOWN):
                 # До общей навигации: явно раскрыть список поля, ничего не печатая —
                 # второй путь назад после Esc (первый — печать, см. reopen_for_typing).
                 # Что именно значит «раскрыть», решает сам список (`reload`): у языка —
@@ -6099,7 +6120,7 @@ class SettingsScreen(Screen):
                     event.stop()
                     self._refresh_footer()
                 return
-            if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
+            if event.key in (_KEY_CTRL_AT, _KEY_CTRL_SPACE, _KEY_CTRL_AT_SIGN):
                 # Проба — только в облачной панели (§2.5 спеки 2026-08-06): локальная
                 # адреса не спрашивает (канон §9.2), проверять там нечего — клавиша
                 # съедается молча, ни в какие глобальные биндинги не проваливаясь.
@@ -6118,11 +6139,11 @@ class SettingsScreen(Screen):
                 event.stop()  # в полях Del правит текст — не перехватываем
                 self._voice_request_remove()
                 return
-            if event.key == "ctrl+u" and not self._voice_focus_in_editor():
+            if event.key == _KEY_CTRL_U and not self._voice_focus_in_editor():
                 event.stop()  # тот же гейт по фокусу, что у Del
                 self._voice_update_engine()
                 return
-            if event.key == "ctrl+u" and self._voice_clear_token():
+            if event.key == _KEY_CTRL_U and self._voice_clear_token():
                 # В полях та же клавиша стирает СОХРАНЁННЫЙ токен — как на
                 # «Подключении» (там `Ctrl+U` пришёл из develop). Голосовая панель
                 # показывает секрет такой же маской, а убрать его было нечем вовсе:
@@ -6261,7 +6282,7 @@ class SettingsScreen(Screen):
                     event.stop()
                     ed.request_remove()
                     return
-                if event.key == "ctrl+u":
+                if event.key == _KEY_CTRL_U:
                     event.stop()
                     ed.begin_update()
                     return
@@ -6289,7 +6310,7 @@ class SettingsScreen(Screen):
                 self._autoprobe_on_leave(ed, leaving_id)
                 self._refresh_footer()  # состав клавиш зависит от того, раскрыт ли список
             return
-        if event.key == "ctrl+u" and self._view == _CONNECTION:
+        if event.key == _KEY_CTRL_U and self._view == _CONNECTION:
             # Очистка сохранённого токена. Клавишу приходится перехватывать здесь:
             # Input держит на ней delete_left_all, а поле токена пустое (секрет
             # живёт в конфиге, в поле — маска), и штатное поведение там вхолостую.

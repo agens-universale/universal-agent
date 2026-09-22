@@ -27,6 +27,10 @@ from gc_server.rest_api.server_config import build_agent_config_for_server, load
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
 from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup, register_swarm_cleanup_on_startup
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
+
+
 logger = logging.getLogger(__name__)
 
 # Swarm-режим пока может быть не готов (например, отсутствуют модули/зависимости).
@@ -39,7 +43,7 @@ try:
     from gc_server.swarm import storage as swarm_storage
     from gc_server.swarm.config import build_swarm_config
     from gc_server.swarm.monitor import SwarmMonitor
-except (ModuleNotFoundError, ImportError) as e:
+except ImportError as e:
     _SWARM_MODULES_AVAILABLE = False
     logger.warning("swarm disabled due to import error: %r", e)
     build_swarm_config = None  # type: ignore[assignment]
@@ -155,7 +159,7 @@ async def _shutdown_swarm_processes() -> None:
             try:
                 os.killpg(pid, signal.SIGTERM)
                 pids_to_kill.append((swarm_id, pid))
-            except (ProcessLookupError, PermissionError, OSError):
+            except OSError:
                 pass
 
     # 2. Grace period — CLI пытается дописать summary.
@@ -166,7 +170,7 @@ async def _shutdown_swarm_processes() -> None:
         if swarm_lifecycle._is_pid_alive(pid):
             try:
                 os.killpg(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
+            except OSError:
                 pass
 
         # Обновляем meta — даже если процесс уже умер, обновляем статус
@@ -241,7 +245,7 @@ async def get_run_status(system: str, task_id: str):
     if not sys_norm or not task_norm:
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
+            detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
 
     # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
@@ -801,7 +805,7 @@ async def get_swarm_status(system: str, task_id: str):
     if not str(system or "").strip() or not str(task_id or "").strip():
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
+            detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
     sys_norm = sanitize_system_id(str(system).lower().strip())
     try:
@@ -872,7 +876,7 @@ async def get_swarm_logs(system: str, task_id: str):
     if not str(system or "").strip() or not str(task_id or "").strip():
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
+            detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
     sys_norm = sanitize_system_id(str(system).lower().strip())
     try:

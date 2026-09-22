@@ -102,27 +102,24 @@ def main() -> int:
     manifest = load_manifest(manifest_path)
     if not manifest:
         print("[info] no mcps declared in config.yml — nothing to run")
-        return 0
-
-    if args.stop:
+    elif args.stop:
         stopped = stop_command_daemons(_command_daemon_names(manifest))
         print(f"[done] stopped {stopped} daemon(s)")
-        return 0
-
-    supervisor = RunSupervisor()
-    started_any = False
-    try:
-        for entry in manifest:
-            if run_entry(entry, root, supervisor):
-                started_any = True
-        if started_any:
-            print("[run] supervising started daemons — Ctrl+C to stop them")
-            supervisor.wait_until_signal()
-        else:
-            print("[run] nothing new to supervise (already running or stdio-only)")
-    finally:
-        supervisor.shutdown_managed()
-    print("[done] run complete")
+    else:
+        supervisor = RunSupervisor()
+        started_any = False
+        try:
+            for entry in manifest:
+                if run_entry(entry, root, supervisor):
+                    started_any = True
+            if started_any:
+                print("[run] supervising started daemons — Ctrl+C to stop them")
+                supervisor.wait_until_signal()
+            else:
+                print("[run] nothing new to supervise (already running or stdio-only)")
+        finally:
+            supervisor.shutdown_managed()
+        print("[done] run complete")
     return 0
 
 

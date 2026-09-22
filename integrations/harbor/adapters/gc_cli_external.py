@@ -111,6 +111,61 @@ def _stringify_content(content: Any) -> str:
     return str(content)
 
 
+def _classify_message(m: dict, attach_observation) -> "tuple[str, str] | None":
+    """Во что превращается одно сообщение: (source, text) либо None.
+
+    None — текст уже приложен к `observation` последнего шага агента и своего
+    шага не заводит.
+    """
+    role = m.get("role")
+    mtype = m.get("type")
+    # Tool result → observation on the last agent step.
+    if mtype == "function_call_output" or role == "tool":
+        text = _stringify_content(m.get("output") if "output" in m else m.get("content"))
+        if attach_observation(text):
+            return None
+        return "user", text or "(tool result)"  # orphan → user step
+    # Tool call → agent step describing the action.
+    if mtype == "function_call":
+        name, args = m.get("name") or "tool", m.get("arguments")
+        return "agent", f"{name}({args})" if args else f"{name}()"
+    return _ROLE_TO_SOURCE.get(role, "user"), _stringify_content(m.get("content"))
+
+
+def _harbor_server_entry(server, *, os_backend_transports, logger=None) -> "tuple[str, dict] | None":
+    """Один MCP-сервер задачи → (ключ, запись `mcp-servers`) либо None, если его
+    транспорт нам неизвестен."""
+    name = getattr(server, "name", None)
+    transport = getattr(server, "transport", None)
+    if not name or not transport:
+        return None
+    gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
+    if gc_transport is None:
+        if logger is not None:
+            logger.warning("MCP server %r: unsupported harbor transport %r, skipped", name, transport)
+        return None
+    # `sse` needs a live session, which a stateless exec cannot hold, so
+    # tagging it os_backend would build a config the resolver is guaranteed to
+    # reject. It stays on the agent locus: unreachable from there is an honest
+    # connection error, not a self-inflicted config one.
+    locus = "os_backend" if gc_transport in os_backend_transports else "agent"
+    if locus == "agent" and logger is not None:
+        logger.warning(
+            "MCP server %r uses transport %r, which needs a live session "
+            "and cannot run inside the task environment; it will be tried "
+            "from the agent runtime instead",
+            name,
+            transport,
+        )
+    entry: dict = {"transport": gc_transport, "server-name": str(name), "execute_on": locus}
+    if gc_transport == "stdio":
+        entry["command"] = str(getattr(server, "command", "") or "")
+        entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
+    else:
+        entry["url"] = str(getattr(server, "url", "") or "")
+    return re.sub(r"[^A-Za-z0-9_]", "_", str(name)), entry
+
+
 def _messages_to_steps(messages: list) -> list:
     """Map gc-cli `state.messages` to ATIF `Step`s.
 
@@ -141,24 +196,10 @@ def _messages_to_steps(messages: list) -> list:
     for m in messages:
         if not isinstance(m, dict):
             continue
-        role = m.get("role")
-        mtype = m.get("type")
-
-        # Tool result → observation on the last agent step.
-        if mtype == "function_call_output" or role == "tool":
-            text = _stringify_content(m.get("output") if "output" in m else m.get("content"))
-            if _attach_observation(text):
-                continue
-            source, text = "user", text or "(tool result)"  # orphan → user step
-        # Tool call → agent step describing the action.
-        elif mtype == "function_call":
-            name, args = m.get("name") or "tool", m.get("arguments")
-            source = "agent"
-            text = f"{name}({args})" if args else f"{name}()"
-        else:
-            source = _ROLE_TO_SOURCE.get(role, "user")
-            text = _stringify_content(m.get("content"))
-
+        classified = _classify_message(m, _attach_observation)
+        if classified is None:
+            continue
+        source, text = classified
         step = Step(step_id=len(steps) + 1, source=source, message=text)
         steps.append(step)
         if source == "agent":
@@ -480,50 +521,17 @@ class GcCliExternal(BaseAgent):
 
         mapped: dict = {}
         for server in servers or []:
-            name = getattr(server, "name", None)
-            transport = getattr(server, "transport", None)
-            if not name or not transport:
+            item = _harbor_server_entry(server, os_backend_transports=OS_BACKEND_TRANSPORTS, logger=logger)
+            if item is None:
                 continue
-            gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
-            if gc_transport is None:
-                if logger is not None:
-                    logger.warning(
-                        "MCP server %r: unsupported harbor transport %r, skipped",
-                        name,
-                        transport,
-                    )
-                continue
-            key = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
+            key, entry = item
             if key in mapped and logger is not None:
                 logger.warning(
                     "MCP server %r collides with an earlier server on key %r after "
                     "sanitising; the earlier one is dropped",
-                    name,
+                    getattr(server, "name", None),
                     key,
                 )
-            # `sse` needs a live session, which a stateless exec cannot hold, so
-            # tagging it os_backend would build a config the resolver is
-            # guaranteed to reject. It stays on the agent locus: unreachable from
-            # there is an honest connection error, not a self-inflicted config one.
-            locus = "os_backend" if gc_transport in OS_BACKEND_TRANSPORTS else "agent"
-            if locus == "agent" and logger is not None:
-                logger.warning(
-                    "MCP server %r uses transport %r, which needs a live session "
-                    "and cannot run inside the task environment; it will be tried "
-                    "from the agent runtime instead",
-                    name,
-                    transport,
-                )
-            entry: dict = {
-                "transport": gc_transport,
-                "server-name": str(name),
-                "execute_on": locus,
-            }
-            if gc_transport == "stdio":
-                entry["command"] = str(getattr(server, "command", "") or "")
-                entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
-            else:
-                entry["url"] = str(getattr(server, "url", "") or "")
             mapped[key] = entry
         return mapped
 
@@ -552,6 +560,40 @@ class GcCliExternal(BaseAgent):
         meta["request_timeout_sec"] = max(int(meta.get("request_timeout_sec") or 0), 600)
         meta["discovery_timeout_sec"] = max(int(meta.get("discovery_timeout_sec") or 0), 120)
         config_dict["mcp-meta"] = meta
+
+    def _dump_outcome(self, state, *, executor, timings, context) -> None:
+        """Сбросить траекторию, тайминги и счётчики токенов — что бы ни случилось.
+
+        Вынесено из `run` целиком: у хвоста своя логика восстановления на
+        оборванном прогоне, и вместе с телом `run` он давал сложность выше
+        порога (Sonar S3776).
+        """
+        if state is None and executor is not None:
+            state = executor.get_state()
+        n_steps = self._write_trajectory(state)
+        # On a timeout the worker is abandoned mid-call: these are the totals
+        # reached so far, and timings.jsonl names the call still running.
+        timing_summary = timings.summary()
+        timings.close()
+        self.logger.info("timings: %s", timing_summary)
+
+        # Populate AgentContext so the run isn't a black box: token counters the
+        # same way every other Harbor agent reports them, plus metadata for triage.
+        if context is None:
+            return
+        totals = self._populate_usage(context, state)
+        if context.metadata is not None:
+            return
+        context.metadata = {
+            "agent": self.name(),
+            "session_id": self._session_id,
+            "total_steps": n_steps,
+            "timings": timing_summary,
+            # A zero token count means "no calls"; a missing one means "not
+            # counted". Record both so the difference stays visible.
+            "llm_calls": totals["calls"] if totals else None,
+            "llm_calls_without_usage": (totals["missing_usage_calls"] if totals else None),
+        }
 
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
         from gc_core.agent_executor import AgentExecutor
@@ -660,27 +702,4 @@ class GcCliExternal(BaseAgent):
             # ponytail: best-effort only — if stop_run() didn't unblock the thread in
             # time, the thread is still orphaned; raise the grace timeout if this needs
             # a harder kill later.
-            if state is None and executor is not None:
-                state = executor.get_state()
-            n_steps = self._write_trajectory(state)
-            # On a timeout the worker is abandoned mid-call: these are the totals
-            # reached so far, and timings.jsonl names the call still running.
-            timing_summary = timings.summary()
-            timings.close()
-            self.logger.info("timings: %s", timing_summary)
-
-            # Populate AgentContext so the run isn't a black box: token counters the
-            # same way every other Harbor agent reports them, plus metadata for triage.
-            if context is not None:
-                totals = self._populate_usage(context, state)
-                if context.metadata is None:
-                    context.metadata = {
-                        "agent": self.name(),
-                        "session_id": self._session_id,
-                        "total_steps": n_steps,
-                        "timings": timing_summary,
-                        # A zero token count means "no calls"; a missing one means "not
-                        # counted". Record both so the difference stays visible.
-                        "llm_calls": totals["calls"] if totals else None,
-                        "llm_calls_without_usage": (totals["missing_usage_calls"] if totals else None),
-                    }
+            self._dump_outcome(state, executor=executor, timings=timings, context=context)

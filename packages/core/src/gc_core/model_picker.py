@@ -136,7 +136,7 @@ def _requests_get_ex(
         resp = NO_NETRC_SESSION.get(
             url,
             headers=headers,
-            verify=verify,
+            verify=verify,  # NOSONAR: use_ssl:false из config.yml — осознанный opt-in, см. docs/code-quality.md
             timeout=5,
             proxies=proxies,
         )
@@ -176,7 +176,7 @@ def _requests_post_ex(
             url,
             headers=headers,
             json=body,
-            verify=verify,
+            verify=verify,  # NOSONAR: use_ssl:false из config.yml — осознанный opt-in, см. docs/code-quality.md
             timeout=5,
             proxies=proxies,
         )

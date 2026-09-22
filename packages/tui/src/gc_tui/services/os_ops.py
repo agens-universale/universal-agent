@@ -15,7 +15,7 @@ def _run_capture(cmd: list[str]) -> str:
             capture_output=True,
             timeout=2.0,
         ).stdout
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return ""
     return out.decode("utf-8", errors="replace")
 
@@ -30,7 +30,7 @@ def _run_feed(cmd: list[str], text: str) -> bool:
             capture_output=True,
             timeout=2.0,
         )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
 
