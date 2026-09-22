@@ -121,3 +121,26 @@ def test_listener_called_on_push():
     register_runtime_notices_listener(lambda: seen.append(1))
     push_runtime_notice(Notice("info", "x", "msg"))
     assert seen == [1]
+
+
+def test_unregistered_listener_is_dropped():
+    """Список подписчиков модульный: без отписки подписчик (у TUI — метод
+    приложения) жил до конца процесса и держал приложение целиком."""
+    from gc_core import runtime_notices
+    from gc_core.runtime_notices import (
+        register_runtime_notices_listener,
+        unregister_runtime_notices_listener,
+    )
+
+    seen = []
+
+    def listener():
+        seen.append(1)
+
+    register_runtime_notices_listener(listener)
+    unregister_runtime_notices_listener(listener)
+    unregister_runtime_notices_listener(listener)   # повтор — не ошибка
+    push_runtime_notice(Notice("info", "y", "msg"))
+
+    assert seen == []
+    assert listener not in runtime_notices._listeners

@@ -11,7 +11,6 @@ from gc_core.config_modules.strip_tags_projection import (
     persist_reasoning_content_from_config,
     projection_tags_from_config,
 )
-from gc_core.intent_guard.feedback import build_finish_gate_feedback, build_finish_gate_reject_technical_user_content
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, SESSION_COMPACT_TOOL_NAME, SESSION_TODO_TOOL_NAME, TURN_FINALIZING_TOOLS
 from gc_core.run_summary_coordinator import build_preserved_batch, filter_messages_not_in_state
 from gc_core.intent_guard.guard import FinishGateGuard
@@ -72,7 +71,17 @@ from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
-from gc_core.message_policy.no_tool_call_bounce import NO_TOOL_CALL_BOUNCE_MESSAGE, extract_last_assistant_text
+from gc_core.message_policy.no_tool_call_bounce import (
+    NO_TOOL_CALL_BOUNCE_MESSAGE,
+    extract_last_assistant_text,
+    format_no_tool_call_bounce,
+)
+from gc_core.utils.backend_errors import (
+    FINISH_KIND_LENGTH,
+    classify_finish_kind,
+    finish_blocks_final,
+    finish_prevents_text_final,
+)
 from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, TECHNICAL_TYPE_ERROR_MESSAGE, wrap_technical_user_content, build_invalid_tool_call_feedback_message
 
@@ -542,6 +551,7 @@ async def _arequest_backend_canonical_once(
             cert=cert,
             use_retry=use_retry,
             retry_embedded_choice_errors=retry_embedded_choice_errors,
+            salvage_reasoning=True,
             logger=getattr(ctx, "logger", None),
             on_delta=_on_delta,
             request_label="main_agent",
@@ -752,7 +762,7 @@ _TRUNCATED_ARGUMENTS_HINT = (
 def _attach_truncation_hint(exc: WrongFunctionArgumentsException, state: Any) -> None:
     """Дописать объяснение про усечение к фидбэку, не затирая подсказку самого
     тула (wrong_arguments_feedback_hint), которую положило место возбуждения."""
-    if getattr(state, "last_finish_reason", None) != "length":
+    if classify_finish_kind(getattr(state, "last_finish_reason", None)) != FINISH_KIND_LENGTH:
         return
     hints = [h for h in (getattr(exc, "extra_hint", None), _TRUNCATED_ARGUMENTS_HINT) if h]
     exc.extra_hint = "\n\n".join(hints)
@@ -1276,16 +1286,15 @@ class _AgentLoop:
     # ------------------------------------------------------------------ loop
     async def arun(self, messages) -> Union[str, None]:
         state = self.state
+        first_poll = True
         while True:
             if self.check_stop is not None and self.check_stop():
                 clear_loop_detector(state)
                 return None
-            if self.get_pending_messages is not None:
-                pending = self.get_pending_messages()
-                if pending:
-                    messages = pending
+            messages = self._poll_pending(messages, first_poll=first_poll)
+            first_poll = False
             # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
-            # не передаём его дальше в check_trace_finished / check_mode, чтобы не падать
+            # не передаём его дальше в check_mode, чтобы не падать
             # с ValueError('Empty messages list'). Вместо этого генерируем понятное
             # сообщение‑обратную связь для агента.
             if not messages:
@@ -1323,6 +1332,20 @@ class _AgentLoop:
         return outcome
 
     # ----------------------------------------------------------- iteration
+    def _poll_pending(self, messages, *, first_poll: bool):
+        """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла."""
+        if self.get_pending_messages is None:
+            return messages
+        pending = self.get_pending_messages()
+        if not pending:
+            return messages
+        # На ПЕРВОМ опросе склеиваем со стартовым батчем, а не
+        # подменяем его: сообщение, пришедшее между стартом прогона и
+        # первым запросом к модели, иначе вытесняло стартовое — и оно
+        # не доходило ни до модели, ни до треда. Дальше подмена верна:
+        # там `messages` — это уже ответ модели, а не просьба человека.
+        return [*messages, *pending] if first_poll else pending
+
     def _technical_bounce(self, text: str) -> List[Dict]:
         return [
             _make_technical_feedback_user_message(
@@ -1331,16 +1354,25 @@ class _AgentLoop:
             )
         ]
 
+    def _finish_reason_bounce(self) -> List[Dict]:
+        """No-tool-call bounce с учётом finish_reason последнего ответа
+        (blocked → просьба переформулировать, length → короче, иначе общий)."""
+        return self._technical_bounce(
+            format_no_tool_call_bounce(
+                finish_reason=getattr(self.state, "last_finish_reason", None)
+            )
+        )
+
     def _bounce_empty_messages(self) -> List[Dict]:
         self.run_logger.error("Empty messages list")
         self.tool_error_cnt += 1
         self.state.steps += 1
-        return self._technical_bounce(NO_TOOL_CALL_BOUNCE_MESSAGE)
+        return self._finish_reason_bounce()
 
     def _bounce_on_error(self, e: Exception) -> List[Dict]:
         self.run_logger.error(e, exc_info=True)
         self.tool_error_cnt += 1
-        return self._technical_bounce(NO_TOOL_CALL_BOUNCE_MESSAGE)
+        return self._finish_reason_bounce()
 
     def _bounce_wrong_arguments(self, e: WrongFunctionArgumentsException) -> List[Dict]:
         self.run_logger.error(e, exc_info=True)
@@ -1629,10 +1661,16 @@ class _AgentLoop:
             messages,
         )
         work_new, finish_new, tail_new = _split_batch_new_around_finish(batch_new, finish_call_id)
+        # Work до гейта; finish в state до гейта (I3: persist после
+        # apply). Technical-хвост нужен только при reject, когда
+        # агент продолжит ход. После принятого finish его нельзя
+        # оставлять в state/jsonl: следующий пользователь иначе
+        # увидит устаревший notice как начало нового хода.
         if work_new:
             state.messages += work_new
             await _maybe_persist(self.persist_messages_callback, work_new, state)
         if finish_new:
+            # I3: finish output в state до gate; persist — после apply.
             state.messages += finish_new
         finish_arguments = closing_finish.get("arguments")
         if backend_mode != "chat_completions":
@@ -1648,14 +1686,13 @@ class _AgentLoop:
             if tail_new:
                 state.messages += tail_new
                 await _maybe_persist(self.persist_messages_callback, tail_new, state)
-            feedback = (decision.feedback_text or "").strip()
-            if not feedback and decision.validation is not None:
-                feedback = build_finish_gate_feedback(decision.validation)
+            # Вердикт уже в output turn_finish (ok: false +
+            # message). Не подменяем батч technical-user:
+            # следующий шаг цикла сам уйдёт в
+            # function_call_output и позовёт модель.
             # Finish-reject — завершённый ход (batch + gate).
-            return _Outcome(
-                self._technical_bounce(build_finish_gate_reject_technical_user_content(feedback)),
-                completed_step=True,
-            )
+            # Work уже в трейсе, не откатываем.
+            return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
         state.steps += 1
@@ -1741,16 +1778,59 @@ class _AgentLoop:
                 "with the same client-side error."
             ))
         # Полный ход: LLM уже вернул tools, batch исполнен.
+        # Невалидный finish сюда же: отказной output в трейсе, ход открыт.
         return _Outcome(messages, completed_step=True)
+
+    async def _atext_decision(
+        self, assistant_text: str, last_finish: Any
+    ) -> Tuple[bool, Optional[str]]:
+        """→ (accept, reject_feedback) для прозы без вызова тула."""
+        # blocked / length — не финал даже в allow: отказ провайдера
+        # или усечение (обрезок тулы/ответа). Иначе allow принимает
+        # мусор и крутит до no_tool_call_max_count / сдаёт ход.
+        # Payload уже в state/jsonl; reject → bounce, не discard.
+        if finish_prevents_text_final(last_finish):
+            return False, None
+        decision = await ashould_return_text_answer(self.ctx, self.state, assistant_text)
+        return decision.accept, decision.reject_feedback
+
+    def _text_reject_bounce_msg(
+        self, reject_feedback: Optional[str], last_finish: Any, default_msg: str
+    ) -> str:
+        """Текст bounce при отклонённой прозе; ``default_msg`` — по finish_reason."""
+        if reject_feedback is not None:      # judge-reject c причиной
+            return reject_feedback
+        if finish_blocks_final(last_finish):
+            self.run_logger.warning(
+                "Provider blocked the completion (%s); "
+                "requesting a rephrased attempt",
+                last_finish,
+            )
+            return default_msg
+        if classify_finish_kind(last_finish) == FINISH_KIND_LENGTH:
+            self.run_logger.warning(
+                "Agent response truncated (finish_reason=length); "
+                "requesting a shorter tool call"
+            )
+            return default_msg
+        # deny / пусто / нет гейта / ошибка
+        self.run_logger.warning(
+            "Agent returned text response without tool call, requesting tool call"
+        )
+        return NO_TOOL_CALL_BOUNCE_MESSAGE
 
     async def _atext_response(self, messages) -> _Outcome:
         state, ctx = self.state, self.ctx
         assistant_text = extract_last_assistant_text(
             messages, tags=self.proj_tags, strip_think=True
         )
-        decision = await ashould_return_text_answer(ctx, state, assistant_text)
+        last_finish = getattr(state, "last_finish_reason", None)
+        bounce_msg = format_no_tool_call_bounce(finish_reason=last_finish)
+        decision_accept, decision_reject_feedback = await self._atext_decision(
+            assistant_text, last_finish
+        )
 
-        if decision.accept:
+        if decision_accept:
             # Финальная проза принята → TUI-индикатор «✓ завершаю…»
             # на время записи/саммари/flush (mark_finalizing пишет
             # runtime.finalizing в meta; снимаем строго в finally).
@@ -1758,7 +1838,9 @@ class _AgentLoop:
             if self.mark_finalizing is not None:
                 await await_callback(self.mark_finalizing(True))
             try:
-                # Корутинным именем, как соседние intent-scope хуки.
+                # Корутинным именем, как соседние intent-scope
+                # хуки: синхронное имя fail-open внутри проглотил
+                # бы, и сводка молча подменилась бы сырым текстом.
                 await _acall_blocking_hook(
                     amaybe_record_final_answer_intent,
                     assistant_text=assistant_text, state=state, ctx=ctx
@@ -1771,13 +1853,9 @@ class _AgentLoop:
             return await self._aclose_turn(assistant_text)
         # === reject ===
         self.tool_error_cnt += 1
-        if decision.reject_feedback is not None:      # judge-reject c причиной
-            bounce_msg = decision.reject_feedback
-        else:                                         # deny / пусто / нет гейта / ошибка
-            self.run_logger.warning(
-                "Agent returned text response without tool call, requesting tool call"
-            )
-            bounce_msg = NO_TOOL_CALL_BOUNCE_MESSAGE
+        bounce_msg = self._text_reject_bounce_msg(
+            decision_reject_feedback, last_finish, bounce_msg
+        )
         return _Outcome(self._technical_bounce(bounce_msg), completed_step=True)
 
 

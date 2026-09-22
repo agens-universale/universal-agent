@@ -11,7 +11,7 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from gc_core.runtime_notices import collect_runtime_notices, collect_unread_runtime_notices, push_runtime_notice, register_runtime_notices_listener
+from gc_core.runtime_notices import collect_runtime_notices, collect_unread_runtime_notices, push_runtime_notice, register_runtime_notices_listener, unregister_runtime_notices_listener
 from gc_core.startup_notices import Notice, collect_startup_notices
 from gc_tui.services.voice_notices import voice_notices
 from gc_tui import branding, palette
@@ -93,6 +93,16 @@ def _run_auto_check_safely(config: dict, state: dict, now: float, installed_comm
         pass
 
 
+def _release_runner(runner) -> None:
+    """Отдать логгер прогона снимаемого runner'а (см. `AgentRunner.release`).
+
+    Через getattr: тесты подставляют в ``active_runner`` двойников без него.
+    """
+    release = getattr(runner, "release", None)
+    if callable(release):
+        release()
+
+
 class TuiApp(App):
     """GigaCode — основное приложение."""
 
@@ -161,6 +171,7 @@ class TuiApp(App):
         self._mcp_progress = None
         self._mcp_snapshot = None      # boot-дискавери для /mcp (сервер→статус/тулы)
         self._mcp_status = None        # per-server status dict — для startup_notices
+        self._registered_tool_names = None  # имена тулов до stop_tools — валидатор notices
         self.active_runner = None      # AgentRunner | None
         self._runner_stale = False   # конфиг изменился при живом run → пересборка после завершения
         self.last_runner_error: Optional[str] = None
@@ -995,8 +1006,33 @@ class TuiApp(App):
         if runner is not None and runner.is_running():
             self._runner_stale = True
             return
+        _release_runner(runner)
         self.active_runner = None
         self._runner_stale = False
+
+    def on_unmount(self) -> None:
+        """Выход приложения — отпустить всё, что держит его из модулей ядра.
+
+        Сначала `stop()`, и это не вежливость. Пока агент ждёт ответа человека,
+        его поток сидит в `queue.get()` внутри `asyncio.to_thread`, то есть в
+        потоке пула `concurrent.futures`, а такие потоки интерпретатор ждёт на
+        выходе. `/quit` зовёт `app.exit()` без остановки прогона, и процесс
+        оставался жить, пока в очередь не придёт строка. `stop()` кладёт туда
+        пустую (`cancel_ask_human`) и снимает ожидание подтверждения.
+
+        Затем логгер прогона (см. `AgentRunner.release`) и подписка на
+        runtime-уведомления: и то и другое живёт в модульных реестрах до конца
+        процесса и держит приложение целиком, если его не снять.
+        """
+        runner = self.active_runner
+        stop = getattr(runner, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+        _release_runner(runner)
+        unregister_runtime_notices_listener(self._on_runtime_notice)
 
     def _finish_onboarding(self) -> None:
         """Финал онбординга (auto и review одинаково): reload_config + переход
@@ -1030,6 +1066,7 @@ class TuiApp(App):
         """
         if (self.active_runner is not None and self._runner_stale
                 and not self.active_runner.is_running()):
+            _release_runner(self.active_runner)
             self.active_runner = None
             self._runner_stale = False
         if self.active_runner is not None:
@@ -1109,18 +1146,33 @@ class TuiApp(App):
         # рабочем потоке на всё приложение. Он же убрал бы TLS-рукопожатие,
         # которое TUI платит на каждое сообщение, закрывая пул после хода.
         import asyncio
-        ctx = asyncio.run(acreate_run_context(
-            cfg, auth_connector=auth, on_progress=progress.update,
-            on_stream_delta=self._stream_pump.on_delta,
-            is_tui=True,
-            level_provider=self._level_provider,
-            circuit_breaker=self._circuit_breaker,
-            # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url поверх
-            # непустого реестра — тот же детект, что уже используют CLI/server
-            # (config.cli_forces_legacy_model); без него ран резолвил бы через
-            # реестр, расходясь с честным хинтом /level (display_router).
-            force_legacy=cli_forces_legacy_model(cfg),
-        ))
+
+        async def _abuild_ctx():
+            # Пул httpx ЭТОГО loop закрываем здесь же: `asyncio.run` ниже убьёт
+            # loop, а реестр клиентов ключуется по нему. Ход и `/compact` так и
+            # делают, а сборка — нет: клиент легаси http/sse MCP оставался в
+            # реестре с открытыми сокетами, и так на каждой пересборке (смена
+            # конфига сессии, `/profiles`).
+            from gc_core.utils.async_http import aclose_clients
+
+            try:
+                return await acreate_run_context(
+                    cfg, auth_connector=auth, on_progress=progress.update,
+                    on_stream_delta=self._stream_pump.on_delta,
+                    is_tui=True,
+                    level_provider=self._level_provider,
+                    circuit_breaker=self._circuit_breaker,
+                    # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
+                    # поверх непустого реестра — тот же детект, что уже
+                    # используют CLI/server (config.cli_forces_legacy_model); без
+                    # него ран резолвил бы через реестр, расходясь с честным
+                    # хинтом /level (display_router).
+                    force_legacy=cli_forces_legacy_model(cfg),
+                )
+            finally:
+                await aclose_clients()
+
+        ctx = asyncio.run(_abuild_ctx())
         # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
         from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
         _attach_diff(ctx, cfg)
@@ -1134,6 +1186,7 @@ class TuiApp(App):
         from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
         self._mcp_snapshot = build_mcp_tools_snapshot(cfg, ctx.tools_data, ctx.mcp_status)
         self._mcp_status = ctx.mcp_status
+        self._registered_tool_names = getattr(ctx, "registered_tool_names", None)
         # Проводка confirm-канала: TUI-раннер умеет показывать баннер; CLI/server — нет.
         runner = self.active_runner
         if runner is not None and hasattr(runner, "make_tui_confirm"):
@@ -1201,6 +1254,7 @@ class TuiApp(App):
             all_builtin_tool_names(cfg),
             self._mcp_status,
             is_tui=True,
+            known_tool_names=getattr(self, "_registered_tool_names", None),
             extra=voice_notices(cfg),
             deprecated_keys_used=cfg.get("deprecated_keys_used"),
             upgrade_info=self._upgrade_info,

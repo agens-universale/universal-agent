@@ -8,6 +8,7 @@ You receive:
 
 Rules:
 - Output **1–2 sentences** of plain text only (no lists, no markdown headings, no reasoning).
+- **No reasoning:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary. Emit only the 1–2 sentence line (or empty).
 - Describe what the user wants, clarified, or what the agent step conveys — **only facts present** in tool_output.
 - Do not invent requirements not supported by the output.
 - Do not repeat the agent's question if the output contains no user answer.

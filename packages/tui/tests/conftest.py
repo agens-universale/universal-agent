@@ -136,6 +136,61 @@ def _isolate_model_list_cache():
     clear_cache()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_slow_git_memo():
+    """`gc_tui.services.file_index` помнит корни, где git не уложился в таймаут,
+    в модульном dict — иначе таймаут из одного теста отключал бы git соседям."""
+    from gc_tui.services import file_index
+    file_index._slow_git_roots.clear()
+    yield
+    file_index._slow_git_roots.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_network_model_fetch(monkeypatch):
+    """По умолчанию TUI-тесты не ходят в сеть за списком моделей.
+
+    ModelEditor на mount зовёт `model_picker.fetch_models` (два HTTP с timeout=5:
+    `/config`, затем `/models`). Тесты секции «Модели»/онбординга подменяют
+    источник сами; навигационные и settings-тесты часто заходят в «Модели»
+    мимохадом (PgDn) без стаба — и платят ~10 с teardown на DNS/connect к
+    `http://host/...` из `_cfg()`. UI-набору реальная сеть не нужна: нужны
+    контролируемые ответы (список / пусто / ошибка), их тест по-прежнему
+    перекрывает этот же атрибут через monkeypatch/patch.
+
+    Возвращаем одну модель `test-model` — совпадает с дефолтом `_cfg()` и с
+    харнесом `_section(..., models=("test-model",))`, чтобы глифы хаба не
+    уходили в «сервер не отдал» без причины."""
+    from gc_core import model_picker
+    from gc_core.model_picker import ModelInfo
+
+    monkeypatch.setattr(
+        model_picker,
+        "fetch_models",
+        lambda *a, **k: [ModelInfo(id="test-model")],
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_network_update_check(monkeypatch):
+    """По умолчанию TUI-тесты не делают git ls-remote на старте приложения.
+
+    `TuiApp.on_mount` всегда крутит `_start_auto_update_check` →
+    `check_for_update` (subprocess timeout 8 с). Тесты секции «Обновление» и
+    авто-чека подменяют check сами; остальным живой git не нужен и на CI/без
+    сети только добавляет флаки и секунды teardown."""
+    from gc_core.updater import check as check_mod
+    from gc_core.updater.check import CheckResult
+
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",
+        lambda source, **k: CheckResult(
+            "current", getattr(source, "commit", None), "установлена последняя версия"
+        ),
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _copy_raw_snapshots_to_svg():
     """After tests, copy every __snapshots__/**/*.raw to a sibling .svg.

@@ -9,6 +9,7 @@ from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.harbor import HarborBackend
 from gc_core.config_modules.agent import (
     exec_output_capture_max_chars_from_config_dict,
+    harbor_exec_init_from_config_dict,
     walk_output_max_chars_from_config_dict,
 )
 
@@ -57,6 +58,7 @@ def resolve_os_backend(
             loop,
             exec_output_capture_max_chars=cap,
             walk_output_max_chars=walk_output_max_chars_from_config_dict(config_dict),
+            exec_init=harbor_exec_init_from_config_dict(config_dict),
         )
 
     raise ValueError(f"unsupported os_backend: {kind!r}")

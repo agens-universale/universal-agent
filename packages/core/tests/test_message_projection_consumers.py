@@ -102,6 +102,23 @@ def test_trigger_volume_excludes_think_span():
     assert calc_history_chars_for_trigger([msg]) == len("короткий")
 
 
+def test_trigger_volume_think_only_counts_raw_payload():
+    raw = "<think>search the leaderboard</think>"
+    msg = {"type": "message", "role": "assistant", "content": raw}
+    assert message_raw_payload_chars_for_trigger(msg) == len(raw)
+    assert calc_history_chars_for_trigger([msg]) == len(raw)
+
+
+def test_trigger_volume_think_only_list_content_counts_raw():
+    text = "<think>search the leaderboard</think>"
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}],
+    }
+    assert message_raw_payload_chars_for_trigger(msg) == len(text)
+
+
 def test_trigger_volume_user_keeps_literal_think():
     text = "user said <think>literal</think>"
     msg = {"type": "message", "role": "user", "content": text}

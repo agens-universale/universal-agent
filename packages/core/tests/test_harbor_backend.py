@@ -1,8 +1,13 @@
 import asyncio
+import subprocess
 import threading
 import pytest
-from gc_core.backends.harbor import HarborBackend
+from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
 from gc_core.backends.protocol import FsBackend
+
+
+def _user_shell(command, *, cwd=None, env=None):
+    return build_harbor_shell_command(command, cwd=cwd, env=env, exec_init="bashrc")
 
 
 class FakeExecResult:
@@ -203,16 +208,118 @@ async def test_append_concatenates_existing_content(loop_in_thread):
 
 async def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     await backend.aexec("echo hi", env={"FOO": "bar baz"})
-    assert env.calls == ["env FOO='bar baz' echo hi"]
+    assert env.calls == [_user_shell("echo hi", env={"FOO": "bar baz"})]
+    assert env.calls[0].startswith("env FOO='bar baz' bash -c ")
 
 
 async def test_exec_env_prefix_with_cwd(loop_in_thread):
     env = FakeEnv()
-    backend = HarborBackend(env, loop_in_thread)
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     await backend.aexec("echo hi", cwd="/work", env={"FOO": "bar"})
-    assert env.calls == ["cd /work && env FOO=bar echo hi"]
+    wired = env.calls[0]
+    assert wired == _user_shell("echo hi", cwd="/work", env={"FOO": "bar"})
+    assert wired.startswith("cd /work && env FOO=bar bash -c ")
+    assert not wired.startswith("env ")
+
+
+async def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path):
+    """`env` must not swallow `cd`/`&&`: with exec_init the script is one bash -c arg."""
+    work = tmp_path / "proj"
+    work.mkdir()
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    await backend.aexec(
+        'cd sub && printf "%s\\n" "$FOO" && printf "%s\\n" "$(pwd)"',
+        cwd=str(work),
+        env={"FOO": "bar baz"},
+    )
+    script = env.calls[0]
+    assert script.startswith(f"cd {work} && env FOO='bar baz' bash -c ")
+    # cwd снаружи, скрипт агента — один закавыченный аргумент, не префикс env.
+    assert "cd sub &&" in script.split("bash -c ", 1)[1]
+
+    (work / "sub").mkdir()
+    proc = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == f"bar baz\n{work / 'sub'}\n"
+
+
+async def test_run_python_env_survives_bash_c_wrap(loop_in_thread):
+    """Heredoc of run_python must still run after the env prefix is quoted."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread)
+    await backend.arun_python("import os\nprint(os.environ['FOO'])\n", env={"FOO": "it's"})
+    proc = subprocess.run(
+        ["bash", "-c", env.calls[0]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == "it's\n"
+
+
+async def test_exec_raw_is_bare_posix(loop_in_thread):
+    """Сырой канал игнорирует инициализацию, даже когда она задана."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    result = await backend.aexec_raw("echo hi")
+    assert result.stdout == "ran:echo hi"
+    assert env.calls == ["echo hi"]
+
+
+async def test_exec_raw_env_cwd_without_profile(loop_in_thread):
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    await backend.aexec_raw("echo hi", cwd="/work", env={"FOO": "bar baz"})
+    assert env.calls == ["cd /work && env FOO='bar baz' echo hi"]
+    assert ".bashrc" not in env.calls[0]
+
+
+async def test_argv_and_python_go_raw_even_with_exec_init(loop_in_thread):
+    """argv — программа, python — heredoc: оба идут сырым каналом, как у develop."""
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    await backend.aexec_argv(["echo", "hi"])
+    await backend.arun_python("print(1)")
+    assert len(env.calls) == 2
+    assert not any(".bashrc" in c for c in env.calls), env.calls
+
+
+def test_build_harbor_shell_command_quotes_user_inner():
+    import shlex
+
+    from gc_core.backends.harbor import _BASHRC_EXEC_INIT
+
+    wired = build_harbor_shell_command(
+        "echo hi", cwd="/work", env={"FOO": "bar baz"}, exec_init="bashrc"
+    )
+    assert wired.startswith("cd /work && env FOO='bar baz' bash -c ")
+    inner = shlex.split(wired)[-1]
+    assert inner.startswith(_BASHRC_EXEC_INIT)
+    assert inner.endswith("echo hi")
+    raw = build_harbor_shell_command("echo hi", cwd="/work", env={"FOO": "x"})
+    assert raw == "cd /work && env FOO=x echo hi"
+
+
+async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(loop_in_thread):
+    import shlex
+
+    env = FakeEnv()
+    await HarborBackend(env, loop_in_thread).aexec("echo raw")
+    assert env.calls == ["echo raw"]
+
+    env.calls.clear()
+    await HarborBackend(env, loop_in_thread, exec_init="export READY=1").aexec("echo custom")
+    inner = shlex.split(env.calls[0])[-1]
+    assert inner == "export READY=1\necho custom"
 
 
 def test_every_impl_signature_accepts_protocol_parameters():
@@ -289,10 +396,10 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     async def head_exec(command, **kw):
         env.calls.append(command)
         if "head -c" in command and "base64" in command:
-            return FakeExecResult(
-                stdout=base64.b64encode(raw).decode("ascii"),
-                return_code=0,
-            )
+            # Default GNU wrap (76 cols). ``-w 0`` is a one-line blob and
+            # trips Harbor's 64 KiB readline.
+            wrapped = base64.encodebytes(raw).decode("ascii")
+            return FakeExecResult(stdout=wrapped, return_code=0)
         return FakeExecResult(stdout="", return_code=1)
 
     env.exec = head_exec
@@ -300,7 +407,7 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     sample = await backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
     assert any(
-        c.startswith("head -c 3 ") and "| base64" in c for c in env.calls
+        c.startswith("head -c 3 ") and c.endswith("| base64") for c in env.calls
     )
 
 
@@ -499,7 +606,7 @@ async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thre
     backend = HarborBackend(env, loop_in_thread)
 
     await backend.aexec("ls", cwd="/work", env={"A": "1"})
-    expected = backend._full_command("ls", cwd="/work", env={"A": "1"})
+    expected = build_harbor_shell_command("ls", cwd="/work", env={"A": "1"})
     assert env.calls == [expected]
     assert "cd " in expected and "A=1" in expected, expected
 
@@ -507,13 +614,58 @@ async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thre
     argv = ["grep", "-n", "TOKEN", "/work/a b.py"]
     await backend.aexec_argv(argv)
     assert env.calls == [
-        backend._full_command(argv_to_posix_command(argv), cwd=None, env=None)
+        build_harbor_shell_command(argv_to_posix_command(argv), cwd=None, env=None)
     ]
 
     env.calls.clear()
     await backend.arun_python("print(1)")
     assert env.calls == [
-        backend._full_command(
+        build_harbor_shell_command(
             backend._python_command("print(1)"), cwd=None, env=None
         )
     ]
+
+
+async def test_fs_helpers_use_raw_channel(loop_in_thread):
+    """Помощники ФС — сырым каналом, и их проверки возвращают bool.
+
+    Тест из develop; вошёл вместе с починкой #5 ревью: у `exists`, `lexists`
+    и `is_symlink` не хватало скобок у `await` — `.return_code` брался у
+    корутины, и любой прогон в Harbor падал на первой же проверке файла.
+    Ни один тест этих методов не исполнял: фейк тест-кита — отдельный класс.
+    """
+    env = FakeEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    assert await backend.exists("/work/a.txt") is True
+    assert env.calls == ["test -e /work/a.txt"]
+    assert await backend.lexists("/work/a.txt") is True
+    assert await backend.is_symlink("/work/a.txt") is True
+    env.calls.clear()
+    await backend.walk_entries("/work")
+    assert env.calls[-1].startswith("find -H /work")
+    assert not any(".bashrc" in c for c in env.calls)
+
+
+async def test_workspace_root_is_the_container_workdir(loop_in_thread):
+    """Корень рабочей папки — WORKDIR контейнера, а не `/`.
+
+    Синхронный `discover_backend_cwd` спрашивал `exec("pwd")`, а синхронного
+    `exec` у Harbor больше нет: отказ глотался, и корнем становился `/`.
+    Теперь WORKDIR прогревается корутиной при сборке контекста.
+    """
+    from gc_core.execution_workspace import aprime_backend_cwd, build_execution_workspace
+
+    class _PwdEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            self.calls.append(command)
+            if command == "pwd":
+                return FakeExecResult(stdout="/testbed\n", return_code=0)
+            return FakeExecResult(stdout=f"ran:{command}", return_code=0)
+
+    env = _PwdEnv()
+    backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
+    assert backend.default_cwd() is None
+    await aprime_backend_cwd(backend)
+    assert backend.default_cwd() == "/testbed"
+    assert env.calls == ["pwd"], "pwd — внутренний вызов: сырой канал, без профиля"
+    assert build_execution_workspace(backend, {}).root == "/testbed"

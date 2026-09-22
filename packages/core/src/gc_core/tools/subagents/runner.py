@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from gc_core.bundled_assets import bundled_root
 from gc_core.trace_id import trace_id_from_config
 from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
-from gc_core.config_modules.chat_completions import chat_completions_llm_from_config_dict
+from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
 from gc_core.config_modules.intent_scope import intent_scope_from_config_dict
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.model_router import AliasCircuitOpenError, ModelRouter, SUBAGENT_CONSUMER_PREFIX
@@ -80,6 +80,7 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
 _CHILD_CONFIG_DEEP_COPY_KEYS = (
     "chat_completion_headers",
     "chat_completion_kwargs",
+    "auxiliary_llm_params",
     "models",
     "slots",
     "assign",
@@ -188,7 +189,15 @@ class SubagentRunner:
             )
         return await self._arun_internal(tool_name, subagent_cls, arguments, run_agent_func)
 
-    def _pre_backend_compaction_hook(self, child_ctx: Any, child_state: Any, summary_trigger_chars: int):
+    def _pre_backend_compaction_hook(self, child_ctx: Any, child_state: Any) -> Optional[Callable]:
+        """Хук компакции ребёнка перед backend-вызовом; ``None`` — компакция выключена."""
+        summary_trigger_chars = parse_summary_trigger_chars(self._config)
+        should_enable_summary = (
+            child_state.backend_api_mode == "chat_completions"
+            and summary_trigger_chars > 0
+        )
+        if not should_enable_summary:
+            return None
         summary = RunSummaryCoordinator(
             ctx=child_ctx,
             state=child_state,
@@ -202,6 +211,14 @@ class SubagentRunner:
         _orig_on_summary = summary.on_summary_applied
 
         async def _on_summary_applied_with_sidecar(event: Dict[str, Any]) -> None:
+            # `on_summary_applied` — корутина. Без `await` она молча не
+            # исполнялась: терялись `append_summary_trace_record` и
+            # `archive_suffix`. Прогон это ВИДЕЛ — `RuntimeWarning:
+            # coroutine ... was never awaited`, — но предупреждение не
+            # роняет набор, и тест был зелёным, потому что проверяет
+            # только строку sidecar. `await_callback`, а не голый `await`:
+            # у координатора встраивающего колбэк может быть и обычной
+            # функцией.
             await await_callback(_orig_on_summary(event))
             synthesis = _synthesis_from_summary_event(event)
             await apersist_subagent_trace(
@@ -211,6 +228,10 @@ class SubagentRunner:
             )
 
         summary.on_summary_applied = _on_summary_applied_with_sidecar
+        # Корутинный двойник, как и у родителя (agent_executor).
+        # Корутинным именем: синхронное fail-open внутри проглотил бы,
+        # и компакция субагента молча
+        # переставала срабатывать.
         return summary.apre_backend_compaction_hook
 
     async def _arun_failed(self, tool_name: str, child_state: Any, child_ctx: Any, exc: Exception) -> str:
@@ -334,6 +355,69 @@ class SubagentRunner:
             finish_reason=limit_outcome,
         )
 
+    async def _aprepare_child(self, tool_name: str, instance: Any, child_ctx: Any) -> tuple:
+        """Роль, дочерний State и стартовые сообщения ребёнка.
+
+        → (child_state, messages, error_response): при провале child_state и
+        messages — None, error_response — готовый ответ тула.
+        """
+        try:
+            # finalize_role некоторых субагентов (special_agent) делает LLM-вызов
+            # генерации роли — относим его токены к категории subagent родителя.
+            with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
+                await instance.afinalize_role(child_ctx, self._orchestrator_state)
+        except Exception as exc:
+            return None, None, self._error_response(
+                tool_name=tool_name,
+                code="subagent_role_generation_failed",
+                message=f"Subagent {tool_name} role generation failed: {exc}",
+                retryable=True,
+            )
+        agent_role, initial_message = instance.get_initial_data()
+
+        try:
+            child_state = await self._build_child_state(agent_role)
+        except Exception as exc:
+            return None, None, self._error_response(
+                tool_name=tool_name,
+                code="subagent_state_build_failed",
+                message=f"Subagent {tool_name} child state build failed: {exc}",
+                retryable=False,
+            )
+        # child_ctx.model_router — свой Router ребёнка (спека §7 п.4): фиксирует
+        # default_model на модель субагента, как begin_turn фиксирует его на
+        # активную модель в обычном ходе (turn_boundary.begin_turn).
+        begin_turn(child_state, child_ctx)
+
+        user_message = {
+            "role": "user",
+            "content": initial_message,
+            "id": generate_message_id_func("m_user_sub"),
+        }
+        messages = self._build_initial_messages(child_state, agent_role, user_message)
+        init_subagent_open_turn(child_state, initial_message)
+        shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
+        # Bootstrap памяти директивен («update persistent registers with the thread
+        # memory tool»), поэтому шлём его только если тул у ребёнка есть. Конфиг
+        # здесь родительский — набор ребёнка знает только его State, собранный
+        # выше уже с учётом tools/stop_tools из файла сабагента.
+        bootstrap_text = (
+            subagent_thread_memory_bootstrap_text(self._config, shared_mf)
+            if tool_is_available(
+                available_tool_names(child_state), SESSION_MEMORY_TOOL_NAME
+            )
+            else None
+        )
+        if bootstrap_text:
+            messages.append(
+                wrap_thread_memory_technical_user_message(
+                    bootstrap_text,
+                    message_id_suffix="mem_wiki_boot",
+                )
+            )
+            child_state.messages = messages.copy()
+        return child_state, messages, None
+
     async def _arun_internal(
         self,
         tool_name: str,
@@ -374,141 +458,95 @@ class SubagentRunner:
                 retryable=True,
             )
 
+        primary_child_logger = getattr(child_ctx, "logger", None)
         try:
-            # finalize_role некоторых субагентов (special_agent) делает LLM-вызов
-            # генерации роли — относим его токены к категории subagent родителя.
-            with usage_scope(self._orchestrator_state.usage, USAGE_CATEGORY_SUBAGENT):
-                await instance.afinalize_role(child_ctx, self._orchestrator_state)
-        except Exception as exc:
-            return self._error_response(
+            child_state, messages, error_response = await self._aprepare_child(
+                tool_name, instance, child_ctx
+            )
+            if error_response is not None:
+                return error_response
+            child_meta: Dict[str, Any] = {}
+
+            self._log_lifecycle(
+                event="subagent_start",
                 tool_name=tool_name,
-                code="subagent_role_generation_failed",
-                message=f"Subagent {tool_name} role generation failed: {exc}",
-                retryable=True,
-            )
-        agent_role, initial_message = instance.get_initial_data()
-
-        try:
-            child_state = await self._build_child_state(agent_role)
-        except Exception as exc:
-            return self._error_response(
-                tool_name=tool_name,
-                code="subagent_state_build_failed",
-                message=f"Subagent {tool_name} child state build failed: {exc}",
-                retryable=False,
-            )
-        # child_ctx.model_router — свой Router ребёнка (спека §7 п.4): фиксирует
-        # default_model на модель субагента, как begin_turn фиксирует его на
-        # активную модель в обычном ходе (turn_boundary.begin_turn).
-        begin_turn(child_state, child_ctx)
-
-
-        user_message = {
-            "role": "user",
-            "content": initial_message,
-            "id": generate_message_id_func("m_user_sub"),
-        }
-        child_meta: Dict[str, Any] = {}
-        messages = self._build_initial_messages(child_state, agent_role, user_message)
-        init_subagent_open_turn(child_state, initial_message)
-        shared_mf = get_thread_memory_registers_from_shared(child_state.shared)
-        # Bootstrap памяти директивен («update persistent registers with the thread
-        # memory tool»), поэтому шлём его только если тул у ребёнка есть. Конфиг
-        # здесь родительский — набор ребёнка знает только его State, собранный
-        # выше уже с учётом tools/stop_tools из файла сабагента.
-        bootstrap_text = (
-            subagent_thread_memory_bootstrap_text(self._config, shared_mf)
-            if tool_is_available(
-                available_tool_names(child_state), SESSION_MEMORY_TOOL_NAME
-            )
-            else None
-        )
-        if bootstrap_text:
-            messages.append(
-                wrap_thread_memory_technical_user_message(
-                    bootstrap_text,
-                    message_id_suffix="mem_wiki_boot",
-                )
-            )
-            child_state.messages = messages.copy()
-
-        self._log_lifecycle(
-            event="subagent_start",
-            tool_name=tool_name,
-            child_state=child_state,
-            child_ctx=child_ctx,
-            extra={"steps": child_state.steps},
-        )
-        summary_trigger_chars = parse_summary_trigger_chars(self._config)
-        should_enable_summary = (
-            child_state.backend_api_mode == "chat_completions"
-            and summary_trigger_chars > 0
-        )
-
-        persist_messages_callback = partial(
-            self._persist_runtime_step, child_state, child_meta, child_ctx
-        )
-        pre_backend_compaction_hook = (
-            self._pre_backend_compaction_hook(child_ctx, child_state, summary_trigger_chars)
-            if should_enable_summary
-            else None
-        )
-
-        self._usage_pushed = UsageAccount()
-        self._tool_calls_pushed = 0
-        try:
-            result, child_ctx, error_response = await self._arun_child_or_fallback(
-                tool_name=tool_name,
-                messages=messages,
                 child_state=child_state,
                 child_ctx=child_ctx,
-                run_agent_func=run_agent_func,
-                persist_messages_callback=persist_messages_callback,
-                pre_backend_compaction_hook=pre_backend_compaction_hook,
-                child_meta=child_meta,
+                extra={"steps": child_state.steps},
+            )
+            persist_messages_callback = partial(
+                self._persist_runtime_step, child_state, child_meta, child_ctx
+            )
+            pre_backend_compaction_hook = self._pre_backend_compaction_hook(
+                child_ctx, child_state
+            )
+
+            self._usage_pushed = UsageAccount()
+            self._tool_calls_pushed = 0
+            try:
+                result, child_ctx, error_response = await self._arun_child_or_fallback(
+                    tool_name=tool_name,
+                    messages=messages,
+                    child_state=child_state,
+                    child_ctx=child_ctx,
+                    run_agent_func=run_agent_func,
+                    persist_messages_callback=persist_messages_callback,
+                    pre_backend_compaction_hook=pre_backend_compaction_hook,
+                    child_meta=child_meta,
+                )
+            finally:
+                # Только residual delta с последнего live-tick — не полный merge
+                # (иначе double-count уже запушенных токенов).
+                self._push_usage_delta(child_state, child_ctx)
+                self._push_tool_calls_delta(child_state)
+            if error_response is not None:
+                return error_response
+
+            if result is None:
+                return await self._acancelled_by_user(tool_name, child_state, child_ctx)
+
+            _limit_outcome = getattr(child_state, "terminal_outcome", None)
+            if _limit_outcome in ("step_limit", "token_limit", "tool_call_limit"):
+                await self._afinish_on_limit(tool_name, child_state, child_ctx, _limit_outcome)
+                # Pass-through: child run_agent already built the limit envelope
+                # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
+                # our own JSON or call LLM here — spec §6.2.
+                return result
+
+            result_payload: Any = result or "Subagent finished without explicit result."
+            self._log_lifecycle(
+                event="subagent_end",
+                tool_name=tool_name,
+                child_state=child_state,
+                child_ctx=child_ctx,
+                extra={"steps": child_state.steps, "finish_reason": "completed"},
+            )
+            await self._persist_finished(
+                child_ctx,
+                child_state,
+                ok=True,
+                finish_reason="completed",
+            )
+            return self._success_response(
+                tool_name=tool_name,
+                result=result_payload,
+                steps=child_state.steps,
+                finish_reason="completed",
+                usage=child_state.usage.to_meta(),
+                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
             )
         finally:
-            # Только residual delta с последнего live-tick — не полный merge
-            # (иначе double-count уже запушенных токенов).
-            self._push_usage_delta(child_state, child_ctx)
-            self._push_tool_calls_delta(child_state)
-            release_run_logger(getattr(child_ctx, "logger", None))
-        if error_response is not None:
-            return error_response
-
-        if result is None:
-            return await self._acancelled_by_user(tool_name, child_state, child_ctx)
-
-        _limit_outcome = getattr(child_state, "terminal_outcome", None)
-        if _limit_outcome in ("step_limit", "token_limit", "tool_call_limit"):
-            await self._afinish_on_limit(tool_name, child_state, child_ctx, _limit_outcome)
-            # Pass-through: child run_agent already built the limit envelope
-            # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
-            # our own JSON or call LLM here — spec §6.2.
-            return result
-
-        result_payload: Any = result or "Subagent finished without explicit result."
-        self._log_lifecycle(
-            event="subagent_end",
-            tool_name=tool_name,
-            child_state=child_state,
-            child_ctx=child_ctx,
-            extra={"steps": child_state.steps, "finish_reason": "completed"},
-        )
-        await self._persist_finished(
-            child_ctx,
-            child_state,
-            ok=True,
-            finish_reason="completed",
-        )
-        return self._success_response(
-            tool_name=tool_name,
-            result=result_payload,
-            steps=child_state.steps,
-            finish_reason="completed",
-            usage=child_state.usage.to_meta(),
-            child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
-        )
+            # Логгер субагента уникален по имени и живёт в реестре `logging` до
+            # конца процесса вместе с файловым хендлером — освобождать надо.
+            # Но ПОСЛЕ всех записей о завершении: раньше это делал внутренний
+            # finally, до `_log_lifecycle(event="subagent_end")`, и запись о
+            # завершении в логе субагента терялась. Здесь же оба логгера, если
+            # прогон ушёл на запасной контекст (первый раньше утекал), и ранние
+            # выходы после сборки контекста.
+            final_child_logger = getattr(child_ctx, "logger", None)
+            release_run_logger(primary_child_logger)
+            if final_child_logger is not primary_child_logger:
+                release_run_logger(final_child_logger)
 
     async def _arun_child_loop(
         self,
@@ -525,7 +563,9 @@ class SubagentRunner:
         Вынесено отдельно, чтобы класс-1 фоллбэк (спека §8, ``_maybe_pin_fallback``)
         мог вызвать его повторно (рестарт/деградация) со свежим scope — переиспользовать
         уже закрытый ``scope`` первой попытки небезопасно (его `__exit__` уже отработал)."""
-        with activate_child_input(parent_call_id=self._parent_call_id) as scope:
+        with activate_child_input(
+            self._ctx, parent_call_id=self._parent_call_id
+        ) as scope:
             # Колбэк enqueue приходит из ЧУЖОГО потока: его дёргает
             # `AgentExecutor.add_message`, которую зовёт TUI, и loop'а там нет.
             # Поэтому запись трассы уезжает на loop ЭТОГО прогона, а не делается
@@ -1016,7 +1056,7 @@ class SubagentRunner:
             logger=child_logger,
             logging_path=child_log_path,
             summary_trace_path=child_summary_trace_path,
-            chat_completions_llm=chat_completions_llm_from_config_dict(child_config),
+            auxiliary_llm=auxiliary_llm_from_config_dict(child_config),
             intent_scope=intent_scope_from_config_dict(child_config),
             tools_data=child_tools_data,
             tools_spec=child_tools_spec,
@@ -1045,17 +1085,22 @@ class SubagentRunner:
         parent_threads_dir = getattr(self._ctx, "threads_dir", None)
         parent_system_id = getattr(self._ctx, "system_id", None)
         parent_thread_id = getattr(self._ctx, "thread_id", None)
+        # Каталог в условие НЕ входит: адрес треда — это (system_id, thread_id),
+        # а у стороннего хранилища (база, память) `threads_dir` пуст законно.
+        # Прежнее требование уводило такого ребёнка в `clear_thread_identity`, и
+        # гейт `resolve_sidecar_identity`, который пустой каталог уже принимает,
+        # до решения даже не доходил: трасса субагента молча терялась.
         if (
-            isinstance(parent_threads_dir, str)
-            and parent_threads_dir.strip()
-            and isinstance(parent_system_id, str)
+            isinstance(parent_system_id, str)
             and parent_system_id.strip()
             and isinstance(parent_thread_id, str)
             and parent_thread_id.strip()
         ):
             bind_thread_identity(
                 child_ctx,
-                threads_dir=parent_threads_dir,
+                threads_dir=(
+                    parent_threads_dir if isinstance(parent_threads_dir, str) else ""
+                ),
                 system_id=parent_system_id,
                 thread_id=parent_thread_id,
             )
@@ -1064,6 +1109,17 @@ class SubagentRunner:
         # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
         child_ctx.permission_store = getattr(self._ctx, "permission_store", None)
+        # Порт «спросить человека» — туда же, куда confirm-баннер. Без него ядро
+        # читает ответ `input()` в потоке пула, а подмена stdin в TUI
+        # потоко-локальна: поток читал настоящую консоль, которую держит
+        # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
+        child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Хранилище тредов — туда же, и по той же причине: трассу субагента
+        # пишет `apersist_subagent_trace`, а без этого поля она уходила в
+        # файловое хранилище по умолчанию. У встраивающего, отдавшего свой стор
+        # (`AsyncAgent.create(cfg, thread_store=…)`), трасса либо терялась, либо
+        # ложилась на диск хоста мимо него.
+        child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
         child_ctx.subagent_tool_name = tool_name
         return child_ctx
 

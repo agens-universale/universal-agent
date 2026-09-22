@@ -1,17 +1,21 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
-from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, chat_completions_llm_from_config_dict
+from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, auxiliary_llm_from_config_dict
 from gc_core.utils.prod_auth import AuthConnector
 from gc_core.utils.logging_module import create_run_logger
 from gc_core.utils.logging_module import generate_run_id
 from gc_core.tools import abuild_tools_data
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    aprime_backend_cwd,
+    build_execution_workspace,
+)
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
@@ -29,7 +33,7 @@ class RunContext:
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
-    - chat_completions_llm — LLM-профиль (chat_completions.llm): summary, finish gate, intent scope, judges;
+    - auxiliary_llm — профиль вспомогательных LLM (summary, finish gate, judges);
     - intent_scope — параметры intent-scope hook (из intent_scope в config);
     - tools_data / tools_spec / tools_description — подготовленные данные о тулах;
     - project_gc_dir — папка project-local артефактов (<cwd>/.gc/);
@@ -45,7 +49,7 @@ class RunContext:
     logger: logging.Logger
     logging_path: str
     summary_trace_path: str
-    chat_completions_llm: ChatCompletionsLlmConfig
+    auxiliary_llm: ChatCompletionsLlmConfig
     intent_scope: IntentScopeConfig
     tools_data: Dict[str, Dict[str, Any]]
     tools_spec: List[Dict[str, Any]]
@@ -59,6 +63,9 @@ class RunContext:
     # (create_run_context), чтобы значения не разъехались.
     trace_id: str = ""
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Имена тулов до вычитания stop_tools. Валидатор сверяется с этим набором:
+    # успешно снятый skills_*/mcp_* не опечатка.
+    registered_tool_names: Set[str] = field(default_factory=set)
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
@@ -68,6 +75,12 @@ class RunContext:
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    # Активный скоуп ввода субагента ЭТОГО прогона: сюда уходит сообщение
+    # пользователя, пришедшее посреди работы ребёнка. Живёт здесь, а не в
+    # глобали модуля, потому что процесс ведёт МНОГО прогонов сразу (сервер) —
+    # и глобаль отдавала сообщение тому, кто зарегистрировался последним, чужой
+    # сессии в том числе. Подробности — в `tools/subagents/active_scope`.
+    child_input_scope: Optional[Any] = None
     # Хранилище тредов. None — файловое по умолчанию (прежнее поведение).
     # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
     # ни ThreadSession, ни ядро больше диска не касаются.
@@ -148,6 +161,17 @@ async def acreate_run_context(
       поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
       запуск (детект — ``config.cli_forces_legacy_model``).
     """
+    # Хранилище встраивающего проверяем ДО всего остального. Проверка стояла в
+    # `_finish_run_context`, то есть после MCP-дискавери и создания логгера: на
+    # негодном сторе исключение прилетало, когда stdio-сессии уже подняты под
+    # токеном владельца, а `AsyncAgent.create` на ошибке закрывает только пул
+    # httpx — persistent stdio (браузер) и логгер с открытым файлом доживали до
+    # конца процесса.
+    if thread_store is not None:
+        from gc_core.thread_store_async import athread_store
+
+        athread_store(thread_store)
+
     prep = _prepare_run_context(
         config_dict, run_id=run_id, environment=environment, loop=loop,
         os_backend=os_backend, log_handlers=log_handlers,
@@ -166,23 +190,81 @@ async def acreate_run_context(
     #
     # Кому перенос нужен (фронтенд, знающий, что поиск будет) — зовёт
     # `backend.awarm_capabilities()` сам, вне горячего пути.
-    with use_owner(prep.mcp_session_owner):
-        tools = await abuild_tools_data(
-            config_dict,
-            on_progress=on_progress,
-            os_backend=prep.backend,
-            skills_registry=prep.skills_registry,
-            logger=prep.run_logger,
-            tools_cache=tools_cache,
+    # Рабочий каталог окружения спрашиваем ЗДЕСЬ, до дискавери MCP: сборка
+    # рабочей области ниже синхронная, а синхронного `exec` у песочницы нет.
+    # До дискавери — чтобы его отказ не застал открытых MCP-сессий.
+    #
+    # Страховка — на ВСЁ после подготовки, а не на один прогрев. Логгер
+    # прогона уже создан и держит открытый файл, а дискавери поднимает
+    # stdio-серверы под токеном владельца этого контекста. Обычный отказ
+    # дискавери исключения не бросает (сервер помечается недоступным), но
+    # отмена посреди неё и исключение сборки после неё раньше шли мимо:
+    # логгер доживал до конца процесса, сервер (браузер) — до `atexit`.
+    # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
+    # которому он принадлежит, так и не появилось.
+    try:
+        await aprime_backend_cwd(prep.backend, config_dict)
+        # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
+        # успешно снятый тул снова считается опечаткой. Способность пришла с
+        # develop, у нас её не было; тело, которое список заполняет, слилось
+        # автоматически — без самого списка оно осталось бы мёртвым кодом.
+        registered: list[str] = []
+        with use_owner(prep.mcp_session_owner):
+            tools = await abuild_tools_data(
+                config_dict,
+                on_progress=on_progress,
+                os_backend=prep.backend,
+                skills_registry=prep.skills_registry,
+                logger=prep.run_logger,
+                tools_cache=tools_cache,
+                registered_names=registered,
+            )
+        return _finish_run_context(
+            config_dict, prep, tools,
+            registered_names=registered,
+            auth_connector=auth_connector, environment=environment,
+            on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
+            is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
+            level_provider=level_provider, circuit_breaker=circuit_breaker,
+            force_legacy=force_legacy,
         )
-    return _finish_run_context(
-        config_dict, prep, tools,
-        auth_connector=auth_connector, environment=environment,
-        on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-        is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
-        level_provider=level_provider, circuit_breaker=circuit_breaker,
-        force_legacy=force_legacy,
-    )
+    except BaseException as exc:
+        from gc_core.utils.logging_module import release_run_logger
+
+        try:
+            # Закрытую корутину (`GeneratorExit`) ждать уже нельзя: `await`
+            # здесь кончился бы «coroutine ignored GeneratorExit». Тогда
+            # серверы доберёт хук на выход, а логгер отдаём в любом случае.
+            if not isinstance(exc, GeneratorExit):
+                await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
+        finally:
+            release_run_logger(prep.run_logger)
+        raise
+
+
+async def _aclose_owned_mcp_sessions(owner: str) -> None:
+    """Закрыть MCP-сессии, поднятые под владельцем несостоявшегося контекста.
+
+    Закрывается долгоживущий stdio, и этого достаточно: других живых сессий
+    дискавери не оставляет. Stream-транспорты спрашивают список тулов
+    одноразовой сессией, а долгоживущую заводит только вызов тула — до него
+    сборка не доходит.
+
+    Не ``_aclose_mcp_and_release`` из исполнителя, хотя по сути то же самое.
+    Тот держит реестр, связанный при импорте ``agent_executor``, а дискавери
+    берёт клиента лениво, в момент вызова. Реестр здесь берётся так же — и
+    потому гарантированно тот, куда дискавери положила сессии. Это не
+    теория: вторая копия ``gc_core.tools.*`` в процессе бывает — тесты
+    ``tests/tools`` и ``tests/security`` импортируются под заглушкой пакета, а
+    тест-кит до недавнего времени перезагружал его после каждого теста, — и с
+    помощником исполнителя проверка этого места краснела уже на втором тесте
+    файла: закрывался реестр другой копии модуля. К тому же сборка контекста
+    лежит ниже исполнителя, и тянуть его наверх ради отказа незачем.
+    """
+    from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+
+    with use_owner(owner):
+        await PersistentStdioRegistry.instance().aclose_all()
 
 
 @dataclass
@@ -258,6 +340,7 @@ def _finish_run_context(
     prep: "_RunContextPrep",
     tools: tuple,
     *,
+    registered_names: Optional[list] = None,
     auth_connector: Optional[AuthConnector],
     environment: Optional[Any],
     on_stream_delta,
@@ -326,7 +409,7 @@ def _finish_run_context(
             },
         )
 
-    chat_completions_llm = chat_completions_llm_from_config_dict(config_dict)
+    auxiliary_llm = auxiliary_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
     effective_level_provider = level_provider or (
@@ -347,12 +430,13 @@ def _finish_run_context(
         logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
-        chat_completions_llm=chat_completions_llm,
+        auxiliary_llm=auxiliary_llm,
         intent_scope=intent_scope_from_config_dict(config_dict),
         tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,
         mcp_status=mcp_status,
+        registered_tool_names=set(registered_names or []),
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,

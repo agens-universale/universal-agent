@@ -18,6 +18,7 @@ no relevant content.
 
 ## Rules
 
+- **No reasoning in the reply:** Do not write chain-of-thought, analysis prose, `<think>…</think>`, or step-by-step commentary. Decide silently, then emit **only** the markdown sections below.
 - Be honest: do NOT invent files, facts, results, steps, insights, or assessments
   that are not grounded in the trace. If unsure, omit — never pad with speculation.
 - Be concise: extract the essence, not a replay.

@@ -30,6 +30,13 @@ class AsyncExecPort(Protocol):
                     timeout: Optional[int] = None,
                     env: Optional[dict] = None) -> ExecResult: ...
 
+    async def aexec_raw(self, command: str, *, cwd: Optional[str] = None,
+                        timeout: Optional[int] = None,
+                        env: Optional[dict] = None,
+                        capture_max_chars: Optional[int] = None) -> ExecResult:
+        """Механический POSIX без инициализации окружения образа."""
+        ...
+
     async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
                          cwd: Optional[str] = None,
                          timeout: Optional[int] = None,
@@ -75,6 +82,14 @@ class SyncExecAdapter:
     async def aexec(self, command: str, **kwargs: Any) -> ExecResult:
         return await self._off_loop(self._backend.exec, command, **kwargs)
 
+    async def aexec_raw(self, command: str, **kwargs: Any) -> ExecResult:
+        # `exec_raw`, если чужой бэкенд его знает, иначе `exec`: у хоста
+        # профиля нет, и каналы совпадают.
+        fn = getattr(self._backend, "exec_raw", None)
+        if not callable(fn):
+            fn = self._backend.exec
+        return await self._off_loop(fn, command, **kwargs)
+
     async def aexec_argv(self, argv: list, **kwargs: Any) -> ExecResult:
         return await self._off_loop(self._backend.exec_argv, argv, **kwargs)
 
@@ -98,4 +113,23 @@ def aexec_port(backend: Any) -> AsyncExecPort:
     return SyncExecAdapter(backend)
 
 
-__all__ = ["AsyncExecPort", "SyncExecAdapter", "aexec_port"]
+async def arun_backend_exec_raw(backend: Any, command: str, **kwargs: Any) -> ExecResult:
+    """Сырой POSIX-канал для ВНУТРЕННИХ вызывающих: пробы, grep, обход, MCP.
+
+    Канал модели (``aexec``) может предварять команду инициализацией окружения
+    образа — у Harbor это ``agent.harbor_exec_init``. Внутренним вызовам
+    профиль вреден: conda-хуки пишут в stdout и ломают разбор, а ``set -e`` в
+    rc подменяет код возврата. Бэкенд без отдельного канала (хост) отвечает
+    обычным ``aexec`` — профиля у него нет.
+
+    По смыслу это ``run_backend_exec_raw`` из develop. Синхронного помощника
+    нет: внутренние вызывающие ядра все корутинные, и звать его было бы некому.
+    """
+    port = aexec_port(backend)
+    fn = getattr(port, "aexec_raw", None)
+    if not callable(fn):
+        fn = port.aexec
+    return await fn(command, **kwargs)
+
+
+__all__ = ["AsyncExecPort", "SyncExecAdapter", "aexec_port", "arun_backend_exec_raw"]

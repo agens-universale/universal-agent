@@ -24,6 +24,10 @@ _OPTIONAL_HINTS = (OPTIONAL_OMIT_HINT, OPTIONAL_EMPTY_AS_OMIT_HINT)
 # All x-* keys are internal bookkeeping and are stripped before a request goes out —
 # see utils.schema_markers.schema_without_internal_markers.
 X_PRESERVE_EMPTY_STRING = "x-preserve-empty-string"
+# Semantically optional for local validation, but the omit/empty hint must not be
+# appended. Injected fields (reason) stay required on the wire so the model fills
+# them; telling it to omit would cancel that contract.
+X_SUPPRESS_OPTIONAL_HINT = "x-suppress-optional-hint"
 
 
 def optional_property_description(base: str, *, openai_strict: bool) -> str:
@@ -255,6 +259,10 @@ def augment_optional_property_descriptions(
         prop = props.get(name)
         if not _is_string_like_property(prop):
             continue
+        # Injected fields are required on the wire. The omit/empty hint would
+        # tell the model to skip a field the schema just demanded.
+        if prop.get(X_SUPPRESS_OPTIONAL_HINT):
+            continue
         # Не обещаем пустую строку там, где схема её не примет (enum, minLength,
         # pattern): подсказка увела бы модель в гарантированную ошибку аргументов.
         if not _accepts_empty_string(prop):
@@ -297,6 +305,7 @@ def normalize_optional_empty_as_omit(
 
 __all__ = [
     "X_PRESERVE_EMPTY_STRING",
+    "X_SUPPRESS_OPTIONAL_HINT",
     "OPTIONAL_OMIT_HINT",
     "OPTIONAL_EMPTY_AS_OMIT_HINT",
     "optional_property_description",

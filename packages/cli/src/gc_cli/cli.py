@@ -361,6 +361,12 @@ async def _run_init_agents_md() -> int:
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
     ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
+    # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
+    # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
+    from gc_cli.ask_human_port import make_cli_ask_human_port
+
+    ctx.ask_human = make_cli_ask_human_port()
 
     from gc_core.utils.async_http import aclose_clients
 
@@ -470,6 +476,12 @@ async def arun_cli() -> int:
     ctx = await acreate_run_context(
         config_dict, auth_connector=auth_connector, force_legacy=force_legacy
     )
+    # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
+    # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
+    # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
+    from gc_cli.ask_human_port import make_cli_ask_human_port
+
+    ctx.ask_human = make_cli_ask_human_port()
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
     from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli
@@ -479,6 +491,7 @@ async def arun_cli() -> int:
         all_builtin_tool_names(config_dict),
         getattr(ctx, "mcp_status", None),
         is_tui=False,
+        known_tool_names=getattr(ctx, "registered_tool_names", None),
         deprecated_keys_used=config_dict.get("deprecated_keys_used"),
         upgrade_info=_upgrade_info,
         compat_notices=config_dict.get("compat_notices"),

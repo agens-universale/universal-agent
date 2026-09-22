@@ -4,11 +4,12 @@ import asyncio
 import signal
 import codecs
 import hashlib
+import logging
 import os
 import stat as stat_module
+import threading
 import time
 import sys
-import threading
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from gc_core.backends.capture import BoundedStreamAccumulator, CapturedStream
@@ -19,6 +20,8 @@ from gc_core.backends.protocol import (
 )
 from gc_core.backends.walk_util import WalkEntry, pruned_dir_predicate
 from gc_core.utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
+
+logger = logging.getLogger(__name__)
 
 
 def _is_real_dir(entry: os.DirEntry) -> bool:
@@ -40,6 +43,10 @@ def _size_without_following(entry: os.DirEntry) -> Optional[int]:
 class LocalFsBackend(FsBackend):
     is_sandbox = False
     default_exec_timeout = None
+    #: Умеем запускать фоном: процесс отцепляется в свою сессию, вывод идёт в
+    #: файл. У порта по умолчанию False — бэкенд песочницы (Harbor) так не
+    #: умеет, и тул обязан сказать об этом честно, а не падать AttributeError.
+    supports_background = True
 
     def __init__(
         self,
@@ -311,20 +318,187 @@ class LocalFsBackend(FsBackend):
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
+                                env: Optional[dict] = None) -> dict:
+        """Запустить команду и НЕ ждать её: отдать pid сразу.
+
+        Здесь нет ни труб, ни чтения, ни таймаута, и в этом весь смысл. Труба
+        требует живого читателя: как только он исчезает — кончился ход, вышел
+        процесс агента, — потомок получает EPIPE или встаёт на заполненном
+        буфере. Поэтому все три потока смотрят в нулевое устройство: запись
+        туда не кончается ошибкой и не встаёт никогда. Лога нет намеренно —
+        почему, сказано у `ExecuteCommand._abackground`.
+
+        Отцепление от нас обязательно — см. `_background_detach_kwargs`: без
+        него потомок получал бы адресованные нам сигналы и события консоли.
+        """
+        import subprocess
+
+        from gc_core.utils.win_console import preserve_console_mode
+
+        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
+        # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
+        # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
+        # прежнего asyncio-пути, который отдавал управление внутри себя. Одна
+        # уступка возвращает паритет (5–7 мс), а стоит она ничего.
+        #
+        # Стоит она ДО запуска, а не после: это единственная точка, где вызов
+        # можно отменить. Будь она после `Popen`, отмена на ней бросала бы уже
+        # живой процесс, чей pid так и не дошёл до модели, — ни найти, ни
+        # остановить. До запуска отмена честная: процесса ещё нет.
+        await asyncio.sleep(0)
+        _reap_finished_background()
+        with preserve_console_mode():
+            # `Popen`, а НЕ `asyncio.create_subprocess_shell`. Асинхронный
+            # подпроцесс привязан к наблюдателю за потомками и к транспорту
+            # своего loop — то есть к loop ХОДА. На Linux финализатор
+            # транспорта при выходе интерпретатора шлёт процессу kill, и
+            # фоновая команда погибала вместе с агентом; на macOS она выживала,
+            # но в stderr сыпалось «Loop … is closed». Фоновому процессу loop
+            # не нужен вовсе: мы его не ждём и не читаем.
+            proc = subprocess.Popen(                       # noqa: S602 — shell намеренно
+                command,
+                shell=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=cwd, env=merged_env,
+                **_background_detach_kwargs(),
+            )
+        # Команда, упавшая сразу (опечатка в имени, нет файла), — не «запущена».
+        # Без этой проверки ответ говорил `ok` и давал pid мёртвого процесса, и
+        # модель шла проверять порт сервиса, которого нет.
+        try:
+            await asyncio.sleep(_BACKGROUND_EARLY_EXIT_SEC)
+        except BaseException:
+            # Отмена ПОСЛЕ запуска: pid до вызывающего уже не дойдёт, найти
+            # процесс будет некому — гасим его сами.
+            _kill_background_now(proc)
+            raise
+        exit_code = proc.poll()
+        if exit_code is None:
+            _BACKGROUND_PROCS.add(proc)
+        return {"pid": proc.pid, "exit_code": exit_code}
+
     def default_cwd(self) -> Optional[str]:
         return os.getcwd()
 
 
 # --- bounded process runner (spec D1/D2/D6/D9) ---
-# Потоки stdout/stderr читаются параллельно (thread-per-pipe), иначе большой
-# вывод в один pipe заблокирует другой (deadlock). Буфер ≤ capture_max_chars на
-# поток; после cap — drain & discard (НЕ kill). Без записи на диск.
+#
+# Вывод команды ПЕРЕДНЕГО ПЛАНА идёт в трубы и читается корутинами. Это не
+# возврат к прежнему, а разделение двух разных случаев: команда переднего плана
+# живёт секунды-минуты, её вывод нужен сейчас, и переживать нас она не должна.
+# Долгоживущая запускается отдельным фоновым режимом, где вывод уходит в
+# нулевое устройство, а труб нет вовсе.
+#
+# У трубы есть то, чего нет у файла: обратное давление. Читать её ОБЯЗАТЕЛЬНО —
+# полный буфер останавливает запись в потомке, — и каждое чтение это `await`,
+# то есть уступка loop неустранима по построению. Файловый захват, стоявший
+# здесь между этими двумя редакциями, обратного давления не имел: цикл чтения
+# не отдавал управление, пока команда писала, и вместе с loop замирали дедлайн
+# этой же команды, соседние агенты и keep-alive MCP-сессий.
 
 _READ_CHUNK = 8192
-# Discard после cap — fire-and-forget: данные уже в sink. Короткий join, чтобы
-# не копить зомби-треды на типичном хвосте; если discard долгий — уходим с
-# captured, reader дочитает в фоне как daemon (не блокирует process exit).
+#: Сколько ждать дочитывания ПОСЛЕ выхода потомка. EOF в трубе наступает, когда
+#: её закрыл последний писатель, а фоновый внук держит унаследованный конец
+#: сколько угодно долго: ждать его бесконечно значит держать tool-call.
 _DRAIN_JOIN_TIMEOUT_SEC = 2
+
+#: Сколько даём команде на самостоятельный выход по SIGTERM, прежде чем послать
+#: SIGKILL. SIGKILL не перехватывается, и без этой паузы корректная команда не
+#: успевает снять блокировку и дописать файл — остаются `.git/index.lock`,
+#: недокачанные слои, полузаписанные архивы. Повреждённое состояние обходится
+#: дороже, чем полсекунды ожидания.
+_KILL_GRACE_SEC = 0.5
+
+#: Сколько ждать выхода уже убитого потомка, прежде чем отпускать дренаж.
+#: Сигнал послан, речь о миллисекундах; потолок здесь — от зависшего в
+#: непрерываемом системном вызове процесса, а не от нормального случая.
+_KILL_EXIT_GRACE_SEC = 1.0
+
+#: Запущенные фоном процессы. Держим ссылку, чтобы дожать вышедших: иначе они
+#: остаются зомби до конца жизни агента — своя сессия не делает процесс чужим,
+#: он остаётся нашим ПРЯМЫМ потомком. Выметаем на следующем запуске.
+_BACKGROUND_PROCS: set = set()
+
+#: Сколько фоновый запуск ждёт мгновенного отказа команды. Ловит опечатки и
+#: «нет такого файла» — такие команды умирают за миллисекунды; живой сервис это
+#: стоит одну паузу на запуск, а не на каждый ход.
+_BACKGROUND_EARLY_EXIT_SEC = 0.1
+
+
+def _kill_background_now(proc: Any) -> None:
+    """Убить только что запущенный фоновый процесс вместе с его группой.
+
+    Не ждёт: вызывается на отмене, а убитого дожмёт учёт при следующем запуске.
+    На Windows групп в этом смысле нет — гасится сам `cmd`, его дети могут
+    уцелеть; окно здесь — доли секунды после запуска.
+    """
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)        # своя сессия: pgid == pid
+        else:
+            proc.kill()
+    except OSError:
+        pass
+    _BACKGROUND_PROCS.add(proc)
+
+
+def _reap_finished_background() -> None:
+    """Снять с учёта вышедших фоновых потомков.
+
+    Прежняя редакция смотрела на `returncode` объекта asyncio — и это был
+    мёртвый код: его выставляет наблюдатель ТОГО loop, на котором процесс
+    создан, а loop хода к этому времени закрыт. Записи не удалялись никогда.
+    У `Popen` состояние спрашивается синхронно и без всякого loop.
+    """
+    for proc in list(_BACKGROUND_PROCS):
+        try:
+            if proc.poll() is not None:
+                _BACKGROUND_PROCS.discard(proc)
+        except Exception:                      # noqa: BLE001 — учёт не критичен
+            _BACKGROUND_PROCS.discard(proc)
+
+
+def _background_detach_kwargs(os_name: str = os.name) -> dict:
+    """Как отцепить фоновый процесс от агента: на POSIX — сессия, на Windows — консоль.
+
+    На POSIX хватает своей сессии: закрытие терминала (SIGHUP) и Ctrl+C
+    (SIGINT) достаются сессии и группе агента, а потомок уже вне их.
+
+    На Windows сессий нет, а события консоли — Ctrl+C, Ctrl+Break, закрытие
+    окна — система рассылает ВСЕМ процессам, подключённым к консоли. Без флагов
+    потомок наследует консоль агента: выход агента его не трогает, но закрытие
+    окна терминала или Ctrl+C в нём — в gc-cli или позже в оболочке — убивают и
+    его. `CREATE_NO_WINDOW` даёт потомку СВОЮ консоль без окна; внуки `cmd`
+    (node, python) наследуют её же, и окна не всплывают. Заодно потомок не
+    может тронуть режим НАШЕЙ консоли — ради этого стоит `preserve_console_mode`.
+    `CREATE_NEW_PROCESS_GROUP` один закрыл бы только Ctrl+C; он здесь ради
+    единообразия со «своей группой» в `process_supervisor` и `persistent_stdio`.
+
+    Чего здесь нет — и почему:
+      * `DETACHED_PROCESS` — консоли нет вовсе, и каждый консольный внук `cmd`
+        открывает своё ВИДИМОЕ окно; апдейтер на это наступал (у него в `cmd`
+        без консоли не отработали `tasklist`/`find`/`ping`);
+      * `CREATE_NEW_CONSOLE` — своя консоль, но с видимым окном на каждый запуск;
+      * `CREATE_BREAKAWAY_FROM_JOB` — если job запрещает выход, `CreateProcess`
+        падает и команда не стартует вовсе (libuv его не ставит ровно поэтому).
+        Он и не нужен: job трамплина uv (`gc-ua.exe`) настроен с
+        `SILENT_BREAKAWAY_OK`, и процессы, запущенные питоном, покидают его сами.
+
+    Значения флагов — запасные через `getattr`: константы `subprocess` есть
+    только на Windows, а проверять выбор нужно и там, где его не исполнить.
+    """
+    if os_name != "nt":
+        return {"start_new_session": True}
+    import subprocess
+
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200),
+    }
 
 
 # --- асинхронный запуск процесса (async-переезд, Задача 18) -----------------
@@ -391,17 +565,17 @@ def _scandir_sorted(abs_dir: str) -> "Optional[list]":
 async def _adrain_stream(stream, sink: "_Capture") -> None:
     """Прочитать поток ДО EOF в ограниченный накопитель ``sink``.
 
-    Чтение не прекращается по заполнении головы, и это не расточительство:
-    хвост нужен настоящий, а счётчик — точный. Раньше после лимита чанки
-    отбрасывались, и вызывающий получал только начало вывода — обрезку
-    приходилось объяснять моделью «дальше что-то было». Кольцевой хвост
-    накопителя стоит O(1) на чанк, так что цена не выросла.
+    `await stream.read(...)` — настоящая точка переключения: пока команда
+    печатает, мы отдаём управление на каждом чанке. Это не вежливость, а
+    свойство трубы: читать её обязательно, иначе заполненный буфер остановит
+    запись в потомке, — и ровно поэтому уступка loop здесь неустранима.
 
-    Не читать нельзя в любом случае: полный pipe заблокирует запись
-    дочернего процесса.
+    Чтение не прекращается по заполнении головы, и это не расточительство:
+    хвост нужен настоящий, а счётчик — точный. Кольцевой хвост накопителя
+    стоит O(1) на чанк.
 
     ``sink`` публикуется по ходу дела, поэтому отмена таски уже не отнимает
-    захваченное — на этом держится освобождение дренажа (см. `_release_drain`).
+    захваченное: вызывающий получает то, что команда успела напечатать.
     """
     decoder = codecs.lookup("utf-8").incrementaldecoder(errors="replace")
     try:
@@ -412,7 +586,6 @@ async def _adrain_stream(stream, sink: "_Capture") -> None:
             sink.acc.feed(decoder.decode(chunk))
             sink.publish()
     except asyncio.CancelledError:
-        # Отмена (сняли вызывающего): отдаём то, что уже прочли, и уходим.
         sink.publish()
         raise
     except Exception:
@@ -420,6 +593,27 @@ async def _adrain_stream(stream, sink: "_Capture") -> None:
         return
     sink.acc.feed(decoder.decode(b"", final=True))
     sink.publish()
+
+
+async def _astop_process(proc) -> None:
+    """Остановить команду: сначала попросить, потом убить.
+
+    `SIGTERM` → грация → `SIGKILL` вместо одного KILL. Разница не в том, умрёт
+    ли команда — умрёт в обоих случаях, — а в том, что она успеет сделать перед
+    смертью: снять `.git/index.lock`, дописать архив, закрыть транзакцию.
+    KILL такого шанса не даёт вовсе, потому что не перехватывается.
+    """
+    if _terminate_quietly(proc):
+        try:
+            await _await_process_exit(proc, _KILL_GRACE_SEC)
+            return                       # вышла сама, убивать некого
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+    _kill_quietly(proc)
+    try:
+        await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        pass
 
 
 async def _await_process_exit(proc, timeout: Optional[float]):
@@ -468,6 +662,7 @@ async def _arun_bounded_process(
     # переживали и таймаут, и отмену. С группой убиваем всю команду разом
     # (см. `_kill_quietly`). На Windows группы нет — там поведение прежнее.
     spawn_kwargs = {"start_new_session": True} if os.name != "nt" else {}
+
     with preserve_console_mode():
         if shell:
             proc = await asyncio.create_subprocess_shell(
@@ -493,16 +688,11 @@ async def _arun_bounded_process(
     # в `drain()`, ребёнок — в `write()`, и это взаимная блокировка НАВСЕГДА:
     # таймаут тула стартует ниже, в `_await_process_exit`, и до этой фазы не
     # доходит. Достижимо из `skills_run_script` (аргументы уходят JSON'ом через
-    # stdin) и `arun_python` с большим кодом. На синхронном пути читатели тоже
-    # стартовали до записи — регрессию внёс переезд на asyncio.
+    # stdin) и `arun_python` с большим кодом.
     out_sink = _Capture(capture_max_chars)
     err_sink = _Capture(capture_max_chars)
-    out_task = asyncio.ensure_future(
-        _adrain_stream(proc.stdout, out_sink)
-    )
-    err_task = asyncio.ensure_future(
-        _adrain_stream(proc.stderr, err_sink)
-    )
+    out_task = asyncio.ensure_future(_adrain_stream(proc.stdout, out_sink))
+    err_task = asyncio.ensure_future(_adrain_stream(proc.stderr, err_sink))
 
     # Запись держим под ТЕМ ЖЕ дедлайном, что и сам процесс: ребёнок, который
     # не читает свой stdin вовсе, иначе снова подвесил бы шаг без предохранителя.
@@ -512,51 +702,27 @@ async def _arun_bounded_process(
         else None
     )
 
+    cancelled = False
     try:
         try:
-            return_code, timed_out = await _await_exit_or_kill(proc, timeout)
+            return_code, timed_out = await _await_exit_or_stop(proc, timeout)
         finally:
             # Ребёнок мёртв или дочитан — писать больше некому и незачем.
             if stdin_task is not None and not stdin_task.done():
                 stdin_task.cancel()
 
-        # Хвост pipe дочитываем ограниченно
-        # tool-call — тот же приём, что у синхронного join с таймаутом.
-        _done, pending = await asyncio.wait(
-            {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
-        )
-        if pending:
-            # НЕ отменяем, а ОТПУСКАЕМ дочитывать в фоне.
-            #
-            # Отмена здесь стоила дорого и незаметно. Труба остаётся никем не
-            # читаемой, и фоновый потомок с унаследованным stdout
-            # (`npm run dev &`) встаёт на write примерно после 64 КиБ — то
-            # есть тул «вернулся», а процесс, который он запустил, заморожен.
-            # Плюс транспорты подпроцесса не закрывались до сборки мусора, и
-            # их `__del__` уже на закрытом loop печатал «Event loop is closed».
-            # На синхронном пути, откуда переезжали, daemon-читатель дочитывал
-            # в фоне — то есть это была регрессия, а не новое ограничение.
-            #
-            # Захваченное к этому моменту уже в sink, поэтому результат мы
-            # отдаём сразу и ничего не ждём.
-            # Публикуем ДО возврата: дренаж продолжится в фоне, но результат
-            # тула собирается сейчас.
-            out_sink.publish()
-            err_sink.publish()
-            _release_drain(proc, pending)
-        else:
-            _close_transport(proc)
+        # Потомок вышел — читателям пора дойти до EOF. Ждём ОГРАНИЧЕННО: EOF
+        # наступает, когда трубу закрыл ПОСЛЕДНИЙ писатель, а фоновый внук с
+        # унаследованным дескриптором может держать её сколько угодно долго.
+        await asyncio.wait({out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC)
     except asyncio.CancelledError:
-        # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup) —
-        # без этого процесс и обе дренажные корутины пережили бы отмену.
-        _kill_quietly(proc)
-        # Ребёнок убит, значит трубы вот-вот закроются сами: даём дренажу
-        # доработать и закрыть транспорт, а не бросаем открытым.
-        _release_drain(proc, {out_task, err_task})
+        # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup).
+        cancelled = True
+        await _astop_process(proc)
         raise
+    finally:
+        _settle_drains(proc, out_sink, err_sink, (out_task, err_task), cancelled=cancelled)
 
-    # Читаем из sink, а НЕ из task.result(): отменённая по таймауту дренажа
-    # таска результата не отдаст, но захваченное к тому моменту уже там.
     return ExecResult(
         return_code=return_code,
         timed_out=timed_out,
@@ -565,9 +731,172 @@ async def _arun_bounded_process(
     )
 
 
-#: Дренажи, отпущенные дочитывать в фоне. Ссылку держим, иначе задачу соберёт
-#: сборщик мусора посреди чтения — asyncio на это прямо предупреждает.
-_BACKGROUND_DRAINS: "set[asyncio.Task]" = set()
+def _settle_drains(proc, out_sink: "_Capture", err_sink: "_Capture", tasks, *, cancelled: bool) -> None:
+    """Снять снимки вывода и решить судьбу дренажа: закрыть транспорт или дочитывать фоном."""
+    # Публикуем захваченное к этому моменту: даже на отмене вызывающий
+    # получает то, что команда успела напечатать.
+    out_sink.publish()
+    err_sink.publish()
+    pending = [t for t in tasks if not t.done()]
+    if cancelled or not pending:
+        for task in pending:
+            task.cancel()
+        _close_transport(proc)
+    else:
+        # Труба ещё открыта — её держит фоновый внук (команда с `&`, чужой
+        # скрипт с `nohup`, самодемонизация). Закрыть её сейчас значит
+        # выдать ему EPIPE на первой же записи: обычную программу это
+        # убивает SIGPIPE, питоновскую заваливает `BrokenPipeError` на
+        # каждой строке лога. Поэтому читаем дальше ФОНОМ и закрываем
+        # транспорт, когда внук закроет свой конец сам. Результат вызова
+        # это не трогает: он собран из снимков выше, а накопители
+        # ограничены — сколько бы внук ни писал, память не растёт.
+        _keep_draining(pending, proc)
+
+
+#: Дренажи, доигрывающие после возврата вызова. Держим ссылки: у asyncio на
+#: задачи ссылки СЛАБЫЕ, и сборщик вправе унести задачу посреди работы.
+#: На выходе `asyncio.run` сам отменит оставшиеся — то есть живут они ровно
+#: столько, сколько живёт агент, как daemon-потоки до переезда на корутины.
+_DRAIN_TASKS: set = set()
+
+
+def _keep_draining(tasks: list, proc) -> None:
+    """Дочитать трубы в фоне и закрыть транспорт, когда придёт EOF.
+
+    EOF наступит, когда последний писатель закроет свой конец: фоновый внук
+    умрёт или завершится сам. До тех пор читаем — иначе закрытая труба выдаёт
+    ему EPIPE на первой записи.
+    """
+    async def _finish() -> None:
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            # Loop уходит и забирает дренаж с собой. В TUI это конец КАЖДОГО
+            # хода: `AgentRunner` крутит ход в своём `asyncio.run`, и тот на
+            # выходе отменяет всё оставшееся. Модель к этому моменту уже
+            # проверила порт внутри хода и отчиталась «сервер поднят» — а
+            # транспорт закрылся бы под живым внуком. Поэтому отдаём трубы
+            # потокам, как было до переезда на корутины.
+            _drain_in_threads(proc)
+            raise
+        finally:
+            _close_transport(proc)
+
+    task = asyncio.ensure_future(_finish())
+    _DRAIN_TASKS.add(task)
+    task.add_done_callback(_DRAIN_TASKS.discard)
+
+
+def _drain_in_threads(proc) -> None:
+    """Дочитать трубы вне loop — по потоку на каждую.
+
+    Поток на трубу, а не один на обе: читатель, залипший на stdout, не мешает
+    внуку писать в stderr, чей буфер иначе заполнится и остановит его насовсем.
+    Потоки daemon — на выходе интерпретатора их никто не ждёт.
+    """
+    for end in _dup_pipe_ends(proc):
+        threading.Thread(
+            target=_read_until_eof,
+            args=(end,),
+            daemon=True,
+            name="exec-pipe-drain",
+        ).start()
+
+
+def _dup_pipe_ends(proc) -> list:
+    """Копии наших концов stdout и stderr команды.
+
+    Копия — независимая ссылка на тот же открытый конец трубы: закрытие
+    транспорта её не трогает, и труба живёт, пока жива она. Транспорт
+    приватный, поэтому на любой неожиданности возвращаем, что набрали:
+    дренаж потеряем, но вызов не уроним — и скажем об этом в лог, иначе
+    сломанный дренаж выглядит как рабочий.
+    """
+    transport = getattr(proc, "_transport", None)
+    if transport is None:
+        return []
+    ends: list = []
+    for stream_fd in (1, 2):
+        try:
+            pipe = transport.get_pipe_transport(stream_fd).get_extra_info("pipe")
+            ends.append(_dup_pipe_end(pipe))
+        except Exception as exc:
+            logger.warning(
+                "exec: трубу %s команды не отдать потоку дренажа — фоновый "
+                "процесс команды получит ошибку записи: %r", stream_fd, exc,
+            )
+    return ends
+
+
+def _dup_pipe_end(pipe):
+    """Копия одного конца: дескриптор на POSIX, хэндл на Windows.
+
+    На Windows труба asyncio — `PipeHandle`, его `fileno()` отдаёт хэндл, а не
+    дескриптор, и `os.dup` на нём падает с EBADF. Хэндл копирует
+    `DuplicateHandle`.
+    """
+    if os.name == "nt":
+        import _winapi
+
+        current = _winapi.GetCurrentProcess()
+        return _winapi.DuplicateHandle(
+            current, pipe.handle, current, 0, False, _winapi.DUPLICATE_SAME_ACCESS
+        )
+    copy = os.dup(pipe.fileno())
+    # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
+    # без этого первое же чтение из потока даёт `BlockingIOError`, мы
+    # принимаем его за конец и закрываем трубу — ровно та беда, от
+    # которой уходим. Флаг общий с оригиналом, но его читателей уже
+    # отменили, а сам он закроется следом.
+    os.set_blocking(copy, True)
+    return copy
+
+
+def _read_until_eof(end: int) -> None:
+    """Читать копию трубы до EOF и закрыть её.
+
+    Прочитанное выбрасываем: результат вызова давно собран, а нужен тут сам
+    факт чтения — труба, у которой есть живой читатель, не даёт писателю EPIPE.
+    """
+    if os.name == "nt":
+        _read_handle_until_eof(end)
+        return
+    try:
+        while os.read(end, _READ_CHUNK):
+            pass
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(end)
+        except OSError:
+            pass
+
+
+def _read_handle_until_eof(handle: int) -> None:
+    """Windows: читать копию хэндла до EOF и закрыть её.
+
+    asyncio открыл нашу сторону трубы с FILE_FLAG_OVERLAPPED, а синхронное
+    чтение такого хэндла Windows не гарантирует. Поэтому читаем overlapped и
+    ждём каждый результат — как `multiprocessing.connection.PipeConnection`.
+    EOF здесь — ERROR_BROKEN_PIPE: все писатели закрыли свой конец.
+    """
+    import _winapi
+
+    try:
+        while True:
+            ov, _ = _winapi.ReadFile(handle, _READ_CHUNK, overlapped=True)
+            _, err = ov.GetOverlappedResult(True)
+            if err == _winapi.ERROR_BROKEN_PIPE:
+                break
+    except OSError:
+        pass
+    finally:
+        try:
+            _winapi.CloseHandle(handle)
+        except OSError:
+            pass
 
 
 def _close_transport(proc) -> None:
@@ -587,22 +916,29 @@ def _close_transport(proc) -> None:
         pass
 
 
-def _release_drain(proc, tasks) -> None:
-    """Отпустить дренаж дочитывать в фоне и закрыть транспорт, когда дочитает."""
-    live = {t for t in tasks if not t.done()}
-    if not live:
-        _close_transport(proc)
-        return
+def _terminate_quietly(proc) -> bool:
+    """Попросить команду завершиться самой: SIGTERM всей её группе.
 
-    _BACKGROUND_DRAINS.update(live)
+    Ходит парой с `_kill_quietly`: сначала просим, через `_KILL_GRACE_SEC`
+    убиваем. SIGKILL не перехватывается, поэтому без этой просьбы даже
+    корректная команда не получает шанса прибраться за собой — и после таймаута
+    остаются повисшие блокировки и недописанные файлы, разгребать которые
+    придётся следующему ходу агента.
 
-    def _done(task: "asyncio.Task") -> None:
-        _BACKGROUND_DRAINS.discard(task)
-        if not any(t in _BACKGROUND_DRAINS for t in live):
-            _close_transport(proc)
-
-    for task in live:
-        task.add_done_callback(_done)
+    ``False`` — послать было некому: ждать грацию незачем, идём убивать сразу.
+    """
+    pid = getattr(proc, "pid", None)
+    if pid and os.name != "nt":
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+    try:
+        proc.terminate()
+        return True
+    except Exception:
+        return False
 
 
 async def _afeed_stdin(proc, stdin_text: str) -> None:
@@ -618,17 +954,13 @@ async def _afeed_stdin(proc, stdin_text: str) -> None:
             pass
 
 
-async def _await_exit_or_kill(proc, timeout: Optional[int]) -> tuple:
-    """Дождаться процесса; по таймауту — убить и дать 5 с на выход. → (return_code, timed_out)."""
+async def _await_exit_or_stop(proc, timeout: Optional[int]) -> tuple:
+    """Дождаться процесса; по таймауту — остановить (`_astop_process`). → (return_code, timed_out)."""
     try:
         await _await_process_exit(proc, timeout)
         return proc.returncode, False
     except asyncio.TimeoutError:
-        _kill_quietly(proc)
-        try:
-            await _await_process_exit(proc, 5)
-        except Exception:
-            pass
+        await _astop_process(proc)
         return None, True
 
 

@@ -27,7 +27,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.ctx = SimpleNamespace(
             config_dict={},
             logger=None,
-            chat_completions_llm=SimpleNamespace(
+            auxiliary_llm=SimpleNamespace(
                 max_tokens=8192,
                 judge_max_tokens=10000,
                 completion_kwargs={"reasoning_effort": "none"},
@@ -153,7 +153,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn("Return ONLY a single raw JSON object", user_content)
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_uses_chat_completions_llm_completion_kwargs(self, mock_llm) -> None:
+    def test_uses_auxiliary_llm_completion_kwargs(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         run_coro(avalidate_final_report_vs_user_intent(
             ctx=self.ctx,

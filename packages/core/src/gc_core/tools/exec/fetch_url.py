@@ -86,10 +86,10 @@ class FetchUrl(AbstractSimpleTool):
                         "type": "string",
                         "description": "Absolute URL to fetch (http or https).",
                     },
-                    "timeout_seconds": {
+                    "timeout": {
                         "type": "integer",
                         "description": (
-                            "Optional timeout for HTTP request in seconds. "
+                            "HTTP timeout in seconds. "
                             f"Default is {cls.timeout_seconds}."
                         ),
                     },
@@ -124,7 +124,7 @@ class FetchUrl(AbstractSimpleTool):
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return f"""Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
-Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout_seconds": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}
+Input schema: {{"type": "object", "properties": {{"url": {{"type": "string", "description": "Absolute URL to fetch."}}, "timeout": {{"type": "integer", "description": "HTTP timeout in seconds."}}, "offset": {{"type": "integer", "description": "Character offset for paginated reads."}}, "limit": {{"type": "integer", "description": "Max characters to return in this call."}}, "proxy": {{"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}}}, "required": ["url"], "additionalProperties": false}}
 
 Usage:
 - Use this tool when you need readable text from a web page.
@@ -481,9 +481,9 @@ Usage:
         return summary_html, fallback_text
 
 
-    def _fetch_arg_error(self, timeout_seconds, max_preview_chars, offset, limit) -> "Optional[Dict[str, Any]]":
-        if timeout_seconds is not None and not isinstance(timeout_seconds, int):
-            return {"type": "invalid_argument", "field": "timeout_seconds"}
+    def _fetch_arg_error(self, timeout, max_preview_chars, offset, limit) -> "Optional[Dict[str, Any]]":
+        if timeout is not None and not isinstance(timeout, int):
+            return {"type": "invalid_argument", "field": "timeout"}
         if not isinstance(max_preview_chars, int) or max_preview_chars <= 0:
             return {"type": "invalid_argument", "field": "max_preview_chars"}
         if not isinstance(offset, int) or offset < 0:
@@ -492,13 +492,13 @@ Usage:
             return {"type": "invalid_argument", "field": "limit"}
         return None
 
-    def _url_or_timeout_error(self, normalized_url: str, timeout_seconds) -> "Optional[Dict[str, Any]]":
+    def _url_or_timeout_error(self, normalized_url: str, timeout) -> "Optional[Dict[str, Any]]":
         if not normalized_url:
             return {"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."}
         if not normalized_url.startswith(("http://", "https://")):
             return {"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."}
-        if (timeout_seconds or self.timeout_seconds) <= 0:
-            return {"type": "invalid_argument", "field": "timeout_seconds", "message": "timeout_seconds must be greater than 0."}
+        if (timeout or self.timeout_seconds) <= 0:
+            return {"type": "invalid_argument", "field": "timeout", "message": "timeout must be greater than 0."}
         return None
 
     def _content_payload(self, content: str, offset: int, limit: int, *, source: str, cache_hit: bool, final_url, status_code, content_type, meta) -> Dict[str, Any]:
@@ -650,7 +650,7 @@ Usage:
     async def acall(
         self,
         url: str,
-        timeout_seconds: Optional[int] = None,
+        timeout: Optional[int] = None,
         max_preview_chars: int = 1200,
         offset: int = 0,
         limit: Optional[int] = None,
@@ -668,17 +668,17 @@ Usage:
 
         if limit is None:
             limit = self.max_content_chars
-        arg_error = self._fetch_arg_error(timeout_seconds, max_preview_chars, offset, limit)
+        arg_error = self._fetch_arg_error(timeout, max_preview_chars, offset, limit)
         if arg_error is not None:
             return _result(ok=False, error=arg_error)
         normalized_proxy, proxy_error = self._normalize_proxy(proxy)
         if proxy_error is not None:
             return _result(ok=False, error=proxy_error)
         normalized_url = url.strip()
-        url_error = self._url_or_timeout_error(normalized_url, timeout_seconds)
+        url_error = self._url_or_timeout_error(normalized_url, timeout)
         if url_error is not None:
             return _result(ok=False, error=url_error)
-        effective_timeout = timeout_seconds or self.timeout_seconds
+        effective_timeout = timeout or self.timeout_seconds
 
         cache_key = self._cache_key(normalized_url, normalized_proxy)
         cached = self._get_from_cache(cache_key)

@@ -236,6 +236,70 @@ def _decode_double_encoded(value: str, subschema: Dict[str, Any]) -> Any:
     return decoded if Draft7Validator(subschema).is_valid(decoded) else None
 
 
+def unknown_property_names(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> list[str]:
+    """Ключи верхнего уровня, которых нет в ``properties``.
+
+    ``additionalProperties`` — инструкция модели в схеме, не рантайм-политика:
+    лишнее на корне снимаем всегда, даже если схема его формально разрешает.
+    """
+    properties = params_schema.get("properties") or {}
+    if not isinstance(properties, dict):
+        properties = {}
+    return [key for key in parsed_args if key not in properties]
+
+
+def format_dropped_arguments_note(names: list[str]) -> str:
+    """Информационная строка для вывода тула: какие поля сняты и почему."""
+    listed = ", ".join(names)
+    if len(names) == 1:
+        return f"Field {listed} was dropped because it is not in the tool schema."
+    return f"Fields {listed} were dropped because they are not in the tool schema."
+
+
+def annotate_output_with_dropped_arguments(output: str, dropped: list[str]) -> str:
+    """Вставить заметку об отброшенных полях в вывод тула.
+
+    JSON-объект получает поле ``dropped_arguments`` первым, чтобы заметка
+    попала в префикс длинного ответа. Иной текст — строка перед выводом.
+    """
+    if not dropped:
+        return output
+    note = format_dropped_arguments_note(dropped)
+    stripped = output.lstrip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and "dropped_arguments" not in data:
+            return json.dumps({"dropped_arguments": note, **data}, ensure_ascii=False)
+    if not output:
+        return note
+    return f"{note}\n{output}"
+
+
+def _drop_unknown_properties(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> tuple[Dict[str, Any], list[str]]:
+    """Снять ключи верхнего уровня, которых нет в ``properties``.
+
+    Не зависит от ``additionalProperties``: это контракт для модели. Вложенные
+    объекты не трогаем — там лишний ключ может быть частью данных. Срез сам по
+    себе вызов не спасает: если после него не хватает required или не сходятся
+    типы, отказ сохраняется, а список снятых ключей наружу не отдаём.
+    """
+    unknown = unknown_property_names(parsed_args, params_schema)
+    if not unknown:
+        return parsed_args, []
+    properties = params_schema.get("properties") or {}
+    if not isinstance(properties, dict):
+        properties = {}
+    stripped = {key: value for key, value in parsed_args.items() if key in properties}
+    return stripped, unknown
+
+
 def _drop_empty_optional_keys(
     parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
 ) -> tuple[Dict[str, Any], bool]:
@@ -338,8 +402,8 @@ def _parse_arguments_object(arguments: Any, reject, *, allow_empty: bool) -> Any
 def _recover_arguments(tool_name: str, parsed_args: Dict[str, Any], params_schema: Dict[str, Any], validation_schema: Any) -> "Dict[str, Any] | None":
     """Коэрсеры по очереди; первый вариант, проходящий валидацию, либо None."""
     candidate = parsed_args
-    # Порядок: сначала снимаем «не задано», потом чиним типы. Обратный
-    # порядок оставил бы "" в enum-поле и второй коэрсер об него споткнулся.
+    # Пустую строку нельзя оставлять в enum-поле до числового коэрсера —
+    # он об неё споткнётся.
     for coercer in (
         _drop_empty_optional_keys,
         _coerce_double_encoded_fields,
@@ -364,6 +428,7 @@ def parse_and_validate_tool_arguments(
     tool_spec: Dict[str, Any],
     allow_empty_for_empty_schema: bool,
     tool_fabric: Type[Any] | None = None,
+    dropped_unknown: list[str] | None = None,
 ) -> Dict[str, Any]:
     params_schema = tool_spec.get("parameters", {}) if isinstance(tool_spec, dict) else {}
     params_schema = params_schema if isinstance(params_schema, dict) else {}
@@ -392,6 +457,10 @@ def parse_and_validate_tool_arguments(
             parsed_args=None,
         )
 
+    # Лишние ключи корня снимаем до валидации, иначе схема без
+    # additionalProperties: false их пропустит и они доедут до тула.
+    parsed_args, dropped_names = _drop_unknown_properties(parsed_args, params_schema)
+
     validation_schema = parameters_schema_for_local_validation(params_schema)
     try:
         _validate_tool_arguments(tool_name, validation_schema, parsed_args)
@@ -409,11 +478,15 @@ def parse_and_validate_tool_arguments(
                 parsed_args=parsed_args,
             )
 
+    if dropped_unknown is not None and dropped_names:
+        dropped_unknown.extend(dropped_names)
     return normalize_optional_empty_as_omit(parsed_args, params_schema)
 
 
 __all__ = [
     "WrongFunctionArgumentsException",
+    "annotate_output_with_dropped_arguments",
+    "format_dropped_arguments_note",
     "parse_and_validate_tool_arguments",
     "resolve_tool_arguments_feedback_hint",
 ]

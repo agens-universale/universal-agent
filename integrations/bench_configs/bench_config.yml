@@ -14,6 +14,7 @@ agent_kwargs:
     # --- backend ---
     backend_api_mode: chat_completions
     os_backend: harbor
+    harbor_exec_init: bashrc              # model-facing exec читает profile/bashrc (SWE testbed); null = raw
     chat_completions_max_tokens: 32768
     chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
     use_max_tokens_param: true
@@ -30,11 +31,12 @@ agent_kwargs:
       chat_template_kwargs:
         enable_thinking: false
       tool_choice: auto
-    chat_completions_params:
-      llm:
-        max_tokens: 8192                 # aux LLM: summary / intent-scope
-        judge_max_tokens: 10000          # finish-gate / command_moderation
-        completion_kwargs: {}
+    auxiliary_llm_params:
+      max_tokens: 24576                # aux LLM: summary / intent-scope (потолок)
+      judge_max_tokens: 24576          # finish-gate / command_moderation (запас под мысль модели)
+      # {} = schema default (без vendor-ключей). Не наследует и не гасит agent kwargs.
+      # Если у агента thinking вкл — задайте anti-thinking явно (см. ua_qwen / dsv4).
+      completion_kwargs: {}
 
     # --- agent loop ---
     system_prompt_id: v1
@@ -60,13 +62,13 @@ agent_kwargs:
     server_tool_prefix: system
     limit_project_metadata: false
     model_steering: ""
-    exec_timeout_sec: 600                # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
+    exec_timeout_sec: 600                # дефолт timeout для exec_command / exec_python, если модель не передала
     tool_output_inline_max_chars: 10000  # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
     exec_output_capture_max_chars: 40000  # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
     exec_output_preview_edge_chars: 3000  # каждый край front-loaded preview длинного потока; 0 — без preview
     stored_tool_outputs_max_entries: 50  # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
     inject_tool_fields:                  # инжект синтетического поля в JSON Schema КАЖДОГО тула
-      reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
+      reason: "At most 10 words: why this call, what you expect."
     stop_tools: [turn_ask_human, project_memory,
                  fs_save_base64_file, exec_calculator,
                  exec_sleep, exec_python, exec_fetch_url,

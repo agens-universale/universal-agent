@@ -13,10 +13,13 @@
 упал», а состав того, что доехало до хранилища.
 
 Полный прогон, а не единичный вызов: модель заменена ``ScriptedBackend``, но
-цикл, тулы, финализатор и судья finish-gate — настоящие.
+цикл и судья finish-gate — настоящие. Диспетчер тулов заглушен ЦЕЛИКОМ
+(фикстура ``_stub_turn_finish``): и ``turn_finish``, и ``exec_sleep`` сразу
+получают ``ok``, настоящий путь тула здесь не исполняется. Предмет файла —
+хранилище тредов; путь тула меряет ``test_acceptance_non_blocking``, у него
+заглушка делегирующая.
 """
 import asyncio
-import time
 
 import pytest
 
@@ -34,12 +37,19 @@ from parity_harness import (
 
 @pytest.fixture(autouse=True)
 def _stub_turn_finish(monkeypatch):
-    """Диспетчер тулов для ``turn_finish``: у стенда нет tools_data.
+    """Сплошная заглушка диспетчера тулов: у стенда нет tools_data.
 
     После правки develop «батч с turn_finish — сначала вся work, закрытие по
     output» ход ИСПОЛНЯЕТ финализатор и закрывается по факту ``ok``, а не по
     обнаружению вызова в трассе. Без tools_data это unknown tool, ход не
     закрывается и упирается в ``step_limit``.
+
+    Сплошная, а не делегирующая: мгновенный ``ok`` получает ЛЮБОЙ тул, и
+    ``exec_sleep`` из сценария не исполняется вовсе. Для этого файла так и
+    надо — проверяется хранилище, а не тулы. Но и путь тула тесты файла не
+    видят: блокировка в нём сюда не доходит (проверено подменой — 0,2 с сна в
+    ``exec_sleep`` красят ``test_acceptance_non_blocking`` и не трогают
+    здешний замер отзывчивости).
     """
     from gc_core import processing_responses as pr
     from helpers.turn_finish_apply import stub_turn_finish_apply
@@ -47,7 +57,8 @@ def _stub_turn_finish(monkeypatch):
     monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
 
 
-#: Ход 1 — тул (настоящий subprocess). Ход 2 — финализатор. Ход 3 — судья.
+#: Ход 1 — вызов тула; сам ``exec_sleep`` не исполняется, заглушка выше
+#: отвечает за него мгновенно. Ход 2 — финализатор. Ход 3 — судья.
 TURNS = [
     assistant_tool_call("exec_sleep", {"seconds": 0.05}, call_id="c1"),
     assistant_tool_call("turn_finish", {
@@ -222,14 +233,26 @@ async def test_native_async_store_is_awaited_not_adapted(tmp_path, monkeypatch):
 async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypatch):
     """Медленное АСИНХРОННОЕ хранилище не морозит цикл.
 
-    Ради этого и заводился нативный путь. Закон, выведенный из кода и
-    подтверждённый замером: у блокирующего хранилища максимальный лаг ≈
-    ``11 × RTT + 29 мс`` (25 обращений за прогон укладываются в три блока
-    подряд — 11, 11 и 3). При 10 мс на вызов бюджет в 150 мс пробит.
+    Что меряется: loop свободен всю жизнь агента — сборку, прогон и
+    закрытие, — пока ядро ждёт хранилище с RTT 5 мс. То есть путь хранилища
+    и собственные куски ядра между его обращениями. Путь тула НЕ меряется:
+    диспетчер заглушен целиком (фикстура ``_stub_turn_finish``), и блокировка
+    в настоящем ``exec_sleep`` этот тест не красит — её ловит
+    ``test_acceptance_non_blocking``.
 
-    Здесь RTT = 5 мс: блокирующее хранилище дало бы ≈ 84 мс, нативно
-    ожидаемое — единицы миллисекунд. Порог взят с запасом, чтобы тест не
-    мигал на загруженной машине, но разница между путями на порядок больше.
+    Ради этого и заводился нативный путь. Закон ниже снят тем же прогретым
+    пульсом на ходах этого файла, но с настоящим ``exec_sleep`` вместо
+    сплошной заглушки: у синхронного, блокирующего хранилища 25 обращений за
+    прогон ложатся в два куска без уступки — 11 и 14 обращений. При RTT 5 мс
+    это разрывы около 85 и 100 мс; потолок в 150 мс их пропускает, отвергает
+    правило «не больше одного пропуска». При 10 мс пробит и потолок — около
+    185 мс.
+
+    Здесь RTT = 5 мс, и нативно ожидаемое хранилище держит разрывы у шага
+    пульса: худший 12 мс, пропусков ноль. Проверено подменой: ``time.sleep``
+    вместо ``await asyncio.sleep`` в этом хранилище сливает весь прогон в
+    один разрыв около 180 мс (тулы здесь заглушены, других уступок нет) —
+    тест красный.
     """
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
@@ -248,30 +271,21 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
             locals()[f"a{_n}"] = _make(_n)
         del _make, _n, _NAMES
 
-    gaps: list = []
-    stop = asyncio.Event()
+    from gc_testkit import LoopPulse, assert_loop_was_free, quiet_gc_for_loop_timing
 
-    async def heartbeat():
-        prev = time.monotonic()
-        while not stop.is_set():
-            await asyncio.sleep(0.01)
-            now = time.monotonic()
-            gaps.append(now - prev)
-            prev = now
-
-    beat = asyncio.create_task(heartbeat())
     store = SlowAsyncStore()
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
-        await agent.run("сделай что-нибудь", thread_id="t-sdk")
-    stop.set()
-    await beat
+    # Сборщик глушится на окне: тест судит НАТИВНОСТЬ ожидания хранилища, а
+    # пауза поколения 2 на куче набора (180–220 мс) кратно больше бюджета.
+    # Пульс прогрет и тикает ДО сборки агента: иначе синхронный кусок сборки
+    # до её первой уступки в замер не попадал бы.
+    with quiet_gc_for_loop_timing():
+        async with LoopPulse() as pulse:
+            async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+                await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
-    worst = max(gaps) if gaps else 0.0
-    assert worst < 0.15, (
-        f"цикл замирал на {worst * 1000:.0f} мс при хранилище с RTT 5 мс — "
-        "обращения идут блокирующе"
-    )
+    assert_loop_was_free(pulse.gaps, tick=pulse.step,
+                         label="хранилище с RTT 5 мс: ")
 
 
 async def test_broken_store_fails_loudly_at_wiring(tmp_path, monkeypatch):

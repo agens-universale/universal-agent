@@ -53,13 +53,20 @@ def test_acall_writes_the_body_inline():
     ]
     assert direct, "не нашёл прямого вызова self._atomic_write(…) в acall"
 
-    threaded = [
+    # Запрет узкий — на ЗАПИСЬ, а не на поток вообще. Гард записи
+    # (`_check_write_guard`) в поток уезжает законно: в режиме `ask` он ждёт
+    # человека, в TUI это до 600 с, и loop вызывающего иначе встал бы целиком.
+    # Но уезжает он маршрутом гвардов (`dual_wrapper.off_loop`), а не через
+    # `asyncio.to_thread` — только там вызову ставится метка «брошен»
+    # (см. test_guard_confirm_off_loop).
+    threaded_write = [
         n for n in ast.walk(acall)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "to_thread"
+        and any(getattr(a, "attr", None) == "_atomic_write" for a in n.args)
     ]
-    assert not threaded, (
+    assert not threaded_write, (
         "запись снова уходит в asyncio.to_thread — поток здесь не окупается: "
         "3.4 мс выигрыша на 32 МиБ при бюджете 150 мс"
     )

@@ -217,45 +217,47 @@ Do not implement until they confirm.
 
 
     async def acall(self, question: str, **kwargs) -> str:
-        """Асинхронный вход: ожидание человека не занимает поток из пула.
+        """Асинхронный вход. Вопрос виден ДО того, как ждём ответ.
 
-        Ждать человека можно сколько угодно, и синхронный путь держал на этом
-        слот общего пула ``to_thread`` (14 воркеров на всех) без всякого
-        предела. Здесь ответ читается ДО тела, а тело получает его готовым:
-        так у двух входов остаётся ровно одна разница — способ чтения, — и
-        печать, логи и обработка ошибок не раздваиваются.
+        Порядок несущий. Раньше ответ читался первым, а проверки, печать
+        вопроса, лог и событие прогресса шли в общем теле уже с готовым
+        ответом. В CLI человек видел вопрос только после того, как вслепую
+        ответил; баннер субагента в TUI (он рисуется по событию прогресса) не
+        появлялся вовсе; пустой и слишком длинный вопрос сначала ждали ввода и
+        лишь потом отклонялись.
+
+        Ожидание человека не занимает поток пула: встраивающий отвечает через
+        свой порт ``ctx.ask_human``, без порта — ``input()`` в потоке.
         """
-        # Читаем ВНУТРИ колбэка, а не заранее. Разница несущая: `_ask_with`
-        # ловит `KeyboardInterrupt` и превращает его в конверт «прервано», а
-        # чтение до тела выносило Ctrl+C наружу — прогон падал вместо ответа.
-        # Ответ уже получен к моменту вызова колбэка (`await` выше по стеку
-        # невозможен внутри синхронного тела), поэтому читаем его отложенно
-        # через futures-обёртку: корутина ждётся здесь, а исключение всплывает
-        # в колбэке, то есть внутри try.
-        pending: dict = {}
-
+        prepared = self._begin_ask(question)
+        if isinstance(prepared, str):
+            return prepared                       # проверка не прошла — ждать нечего
+        question, via_name = prepared
         try:
-            pending["answer"] = await _aread_human_response(self._ctx, question)
-        except BaseException as exc:          # noqa: BLE001 — переносим ЛЮБОЙ
-            # Любой, а не только KeyboardInterrupt: тело разбирает и EOFError,
-            # и ошибки порта встраивающего, и каждый исход у него свой конверт.
-            # Перехват здесь только ПЕРЕНОСИТ исключение внутрь try тела.
-            pending["error"] = exc
+            response = await _aread_human_response(self._ctx, question)
+        except KeyboardInterrupt:
+            return self._ask_interrupted(question, via_name)
+        except Exception as exc:                  # EOFError, отказ порта встраивающего
+            return self._ask_failed(question, via_name, exc)
+        except BaseException:
+            # `CancelledError` — не `Exception`, и проходила мимо: событие
+            # `ask_human` из `_begin_ask` оставалось незакрытым, а баннер
+            # «агент спрашивает» висел в TUI и у встраивающего после отмены
+            # `stream()` или остановки сервера. Закрываем и пробрасываем.
+            from gc_core.tools.subagents.progress import emit_progress
 
-        def _read() -> str:
-            if "error" in pending:
-                raise pending["error"]
-            return pending["answer"]
+            emit_progress(
+                self._ctx, self._state, "ask_human_done",
+                tool_name=via_name, ok=False,
+            )
+            raise
+        return self._ask_answered(question, via_name, response)
 
-        return self._ask_with(question, _read)
+    def _begin_ask(self, question: Any):
+        """Проверки, нормализация, событие прогресса и печать вопроса.
 
-    def _ask_with(self, question: str, read_response: "Any") -> str:
-        """Общее тело: проверки, печать, логи, прогресс и разбор ответа.
-
-        ``read_response`` — нульарный колбэк, отдающий ответ человека. Он и
-        есть единственное, чем отличаются синхронный и асинхронный входы.
+        Возвращает конверт-отказ (строку) или пару ``(вопрос, имя субагента)``.
         """
-        # Input validation
         if not isinstance(question, str):
             return self._result(
                 ok=False,
@@ -290,103 +292,103 @@ Do not implement until they confirm.
                 },
             )
 
-        # Sanitize line endings and normalize whitespace
         question = self._normalize_text(question)
 
         from gc_core.tools.subagents.progress import emit_progress
 
         via_name = getattr(self._ctx, "subagent_tool_name", None)
+        via_name = via_name if isinstance(via_name, str) else None
         emit_progress(
             self._ctx,
             self._state,
             "ask_human",
             prose=question,
-            tool_name=via_name if isinstance(via_name, str) else None,
+            tool_name=via_name,
+        )
+        print("\n" + "="*60, file=sys.stderr)
+        print("AI ASKS HUMAN:", file=sys.stderr)
+        print("-"*60, file=sys.stderr)
+        print(question, file=sys.stderr)
+        print("-"*60, file=sys.stderr)
+        print("Please enter your response (end with EOF or empty line):", file=sys.stderr)
+        self._run_logger().info(
+            "ask_human_question",
+            extra={"event": "ask_human_question", "question": question},
+        )
+        return question, via_name
+
+    def _ask_answered(self, question: str, via_name: Optional[str], response: str) -> str:
+        from gc_core.tools.subagents.progress import emit_progress
+
+        if response == "":
+            response = "(empty response)"
+        print(f"Human responded: {repr(response)}", file=sys.stderr)
+        print("="*60 + "\n", file=sys.stderr)
+        self._run_logger().info(
+            "ask_human_response",
+            extra={"event": "ask_human_response", "response": response},
+        )
+        emit_progress(
+            self._ctx,
+            self._state,
+            "ask_human_done",
+            tool_name=via_name,
+            ok=True,
+        )
+        return self._result(
+            ok=True,
+            question=question,
+            response=response,
+            error=None,
+            hint=_RESPONSE_HINT,
         )
 
-        try:
-            # Print the question to stdout (visible to user)
-            print("\n" + "="*60, file=sys.stderr)
-            print("AI ASKS HUMAN:", file=sys.stderr)
-            print("-"*60, file=sys.stderr)
-            print(question, file=sys.stderr)
-            print("-"*60, file=sys.stderr)
-            print("Please enter your response (end with EOF or empty line):", file=sys.stderr)
-            self._run_logger().info(
-                "ask_human_question",
-                extra={"event": "ask_human_question", "question": question},
-            )
+    def _ask_interrupted(self, question: str, via_name: Optional[str]) -> str:
+        from gc_core.tools.subagents.progress import emit_progress
 
-            response = read_response()
+        print("\n\n[Interaction interrupted by user]", file=sys.stderr)
+        self._run_logger().warning(
+            "ask_human_interrupted",
+            extra={"event": "ask_human_interrupted"},
+        )
+        emit_progress(
+            self._ctx,
+            self._state,
+            "ask_human_done",
+            tool_name=via_name,
+            ok=False,
+            error_brief="interrupted",
+        )
+        return self._result(
+            ok=False,
+            question=question,
+            response="(user interrupted)",
+            error={"type": "interrupted", "message": "Interaction interrupted by user."},
+        )
 
-            if response == "":
-                response = "(empty response)"
+    def _ask_failed(self, question: str, via_name: Optional[str], exc: Exception) -> str:
+        from gc_core.tools.subagents.progress import emit_progress
 
-            print(f"Human responded: {repr(response)}", file=sys.stderr)
-            print("="*60 + "\n", file=sys.stderr)
-            self._run_logger().info(
-                "ask_human_response",
-                extra={"event": "ask_human_response", "response": response},
-            )
-
-            emit_progress(
-                self._ctx,
-                self._state,
-                "ask_human_done",
-                tool_name=via_name if isinstance(via_name, str) else None,
-                ok=True,
-            )
-
-            return self._result(
-                ok=True,
-                question=question,
-                response=response,
-                error=None,
-                hint=_RESPONSE_HINT,
-            )
-
-        except KeyboardInterrupt:
-            print("\n\n[Interaction interrupted by user]", file=sys.stderr)
-            self._run_logger().warning(
-                "ask_human_interrupted",
-                extra={"event": "ask_human_interrupted"},
-            )
-            emit_progress(
-                self._ctx,
-                self._state,
-                "ask_human_done",
-                tool_name=via_name if isinstance(via_name, str) else None,
-                ok=False,
-                error_brief="interrupted",
-            )
-            return self._result(
-                ok=False,
-                question=question,
-                response="(user interrupted)",
-                error={"type": "interrupted", "message": "Interaction interrupted by user."},
-            )
-        except Exception as e:
-            # Fallback in case of unexpected error
-            error_msg = f"(error reading input: {str(e)})"
-            print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
-            self._run_logger().warning(
-                "ask_human_error",
-                extra={"event": "ask_human_error", "error": error_msg},
-            )
-            emit_progress(
-                self._ctx,
-                self._state,
-                "ask_human_done",
-                tool_name=via_name if isinstance(via_name, str) else None,
-                ok=False,
-                error_brief=str(e),
-            )
-            return self._result(
-                ok=False,
-                question=question,
-                response=error_msg,
-                error={"type": "read_failed", "message": str(e)},
-            )
+        error_msg = f"(error reading input: {str(exc)})"
+        print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
+        self._run_logger().warning(
+            "ask_human_error",
+            extra={"event": "ask_human_error", "error": error_msg},
+        )
+        emit_progress(
+            self._ctx,
+            self._state,
+            "ask_human_done",
+            tool_name=via_name,
+            ok=False,
+            error_brief=str(exc),
+        )
+        return self._result(
+            ok=False,
+            question=question,
+            response=error_msg,
+            error={"type": "read_failed", "message": str(exc)},
+        )
 
     def _normalize_text(self, text: str) -> str:
         """Normalize line endings and clean up extra whitespace."""

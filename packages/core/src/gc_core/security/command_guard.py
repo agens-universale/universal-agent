@@ -12,6 +12,7 @@ import re
 import shlex
 from typing import Any, Callable
 
+from gc_core.security.dual_wrapper import OffLoop
 from gc_core.security.dual_wrapper import dual_wrap
 
 from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, effective_command_cwd
@@ -172,13 +173,14 @@ def _command_guard_flow(func: Callable[..., str], payload_arg: str, tool_name: s
 
     if decision == "ask":
         from gc_core.security.confirm_port import request_confirm
-        confirmed = request_confirm(
+        confirmed = (yield OffLoop(functools.partial(
+            request_confirm,
             title="Защищённый путь",
             question="Команда затрагивает защищённый путь. Выполнить?",
             fields=[("command", payload)],
             ctx=ctx_obj,
             decision_key=f"command:{payload}",
-        )
+        ), on_interrupt=False))
         if confirmed:
             return (yield)
         # ask not confirmed → instructive blocked result

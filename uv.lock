@@ -1019,7 +1019,7 @@ wheels = [
 
 [[package]]
 name = "gc-cli"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "gc-core" },
@@ -1034,9 +1034,10 @@ requires-dist = [
 
 [[package]]
 name = "gc-core"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/core" }
 dependencies = [
+    { name = "certifi" },
     { name = "chardet" },
     { name = "httpx", extra = ["socks"] },
     { name = "httpx-sse" },
@@ -1051,6 +1052,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi" },
     { name = "chardet", specifier = ">=7.4.3" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "httpx-sse", specifier = ">=0.4.0" },
@@ -1065,7 +1067,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-mcp"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "gc-core" },
@@ -1080,7 +1082,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-server"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/server" }
 dependencies = [
     { name = "fastapi" },
@@ -1103,7 +1105,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-testkit"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/testkit" }
 dependencies = [
     { name = "pytest" },
@@ -1114,11 +1116,12 @@ requires-dist = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "gc-tui"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/tui" }
 dependencies = [
     { name = "gc-core" },
     { name = "gc-mcp" },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "pygments" },
     { name = "rich" },
@@ -1131,6 +1134,7 @@ dependencies = [
 requires-dist = [
     { name = "gc-core", editable = "packages/core" },
     { name = "gc-mcp", editable = "packages/mcp" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "huggingface-hub", specifier = ">=0.30" },
     { name = "pygments", specifier = ">=2.13" },
     { name = "rich", specifier = ">=13" },
@@ -1141,7 +1145,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-ua"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "gc-cli" },

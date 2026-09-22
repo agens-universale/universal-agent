@@ -57,6 +57,7 @@ import threading
 import time
 
 from gc_core.mcp_session_owner import current_owner
+from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
@@ -65,6 +66,12 @@ from gc_core.tools.connect_mcp.transport import (
     _resolve_command,
     forget_stdio_reader,
 )
+
+#: Общий бюджет на дочистку остатка сессий, когда прогон сняли снаружи.
+#: Именно общий, а не на сессию: закрытие одной стоит до 7 с (SIGTERM →
+#: таймаут → SIGKILL) плюс до 10 с на ответ close-тула, и умножать это на число
+#: сессий значит держать уже снятый прогон десятки секунд.
+_CANCEL_DRAIN_BUDGET_SEC = 3.0
 
 
 def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
@@ -117,20 +124,91 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
 #: Шаг опроса при асинхронном ожидании смерти процесса. Компромисс: реже —
 #: закрытие тянется дольше нужного, чаще — лишние пробуждения loop на пустом
 #: месте. При graceful-таймауте 5 с это до сотни проверок, каждая — один
-#: ``waitpid(WNOHANG)``.
+#: ``waitpid(WNOHANG)`` и один ``killpg(pgid, 0)``.
 _POLL_STEP_SEC = 0.05
 
 
-async def _await_exit(proc: subprocess.Popen, timeout: float) -> bool:
-    """Дождаться смерти процесса опросом. ``True`` — успел, ``False`` — таймаут.
+def _pgid_of(proc: subprocess.Popen) -> Optional[int]:
+    """Группа сервера. ``None`` — групп в POSIX-смысле нет (Windows).
 
-    Замена ``proc.wait(timeout)``, которая не занимает ни поток, ни loop:
-    ``poll()`` — неблокирующий ``waitpid(WNOHANG)``, а пауза между проверками
-    отдаёт управление циклу.
+    Это ``proc.pid``, а не ``os.getpgid``: сервер запущен лидером своей
+    сессии (``start_new_session``), и номер группы равен его pid. Спрашивать
+    ``getpgid`` поздно — после смерти лидера он падает, а группа (его дети)
+    в этот момент ещё жива и как раз нужна.
+    """
+    return proc.pid if os.name == "posix" else None
+
+
+def _signal_group(pgid: int, sig: int) -> bool:
+    """Сигнал группе. ``False`` — группы нет: в ней не осталось никого.
+
+    ``pgid`` ≤ 1 отвергается сразу: ``killpg(0, …)`` бьёт СВОЮ группу, а
+    ``killpg(-1, …)`` на macOS становится ``kill(1, …)``. У настоящего
+    процесса такого pid не бывает — только у двойника в тесте.
+    """
+    if pgid <= 1:
+        return False
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _group_alive(pgid: int) -> bool:
+    """Есть ли в группе ещё кто-нибудь, живой или не пожатый."""
+    try:
+        return _signal_group(pgid, 0)
+    except PermissionError:
+        return True                    # кто-то есть, но сигналить ему нам нельзя
+
+
+def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> bool:
+    """Сигнал всему дереву сервера: группе, а без неё — хотя бы лидеру.
+
+    ``False`` — бить некого: группы нет, лидер мёртв. Не бросает никогда:
+    отказ сигнала не повод бросать снос на полпути, а обработчик прерывания в
+    ``aclose`` подменил бы новым исключением исходное.
+    """
+    if pgid is not None:
+        try:
+            if _signal_group(pgid, signal.SIGKILL if kill else signal.SIGTERM):
+                return True
+        except OSError:
+            pass                       # группа недоступна (EPERM) — остаётся лидер
+    try:
+        if proc.poll() is not None:
+            return False
+        # Лидер жив, а группы с его номером нет или она недоступна: он не
+        # лидер своей группы (запущен в обход `_spawn_detached_stdio_process`).
+        # Бьём хотя бы его.
+        if kill:
+            proc.kill()
+        else:
+            proc.terminate()
+    except Exception:
+        pass
+    return True
+
+
+async def _await_exit(
+    proc: subprocess.Popen, timeout: float, pgid: Optional[int] = None
+) -> bool:
+    """Дождаться смерти процесса, а с ``pgid`` — и всей его группы.
+
+    ``True`` — успел, ``False`` — таймаут. Замена ``proc.wait(timeout)``,
+    которая не занимает ни поток, ни loop: ``poll()`` — неблокирующий
+    ``waitpid(WNOHANG)``, ``killpg(pgid, 0)`` — мгновенный системный вызов,
+    а пауза между проверками отдаёт управление циклу.
+
+    Порядок проверок несущий: сначала лидер, потом группа. Лидер — наш прямой
+    ребёнок, и пока ``poll()`` его не пожал, он зомби и числится в группе:
+    без этого ``killpg`` не ответил бы «никого» никогда, и каждый снос стоил
+    бы полный таймаут.
     """
     deadline = time.monotonic() + timeout
     while True:
-        if proc.poll() is not None:
+        if proc.poll() is not None and (pgid is None or not _group_alive(pgid)):
             return True
         if time.monotonic() >= deadline:
             return False
@@ -147,43 +225,43 @@ async def _aterminate_process_tree(
     системные вызовы и в потоке не нуждались никогда, блокировал только
     ``proc.wait(timeout)``. Держать ради него второй экземпляр эскалации
     дорого: разъехаться эти два экземпляра могли молча, а цена расхождения —
-    выживший MCP-сервер. Вызывающему без loop (``close`` из ``atexit``)
-    хватает своего ``asyncio.run`` — обмена с процессом здесь нет, только
-    сигнал и ожидание, поэтому отдельная синхронная форма не нужна.
+    выживший MCP-сервер. Синхронному вызывающему (``close`` — из ``atexit``
+    или из ``finally`` встраивающего под живым loop) хватает
+    ``run_coro_blocking`` — обмена с процессом здесь нет, только сигнал и
+    ожидание, поэтому отдельная синхронная форма не нужна.
 
     Эскалация: SIGTERM по группе → graceful-таймаут → SIGKILL по группе.
     Терять её нельзя — сервер, игнорирующий SIGTERM (Chromium под
     @playwright/mcp), иначе переживёт агента.
+
+    Ждём ГРУППУ, а не лидера. Лидер — сам MCP-сервер, а тяжёлое у него в
+    детях: node под @playwright/mcp по SIGTERM выходит сразу, Chromium в той
+    же группе SIGTERM игнорирует. Пока ожидание смотрело на один
+    ``proc.poll()``, смерть лидера засчитывалась за смерть всех, и SIGKILL
+    группе не уходил никогда; уже мёртвого лидера снос и вовсе пропускал, не
+    тронув группу. Теперь группа мёртвого лидера получает тот же порядок:
+    SIGTERM (послушная сирота уйдёт сразу, а не по таймауту), опрос
+    ``killpg(pgid, 0)`` до «никого» в пределах того же graceful-таймаута,
+    затем SIGKILL.
+
+    Это только POSIX. На Windows групп в этом смысле нет:
+    ``CREATE_NEW_PROCESS_GROUP`` — группа для консольных событий, её не
+    опросить и не убить целиком, а дети мёртвого лидера не видны ни
+    ``terminate``, ни ``kill``. Там снос по-прежнему ждёт одного лидера, и
+    его дети могут пережить агента — ограничение платформы, которое снимает
+    только Job Object.
     """
-    if proc.poll() is not None:
+    pgid = _pgid_of(proc)
+    if not _signal_tree(proc, pgid, kill=False):
         return
-    pid = proc.pid
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        else:
-            proc.terminate()
-    except ProcessLookupError:
-        return
-    except Exception:
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-    try:
-        if await _await_exit(proc, graceful_timeout):
+        if await _await_exit(proc, graceful_timeout, pgid):
             return
     except Exception:
         return
+    _signal_tree(proc, pgid, kill=True)
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-        else:
-            proc.kill()
-    except Exception:
-        pass
-    try:
-        await _await_exit(proc, 2.0)
+        await _await_exit(proc, 2.0, pgid)
     except Exception:
         pass
 
@@ -215,15 +293,23 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
-            try:
-                self._proc.wait(timeout=0.1)
-            except Exception:
-                pass
+            dead = self._proc
+            self._proc = None
             # И его читателя: реестр ключуется по id трубы, а запись мёртвого
             # процесса иначе оставалась там навсегда. Сервер, который падает
             # и перезапускается, копил бы их без предела.
-            forget_stdio_reader(getattr(self._proc, "stdout", None))
-            self._proc = None
+            forget_stdio_reader(getattr(dead, "stdout", None))
+            # И его группу: лидер мёртв, а дети его пережили — Chromium
+            # упавшего @playwright/mcp остаётся сиротой, а новый сервер
+            # поднимет второй. Снос тот же, что при закрытии (он же и пожнёт
+            # лидера); дольше мгновения он идёт, только если сироты глухи к
+            # SIGTERM. Loop'а здесь нет — `call` ходит через брошенный поток, —
+            # поэтому свой, как у `close`; `run_coro_blocking` переживёт и
+            # вызов с живого loop.
+            try:
+                run_coro_blocking(_aterminate_process_tree(dead, graceful_timeout=5.0))
+            except Exception:
+                pass
 
         self._proc = _spawn_detached_stdio_process(self._server_cfg)
         self._next_id = 2
@@ -313,21 +399,45 @@ class PersistentStdioSession:
         if proc is not None:
             if had_lock:
                 self._close_prologue(proc)
-            # Своя форма терминации одна и корутинная; здесь loop'а нет
-            # (`atexit`), поэтому заводим собственный — как `main` у gc-cli.
-            asyncio.run(_aterminate_process_tree(proc, graceful_timeout=5.0))
+            # Форма терминации одна и корутинная. Loop'а нет в `atexit`, но
+            # встраивающий зовёт `close_all` из своего `finally` — под живым
+            # loop. Голый `asyncio.run` там бросал, общий `except` выше это
+            # глушил, и отцепленный процесс оставался жить без хозяина.
+            run_coro_blocking(_aterminate_process_tree(proc, graceful_timeout=5.0))
 
     async def aclose(self) -> None:
         """То же закрытие, но ожидание не занимает поток.
 
         Пролог (ответ close-тула) и терминация — единственное, что здесь
         долгое, и оба переведены на опрос.
+
+        Прерванное закрытие добивает группу СРАЗУ. Отмена, таймаут
+        вызывающего, отмена фона на выходе ``asyncio.run`` — любое прерывание
+        посреди ожидания раньше обрывало эскалацию, и SIGKILL не уходил
+        никогда: сервер, глухой к SIGTERM (Chromium под @playwright/mcp),
+        переживал агента. Подобрать его потом некому — процесс отцеплен от
+        сессии первым делом, а сессия к этому моменту снята и с реестра, так
+        что хук на выход её не видит. Поэтому на ЛЮБОМ ``BaseException`` —
+        синхронный SIGKILL группе и прерывание дальше. Ждать смерти здесь
+        нельзя: прерванную корутину уже никто не ждёт, а ``GeneratorExit``
+        не позволил бы и ``await``. Пожнёт зомби ``Popen`` сам.
+
+        Процесс берётся из отцепления, до первого ``await``: прервать нас
+        между ними нечему, а ``self._proc`` после отцепления уже пуст.
         """
         proc, had_lock = self._detach_nowait()
-        if proc is not None:
+        if proc is None:
+            return
+        try:
             if had_lock:
                 await self._aclose_prologue(proc)
             await _aterminate_process_tree(proc, graceful_timeout=5.0)
+        except BaseException:
+            _signal_tree(proc, _pgid_of(proc), kill=True)
+            # Хвост пролога мог не дойти: прервали на ответе close-тула. Без
+            # него читатель мёртвого процесса остался бы в реестре навсегда.
+            self._close_prologue_tail(proc)
+            raise
 
     def _close_prologue(self, proc: "subprocess.Popen") -> None:
         close_tool = self._close_tool_name()
@@ -555,15 +665,17 @@ class PersistentStdioRegistry:
     ) -> PersistentStdioSession:
         owner = current_owner()
         key = (owner, server_key)
-        if owner is None:
-            # Сессия без владельца: её не закроет ни один `arun`, потому что
-            # ни один прогон её не заводил (прямой `apply_tool`, `gc-mcp`).
-            # Докстрока `mcp_session_owner` обещала явный `close_everything()`,
-            # но такого вызова не было НИ В ОДНОМ пакете — сессия жила до конца
-            # процесса, а с ней и Chromium. Ставим хук на выход; при SIGKILL он
-            # не отработает, но это разница между «обычно закрываем» и
-            # «не закрываем никогда».
-            self._arm_exit_hook()
+        # Хук на выход ставим ВСЕГДА. Раньше — только для безвладельческих
+        # сессий: их не закроет ни один `arun`, потому что ни один прогон их не
+        # заводил (прямой `apply_tool`, `gc-mcp`), а обещанного докстрокой
+        # `mcp_session_owner` явного `close_everything()` не было НИ В ОДНОМ
+        # пакете. Но владельческой сессии подстраховка нужна ровно так же: её
+        # закрывает `aclose_all` из `finally` прогона, и если этот `finally`
+        # сняли, остаток не увидит никто — снос фильтрует по владельцу, а
+        # следующий прогон приходит с новым. Хук стоит один `atexit.register`
+        # на процесс; при SIGKILL не отработает, но это разница между «обычно
+        # закрываем» и «не закрываем никогда».
+        self._arm_exit_hook()
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
@@ -594,6 +706,42 @@ class PersistentStdioRegistry:
                     return self._sessions.pop(key)
         return None
 
+    async def _adrain_own_within_budget(self, budget: float) -> None:
+        """Дочистить свои сессии с ОБЩИМ бюджетом. Зовут под уже снятой задачей.
+
+        На что бюджета не хватило — НЕ снимаем с реестра: там остаток застанет
+        ``close_everything`` на выходе процесса. Поэтому бюджет проверяется ДО
+        снятия сессии, а не после.
+
+        Сессию, которую сняли, но закрыть в остаток бюджета не успели, таймаут
+        ОТМЕНЯЕТ, и ``aclose`` на прерывании сразу добивает её группу. Раньше
+        закрытие шло под ``shield`` и по таймауту доигрывало в фоне, но фон
+        на выходе ``asyncio.run`` снимается отменой, и эскалация обрывалась
+        там же: после выхода агента глухие к SIGTERM серверы оставались жить,
+        а из реестра они уже сняты. Вернуть такую сессию в реестр нельзя —
+        ``aclose`` первым делом отцепляет процесс, и ``close_everything``
+        нашёл бы в ней пустое место.
+        """
+        deadline = time.monotonic() + budget
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return
+            session = self._take_one_own()
+            if session is None:
+                return
+            try:
+                # Без `shield`: по таймауту закрытие отменяется, и группа
+                # добивается SIGKILL'ом сразу, а не бросается доигрывать в фон.
+                await asyncio.wait_for(session.aclose(), left)
+            except asyncio.CancelledError:
+                # Сняли ПОВТОРНО. Настаивать не на чем: исходную отмену
+                # вызывающий получит в любом случае. Закрывавшуюся сессию
+                # `aclose` уже добил, оставшиеся в реестре доберёт выход.
+                return
+            except Exception:
+                pass
+
     def close_all(self) -> None:
         """Закрыть сессии текущего владельца. Синхронный вход."""
         for session in self._take_own():
@@ -610,7 +758,31 @@ class PersistentStdioRegistry:
         всё это уезжало в ``asyncio.to_thread``; теперь ожидание — опрос, и
         поток не нужен. Форма та же, что у ``stream_client``: синхронный
         ``close_all`` рядом с ``aclose_all``.
+
+        Отмена приходит из двух РАЗНЫХ мест, и поступать с ними надо
+        по-разному; различаем по счётчику ``Task.cancelling()``:
+
+        * **сняли НАС** (счётчик вырос) — дочищаем остаток с общим бюджетом
+          ``_CANCEL_DRAIN_BUDGET_SEC`` и пробрасываем отмену дальше. Глотать
+          её нельзя: вызывающий обязан узнать, что его сняли. Работать же без
+          ограничения нельзя тем более — это держит снятый прогон ещё по 7 с
+          на сессию.
+        * **отменилась САМА сессия** — ``CancelledError`` прилетел из её
+          ``aclose`` (обычно из anyio cancel scope). Тогда копим и закрываем
+          остальные: прежний ``raise`` прямо из цикла гасил ровно одну, а
+          прочие оставались в реестре и ЖИВЫМИ.
+
+        Почему остаток нельзя просто оставить в реестре «до следующего
+        сноса», как здесь было написано раньше: снос фильтрует по владельцу, а
+        следующий владелец другой. У сервера контекст новый на каждый вебхук,
+        у CLI прогон один; переиспользует владельца только TUI. Последняя
+        сетка — ``atexit``, и ради неё же хук теперь ставится всегда, а не
+        только на безвладельческом пути. Для playwright цена прежняя: Chromium
+        переживает агента.
         """
+        task = asyncio.current_task()
+        outer_cancels = task.cancelling() if task is not None else 0
+        cancelled = None
         while True:
             session = self._take_one_own()
             if session is None:
@@ -619,12 +791,26 @@ class PersistentStdioRegistry:
                 # `shield`: закрытие сессии обязано ДОЙТИ до конца, даже если
                 # вызывающего сняли прямо сейчас. Это `finally` цикла агента,
                 # и оборванный на середине teardown оставляет чужой процесс
-                # (браузер) жить дальше.
+                # (браузер) жить дальше. Доигрывает оно в фоне, и это
+                # безопасно: снимут фон (выход `asyncio.run` отменяет всё
+                # оставшееся) — `aclose` на прерывании добьёт группу SIGKILL'ом.
+                # Убирать `shield` отсюда, как из дочистки, нельзя: без него
+                # отмена сразу отдавала бы этой сессии SIGKILL, не дав
+                # close-тулу погасить потомков сервера вне нашей группы
+                # (системный Chrome) — до них killpg не дотянется.
                 await asyncio.shield(session.aclose())
-            except asyncio.CancelledError:
-                raise
+            except asyncio.CancelledError as exc:
+                if task is not None and task.cancelling() > outer_cancels:
+                    # Сняли нас: дочищаем остаток в пределах общего бюджета и
+                    # отдаём отмену наружу. Что не успели — ждёт выхода
+                    # процесса, хук на который теперь стоит всегда.
+                    await self._adrain_own_within_budget(_CANCEL_DRAIN_BUDGET_SEC)
+                    raise
+                cancelled = exc            # отменилась сессия: гасим остальные
             except Exception:
                 pass
+        if cancelled is not None:
+            raise cancelled
 
     def close_everything(self) -> None:
         """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.

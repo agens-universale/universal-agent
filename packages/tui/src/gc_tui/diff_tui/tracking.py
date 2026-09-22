@@ -121,6 +121,21 @@ class TrackingFsBackend:
         self._ctx = ctx
         self.is_sandbox = bool(getattr(inner, "is_sandbox", False))
         self.default_exec_timeout = getattr(inner, "default_exec_timeout", None)
+        # Возможность фонового запуска — свойство ВНУТРЕННЕГО бэкенда, обёртка
+        # её только повторяет. Без этой строки тул считал бы обёртку бэкендом
+        # без фона и отказывал бы в TUI, хотя под ней обычный LocalFsBackend.
+        self.supports_background = bool(getattr(inner, "supports_background", False))
+
+    async def aspawn_background(self, command: str, *, cwd: Any = None,
+                                env: Any = None) -> dict:
+        """Фоновый запуск проксируем как есть, без дельты diff-журнала.
+
+        Журнал снимает изменения ВОКРУГ вызова, а этот возвращается мгновенно:
+        дельта вокруг него пуста по построению. Файлы, которые фоновый процесс
+        напишет позже, журнал не увидит — показать их можно было бы только
+        опросом, которого у журнала нет. Это осознанная граница, а не пропуск.
+        """
+        return await self._inner.aspawn_background(command, cwd=cwd, env=env)
 
     @property
     def exec_output_capture_max_chars(self) -> int:
@@ -172,7 +187,7 @@ class TrackingFsBackend:
         except ValueError:
             return None
 
-    async def _atrack_text_mutation(self, path: str) -> None:
+    async def _journal_mutation_off_loop(self, path: str) -> None:
         """Снимок и journal перед записью — в потоке, не на loop.
 
         Внутри ``_track_text_mutation`` живёт ``git_ops.check_ignore``, то есть
@@ -296,6 +311,30 @@ class TrackingFsBackend:
             )
         )
 
+    async def aexec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> Any:
+        """Сырой канал тоже меняет дерево (mkdir/mktemp/rm внутренних
+        помощников), поэтому дельта журналируется так же, как у ``aexec``."""
+        from gc_core.backends.async_protocol import arun_backend_exec_raw
+
+        return await self._atrack_shell_delta(
+            lambda: arun_backend_exec_raw(
+                self._inner,
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                capture_max_chars=capture_max_chars,
+            )
+        )
+
     async def aexec_argv(
         self,
         argv: list,
@@ -340,16 +379,16 @@ class TrackingFsBackend:
         )
 
     async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        await self._atrack_text_mutation(path)
+        await self._journal_mutation_off_loop(path)
         await self._inner.write(path, content, encoding=encoding)
 
     async def write_bytes(self, path: str, data: bytes) -> None:
         if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
-            await self._atrack_text_mutation(path)
+            await self._journal_mutation_off_loop(path)
         await self._inner.write_bytes(path, data)
 
     async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        await self._atrack_text_mutation(path)
+        await self._journal_mutation_off_loop(path)
         await self._inner.append(path, content, encoding=encoding)
 
     async def copy(self, src: str, dst: str) -> None:
@@ -368,6 +407,10 @@ class TrackingFsBackend:
 
     def default_cwd(self) -> Optional[str]:
         return self._inner.default_cwd()
+
+    async def aprime_default_cwd(self) -> Optional[str]:
+        prime = getattr(self._inner, "aprime_default_cwd", None)
+        return await prime() if callable(prime) else None
 
     async def exists(self, path: str) -> bool:
         return await self._inner.exists(path)

@@ -729,7 +729,7 @@ async def test_connection_section_esc_collapses_presets_enter_substitutes(tmp_pa
         rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
         assert any("OpenRouter" in r for r in rows)
         assert any("Cloud.ru" in r for r in rows)
-        assert any("GigaCode" in r for r in rows)
+        assert any("RouterAI" in r for r in rows)
 
         await pilot.press("escape")                            # свернуть список (не закрыть секцию)
         await pilot.pause()

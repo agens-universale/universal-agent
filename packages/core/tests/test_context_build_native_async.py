@@ -74,27 +74,26 @@ async def test_loop_stays_free_during_build(monkeypatch):
 
     monkeypatch.setattr(agent_tools, "aget_mcp_tools_data_for_config", _slow)
 
-    gaps: list[float] = []
-    stop = asyncio.Event()
-
-    async def pulse() -> None:
-        loop = asyncio.get_running_loop()
-        prev = loop.time()
-        while not stop.is_set():
-            await asyncio.sleep(0.005)
-            now = loop.time()
-            gaps.append(now - prev)
-            prev = now
+    from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
     cfg = dict(_CFG)
     cfg["mcp-servers"] = {"srv": {"transport": "stream_http", "url": "http://x"}}
-    beat = asyncio.create_task(pulse())
-    await acreate_run_context(cfg)
-    stop.set()
-    await beat
+    # Сборщик глушится на окне: порог абсолютный, а пауза поколения 2 на куче
+    # полного набора (180–220 мс) — почти весь бюджет в 0,25 с, и тест судил
+    # бы её, а не сборку.
+    #
+    # Пульс прогретый и общий. Собственный ставился в очередь прямо перед
+    # `await acreate_run_context` и не видел синхронную часть сборки до
+    # первой уступки: 0,4 с сна перед `_prepare_run_context` тест пропускал —
+    # проверено подменой.
+    with quiet_gc_for_loop_timing():
+        async with LoopPulse(step=0.005) as pulse:
+            await acreate_run_context(cfg)
 
-    assert gaps, "пульс не тикнул ни разу"
-    assert max(gaps) < 0.25, f"loop залипал на {max(gaps):.3f}с при сборке контекста"
+    assert pulse.worst() < 0.25, (
+        f"loop залипал на {pulse.worst():.3f}с при сборке контекста "
+        f"({pulse.report()})"
+    )
 
 
 def test_acreate_is_not_a_thread_wrapper():

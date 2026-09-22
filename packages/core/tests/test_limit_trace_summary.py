@@ -32,7 +32,7 @@ def _make_ctx(**overrides):
     return SimpleNamespace(
         config_dict=cfg,
         logger=None,
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={},
         ),

@@ -174,6 +174,17 @@ class CapabilitiesNotWarmedError(RuntimeError):
     """
 
 
+class BackgroundNotSupportedError(NotImplementedError):
+    """Фоновый запуск у бэкенда, который так не умеет.
+
+    Отдельный тип по той же причине, что и ``SyncExecNotSupportedError``: это
+    не «допишите бэкенд», а «у этой песочницы такой возможности нет, скажите
+    об этом модели честно». Раньше метода на порту не было вовсе, и вызов
+    через обёртку TUI падал с ``AttributeError`` — то есть сообщением об
+    отсутствующем атрибуте вместо ответа тула.
+    """
+
+
 class FsBackend(ABC):
     """Физический порт ввода-вывода. Файловые операции — КОРУТИНЫ.
 
@@ -205,8 +216,32 @@ class FsBackend(ABC):
     is_sandbox: bool = False
     # Backend-preferred default exec timeout; None → tool class default.
     default_exec_timeout: Optional[int] = None
+    # Умеет ли бэкенд отцепить команду в фон (см. `aspawn_background`).
+    # False по умолчанию: фон есть только там, где мы владеем процессами хоста.
+    supports_background: bool = False
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
+                                env: Optional[dict] = None) -> dict:
+        """Запустить команду фоном и НЕ ждать её: вернуть как минимум ``pid``.
+
+        Вывод команды не сохраняется: у фонового процесса не должно быть ни
+        одной трубы к нам, иначе он погибает вместе с читателем.
+
+        Бэкенд, который проверяет мгновенный отказ, кладёт ещё ``exit_code``:
+        ``None`` — команда жива, число — она уже вышла с этим кодом. Нет ключа —
+        не проверялось (Harbor).
+
+        Объявлено НА ПОРТУ намеренно, хотя умеют не все бэкенды. Пока метод
+        жил только на `LocalFsBackend`, обёртка TUI (`TrackingFsBackend`) его
+        не видела, и фоновый режим в TUI падал с `AttributeError` — там, где
+        он нужнее всего. Теперь поверхность порта одна, и сторож паритета
+        обёртки ловит пропажу сразу.
+        """
+        raise BackgroundNotSupportedError(
+            f"{type(self).__name__} не умеет запускать команды фоном"
+        )
 
     # Кэш ответов проб. Заполняет ЕДИНСТВЕННЫЙ писатель —
     # ``awarm_capabilities``; подклассы могут задать ответы заранее через
@@ -473,6 +508,22 @@ class FsBackend(ABC):
              capture_max_chars: Optional[int] = None) -> ExecResult:
         raise SyncExecNotSupportedError(_sync_exec_message(self, "exec"))
 
+    def exec_raw(self, command: str, *, cwd: Optional[str] = None,
+                 timeout: Optional[int] = None,
+                 env: Optional[dict] = None,
+                 capture_max_chars: Optional[int] = None) -> ExecResult:
+        """Механический POSIX: без инициализации окружения образа.
+
+        Вход для ЧУЖИХ синхронных реализаций, как и ``exec``. Канал модели
+        может предварять команду профилем (Harbor); внутренние вызовы — пробы,
+        grep, обход, MCP — идут этим каналом. У хоста профиля нет, поэтому
+        умолчание — тот же ``exec``.
+        """
+        kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
+        if capture_max_chars is not None:
+            kwargs["capture_max_chars"] = capture_max_chars
+        return self.exec(command, **kwargs)
+
     def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
                   cwd: Optional[str] = None,
                   timeout: Optional[int] = None,
@@ -485,20 +536,23 @@ class FsBackend(ABC):
         POSIX (e.g. local Windows cmd.exe) must override with a shell-less
         implementation.
 
+        Goes through ``exec_raw``: argv is a program, not a model shell command.
+
         ``capture_max_chars=None`` → ``exec_output_capture_max_chars`` (tool
         trace, 40k/поток). Internal post-processed calls (native grep, walk) pass
         the walk ceiling (~50M).
         """
         command = argv_to_posix_command(argv, stdin=stdin)
-        if capture_max_chars is None:
-            return self.exec(command, cwd=cwd, timeout=timeout, env=env)
-        return self.exec(
-            command,
-            cwd=cwd,
-            timeout=timeout,
-            env=env,
-            capture_max_chars=capture_max_chars,
-        )
+        kwargs = {"cwd": cwd, "timeout": timeout, "env": env}
+        if capture_max_chars is not None:
+            kwargs["capture_max_chars"] = capture_max_chars
+        # Откат на `exec`, как у develop: чужой бэкенд может не наследовать
+        # FsBackend (утиная реализация) и `exec_raw` не знать — у хоста профиля
+        # нет, каналы совпадают.
+        fn = getattr(self, "exec_raw", None)
+        if not callable(fn):
+            fn = self.exec
+        return fn(command, **kwargs)
 
     def run_python(self, code: str, *, cwd: Optional[str] = None,
                    timeout: Optional[int] = None,

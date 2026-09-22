@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.backends.async_protocol import aexec_port
-from gc_core.config_modules.agent import DEFAULT_EXEC_TIMEOUT_SEC, exec_timeout_from_config_dict
+from gc_core.config_modules.agent import exec_timeout_from_config_dict
 from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
@@ -70,6 +70,7 @@ def _parse_env_vars(env_vars) -> "tuple[Optional[Dict[str, str]], Optional[dict]
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = {
             "type": "function",
             "name": "exec_python",
@@ -87,13 +88,13 @@ class RunPythonCode(AbstractSimpleTool):
                             "(fed on standard input; no temp script file)."
                         ),
                     },
-                    "timeout_seconds": {
+                    "timeout": {
                         "type": "integer",
                         "description": (
                             f"Maximum execution time in seconds before the process is terminated. "
-                            f"Default is {DEFAULT_EXEC_TIMEOUT_SEC} (agent.exec_timeout_sec)."
+                            f"Default is {timeout_default} (agent.exec_timeout_sec)."
                         ),
-                        "default": DEFAULT_EXEC_TIMEOUT_SEC,
+                        "default": timeout_default,
                         "minimum": 1,
                     },
                     "cwd": {
@@ -129,11 +130,12 @@ class RunPythonCode(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+        timeout_default = exec_timeout_from_config_dict(config_dict)
         description = (
             '''Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
-Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout_seconds": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
-            + str(DEFAULT_EXEC_TIMEOUT_SEC)
+Input schema: {"type": "object", "properties": {"code": {"type": "string", "description": "Python code to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": '''
+            + str(timeout_default)
             + '''}, "cwd": {"type":"string","description":"Working directory (optional)"}, "env_vars": {"type":"array","description":"Env overrides as [{'name','value'}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}} , "required": ["code"], "additionalProperties": false}
 
 Usage:
@@ -157,7 +159,7 @@ Usage:
         stderr=None,
         error: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Envelope с front-loaded preview; ``truncated`` выводится из потоков."""
+        """Envelope с front-loaded preview; ``truncated`` только если поток обрезан."""
         return build_exec_envelope(
             tool=RunPythonCode.registered_tool_name(),
             ok=ok,
@@ -174,7 +176,7 @@ Usage:
         self,
         error: Dict[str, Any],
         code: str,
-        timeout_seconds: Optional[int] = None,
+        timeout: Optional[int] = None,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -193,7 +195,7 @@ Usage:
     async def acall(
         self,
         code: str,
-        timeout_seconds: Optional[int] = None,
+        timeout: Optional[int] = None,
         cwd: Optional[str] = None,
         env_vars: Optional[list[dict]] = None,
         **kwargs,
@@ -205,7 +207,7 @@ Usage:
         обошёл бы политику. ``aexec_port`` вместо прямого ``backend.arun_python``
         оставляет рабочими бэкенды без нативного запуска (harbor, TUI).
         """
-        early, plan = await self._plan(code, timeout_seconds, cwd, env_vars, **kwargs)
+        early, plan = await self._plan(code, timeout, cwd, env_vars, **kwargs)
         if early is not None:
             return early
         try:
@@ -257,7 +259,7 @@ Usage:
     async def _plan(
         self,
         code: str,
-        timeout_seconds: Optional[int],
+        timeout: Optional[int],
         cwd: Optional[str],
         env_vars: Optional[list[dict]],
         **kwargs,
@@ -279,12 +281,12 @@ Usage:
             return reject({"type": "invalid_argument", "field": "code", "message": "Code is empty"})
 
         effective_timeout = (
-            timeout_seconds
-            if timeout_seconds is not None
+            timeout
+            if timeout is not None
             else exec_timeout_from_config_dict(self._config_dict)
         )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
-            return reject({"type": "invalid_argument", "field": "timeout_seconds"})
+            return reject({"type": "invalid_argument", "field": "timeout"})
 
         if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
             return reject({"type": "invalid_argument", "field": "cwd"})

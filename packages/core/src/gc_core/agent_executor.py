@@ -36,7 +36,11 @@ from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_report, build_run_usage_dict
 from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
 from gc_core.trace_id import trace_id_from_config
-from gc_core.tools.subagents.active_scope import try_enqueue_user_message
+from gc_core.tools.subagents.active_scope import (
+    active_parent_call_id,
+    is_child_input_active,
+    try_enqueue_user_message,
+)
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -148,6 +152,23 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
         raise cancelled
 
 
+def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
+    """Недоставленные сообщения → аргументы `arun` для отдельного хода.
+
+    Владелец доигрывает хвост (`take_undelivered_messages`) новым ходом, а
+    `arun` принимает тексты и параллельные списки полей, тогда как в очередь
+    кладут готовые словари. Поля переносятся те, из которых `arun` и строит
+    сообщение: id (по нему TUI точечно откатывает реплику), display_content и
+    skill_loaded — других в очередь не кладут ни сервер, ни TUI.
+    """
+    texts = [str(m.get("content", "")) for m in messages]
+    return texts, {
+        "message_ids": [m.get("id") for m in messages],
+        "display_contents": [m.get("display_content") for m in messages],
+        "skills_loaded": [m.get("skill_loaded") for m in messages],
+    }
+
+
 class AgentExecutor:
     """
     Потокобезопасный запуск агента с возможностью добавлять сообщения во время run
@@ -158,11 +179,37 @@ class AgentExecutor:
         self._ctx = ctx
         self._lock = threading.Lock()
         self._pending_messages: list[dict] = []
+        #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
+        #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
+        #: ответили «принято», и молча терять их нельзя. Забирает владелец —
+        #: `take_undelivered_messages`, вместе с пришедшим после.
+        self._undelivered_messages: list[dict] = []
         self._state: State | None = None
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
         self.last_terminal_outcome: Optional[str] = None
+
+    def take_undelivered_messages(self) -> list[dict]:
+        """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
+
+        Это хвост, снятый с очереди на выходе из цикла, и то, что легло в
+        очередь уже после: цикл вычерпывает её в последний раз при закрытии
+        хода, а прогон ещё сохраняет тред и сносит MCP-сессии — через `await`,
+        и не быстро. Звать ПОСЛЕ `arun`: из идущего прогона это украло бы
+        очередь у цикла.
+
+        Владелец (сервер, TUI) доигрывает хвост отдельным ходом того же треда
+        (`undelivered_as_arun_args`) — пока он этого не сделал, прогон нельзя
+        объявлять законченным. Если не забрать, пришедшее после `finally`
+        уедет следующему прогону вслед за его собственным запросом, а снятое
+        `finally` так и останется лежать.
+        """
+        with self._lock:
+            out = [*self._undelivered_messages, *self._pending_messages]
+            self._undelivered_messages = []
+            self._pending_messages = []
+            return out
 
     async def _aopen_thread_session(self, thread_id, *, start_new_thread: bool, system, backend_api_mode: str, logger):
         """Тред-сессия прогона → (thread_session, thread_shared, previous_response_id, system_id)."""
@@ -368,7 +415,17 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
-            self._pending_messages = []
+            # Очередь здесь НЕ сбрасываем. Сброс стоял тут с тех пор, когда до
+            # него не было setup-фазы и класть сообщения заранее было некому.
+            # Теперь кладут: сервер, пока прогон ещё не дошёл до цикла,
+            # `_prebuild_messages` в TUI, `AsyncAgent.send` — и всё это
+            # стиралось, не доходя до агента. Пустой очередь между прогонами
+            # НЕ бывает по построению: сообщение может лечь в неё и после
+            # последнего забора циклом — пока прогон сохраняет тред и сносит
+            # MCP. Такой хвост владелец забирает `take_undelivered_messages` и
+            # доигрывает отдельным ходом. Не забранное из очереди уходит этому
+            # прогону вслед за его собственными сообщениями (см. ниже), а
+            # отложенное `finally` прошлого прогона ждёт владельца.
 
     @staticmethod
     def _seed_current_user_intent(state, new_user_messages) -> None:
@@ -548,6 +605,20 @@ class AgentExecutor:
         ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
         harbor-адаптер.
         """
+        with self._lock:
+            # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
+            # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
+            # состояния, остановка uvicorn) писал флаг в мёртвый state: новый
+            # стартовал чистым, и ход доигрывался целиком — с вызовами модели и
+            # тулов, уже после нажатия стопа. Второй ход у владельца исполнителя
+            # обычное дело: хвост прогона у сервера и SDK, следующий запрос в
+            # TUI. Теперь такой стоп ложится в `_stop_pending` и применяется при
+            # создании state (ниже по функции).
+            #
+            # Именно в НАЧАЛЕ хода, а не в конце прошлого: стоп по остывшему
+            # прогону (ход кончился, ничего не идёт) обязан пропасть, иначе он
+            # молча погасил бы следующий запрос человека.
+            self._state = None
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
@@ -667,6 +738,14 @@ class AgentExecutor:
         # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
         # ровно своё, не тронув сессии параллельных агентов на том же loop.
         _owner_reset = set_owner(getattr(self._ctx, "mcp_session_owner", "") or None)
+        # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
+        # сообщений прогона: клиент, которому ответили `queued`, должен попасть
+        # к модели в том же запросе, а не ждать следующего хода.
+        with self._lock:
+            queued_before_loop = self._pending_messages[:]
+            self._pending_messages.clear()
+        if queued_before_loop:
+            messages = [*messages, *queued_before_loop]
         try:
             response = await arun_agent(
                 messages,
@@ -699,6 +778,17 @@ class AgentExecutor:
             self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
             await self._afinalize_thread(thread_session, state, logger)
         finally:
+            # Несъеденное циклом откладываем в сторону: оно не должно молча
+            # уехать следующему прогону позади его запроса. Это НЕ граница
+            # «чистого листа»: ниже ещё `await` сноса MCP, и то, что ляжет в
+            # очередь за это время, окажется там же, где и раньше. Оба куска
+            # забирает владелец одним `take_undelivered_messages`.
+            with self._lock:
+                # КОПИМ, а не присваиваем: иначе следующий прогон затрёт хвост
+                # предыдущего пустым списком — то самое молчаливое исчезновение,
+                # ради которого всё и затевалось.
+                self._undelivered_messages.extend(self._pending_messages)
+                self._pending_messages = []
             # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
             # чтобы они не переживали конкретный запуск агента.
             # Ждём напрямую, без потока: блокирующим в закрытии было только
@@ -722,10 +812,25 @@ class AgentExecutor:
 
         Executing subagent → child pending; иначе → parent pending.
         """
-        if try_enqueue_user_message(message):
+        # Адресат берётся из СВОЕГО контекста: сообщение этого прогона не может
+        # уехать субагенту чужой сессии — до её контекста отсюда нет ссылки.
+        if try_enqueue_user_message(self._ctx, message):
             return
         with self._lock:
             self._pending_messages.append(message)
+
+    def is_child_input_active(self) -> bool:
+        """Работает ли сейчас субагент, которому уйдёт ввод пользователя.
+
+        Фронтенду нужно спрашивать СВОЕГО исполнителя, а не модуль ядра:
+        модульная функция отвечала за весь процесс и в многосессионном сервере
+        говорила о чужом прогоне.
+        """
+        return is_child_input_active(self._ctx)
+
+    def active_parent_call_id(self) -> str | None:
+        """``call_id`` вызова субагента, который сейчас принимает ввод."""
+        return active_parent_call_id(self._ctx)
 
     def get_state(self) -> State | None:
         """

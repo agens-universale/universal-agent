@@ -148,3 +148,37 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypat
     ))
 
     assert res["choices"][0]["message"]["content"] == "Привет, мир"
+
+
+async def test_stream_stops_at_done_even_if_the_server_holds_the_body_open(monkeypatch):
+    """После `[DONE]` читать больше нечего — ждать чужого закрытия нельзя.
+
+    Сборщик на этом маркере поднимает флаг «стрим кончился», но цикл дочитывал
+    тело до конца. Сервер или корп-прокси, не закрывший SSE сразу, держал ход
+    до read-timeout (600 с по умолчанию), а таймаут — повод повторить ВЕСЬ
+    запрос к модели: показанный ответ стирается и генерируется заново. На
+    develop генератор SSE-строк делал на этом маркере `return`, и чтение
+    прекращалось.
+    """
+    import asyncio
+
+    holding = asyncio.Event()          # «сервер» ответил и не закрывает поток
+
+    async def body():
+        yield (b'data: {"id": "x", "choices": [{"index": 0, '
+               b'"delta": {"content": "hi"}}]}\n\n')
+        yield b'data: [DONE]\n\n'
+        await holding.wait()           # дальше тишина, но тело не закрыто
+        yield b""
+
+    _install(monkeypatch, lambda request: httpx.Response(
+        200, content=body(), headers={"content-type": "text/event-stream"}))
+
+    deltas = []
+    res = await asyncio.wait_for(connect_backend.arequest_backend_chat_completions(
+        {"model": "m", "messages": []}, {}, url="http://x", verify=True,
+        on_delta=lambda k, t: deltas.append((k, t)),
+    ), 5)
+
+    assert res["choices"][0]["message"]["content"] == "hi"
+    assert ("answer", "hi") in deltas

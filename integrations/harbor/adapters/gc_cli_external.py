@@ -603,7 +603,9 @@ class GcCliExternal(BaseAgent):
         async def _agent_run():
             nonlocal executor
             from gc_core.utils.async_http import aclose_clients
+            from gc_core.utils.logging_module import release_run_logger
 
+            ctx = None
             try:
                 ctx = await acreate_run_context(
                     config_dict,
@@ -628,6 +630,11 @@ class GcCliExternal(BaseAgent):
                 # убьёт loop, а реестр клиентов ключуется по нему. Без этого
                 # клиент трайла жил до сборщика и всплывал «Event loop is
                 # closed» в чужом месте.
+                #
+                # Логгер трайла — туда же: Harbor ведёт много трайлов в одном
+                # процессе, а `logging` держит каждый логгер до конца процесса
+                # вместе с открытым файлом.
+                release_run_logger(getattr(ctx, "logger", None))
                 await aclose_clients()
 
         def _run_loop():
@@ -637,16 +644,13 @@ class GcCliExternal(BaseAgent):
         # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
         # на loop Harbor.
         #
-        # На loop Harbor его вести нельзя, и это проверено зависанием: файловый
-        # API `FsBackend` синхронный (`read`, `is_file`, `upload_file`), а у
-        # `HarborBackend` он мостится через `run_coroutine_threadsafe(...).result()`
-        # на ТОТ ЖЕ loop. Вызов такого метода с самого loop — вечный дедлок.
-        # Асинхронный порт (шаг A1) снял это только с запуска команд; файловые
-        # операции остались синхронными, потому что синхронен сам протокол.
-        #
-        # Рабочий поток остаётся, а портал уходит: внутри потока свой
-        # `asyncio.run`, и мост к бэкенду работает как раньше — маршалинг идёт
-        # между РАЗНЫМИ потоками.
+        # Раньше поток был обязателен: файловый API `FsBackend` был синхронным и
+        # у `HarborBackend` ждал через `run_coroutine_threadsafe(...).result()`
+        # на loop Harbor — с самого этого loop вечный дедлок. Теперь файловый и
+        # exec-порты корутинные, и `HarborBackend._aawait` сам выбирает: прямой
+        # `await` на loop Harbor или `wrap_future` с чужого loop, — дедлока нет
+        # ни там, ни там. Поток оставлен как есть: перенос агента на loop Harbor
+        # поменял бы модель отмены ниже, а на стенде она не проверена.
         #
         # Отменяемость не изменилась: future от `run_in_executor` по-прежнему не
         # отменить, поэтому на таймауте зовём `stop_run()` (кооперативный флаг,

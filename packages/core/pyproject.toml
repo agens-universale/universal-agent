@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-core"
-version = "0.3.0"
+version = "0.3.1"
 description = "GigaCode Universal Agent — ядро агента (SDK): цикл, тулы, конфиг, безопасность, память, MCP-клиент"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,6 +16,11 @@ dependencies = [
     "jsonschema>=4.0.0",
     "httpx[socks]>=0.27.0",
     "httpx-sse>=0.4.0",
+    # Импортируется напрямую (`utils/async_http`: `certifi.where()` для
+    # дефолтного SSL-контекста), поэтому объявлен явно, а не «приезжает с
+    # httpx». Та же болезнь, что была с requests у голоса и с urllib3 здесь:
+    # необъявленный транзитивный импорт живёт до первой чистой установки.
+    "certifi",
     "mcp==1.26.0",
     "chardet>=7.4.3",
 ]

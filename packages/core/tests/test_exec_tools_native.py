@@ -76,11 +76,18 @@ async def _worst_gap(coro_factory):
             gaps.append(now - prev)
             prev = now
 
-    beat = asyncio.create_task(pulse())
-    await asyncio.sleep(0.05)
-    result = await coro_factory()
-    stop.set()
-    await beat
+    from gc_testkit import quiet_gc_for_loop_timing
+
+    # Сборщик глушится на окне: порог абсолютный (NAP / 2), а пауза поколения 2
+    # на куче полного набора — 180–220 мс, и тест судил бы её, а не запуск.
+    # Пульс свой, но прогретый: 50 мс сна до работы дают ему взять отметку
+    # раньше её начала.
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(pulse())
+        await asyncio.sleep(0.05)
+        result = await coro_factory()
+        stop.set()
+        await beat
     return result, (max(gaps) if gaps else float("inf"))
 
 
@@ -159,7 +166,7 @@ async def test_command_reports_a_timeout_the_same_way():
     """Таймаут — общий путь разбора результата, а не отдельная ветка."""
     out = json.loads(
         await _cmd().acall(
-            command="python3 -c 'import time; time.sleep(5)'", timeout_seconds=1
+            command="python3 -c 'import time; time.sleep(5)'", timeout=1
         )
     )
 

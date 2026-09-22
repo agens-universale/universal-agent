@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import threading
@@ -246,7 +247,24 @@ async def get_run_status(system: str, task_id: str):
             detail={"status": "error", "payload": "system and task_id are required"},
         )
 
-    run = agent_run_registry.get_status(system=sys_norm, task_id=task_norm)
+    # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
+    # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
+    # завершённый с TTL 15 минут. Клиент, которому только что ответили
+    # `queued`, иначе видел 404 или `completed` с результатом прошлого прогона.
+    building_since, run = agent_run_registry.get_status_snapshot(
+        system=sys_norm, task_id=task_norm
+    )
+    if building_since is not None:
+        return {
+            "status": "running",
+            "system": sys_norm,
+            "task_id": task_norm,
+            "thread_id": task_norm,
+            # Прогона ещё нет, поэтому оба времени — от брони. С null зависшая
+            # сборка для сторожа по `last_activity_at` не старела никогда.
+            "started_at": building_since,
+            "last_activity_at": building_since,
+        }
     if run is None:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
 
@@ -293,6 +311,37 @@ async def get_run_status(system: str, task_id: str):
         "finished_at": run.finished_at,
         "result": run.result,
     }
+
+
+#: Потолок ожидания чужой сборки контекста по умолчанию, секунд.
+_CONTEXT_BUILD_WAIT_DEFAULT_S = 120.0
+
+
+def _context_build_wait_s(raw: Any) -> float:
+    """Потолок ожидания чужой сборки из `server.context_build_wait_seconds`.
+
+    Не задан — 120 с: с запасом на законно медленную сборку (MCP-дискавери
+    идёт по сети), но конечный. Мусор — не число, ноль, отрицательное,
+    бесконечность — не отключает потолок и не роняет старт: дефолт и
+    предупреждение, как у `log_level`. Строку принимаем: из `${ENV:...}`
+    значение приезжает строкой.
+    """
+    if raw is None:
+        return _CONTEXT_BUILD_WAIT_DEFAULT_S
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = float("nan")
+    # `bool` — подкласс `int`: `true` в YAML иначе стал бы потолком в секунду.
+    # NaN отсекается тем же сравнением — с ним оно ложно.
+    if isinstance(raw, bool) or not 0 < value < float("inf"):
+        logger.warning(
+            "server.context_build_wait_seconds=%r — нужно положительное конечное "
+            "число секунд, беру %g",
+            raw, _CONTEXT_BUILD_WAIT_DEFAULT_S,
+        )
+        return _CONTEXT_BUILD_WAIT_DEFAULT_S
+    return value
 
 
 @app.post("/events/webhook")
@@ -347,65 +396,124 @@ async def events_webhook(request: Request):
             "id": generate_message_id_func("m"),
         }
 
-    if agent_run_registry.add_user_message(
-        system=system,
-        task_id=task_id,
-        make_message=_make_user_message,
-        content=message_str,
-    ):
-        if trace_id:
-            # Единственное место в дизайне, где trace может быть легитимно
-            # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
-            # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
-            # потери есть именованное событие, а не молчание.
+    # Путь проходится заново после каждой чужой сборки контекста: пока она
+    # шла, прогон мог стартовать — тогда сообщение уходит в него, — а мог и не
+    # стартовать, если сборка упала; тогда строим сами. Откладывать сообщение
+    # «до следующего вебхука» нельзя: следующего может не быть вовсе.
+    #
+    # Потолок — на всё ожидание запроса, а не на каждую чужую сборку: после
+    # отказа одной ключ может занять другой ждущий, и потолки по сборке
+    # складывались бы, а HTTP-запрос висел бы открытым их сумму. Ставится при
+    # первом ожидании: запрос без чужой сборки конфиг и не читает.
+    ceiling: Optional[float] = None
+    deadline = 0.0
+    while True:
+        if agent_run_registry.add_user_message(
+            system=system,
+            task_id=task_id,
+            make_message=_make_user_message,
+            content=message_str,
+        ):
+            if trace_id:
+                # Единственное место в дизайне, где trace может быть легитимно
+                # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
+                # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
+                # потери есть именованное событие, а не молчание.
+                logger.warning(
+                    "trace_id_ignored: trace_id=%s system=%s task_id=%s",
+                    trace_id,
+                    system,
+                    task_id,
+                    extra={
+                        "event": "trace_id_ignored",
+                        "system": system,
+                        "task_id": task_id,
+                        "trace_id": trace_id,
+                    },
+                )
+            return {
+                "status": "queued",
+                "payload": payload,
+                "system": system,
+                "task_id": task_id,
+            }
+
+        # Ключ занимаем ДО первого await: сборка контекста ниже идёт с
+        # дискавери MCP по сети, и без брони второй вебхук на ту же задачу
+        # успевал проскочить проверку занятости выше.
+        if agent_run_registry.reserve(system=system, task_id=task_id):
+            break
+        # Контекст этой задачи строит другой вебхук — ждём конца его сборки, но
+        # не дольше потолка. Своего дедлайна у сборки нет, и вводить его не
+        # станем: медленная, но законная сборка не должна падать. Без потолка же
+        # ждущий висел с открытым запросом всё время сборки, а если прогон
+        # короче сборки, одновременные вебхуки строили контекст по очереди —
+        # источник с ретраем по таймауту получал шторм на ту же задачу.
+        # По истечении — честный 503: сообщение не принято, повторять клиенту.
+        if ceiling is None:
+            ceiling = _context_build_wait_s(
+                (SERVER_CONFIG.get("server") or {}).get("context_build_wait_seconds")
+            )
+            deadline = asyncio.get_running_loop().time() + ceiling
+        try:
+            async with asyncio.timeout_at(deadline):
+                await agent_run_registry.await_build(system=system, task_id=task_id)
+        except TimeoutError:
             logger.warning(
-                "trace_id_ignored: trace_id=%s system=%s task_id=%s",
-                trace_id,
-                system,
-                task_id,
+                "context_build_wait_timeout system=%s task_id=%s ceiling_s=%g",
+                system, task_id, ceiling,
                 extra={
-                    "event": "trace_id_ignored",
+                    "event": "context_build_wait_timeout",
                     "system": system,
                     "task_id": task_id,
-                    "trace_id": trace_id,
+                    "ceiling_s": ceiling,
                 },
             )
-        return {
-            "status": "queued",
-            "payload": payload,
-            "system": system,
-            "task_id": task_id,
-        }
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "error",
+                    "payload": "task context is still being built, retry later",
+                },
+            )
 
-    config_dict = dict(BASE_AGENT_CONFIG)
-    if trace_id:
-        # Shallow copy достаточно: значение — скаляр. Мутировать
-        # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
-        config_dict["trace_id"] = trace_id
-    auth_connector = build_auth_connector(config_dict)
-    # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх непустого
-    # реестра моделей — тот же контракт, что CLI --model (agent_overrides перекрывают
-    # config.yml так же, как CLI-аргументы).
-    force_legacy = cli_forces_legacy_model(config_dict)
-    if force_legacy:
-        logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
-    # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
-    # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на всё
-    # это время, а с переездом прогоны стали тасками на общем loop, поэтому
-    # заморозка била разом по всем эндпоинтам и всем идущим прогонам.
-    ctx = await acreate_run_context(
-        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
-    )
+    # Всё, что может упасть после взятия брони, — внутри `try`: бронь, не
+    # снятая из-за исключения до него, навсегда усыпила бы вебхуки задачи.
+    try:
+        config_dict = dict(BASE_AGENT_CONFIG)
+        if trace_id:
+            # Shallow copy достаточно: значение — скаляр. Мутировать
+            # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
+            config_dict["trace_id"] = trace_id
+        auth_connector = build_auth_connector(config_dict)
+        # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх
+        # непустого реестра моделей — тот же контракт, что CLI --model
+        # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
+        force_legacy = cli_forces_legacy_model(config_dict)
+        if force_legacy:
+            logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
+        # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
+        # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на
+        # всё это время, а с переездом прогоны стали тасками на общем loop,
+        # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
+        ctx = await acreate_run_context(
+            config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+        )
 
-    await agent_run_registry.astart_if_absent(
-        system=system,
-        task_id=task_id,
-        executor_factory=AgentExecutor,
-        ctx=ctx,
-        initial_user_message=message_str,
-        thread_id=task_id,
-        verbose=None,
-    )
+        await agent_run_registry.astart_if_absent(
+            system=system,
+            task_id=task_id,
+            executor_factory=AgentExecutor,
+            ctx=ctx,
+            initial_user_message=message_str,
+            thread_id=task_id,
+            verbose=None,
+        )
+    finally:
+        # Снять бронь в ЛЮБОМ исходе — это и будит ждущих. Прогон стартовал —
+        # они уйдут в него; сборка упала или её сняли — первый из них построит
+        # свой контекст. Без снятия ключ навсегда остался бы «строящимся».
+        agent_run_registry.release_reservation(system=system, task_id=task_id)
 
     return {
         "status": "started",

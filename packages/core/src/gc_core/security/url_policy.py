@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import functools
 import inspect
 import json
 from dataclasses import dataclass, field
@@ -8,7 +9,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context
-from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
 
 
 @dataclass(frozen=True)
@@ -154,7 +155,10 @@ def enforce_url_policy(
                 return (yield)
             if mode == "ask":
                 from gc_core.security.confirm_port import request_confirm
-                confirmed = request_confirm(
+                # В поток, а не на event loop: режим `ask` здесь — умолчание, то
+                # есть обычный путь, а не край.
+                confirmed = (yield OffLoop(functools.partial(
+                    request_confirm,
                     title="Политика URL",
                     question=f"Разрешить запрос вне политики URL: {decision.url}?",
                     fields=[
@@ -165,7 +169,7 @@ def enforce_url_policy(
                     ],
                     ctx=context.ctx,
                     decision_key=f"url:{decision.url}",
-                )
+                ), on_interrupt=False))
                 if confirmed:
                     audit_policy_decision(
                         context,

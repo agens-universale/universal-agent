@@ -88,6 +88,14 @@ async def _off_loop(
     )
 
 
+#: Тот же маршрут для тула, который зовёт гард САМ, а не через декоратор
+#: (`download_file`: гард записи там внутри `acall`). Имя публичное нарочно:
+#: третья копия слотов и `asyncio.to_thread` мимо `run_abandonable_in` стоили
+#: бы метки «брошен» — а без неё подтверждение, оставшееся от снятого вызова,
+#: дописывает решение по чужому нажатию (находки R4.2 и R5.1).
+off_loop = _off_loop
+
+
 # --- Канал запросов тела ------------------------------------------------------
 #
 # Тело гварда — синхронный генератор, но блокирующая работа внутри него бывает
@@ -117,14 +125,34 @@ class AwaitOnCaller:
         self.make_coro = make_coro
 
 
+#: «Перехват не нужен» — отличаем от `on_interrupt=False`, где False и есть
+#: значение, которое надо отдать телу.
+_NO_INTERRUPT = object()
+
+
 class OffLoop:
-    """Выполнить блокирующий вызов в отдельном потоке."""
+    """Выполнить блокирующий вызов в отдельном потоке.
 
-    __slots__ = ("fn", "args")
+    ``on_interrupt`` — что отдать телу гарда, если во время ожидания пришёл
+    Ctrl+C. Ставится ТОЛЬКО там, где ждут человека: подтверждение записи,
+    чтения, URL, команды. Без него (умолчание) SIGINT работает как раньше —
+    отменяет прогон, и это правильно для ожидания LLM-судьи: там прерывание
+    означает «останови всё», а не «человек отказался отвечать».
 
-    def __init__(self, fn: Callable[..., Any], *args: Any) -> None:
+    Зачем вообще: тело гарда исполняется в рабочем потоке, а сигналы CPython
+    доставляет только в главный. Поэтому `except KeyboardInterrupt` внутри
+    `prompt_user_confirmation_choice` — мёртвая ветка: поток её не увидит
+    никогда, а обработчик asyncio тем временем снимает главную задачу, и
+    Ctrl+C на вопросе `y/n` рушит весь прогон вместо вежливого «не разрешаю».
+    """
+
+    __slots__ = ("fn", "args", "on_interrupt")
+
+    def __init__(self, fn: Callable[..., Any], *args: Any,
+                 on_interrupt: Any = _NO_INTERRUPT) -> None:
         self.fn = fn
         self.args = args
+        self.on_interrupt = on_interrupt
 
 
 def _step(flow: Generator, outcome: Any) -> Any:
@@ -146,13 +174,62 @@ class _Failed:
 _INITIAL = object()
 
 
+async def _await_off_loop(request: "OffLoop", *, on_abandoned: Callable[[], None]) -> Any:
+    """Дождаться блокирующего вызова; для ожидания человека — с перехватом Ctrl+C.
+
+    Перехват НАРОЧНО узкий и временный: он живёт только пока ждут человека и
+    только если вызывающий сам об этом попросил. Ставить его на всякое
+    ожидание нельзя — тогда Ctrl+C во время работы гарда перестал бы прерывать
+    прогон, а это единственный способ остановить агента. Обработчик общий на
+    процесс (`intercept_sigint`): ожидания на одном loop выходят не в порядке
+    входа, и своё «запомнить и вернуть» у каждого затирало обработчик соседа.
+
+    Поток, сидящий в ожидании, при перехвате бросается: у ``run_abandonable_in``
+    это штатное состояние (демон-поток, доставка в закрытый future молча
+    отбрасывается). Но брошенное подтверждение живо и могло бы доиграть до
+    конца по строке, набранной уже для следующего вопроса. Поэтому оно само
+    спрашивает `current_call_abandoned`: читатель `y/n` уходит, не трогая
+    чужую строку, а `request_confirm` не пишет решение брошенного вопроса.
+    """
+    from gc_core.utils.sigint_waits import intercept_sigint
+
+    coro = _off_loop(request.fn, *request.args, on_abandoned=on_abandoned)
+    if request.on_interrupt is _NO_INTERRUPT:
+        return await coro
+
+    loop = asyncio.get_running_loop()
+    task = asyncio.ensure_future(coro)
+    interrupted = loop.create_future()
+
+    def _on_sigint() -> None:
+        loop.call_soon_threadsafe(
+            lambda: interrupted.done() or interrupted.set_result(True)
+        )
+
+    try:
+        with intercept_sigint(_on_sigint):
+            done, _ = await asyncio.wait(
+                {task, interrupted}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in done:
+                return task.result()
+            task.cancel()                  # человека ждать больше не нужно
+            return request.on_interrupt
+    finally:
+        if not interrupted.done():
+            interrupted.cancel()
+
+
 async def _aserve_request(flow: Generator, request: Any) -> Any:
     """Выполнить запрос тела (корутина или off-loop вызов); сбой — как ``_Failed``."""
     try:
         if isinstance(request, AwaitOnCaller):
             return await request.make_coro()
-        return await _off_loop(request.fn, *request.args, on_abandoned=lambda: _close_quietly(flow))
+        return await _await_off_loop(request, on_abandoned=lambda: _close_quietly(flow))
     except asyncio.CancelledError:
+        # Отмену в тело НЕ бросаем: его `except Exception` её не
+        # поймает, но проглотить её могло бы чужое `except
+        # BaseException`, и вызов остался бы неотменяемым.
         _close_quietly(flow)
         raise
     except Exception as exc:  # noqa: BLE001 — отдаём в точку запроса

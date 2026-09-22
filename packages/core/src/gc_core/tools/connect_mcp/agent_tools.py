@@ -518,8 +518,48 @@ def _prepare_mcp_tools_data(
         # cfg здесь пересобран из config_dict — поэтому обновляем ссылку, чтобы
         # ключ считался от актуального набора серверов, а не от того, с которым
         # кэш когда-то создали.
+        _warn_if_cache_misses_the_sandbox(tools_cache, servers_cfg, os_backend)
         tools_cache.rebind(cfg)
     return tools_cache, servers_cfg
+
+
+def _warn_if_cache_misses_the_sandbox(
+    tools_cache: ToolsCache, servers_cfg: Dict[str, Any], os_backend: Any
+) -> None:
+    """Сказать вслух, что дискавери уйдёт мимо песочницы.
+
+    Бэкенд кэш получает только при создании: `rebind` перепривязывает конфиг,
+    а бэкенд принять ему нечем. Кэш без бэкенда считает `execute_on: os_backend`
+    «своим», и для stdio это запуск команды сервера в процессе агента — мимо
+    песочницы, тогда как вызовы тулов уходят в неё. Расхождение молчит: внизу,
+    в `resolve_mcp_client`, об этом сказано в debug.
+
+    Доложить можно только ЗДЕСЬ: лишь в этой точке видно обе стороны — что
+    песочница у нас есть и что у кэша её нет. Ниже, где выбирается клиент,
+    отсутствие бэкенда неотличимо от честного запуска без песочницы (CLI на
+    хосте), и предупреждение сыпалось бы там на каждый вызов тула.
+
+    Чинить за владельца нельзя: бэкенд — его выбор и его время жизни.
+    """
+    if not getattr(os_backend, "is_sandbox", False):
+        return
+    if getattr(tools_cache, "os_backend", None) is not None:
+        return
+    orphaned = sorted(
+        name
+        for name, server_cfg in (servers_cfg or {}).items()
+        if isinstance(server_cfg, dict)
+        and str(server_cfg.get("execute_on") or "agent") == "os_backend"
+    )
+    if not orphaned:
+        return
+    logger.warning(
+        "ToolsCache was created without os_backend, so discovery for %s "
+        "(execute_on: os_backend) runs in the agent process instead of the "
+        "sandbox — for stdio that starts the server's command on the host. "
+        "Pass the backend when creating the cache: ToolsCache(cfg, os_backend=…)",
+        ", ".join(orphaned),
+    )
 
 
 def _split_registry_entry(entry: Any) -> tuple:

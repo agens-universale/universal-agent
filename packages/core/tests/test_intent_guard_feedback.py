@@ -1,6 +1,6 @@
 import unittest
 
-from gc_core.intent_guard.feedback import QUESTION_CONTINUE_HINT, TEXT_ANSWER_REJECT_TOOL_HINT, build_finish_gate_feedback, build_finish_gate_reject_technical_user_content, build_text_answer_reject_feedback
+from gc_core.intent_guard.feedback import QUESTION_CONTINUE_HINT, TEXT_ANSWER_REJECT_TOOL_HINT, build_finish_gate_feedback, build_text_answer_reject_feedback
 from gc_core.intent_guard.validation_result import ValidationResult
 
 
@@ -120,22 +120,6 @@ class FinishGateFeedbackTest(unittest.TestCase):
         )
         self.assertIn("without repeating", text)
         self.assertNotIn(QUESTION_CONTINUE_HINT, text)
-
-    def test_reject_technical_user_content_includes_continue_work(self) -> None:
-        feedback = build_finish_gate_feedback(
-            _v(
-                ok=False,
-                action="fix_report",
-                trace_ok=True,
-                report_ok=False,
-                report_mismatches=["solution_type должен быть direct_answer"],
-            )
-        )
-        text = build_finish_gate_reject_technical_user_content(feedback)
-        self.assertIn("does not match", text.lower())
-        self.assertIn("continue working", text.lower())
-        self.assertIn("fix_report", text)
-        self.assertIn("direct_answer", text)
 
 
 class TextAnswerRejectFeedbackTest(unittest.TestCase):

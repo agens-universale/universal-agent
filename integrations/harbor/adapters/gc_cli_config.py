@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.config import flatten_app_config
+from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.root import AppConfig, resolve_paths
 
@@ -91,6 +92,12 @@ def build_gc_cli_config(
         bench_defaults(prompts_dir, skills_dir),
     )
     config = deep_merge(config, dict(overrides or {}))
+    # `${ENV:…}` и `${FILE:…}` — как на файловом пути ядра (`load_config`).
+    # Бенч-путь их не разворачивал, и профиль был обязан держать секрет открытым:
+    # `agent_kwargs.gc_cli_config` уезжает в `config.json` трайла на диск, а через
+    # `--ak` ключ виден ещё и в `ps`. Теперь профиль пишет `"${ENV:GC_API_KEY}"`,
+    # а сам ключ живёт в окружении раннера.
+    config = resolve_env_placeholders(config)
     # Runtime wins: a stale completions_url/model in a profile must not beat what the
     # runner actually passed (api_base / --model).
     config["completions_url"] = completions_url

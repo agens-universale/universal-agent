@@ -1,8 +1,9 @@
-"""Synchronous FsBackend over an async Harbor BaseEnvironment.
+"""Coroutine FsBackend over an async Harbor BaseEnvironment.
 
-The gc-cli tool loop is synchronous; Harbor's environment is async and bound to the
-adapter's event loop. Every method marshals its coroutine onto that loop via
-run_coroutine_threadsafe and blocks the (worker-thread) caller until it completes.
+Harbor's environment is bound to the adapter's event loop. Every operation here is a
+coroutine: on that loop it awaits the environment directly, from any other loop (the
+agent's own ``asyncio.run``) it schedules the call there and awaits the result via
+``wrap_future`` — no thread is blocked either way (see ``_aawait``).
 File ops mirror deepagents' HarborSandbox: write/edit use native upload/download,
 read/list use shell through exec.
 """
@@ -37,6 +38,63 @@ from gc_core.utils.file_text import (
 from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
 
 
+# Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
+# иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
+# глушатся, чтобы conda-хуки не попали в stdout/stderr команды; ``set +e``
+# после source — чтобы ``set -e`` / ``return`` в rc не подменили код возврата
+# пользовательской команды. Имя окружения не зашито. Из develop, как есть.
+#: Потолок на один вопрос «где мы» при сборке контекста. Со стороны ядра
+#: дедлайна нет, и без него медленный контейнер задерживал бы сборку сколько
+#: угодно; сам ответ приходит за миллисекунды.
+_CWD_PRIME_TIMEOUT_SEC = 20
+
+#: Потолок на запуск фоновой команды. Сам запуск — это `exec`, который только
+#: отцепляет команду и печатает pid, ответ приходит за доли секунды.
+_BACKGROUND_SPAWN_TIMEOUT_SEC = 30
+
+_BASHRC_EXEC_INIT = """\
+PS1=${PS1-dummy}
+. /etc/profile >/dev/null 2>&1 || true
+[ -f "${HOME}/.bashrc" ] && . "${HOME}/.bashrc" >/dev/null 2>&1 || true
+set +e
+"""
+
+
+def _env_assignment_prefix(env: Optional[dict]) -> str:
+    if not env:
+        return ""
+    assignments = " ".join(
+        f"{k}={shlex.quote(str(v))}" for k, v in env.items()
+    )
+    return f"env {assignments} "
+
+
+def build_harbor_shell_command(
+    command: str,
+    *,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    exec_init: Optional[str] = None,
+) -> str:
+    """Строка, которую Harbor ``environment.exec`` обернёт в ``bash -c``.
+
+    С инициализацией: ``cd cwd && env K=V bash -c <init+command>``. Без неё
+    команда остаётся сырой. ``cd`` стоит снаружи ``env``, чтобы ``env_vars`` не
+    проглотили cwd бэкенда (R7).
+    """
+    if exec_init:
+        init = _BASHRC_EXEC_INIT if exec_init == "bashrc" else exec_init.rstrip() + "\n"
+        body = "bash -c " + shlex.quote(init + command)
+    else:
+        body = command
+    prefix = _env_assignment_prefix(env)
+    if prefix:
+        body = prefix + body
+    if cwd:
+        return f"cd {shlex.quote(cwd)} && {body}"
+    return body
+
+
 def _build_find_walk_command(
     path: str,
     *,
@@ -65,6 +123,8 @@ class HarborBackend(FsBackend):
     # владельца и без потока.
     # Дефолт берётся из agent.exec_timeout_sec (harbor bench_defaults → 600).
     default_exec_timeout = None
+    #: Фон умеем: команда отцепляется в самом контейнере (см. `aspawn_background`).
+    supports_background = True
 
     def __init__(
         self,
@@ -73,11 +133,17 @@ class HarborBackend(FsBackend):
         *,
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
+        exec_init: Optional[str] = None,
     ) -> None:
         self._env = environment
         self._loop = loop
         self.exec_output_capture_max_chars = exec_output_capture_max_chars
         self.walk_output_max_chars = walk_output_max_chars
+        # Инициализация окружения для канала МОДЕЛИ (`aexec`): None — сырой
+        # shell, "bashrc" — встроенный bootstrap, иначе свой префикс.
+        self.exec_init = exec_init
+        # WORKDIR контейнера, узнанный `aprime_default_cwd`; до того — None.
+        self._discovered_cwd: Optional[str] = None
 
     async def _aawait(self, coro):
         """То же из асинхронного кода — не занимая ни поток, ни event loop.
@@ -144,18 +210,6 @@ class HarborBackend(FsBackend):
         return scope(on_output), accumulators
 
     # --- shell ---
-    def _full_command(
-        self, command: str, *, cwd: Optional[str], env: Optional[dict]
-    ) -> str:
-        """Команда с env-префиксом и cd. Общая для обеих форм exec."""
-        # env forwarding via inline `env K=V` prefix (docker exec has no env dict).
-        if env:
-            prefix = "env " + " ".join(
-                f"{k}={shlex.quote(str(v))}" for k, v in env.items()
-            )
-            command = f"{prefix} {command}"
-        return f"cd {shlex.quote(cwd)} && {command}" if cwd else command
-
     @staticmethod
     def _timed_out_result(streamed: dict, cap: int) -> ExecResult:
         """Таймаут = частичное выполнение: то, что команда успела напечатать.
@@ -193,15 +247,16 @@ class HarborBackend(FsBackend):
         timeout: Optional[int] = None,
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
+        exec_init: Optional[str] = None,
     ) -> ExecResult:
-        """Асинхронный двойник :meth:`_exec`.
+        """Транспорт. ``exec_init`` — только для канала модели (``aexec``).
 
-        Отличается ровно ожиданием: сборка команды, захват вывода и разбор
-        результата общие. Второй копии этих правил быть не должно — иначе
-        синхронный и асинхронный вызовы начали бы запускать разные команды и
-        по-разному читать таймаут.
+        Сборка строки — ``build_harbor_shell_command``. Внутренние помощники,
+        обход, argv и python зовут транспорт без инициализации: сырой канал.
         """
-        full = self._full_command(command, cwd=cwd, env=env)
+        full = build_harbor_shell_command(
+            command, cwd=cwd, env=env, exec_init=exec_init
+        )
         cap = self._capture_cap(capture_max_chars)
         scope, streamed = self._output_capture(cap)
         try:
@@ -244,6 +299,70 @@ class HarborBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
+        """Shell модели: с инициализацией окружения, если она задана."""
+        return await self._aexec_impl(
+            command, cwd=cwd, timeout=timeout, env=env,
+            capture_max_chars=capture_max_chars,
+            exec_init=self.exec_init,
+        )
+
+    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
+                                env: Optional[dict] = None) -> dict:
+        """Запустить команду в контейнере фоном и отдать её pid.
+
+        Пока фона у Harbor не было, промпт велел модели поднимать сервисы через
+        `run_in_background`, а тул отказывал; `&` в обычной команде не спасал —
+        трубы вызова закрывались вместе с ним. Здесь команда отцепляется в самом
+        контейнере: `setsid` уводит её из сессии exec, `nohup` снимает SIGHUP,
+        а все три потока смотрят в /dev/null — ни одной трубы к окружению,
+        которое держит exec. Вывод не сохраняется, как и у локального бэкенда.
+
+        Канал модельный (`aexec`): инициализация окружения (bashrc), `env` и
+        `cwd` те же, что у переднего плана, и внутренний `bash -c` их
+        наследует. В неинтерактивном bash фоновое задание не лидер группы,
+        поэтому `setsid` не форкается, и `$!` — pid самой команды после цепочки
+        exec'ов setsid → nohup → bash. Где `setsid` нет, остаётся `nohup`:
+        exec без терминала SIGHUP при выходе не рассылает.
+        """
+        quoted = shlex.quote(command)
+        detached = (
+            "if command -v setsid >/dev/null 2>&1; then "
+            f"setsid nohup bash -c {quoted} </dev/null >/dev/null 2>&1 & "
+            f"else nohup bash -c {quoted} </dev/null >/dev/null 2>&1 & fi; "
+            "echo $!"
+        )
+        res = await self.aexec(
+            detached, cwd=cwd, env=env, timeout=_BACKGROUND_SPAWN_TIMEOUT_SEC,
+        )
+        if getattr(res, "timed_out", False):
+            # Не «pid не сообщён»: оболочка не вернулась вовсе, а команда могла и
+            # стартовать. Перезапуск вслепую поднял бы второй экземпляр сервиса.
+            raise RuntimeError(
+                f"background command start timed out after "
+                f"{_BACKGROUND_SPAWN_TIMEOUT_SEC} s: the container shell did not "
+                "return, the command may or may not be running"
+            )
+        # Последняя строка: профиль оболочки печатает в stdout раньше нас.
+        lines = (getattr(res, "stdout", "") or "").strip().splitlines()
+        try:
+            return {"pid": int(lines[-1])}
+        except (IndexError, ValueError):
+            raise RuntimeError(
+                "background command did not report its pid: "
+                f"exit={getattr(res, 'return_code', None)} "
+                f"stderr={(getattr(res, 'stderr', '') or '').strip()[:200]!r}"
+            ) from None
+
+    async def aexec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        """POSIX без профиля: помощники ФС, grep, пробы, MCP."""
         return await self._aexec_impl(
             command, cwd=cwd, timeout=timeout, env=env,
             capture_max_chars=capture_max_chars,
@@ -317,7 +436,11 @@ class HarborBackend(FsBackend):
             return b""
         # GNU coreutils in harbor images (same assumption as ``stat -c`` / ``find -printf``).
         # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool cap.
-        res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64 -w 0")
+        # Do not pass ``-w 0``: Harbor's streamed exec reads stdout with
+        # ``StreamReader`` readline (64 KiB). An unwrapped blob is one line and
+        # raises LimitOverrunError before we see stdout. Default wrap is 76
+        # columns; ``b64decode(validate=False)`` ignores the newlines.
+        res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64")
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
         if res.stdout_hit_capture_cap:
@@ -332,10 +455,10 @@ class HarborBackend(FsBackend):
 
     # --- stat: native BaseEnvironment handles where they exist, shell otherwise ---
     async def exists(self, path: str) -> bool:
-        return await self._afs_exec(f"test -e {shlex.quote(path)}").return_code == 0
+        return (await self._afs_exec(f"test -e {shlex.quote(path)}")).return_code == 0
 
     async def lexists(self, path: str) -> bool:
-        return await self._afs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}").return_code == 0
+        return (await self._afs_exec(f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}")).return_code == 0
 
     async def is_file(self, path: str) -> bool:
         return await self._aawait(self._env.is_file(path))
@@ -344,7 +467,7 @@ class HarborBackend(FsBackend):
         return await self._aawait(self._env.is_dir(path))
 
     async def is_symlink(self, path: str) -> bool:
-        return await self._afs_exec(f"test -L {shlex.quote(path)}").return_code == 0
+        return (await self._afs_exec(f"test -L {shlex.quote(path)}")).return_code == 0
 
     async def realpath(self, path: str) -> str:
         res = await self._afs_exec(f"readlink -f {shlex.quote(path)}")
@@ -485,7 +608,32 @@ class HarborBackend(FsBackend):
         return path.startswith("/")
 
     def default_cwd(self) -> Optional[str]:
-        return None  # container's own workdir
+        # WORKDIR контейнера: узнаётся один раз при сборке контекста
+        # (`aprime_default_cwd`), до того — None.
+        return self._discovered_cwd
+
+    async def aprime_default_cwd(self) -> Optional[str]:
+        """Узнать WORKDIR контейнера один раз — корутиной, сырым каналом.
+
+        Раньше рабочую папку спрашивал синхронный ``discover_backend_cwd``
+        через ``exec("pwd")``. Синхронного ``exec`` у Harbor больше нет,
+        умолчание порта отказывает, отказ глотался — и корнем рабочей папки
+        становился ``/`` вместо WORKDIR. Синхронных сборщиков рабочей области
+        восемь (включая конструктор ``State``), каскадом в корутины их не
+        переводим: как и пробы возможностей, значение прогревается один раз
+        при сборке контекста и дальше отдаётся из кэша.
+        """
+        if self._discovered_cwd is None:
+            try:
+                # Таймаут обязателен: без него сборка контекста ждала бы медленный
+                # контейнер сколько угодно — со стороны ядра дедлайна нет.
+                res = await self._aexec_impl("pwd", timeout=_CWD_PRIME_TIMEOUT_SEC)
+            except Exception:  # noqa: BLE001 — окружение может быть недоступно
+                return None
+            lines = (res.stdout or "").strip().splitlines()
+            if res.return_code == 0 and lines and lines[0].startswith("/"):
+                self._discovered_cwd = lines[0]
+        return self._discovered_cwd
 
     # --- file write/edit (native transfer) ---
     async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:

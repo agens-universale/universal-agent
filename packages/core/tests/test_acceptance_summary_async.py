@@ -27,6 +27,7 @@ import time
 import pytest
 
 from gc_core.aio import AsyncAgent
+from gc_testkit import LoopPulse
 
 from parity_harness import (
     ScriptedBackend,
@@ -165,70 +166,12 @@ async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
 
 
 # --- S-2: цикл не залипает во время компакции ------------------------------
-
-class _Pulse:
-    """Пульс на loop: тикает каждые ``STEP`` и запоминает разрывы.
-
-    Разрыв — это время, на которое loop НЕ вернулся к пульсу. Его источников
-    два: занятость самого loop (то, что мы проверяем) и занятость машины (то,
-    что нас не касается). Разделить их абсолютным порогом нельзя — под полным
-    прогоном набора планировщик ОС не возвращает управление за 10 мс, сколько
-    бы loop ни был свободен. Поэтому порог здесь не абсолютный, а относительно
-    базы, снятой тем же пульсом в том же прогоне.
-    """
-
-    STEP = 0.01
-
-    def __init__(self) -> None:
-        self.gaps: list[float] = []
-        self._stop = asyncio.Event()
-        self._task: asyncio.Task | None = None
-
-    async def __aenter__(self) -> "_Pulse":
-        self._task = asyncio.create_task(self._beat())
-        # Ждём первый тик. Иначе замер начинается до старта пульса и меряет не
-        # свободу цикла, а то, успел ли он вообще стартовать.
-        while not self.gaps:
-            await asyncio.sleep(self.STEP / 2)
-        self.gaps.clear()
-        return self
-
-    async def __aexit__(self, *_exc) -> None:
-        self._stop.set()
-        await self._task
-
-    async def _beat(self) -> None:
-        prev = time.monotonic()
-        while not self._stop.is_set():
-            await asyncio.sleep(self.STEP)
-            now = time.monotonic()
-            self.gaps.append(now - prev)
-            prev = now
-
-    def p95(self) -> float:
-        """Только для диагностики в сообщении об ошибке, НЕ критерий.
-
-        Здоровый хвост рядом с разъехавшимся максимумом — это и есть картина
-        «цикл отняли один раз надолго»; критерием процентиль здесь быть не может
-        (см. докстринг ``test_loop_stays_responsive_during_compaction``).
-        """
-        assert self.gaps, "пульс не тикал вовсе"
-        ordered = sorted(self.gaps)
-        return ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
-
-    def worst(self) -> float:
-        assert self.gaps, "пульс не тикал вовсе"
-        return max(self.gaps)
-
-    def report(self) -> str:
-        import statistics
-
-        return (
-            f"p95 {self.p95() * 1000:.0f} мс, "
-            f"медиана {statistics.median(self.gaps) * 1000:.0f} мс, "
-            f"максимум {self.worst() * 1000:.0f} мс, тиков {len(self.gaps)}"
-        )
-
+#
+# Пульс — общий прогретый ``gc_testkit.LoopPulse``: им же меряют
+# ``test_acceptance_non_blocking`` и приёмка чужого хранилища. Разрыв пульса
+# складывается из занятости loop (её и проверяем) и занятости машины (она нас
+# не касается). Поэтому порог здесь не абсолютный, а относительно базы, снятой
+# тем же пульсом в том же прогоне.
 
 #: Во сколько раз худший разрыв ВО ВРЕМЯ компакции может быть хуже базы. Запас
 #: грубый намеренно: ловим не микросекунды, а отнятый цикл.
@@ -239,25 +182,43 @@ _BUDGET = 3.0
 #: заведомо ниже любого блокирующего вызова (сотни мс и больше).
 _STALL_FLOOR = 0.25
 
-#: Заведомая заморозка для контроля измерителя. Больше `_TAIL_FLOOR`, чтобы
-#: контроль не зависел от того, каким вышел порог.
+#: Заведомая заморозка для контроля измерителя. Не меньше `_STALL_FLOOR`:
+#: пульс обязан видеть заморозку того размера, который тест компакции уже
+#: считает отнятым циклом.
 _CONTROL_FREEZE = 0.25
 
 
-async def test_the_pulse_actually_sees_a_frozen_loop():
+@pytest.mark.parametrize("where", ["head", "middle", "tail"])
+async def test_the_pulse_actually_sees_a_frozen_loop(where):
     """Контроль измерителя: без него зелёный вердикт нефальсифицируем.
 
     Пульс, который ничего не видит, одинаково зелёный и когда цикл свободен, и
     когда мы меряем не то. Здесь loop замораживается заведомо — синхронным
     ``time.sleep`` прямо в корутине, — и пульс ОБЯЗАН это заметить.
 
+    Место заморозки в окне — три, и у каждого свой отказ измерителя:
+
+    * ``head`` — первой строкой внутри ``async with``, до первой уступки. Так
+      выглядит синхронный кусок работы до её первого ``await``, и видит его
+      только ПРОГРЕТЫЙ пульс: без прогрева задача пульса к этому моменту лишь
+      поставлена в очередь и берёт отметку времени уже после заморозки.
+      Прежде контроль морозил одну середину, и снятый из ``__aenter__``
+      прогрев набор не замечал — проверено подменой; теперь краснеет ``head``;
+    * ``middle`` — после первой уступки: пульс вообще видит заморозку;
+    * ``tail`` — последней строкой окна: ``__aexit__`` обязан дождаться
+      очередного тика, а не снять пульс, иначе хвост работы выпадает из замера.
+
     Тот же приём, что на стенде приёмки (``~/gc-core-acceptance/control.py``),
-    только дешёвый: одна заморозка вместо живого прогона.
+    только дешёвый: одна заморозка вместо живого прогона. Измеритель общий
+    (``gc_testkit.LoopPulse``), так что контроль здесь один на все замеры
+    отзывчивости, которые идут через него.
     """
-    async with _Pulse() as pulse:
-        await asyncio.sleep(_Pulse.STEP * 3)
+    async with LoopPulse() as pulse:
+        if where != "head":
+            await asyncio.sleep(pulse.step * 3)
         time.sleep(_CONTROL_FREEZE)          # заморозка loop, не await
-        await asyncio.sleep(_Pulse.STEP * 3)
+        if where != "tail":
+            await asyncio.sleep(pulse.step * 3)
 
     # Сравниваем с СОБСТВЕННОЙ медианой того же окна, а не с нулём. Первая
     # редакция требовала `worst >= 0.8 * freeze` — и это проходило само собой
@@ -271,7 +232,7 @@ async def test_the_pulse_actually_sees_a_frozen_loop():
 
     excess = pulse.worst() - statistics.median(pulse.gaps)
     assert excess >= _CONTROL_FREEZE * 0.8, (
-        f"пульс НЕ увидел заморозку на {_CONTROL_FREEZE * 1000:.0f} мс: "
+        f"пульс НЕ увидел заморозку ({where}) на {_CONTROL_FREEZE * 1000:.0f} мс: "
         f"худший разрыв всего на {excess * 1000:.0f} мс больше типичного "
         f"({pulse.report()}) — измеритель сломан, и остальные его выводы "
         "ничего не значат"
@@ -318,12 +279,19 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
     # База: тот же пульс, тот же процесс, та же загрузка машины — но loop
     # свободен. Окно соизмеримо с прогоном, чтобы хвост считался по сравнимому
     # числу тиков.
-    async with _Pulse() as baseline:
-        await asyncio.sleep(0.3)
+    # Сборщик глушится на обоих окнах. База и замер ловят занятость машины
+    # одинаково, но НЕ паузы сборщика: замерено, что в окно этого теста попадает
+    # до 6 пауз на 327 мс при худшей 188 мс, а база снимается за 0,3 с и часто
+    # не ловит ни одной. Отношение сравнивало бы «с паузой» против «без паузы».
+    from gc_testkit import quiet_gc_for_loop_timing
 
-    async with _Pulse() as during:
-        async with await AsyncAgent.create(cfg) as agent:
-            await agent.run("сделай что-нибудь", thread_id="t-s2")
+    with quiet_gc_for_loop_timing():
+        async with LoopPulse() as baseline:
+            await asyncio.sleep(0.3)
+
+        async with LoopPulse() as during:
+            async with await AsyncAgent.create(cfg) as agent:
+                await agent.run("сделай что-нибудь", thread_id="t-s2")
 
     assert was_compacted(cfg, "sdk", "t-s2"), "компакция не сработала — тест пуст"
 
@@ -395,31 +363,37 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
     держит цикл дольше обычного хода, поэтому именно на ней очередь заметнее
     всего.
     """
+    from gc_testkit import quiet_gc_for_loop_timing
+
     solo_cfg = compacting_config(tmp_path / "solo", monkeypatch, model="соло")
     install_many(monkeypatch, {"соло": slow_script()})
-    solo = await AsyncAgent.create(solo_cfg)
-    started = time.monotonic()
-    try:
-        await solo.run("один", thread_id="t-s4-solo")
-    finally:
-        await solo.aclose()
-    alone = time.monotonic() - started
+    # Оба замера под заглушенным сборщиком: замерено 18 пауз на 1311 мс в окне
+    # этого теста при собственной работе около 0,8 с. Отношение мерило долю
+    # пауз, попавших в каждую фазу, а не сериализацию компакцией.
+    with quiet_gc_for_loop_timing():
+        solo = await AsyncAgent.create(solo_cfg)
+        started = time.monotonic()
+        try:
+            await solo.run("один", thread_id="t-s4-solo")
+        finally:
+            await solo.aclose()
+        alone = time.monotonic() - started
 
-    cfg_a = compacting_config(tmp_path / "pa", monkeypatch, model="пара-а")
-    cfg_b = compacting_config(tmp_path / "pb", monkeypatch, model="пара-б")
-    install_many(monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()})
-    a = await AsyncAgent.create(cfg_a)
-    b = await AsyncAgent.create(cfg_b)
-    started = time.monotonic()
-    try:
-        await asyncio.gather(
-            a.run("первый", thread_id="t-s4-a"),
-            b.run("второй", thread_id="t-s4-b"),
-        )
-    finally:
-        await a.aclose()
-        await b.aclose()
-    together = time.monotonic() - started
+        cfg_a = compacting_config(tmp_path / "pa", monkeypatch, model="пара-а")
+        cfg_b = compacting_config(tmp_path / "pb", monkeypatch, model="пара-б")
+        install_many(monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()})
+        a = await AsyncAgent.create(cfg_a)
+        b = await AsyncAgent.create(cfg_b)
+        started = time.monotonic()
+        try:
+            await asyncio.gather(
+                a.run("первый", thread_id="t-s4-a"),
+                b.run("второй", thread_id="t-s4-b"),
+            )
+        finally:
+            await a.aclose()
+            await b.aclose()
+        together = time.monotonic() - started
 
     assert was_compacted(cfg_a, "sdk", "t-s4-a"), "компакция не сработала — тест пуст"
     ratio = together / alone if alone else 0.0

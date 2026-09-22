@@ -17,7 +17,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
-from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.async_protocol import aexec_port, arun_backend_exec_raw
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.utils.find_in_files_scan_mode import Needles
 from gc_core.utils.fs_search_walk import effective_exclude_dir_names
@@ -508,8 +508,8 @@ async def anative_prefilter_candidates(
     """
     cmd = build_prefilter_command(path, **kwargs)
     try:
-        res = await aexec_port(backend).aexec(
-            cmd, **_prefilter_run_kwargs(backend)
+        res = await arun_backend_exec_raw(
+            backend, cmd, **_prefilter_run_kwargs(backend)
         )
     except Exception as exc:
         log.debug("native prefilter failed: %s", exc)
@@ -663,7 +663,7 @@ async def arun_native_grep(
     port = aexec_port(backend)
     try:
         res = (
-            await port.aexec(recipe.target, **recipe.kwargs)
+            await arun_backend_exec_raw(backend, recipe.target, **recipe.kwargs)
             if recipe.shell
             else await port.aexec_argv(recipe.target, **recipe.kwargs)
         )

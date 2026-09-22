@@ -101,10 +101,17 @@ agent_kwargs:
   gc_cli_config:
     max_steps: 300                      # дефолт 200
     no_tool_call_max_count: 3           # дефолт 3 (0 = обрыв с первой ошибки тула)
-    chat_completion_kwargs:             # сэмплинг
+    chat_completion_kwargs:             # сэмплинг агента
       temperature: 1.0
       top_p: 0.95
       top_k: 40
+    auxiliary_llm_params:               # summary / finish-gate / judges (отдельно от агента)
+      max_tokens: 24576
+      # Schema default — {}. Vendor-ключи (enable_thinking) только если бэкенд их знает;
+      # иначе OpenAI/Azure → 400. Когда у агента thinking вкл — гасите явно здесь.
+      completion_kwargs:
+        chat_template_kwargs:
+          enable_thinking: false
     summary_params:                     # суммаризация (по умолчанию ВЫКЛ)
       chat_completions_summary_trigger_chars: 200000
 ```
@@ -113,6 +120,9 @@ agent_kwargs:
   в профиль не пишутся.
 - `completions_url`/`model` runtime-авторитетны (из `api_base`/`model`) — профильный override
   их не перебивает.
+- **Два профиля сэмплинга:** `chat_completion_kwargs` — tool-цикл агента (thinking обычно вкл);
+  `auxiliary_llm_params.completion_kwargs` — summary / finish-gate / judges (thinking обычно выкл).
+  В harbor пишите **плоский** `auxiliary_llm_params`, не `chat_completions_params.auxiliary_llm`.
 
 ## Замечания
 

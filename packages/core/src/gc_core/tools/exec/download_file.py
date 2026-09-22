@@ -414,7 +414,18 @@ class DownloadFile(AbstractSimpleTool):
 
         dest = os.path.join(download_root, validated_filename)
 
-        write_guard_error = self._check_write_guard(dest)
+        # Гард записи в режиме `ask` ждёт человека, а `_check_write_guard`
+        # синхронный: прямой вызов отсюда держал бы event loop вызывающего всё
+        # время ожидания. Уезжаем ТЕМ ЖЕ маршрутом, что гарды-декораторы
+        # (`OffLoop` → `run_abandonable_in`), а не через `asyncio.to_thread`:
+        # только он ставит вызову метку «брошен». Без метки подтверждение,
+        # оставшееся от снятого по Ctrl+C вызова, дожидается следующей строки и
+        # записывает по ней разрешение на запись вне периметра — ровно тот вред,
+        # который закрывали R4.2 и R5.1. Заодно поток берётся из слотов гвардов,
+        # а не из общего пула, который держит выход процесса.
+        from gc_core.security.dual_wrapper import off_loop
+
+        write_guard_error = await off_loop(self._check_write_guard, dest)
         if write_guard_error is not None:
             return self._result(path=dest, filename=validated_filename, error=write_guard_error)
 

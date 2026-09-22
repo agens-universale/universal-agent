@@ -166,13 +166,15 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     Ретраим только вероятно транзиентные ошибки:
     - сетевые ошибки/таймауты
     - HTTP 429 и 5xx
+    - HTTP 404: LLM-прокси отдаёт его, пока route модели нет после обрыва
+      туннеля (транзиентно); честный 404 просто ждёт retry-бюджет.
     - иногда рвётся стрим: ошибки парсинга/валидации
     """
     if isinstance(exc, HTTP_STATUS_ERRORS):
         status_code = http_status_code(exc)
         if status_code is None:
             return False
-        return status_code == 429 or status_code >= 500
+        return status_code in (404, 429) or status_code >= 500
 
     if isinstance(exc, HTTP_TRANSPORT_ERRORS):
         return True
@@ -384,12 +386,6 @@ async def arequest_backend_responses(
 
 
 
-@retry_with_backoff_async(
-    should_retry=_default_should_retry_backend_exception,
-    retry_log_level=logging.ERROR,
-    no_more_retries_log_level=logging.ERROR,
-    operation_name="Backend chat completion request",
-)
 async def _astream_chat_completions(client, url: str, data: Dict, headers: Dict, *, timeout: float, logger, on_delta: OnDelta):
     stream_data = dict(data)
     stream_data["stream"] = True
@@ -423,6 +419,15 @@ async def _astream_chat_completions(client, url: str, data: Dict, headers: Dict,
         assembler = StreamAssembler(on_delta=on_delta)
         async for line in _aiter_utf8_lines(r):
             assembler.feed_line(line)
+            if assembler.done:
+                # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
+                # нельзя: закрывает его сервер, а корп-прокси вправе держать
+                # соединение сколько угодно. Ход ждал бы read-timeout (600 с
+                # по умолчанию), а тот считается поводом повторить ВЕСЬ
+                # запрос: показанный ответ стирается и генерируется заново.
+                # Синхронный путь до переезда выходил здесь же —
+                # `iter_sse_data_lines` делала на маркере `return`.
+                break
         assembler.flush()
         assembled = assembler.result()
 
@@ -438,6 +443,12 @@ async def _astream_chat_completions(client, url: str, data: Dict, headers: Dict,
         return assembled
 
 
+@retry_with_backoff_async(
+    should_retry=_default_should_retry_backend_exception,
+    retry_log_level=logging.ERROR,
+    no_more_retries_log_level=logging.ERROR,
+    operation_name="Backend chat completion request",
+)
 async def arequest_backend_chat_completions(
     data: Dict,
     headers: Dict,
@@ -456,7 +467,9 @@ async def arequest_backend_chat_completions(
     TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None → всегда
     non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
     """
-    del use_retry  # стрим не ретраится; параметр принимается ради единого интерфейса с responses
+    # `use_retry` забирает из kwargs декоратор ретраев (retry_with_backoff_async) —
+    # до тела функции он не доходит; в сигнатуре остаётся как часть интерфейса.
+    del use_retry
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 

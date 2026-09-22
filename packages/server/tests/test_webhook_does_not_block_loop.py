@@ -64,17 +64,22 @@ async def _heartbeat(stop: asyncio.Event, gaps: list) -> None:
 
 async def test_context_build_leaves_the_loop_free(blocking_ctx):
     """Пока контекст собирается, соседняя корутина продолжает тикать."""
+    from gc_testkit import quiet_gc_for_loop_timing
+
     gaps: list = []
     stop = asyncio.Event()
-    beat = asyncio.create_task(_heartbeat(stop, gaps))
-    await asyncio.sleep(0.05)
+    # Сборщик глушится на окне замера: пауза поколения 2 на куче полного набора
+    # (180–220 мс) больше порога, и тест судил бы её, а не сборку контекста.
+    with quiet_gc_for_loop_timing():
+        beat = asyncio.create_task(_heartbeat(stop, gaps))
+        await asyncio.sleep(0.05)
 
-    started = time.monotonic()
-    await blocking_ctx.acreate_run_context({}, auth_connector=None)
-    elapsed = time.monotonic() - started
+        started = time.monotonic()
+        await blocking_ctx.acreate_run_context({}, auth_connector=None)
+        elapsed = time.monotonic() - started
 
-    stop.set()
-    await beat
+        stop.set()
+        await beat
 
     assert elapsed >= _BUILD_SEC, "подмена не сработала — тест ничего не меряет"
     assert gaps, "хартбит не тикал вовсе"

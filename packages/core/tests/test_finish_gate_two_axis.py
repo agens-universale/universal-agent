@@ -84,15 +84,40 @@ def _stub_tools_modules() -> None:
     tools_pkg.tool_arguments_valid = lambda *_a, **_k: True
     tools_pkg.abuild_tools_data = _build_tools_data
     tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.is_internal_tool_error_output = lambda _output: False
+    tools_pkg.is_unknown_tool_output = lambda _output: False
     tools_dir = module_dir("tools")
     tools_pkg.__path__ = [str(tools_dir)]
     sys.modules["gc_core.tools"] = tools_pkg
+    return tools_pkg
+
+
+def _unbind_stub(module, stub, real) -> None:
+    """Вернуть модулю настоящие объекты вместо ВСЕХ, что он взял у заглушки.
+
+    Одного ``aapply_tool`` мало. Если ``processing_responses`` впервые
+    импортируется здесь, его ``from gc_core.tools import (...)`` связывает под
+    заглушкой весь список, и ``is_unknown_tool_output`` навсегда остаётся
+    «всегда False»: у следующих тестов счётчик неизвестных тулов молча стоит на
+    нуле. Так падал ``test_loop_detector``, шедший после этого файла, — и
+    проходил в одиночку.
+
+    Ищем по тождеству с объектами заглушки, а не по списку имён: список
+    разойдётся с импортом ядра на первом же новом имени (прежние приехали с
+    develop — см. выше), а тождество видит и новые имена, и алиасы.
+    """
+    stubbed = [(name, obj) for name, obj in vars(stub).items()
+               if not name.startswith("__")]
+    for name, value in list(vars(module).items()):
+        for stub_name, stub_obj in stubbed:
+            if value is stub_obj:
+                setattr(module, name, getattr(real, stub_name))
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_processing_responses():
     global processing_module, arun_agent, State
-    _stub_tools_modules()
+    stub_tools = _stub_tools_modules()
     from gc_core import processing_responses as pm
     from gc_core.processing_responses import arun_agent as ra
     from gc_core.states import State as St
@@ -105,17 +130,17 @@ def _load_processing_responses():
     # sys.modules, а `processing_responses.aapply_tool` оставался заглушкой на
     # весь остаток прогона — и `test_parity_smoke` падал пятью тестами, проходя
     # при этом в одиночку.
-    pm.aapply_tool = sys.modules["gc_core.tools"].aapply_tool
+    pm.aapply_tool = stub_tools.aapply_tool
     yield
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
-    # Сохранить «прежнее» значение до yield нельзя: к этому моменту оно уже
-    # заглушка — pm импортирован после подмены. Настоящую функцию берём
+    # Сохранить «прежние» значения до yield нельзя: к этому моменту они уже
+    # заглушка — pm импортирован после подмены. Настоящие объекты берём
     # переимпортом уже очищенного пакета.
     import gc_core.tools as real_tools
 
-    pm.aapply_tool = real_tools.aapply_tool
+    _unbind_stub(pm, stub_tools, real_tools)
 
 
 def _make_state(*, max_steps: int = 5, parent_state_id=None):
@@ -540,8 +565,11 @@ def test_guard_passes_structured_intent_lines_to_validator(monkeypatch):
     ]
 
 
-def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch):
-    """Reject finish gate must not return finish_arguments; inject technical user feedback."""
+def test_run_agent_reject_continues_from_tool_output_without_technical_user(monkeypatch):
+    """Reject must not return finish_arguments and must not inject a user message.
+
+    The next loop step is the tool-output batch; the verdict lives in that output.
+    """
     validate_calls = {"n": 0}
 
     def _validate(**_kwargs):
@@ -572,17 +600,24 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
         as_coro(lambda **_kwargs: None),
     )
 
-    user_ask_batches: list[list] = []
+    output_batches: list[list] = []
 
-    def _stub_user_ask(in_messages, _state, _ctx):
-        user_ask_batches.append(list(in_messages))
-        return (
-            [_submit_solution_call(solution_type="direct_answer")],
-            "rid_retry",
-        )
+    def _stub_tool_outputs(in_messages, _state, _ctx):
+        output_batches.append(list(in_messages))
+        retry = _submit_solution_call(solution_type="direct_answer")
+        retry["call_id"] = "call_finish_retry"
+        retry["id"] = "fc_finish_retry"
+        return [retry], "rid_retry"
 
     monkeypatch.setattr(
-        processing_module, "aprocess_user_ask", as_coro(_stub_user_ask)
+        processing_module, "aprocess_tool_outputs", as_coro(_stub_tool_outputs)
+    )
+    monkeypatch.setattr(
+        processing_module,
+        "aprocess_user_ask",
+        as_coro(lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("gate reject must not inject a user message")
+        )),
     )
 
     state = _make_state(max_steps=10)
@@ -600,15 +635,19 @@ def test_run_agent_reject_continues_turn_with_technical_user_message(monkeypatch
         "предыдущий ход",
         "спроси меня что нибудь",
     ]
-    assert len(user_ask_batches) == 1
-    assert len(user_ask_batches[0]) == 1
-    tech_content = str(user_ask_batches[0][0].get("content") or "")
-    assert "intent" in tech_content.lower()
-    assert "continue working" in tech_content.lower()
-    assert "<technical" in tech_content.lower()
-    assert any(
-        "quality gate" in str(m.get("content") or "").lower()
-        or "intent" in str(m.get("content") or "").lower()
+    assert len(output_batches) == 1
+    assert output_batches[0]
+    assert all(m.get("role") != "user" for m in output_batches[0])
+    finish_out = next(
+        m for m in output_batches[0]
+        if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+    )
+    payload = json.loads(finish_out["output"])
+    assert payload["ok"] is False
+    assert "fix_report" in payload["message"].lower()
+    assert "without repeating" in payload["message"].lower()
+    assert not any(
+        "finish gate:" in str(m.get("content") or "").lower()
         for m in state.messages
         if m.get("role") == "user"
     )

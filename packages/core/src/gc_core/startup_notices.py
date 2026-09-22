@@ -21,17 +21,29 @@ class Notice(NamedTuple):
 _DEPRECATED_KEYS = {"backend.stream": "tui.stream"}
 
 
-def _stop_tools_unknown(config_dict: Dict[str, Any], builtin_tool_names: Set[str]) -> List[Notice]:
+def _stop_tools_unknown(
+    config_dict: Dict[str, Any],
+    builtin_tool_names: Set[str],
+    known_tool_names: Optional[Set[str]] = None,
+) -> List[Notice]:
     raw = config_dict.get("stop_tools")
     if not isinstance(raw, list):
         return []
     stop = {s.strip() for s in raw if isinstance(s, str) and s.strip()}
-    unknown = sorted(stop - set(builtin_tool_names))
+    # Каталог до вычитания (builtin + то, что собрал build_tools_data: скиллы,
+    # MCP, сабагенты). Сверять с уже отфильтрованным набором нельзя: успешно
+    # снятый тул снова станет опечаткой. Отдельного вечного списка skills_* нет —
+    # их выключает тот же stop_tools, и известны они только если реально
+    # попали в реестр.
+    known = set(builtin_tool_names)
+    if known_tool_names:
+        known |= set(known_tool_names)
+    unknown = sorted(stop - known)
     if not unknown:
         return []
     return [Notice(
         "warning", "stop_tools_unknown",
-        "stop_tools: имена не совпали ни с одним встроенным тулом и "
+        "stop_tools: имена не совпали ни с одним тулом и "
         f"проигнорированы: {', '.join(unknown)}.",
         highlights=("stop_tools", *unknown),
     )]
@@ -232,6 +244,7 @@ def collect_startup_notices(
     deprecated_keys_used: Optional[List[str]] = None,
     upgrade_info=None,
     compat_notices: Optional[List[str]] = None,
+    known_tool_names: Optional[Set[str]] = None,
 ) -> List[Notice]:
     """Единая точка сборки. Warnings перед infos, внутри — по источнику.
 
@@ -239,11 +252,15 @@ def collect_startup_notices(
     живут в TUI, потому что и голос включается только там. Подставляются НА
     МЕСТО прежнего `_voice`, а не в хвост: внутри уровня порядок источников
     значим, и дописка в конец тихо переставила бы строки на экране.
+
+    `known_tool_names` — каталог до вычитания ``stop_tools``. Без него
+    валидатор видит только builtin: выключенный скилл-тул не считается
+    известным, пока сборка не передала его имя.
     """
     warns: List[Notice] = []
     infos: List[Notice] = []
     for n in (
-        _stop_tools_unknown(config_dict, builtin_tool_names)
+        _stop_tools_unknown(config_dict, builtin_tool_names, known_tool_names)
         + _subagent_definitions(config_dict)
         + _mcp_failed(mcp_status)
         + _agentsmd(config_dict, is_tui=is_tui)

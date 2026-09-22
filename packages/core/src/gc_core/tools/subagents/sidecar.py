@@ -105,6 +105,13 @@ async def apersist_subagent_trace(
         return None
     store = getattr(ctx, "thread_store", None)
     if store is None:
+        if not ident.threads_dir:
+            # Ни хранилища, ни каталога — писать некуда, и молчать здесь
+            # правильнее, чем писать куда попало: `FileThreadStore("")` уводит
+            # запись в путь ОТНОСИТЕЛЬНО текущего каталога процесса. Ровно эта
+            # молчаливая запись мимо контракта уже была однажды (см. докстроку
+            # `FileThreadStore.archive_and_replace`).
+            return None
         from gc_core.thread_store_file import FileThreadStore
 
         store = FileThreadStore(ident.threads_dir)

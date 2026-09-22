@@ -33,7 +33,8 @@ def _envelope(stdout_text: str, stderr_text: str = "", *, p: int = P, cap: int =
 
 def test_whole_stream_uses_content_and_omits_edges():
     js = stream_to_json(_stream("short output\n"))
-    assert js == {"truncated": False, "content": "short output\n", "total_chars": 13}
+    assert js == {"content": "short output\n", "total_chars": 13}
+    assert "truncated" not in js
     assert "head" not in js and "tail" not in js and "omitted_chars" not in js
 
 
@@ -85,7 +86,7 @@ def test_zero_edge_disables_preview():
 def test_both_streams_short_have_no_preview_block():
     env = _envelope("short\n", "")
     assert "preview" not in env
-    assert env["truncated"] is False
+    assert "truncated" not in env
     assert env["stdout"]["content"] == "short\n"
     assert env["stderr"]["content"] == ""
 
@@ -106,16 +107,16 @@ def test_streams_are_independent_and_budget_is_not_shared():
 def test_top_level_truncated_is_or_of_streams():
     assert _envelope("a" * 100, "")["truncated"] is True
     assert _envelope("", "b" * 100)["truncated"] is True
-    assert _envelope("a" * 10, "b" * 10)["truncated"] is False
+    assert "truncated" not in _envelope("a" * 10, "b" * 10)
 
 
 def test_preview_without_truncation_does_not_set_truncated():
     """Поток длиннее 2P, но целиком в capture: preview есть, truncated — нет."""
     env = _envelope("a" * 30)
     assert "stdout" in env["preview"]
-    assert env["stdout"]["truncated"] is False
+    assert "truncated" not in env["stdout"]
     assert env["stdout"]["content"] == "a" * 30
-    assert env["truncated"] is False
+    assert "truncated" not in env
 
 
 def test_preview_precedes_expanded_channels_in_serialized_json():

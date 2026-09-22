@@ -7,9 +7,9 @@ from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 from gc_testkit import run_coro
 
 
-def test_auxiliary_llm_completion_kwargs_from_chat_completions_llm():
+def test_auxiliary_llm_completion_kwargs_from_auxiliary_llm():
     ctx = SimpleNamespace(
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             completion_kwargs={
                 "reasoning_effort": "none",
                 "separate_reasoning": False,
@@ -24,7 +24,7 @@ def test_auxiliary_llm_completion_kwargs_from_chat_completions_llm():
     }
 
 
-def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(monkeypatch):
+def test_summarize_tool_intent_line_uses_auxiliary_llm_completion_kwargs(monkeypatch):
     captured = {}
 
     async def _fake_request_summary_text(*, payload_overrides=None, **kwargs):
@@ -45,7 +45,7 @@ def test_summarize_tool_intent_line_uses_chat_completions_llm_completion_kwargs(
             max_summary_chars=500,
             max_tool_output_chars=1000,
         ),
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={"reasoning_effort": "none"},
         ),
@@ -88,7 +88,7 @@ def test_summarize_tool_intent_line_fail_open_on_llm_error(monkeypatch):
         intent_scope=IntentScopeConfig(
             tools={"turn_ask_human": IntentScopeToolConfig(record="aggregated")}
         ),
-        chat_completions_llm=SimpleNamespace(
+        auxiliary_llm=SimpleNamespace(
             max_tokens=100, completion_kwargs={}
         ),
         logger=None,

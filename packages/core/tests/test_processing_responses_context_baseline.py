@@ -224,6 +224,44 @@ def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatc
     assert order == ["pre:user_ask", "backend"]
 
 
+def test_first_poll_merges_pending_with_the_start_batch(monkeypatch):
+    """Первый опрос очереди СКЛЕИВАЕТСЯ со стартовым батчем, а не подменяет его.
+
+    Цикл делал `messages = pending`, и сообщение, пришедшее между стартом
+    прогона и первым запросом к модели, вытесняло стартовое: оно не доходило ни
+    до модели, ни до треда. Клиенту при этом уже ответили «принято».
+
+    Тест живёт здесь, а не рядом с тестами исполнителя, намеренно: тут есть
+    каркас, гоняющий НАСТОЯЩУЮ `arun_agent`. Первая редакция этой проверки
+    повторяла логику слияния внутри собственной заглушки и потому не ловила
+    откат правки вовсе — подмена показала «3 passed» на сломанном коде.
+    """
+    seen: list = []
+
+    async def _fake_process_user_ask(messages, _state, _ctx):
+        seen.append([m.get("content") for m in messages if isinstance(m, dict)])
+        return [_submit_solution_call()], "resp_1"
+
+    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+
+    polls = [[{"role": "user", "content": "пришло во время прогона", "id": "m2"}]]
+
+    def _get_pending():
+        return polls.pop(0) if polls else []
+
+    result = run_coro(arun_agent(
+        [{"role": "user", "content": "стартовое", "id": "m1"}],
+        _make_state(),
+        _make_ctx(),
+        get_pending_messages=_get_pending,
+    ))
+
+    assert result == _expected_finish_return()
+    assert seen and seen[0] == ["стартовое", "пришло во время прогона"], (
+        f"первый опрос подменил стартовый батч вместо слияния: {seen}"
+    )
+
+
 def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch):
     order: list[str] = []
 

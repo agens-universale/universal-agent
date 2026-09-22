@@ -89,10 +89,12 @@ def test_fetch_url_validation():
     tool = with_local_ctx(FetchUrl)
     assert json.loads(_call(tool, url=""))["error"]["field"] == "url"
     assert json.loads(_call(tool, url="ftp://x"))["error"]["field"] == "url"
-    assert json.loads(_call(tool, url="https://x", timeout_seconds=-1))["error"]["field"] == "timeout_seconds"
+    assert json.loads(_call(tool, url="https://x", timeout=-1))["error"]["field"] == "timeout"
     assert json.loads(_call(tool, url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
     assert json.loads(_call(tool, url="https://x", offset=-1))["error"]["field"] == "offset"
     assert json.loads(_call(tool, url="https://x", limit=0))["error"]["field"] == "limit"
+    assert json.loads(_call(tool, url="https://x", proxy="not-a-proxy"))["error"]["field"] == "proxy"
+    assert json.loads(_call(tool, url="https://x", proxy=123))["error"]["field"] == "proxy"
 
 
 def test_fetch_url_policy_blocks_before_request(monkeypatch):

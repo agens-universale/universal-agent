@@ -405,6 +405,17 @@ class ToolsCache:
         self._cache_key: Optional[str] = None
         self._status: Dict[str, Dict[str, Any]] = {}
 
+    @property
+    def os_backend(self) -> Any:
+        """Бэкенд, с которым кэш создали, — чтобы владельца можно было спросить.
+
+        Спрашивает сборка контекста: кэш приходит от вызывающего, и если у
+        него бэкенда нет, а у нас песочница, дискавери `execute_on: os_backend`
+        уйдёт мимо неё. Передать бэкенд задним числом нельзя (см. `rebind`), но
+        сказать об этом вслух — можно.
+        """
+        return self._os_backend
+
     def rebind(self, cfg: Dict[str, Any]) -> None:
         """Переключить кэш на новый config-словарь, СОХРАНИВ содержимое.
 

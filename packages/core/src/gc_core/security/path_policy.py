@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
+import time
 from typing import Any, Callable, Iterable
 
 from gc_core.trace_id import trace_id_from_config
-from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
 
 
 @dataclass(frozen=True)
@@ -181,7 +183,11 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
 
 
 def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_result_factory):
-    """Floor carve-out (Spec B §6): блок записи в защищённый путь или None (можно писать)."""
+    """Floor carve-out (Spec B §6): блок записи в защищённый путь или None (можно писать).
+
+    Генератор, как и тело гарда: подтверждение человека идёт запросом
+    `yield OffLoop(...)` драйверу, поэтому звать — через `yield from`.
+    """
     from gc_core.security.protected_paths import protected_decision, protection_enabled
     from gc_core.security.confirm_port import request_confirm
     _cfg = getattr(context.ctx, "config_dict", None) or {}
@@ -205,13 +211,17 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
             blocked_result_factory=blocked_result_factory,
         )
     if _decision == "ask":
-        _ok = request_confirm(
+        # Ожидание человека уходит в поток: в TUI это до 600 с, и
+        # на event loop вместе с ним встали бы субагенты и
+        # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
+        _ok = (yield OffLoop(functools.partial(
+            request_confirm,
             title="Защита записи",
             question=f"Разрешить запись в {candidate_path}?",
             fields=[("path", candidate_path)],
             ctx=context.ctx,
             decision_key=f"write:{candidate_path}",
-        )
+        ), on_interrupt=False))
         if not _ok:
             _err = {
                 "type": "protected_path_denied",
@@ -227,7 +237,11 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
 
 
 def _resolve_write_violation(exc, context, candidate_path, operation, func, args, kwargs, blocked_result_factory):
-    """Нарушение периметра по режиму: (True, None) — писать можно; (False, blocked) — отказ."""
+    """Нарушение периметра по режиму: (True, None) — писать можно; (False, blocked) — отказ.
+
+    Генератор: подтверждение в режиме ask — запрос `yield OffLoop(...)`
+    драйверу, звать через `yield from`.
+    """
     tool_name = _tool_name(func, args)
     wg_mode = (context.write_guard.mode or "deny").strip().lower()
     if wg_mode == "allow":
@@ -242,14 +256,17 @@ def _resolve_write_violation(exc, context, candidate_path, operation, func, args
         )
         return True, None
     if wg_mode == "ask":
-        confirmed = _ask_user_confirmation_for_write(
+        # Тот же приём, что и у защищённых путей выше: подтверждение
+        # ждётся в потоке, а не на event loop вызывающего.
+        confirmed = (yield OffLoop(functools.partial(
+            _ask_user_confirmation_for_write,
             tool_name=tool_name,
             path=candidate_path,
             operation=operation,
             error=exc.error,
             ctx=context.ctx,
             decision_key=f"write:{candidate_path}",
-        )
+        ), on_interrupt=False))
         if confirmed:
             audit_policy_decision(
                 context,
@@ -300,7 +317,7 @@ def _write_guard_flow(func, args, kwargs, path_arg, path_extractor, operation, b
     except ValueError:
         candidate_path = None
     if candidate_path is not None:
-        blocked = _protected_write_block(
+        blocked = yield from _protected_write_block(
             candidate_path, context, func, args, kwargs, blocked_result_factory,
         )
         if blocked is not None:
@@ -334,7 +351,7 @@ def _write_guard_flow(func, args, kwargs, path_arg, path_extractor, operation, b
             operation=operation,
         )
     except WriteGuardViolation as exc:
-        allowed, blocked = _resolve_write_violation(
+        allowed, blocked = yield from _resolve_write_violation(
             exc, context, candidate_path, operation, func, args, kwargs, blocked_result_factory,
         )
         if allowed:
@@ -495,14 +512,128 @@ def prompt_user_confirmation_choice(
     # Same mnemonic as TUI; Esc/timeout only exist in TUI runner — omit here.
     lines.append(f"{CONFIRM_CHOICE_HINT}: ")
     try:
+        _drop_typed_ahead()
         print("\n".join(lines), file=sys.stderr, end="")
         sys.stderr.flush()
-        answer = input().strip()
+        answer = _read_confirmation_line()
     except EOFError:
         return CONFIRM_DENY_REMEMBER
     except KeyboardInterrupt:
         return CONFIRM_DENY_ONCE
+    if answer is None:
+        return CONFIRM_DENY_ONCE
     return normalize_confirm_key(answer)
+
+
+#: Шаг опроса stdin в ответе на `y/n`. Идёт в рабочем потоке гарда, loop не
+#: держит; 50 мс человеку незаметны.
+_CONFIRM_POLL_SEC = 0.05
+
+
+def _polling_console() -> Any:
+    """Консоль Windows для опроса нажатий — модуль `msvcrt`; вне Windows ``None``."""
+    if os.name != "nt":
+        return None
+    import msvcrt
+
+    return msvcrt
+
+
+def _drop_typed_ahead() -> None:
+    """Выбросить набранное ДО вопроса: `y/n` отвечает только ввод после него.
+
+    Иначе разрешение выдавало бы то, что человек напечатал, пока агент работал,
+    или строка, начатая для вопроса агента, который потом сняли по Ctrl+C.
+    """
+    from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd
+
+    fd = pollable_stdin_fd()
+    if fd is not None:
+        discard_unread(fd)
+        return
+    console = _polling_console()
+    if console is not None:
+        while console.kbhit():
+            console.getwch()
+
+
+def _read_confirmation_line() -> str | None:
+    """Строка ответа на `y/n`; ``None`` — вопрос бросили, отвечать больше некому.
+
+    Читаем тем же читателем, что и вопросы агента (`gc_core.utils.stdin_lines`),
+    а не `input()`. Подтверждение ждёт в рабочем потоке гарда, и после Ctrl+C
+    его бросают: `input()` остался бы в `read()` и забрал строку, набранную уже
+    для следующего вопроса. Опрос же видит, что вызов брошен, и уходит, не
+    трогая чужую строку.
+
+    На Windows `select` к консоли неприменим — там опрос нажатий `msvcrt`, с тем
+    же уходом брошенного вызова. Прежнее `input()` осталось только для stdin без
+    `fileno()` вне Windows (подменённого): брошенный вызов строку там унести
+    ещё может, но решения по ней не запишет — это отсекает `request_confirm`.
+    """
+    # Lazy: security → tools/utils на module load ломает import graph.
+    from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
+    from gc_core.utils.stdin_lines import pollable_stdin_fd, take_line
+
+    fd = pollable_stdin_fd()
+    if fd is None:
+        console = _polling_console()
+        if console is not None:
+            return _read_console_line(console, give_up=current_call_abandoned)
+        return input().strip()
+    while True:
+        if current_call_abandoned():
+            return None
+        line = take_line(fd, give_up=current_call_abandoned)
+        if line is not None:
+            return line.strip()
+        time.sleep(_CONFIRM_POLL_SEC)
+
+
+def _read_console_line(console: Any, *, give_up: Callable[[], bool]) -> str | None:
+    """Строка с консоли Windows опросом нажатий; ``None`` — вопрос бросили.
+
+    `kbhit` не блокирует, поэтому брошенный вызов замечает метку и уходит, не
+    взяв ни одного нажатия, — в отличие от `input()`, который остался бы в
+    чтении. `getwch` набранное не показывает, эхо печатаем сами. Backspace
+    стирает; стрелки и F-клавиши приходят двумя кодами (префикс и код клавиши)
+    и пропускаются целиком. Ctrl+Z в начале строки — конец ввода, как у
+    `input()` на Windows.
+    """
+    chars: list[str] = []
+    while True:
+        if give_up():
+            return None
+        if not console.kbhit():
+            time.sleep(_CONFIRM_POLL_SEC)
+            continue
+        line = _apply_console_key(console, console.getwch(), chars)
+        if line is not None:
+            return line
+
+
+def _apply_console_key(console: Any, key: str, chars: list[str]) -> str | None:
+    """Одно нажатие для `_read_console_line`: готовая строка по Enter, иначе ``None``.
+
+    ``chars`` — набранное до сих пор, правится на месте.
+    """
+    if key in ("\x00", "\xe0"):
+        console.getwch()
+    elif key in ("\r", "\n"):
+        console.putwch("\r")
+        console.putwch("\n")
+        return "".join(chars).strip()
+    elif key == "\x1a" and not chars:
+        raise EOFError
+    elif key == "\x08":
+        if chars:
+            chars.pop()
+            for ch in "\x08 \x08":
+                console.putwch(ch)
+    elif key.isprintable():
+        chars.append(key)
+        console.putwch(key)
+    return None
 
 
 def prompt_user_confirmation(

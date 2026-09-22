@@ -6,8 +6,6 @@ from typing import Any, Dict, Optional
 
 CONFIG_FILE_NAME = "config.yml"
 
-import urllib3
-
 from gc_core.config_modules.auth import build_auth_connector
 from pydantic import ValidationError as _PydanticValidationError
 
@@ -345,7 +343,10 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "download": app_cfg.security.download.model_dump(),
         "summary_params": app_cfg.summary.model_dump(),
         "chat_completions_params": app_cfg.chat_completions.model_dump(),
-        "chat_completions_llm": app_cfg.chat_completions.llm,
+        # Плоский dict рядом с chat_completion_kwargs: deep_merge (бенч/project)
+        # обновляет его; живой pydantic-объект сюда не кладём — иначе early-return
+        # в auxiliary_llm_from_config_dict игнорирует overlay.
+        "auxiliary_llm_params": app_cfg.chat_completions.auxiliary_llm.model_dump(),
         "quality_gate_params": app_cfg.quality_gate.model_dump(),
         # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
         "working_memory": app_cfg.working_memory,
@@ -414,6 +415,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
         "exec_output_preview_edge_chars": app_cfg.agent.exec_output_preview_edge_chars,
         "walk_output_max_chars": app_cfg.agent.walk_output_max_chars,
+        "harbor_exec_init": app_cfg.agent.harbor_exec_init,
         "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
         "model_steering": app_cfg.agent.model_steering,
         "limit_trace_summary": app_cfg.agent.limit_trace_summary,
@@ -484,7 +486,9 @@ def load_config_ex(
     config_path: Optional[str] = None,
     *,
     profile_override: Optional[str] = None,
-    apply_to_process: bool = True,
+    # Единственный глобальный эффект (глушение urllib3 при `use_ssl: false`)
+    # ушёл вместе с urllib3; параметр держим ради вызывающих (TUI-витрины).
+    apply_to_process: bool = True,  # noqa: ARG001
 ) -> tuple[Dict[str, Any], ProfileMeta]:
     """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
 
@@ -594,10 +598,10 @@ def load_config_ex(
 
     sync_logging_flat_and_params(config_dict)
 
-    verify = config_dict["use_ssl"]
-    if verify is False and apply_to_process:
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+    # Здесь глушились предупреждения urllib3 при `use_ssl: false`. Ядро ходит
+    # httpx, своих предупреждений urllib3 больше не рождает, а сам пакет ядро
+    # не объявляет — он приезжал транзитом через trafilatura. Тот же класс
+    # поломки, что был с requests у голоса, только тише.
     meta = ProfileMeta(active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices)
     return config_dict, meta
 

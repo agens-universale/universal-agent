@@ -349,29 +349,26 @@ async def test_run_python_timeout(be, tmp_path):
 
 
 async def test_drain_keeps_reading_after_head_is_full():
-    """После заполнения головы чанки продолжают считаться и обновлять хвост.
+    """После заполнения головы чтение продолжается: счётчик и хвост настоящие.
 
-    Свойство пришло с develop, где дренаж синхронный и живёт в потоке. У нас
-    он корутина (`_adrain_stream`), поэтому проверяем нашу форму: важно, что
-    чтение НЕ прекращается по заполнении головы — иначе ни счётчик, ни хвост
-    не будут настоящими, а труба переполнится и заблокирует процесс.
+    Свойство пришло с develop, где чтение синхронное и живёт в потоке. У нас
+    это корутина над трубой (`_adrain_stream`): важно, что чтение НЕ
+    прекращается по заполнении головы — иначе ни счётчик, ни хвост не будут
+    настоящими, а вызывающий получит только начало вывода.
     """
     from gc_core.backends.local import _Capture, _adrain_stream
 
     class _Stream:
-        def __init__(self):
-            self._chunks = [b"A" * 50, b"B" * 50, b"END"]
-            self._i = 0
+        """Двойник `StreamReader`: отдаёт заготовленные чанки, потом EOF."""
+
+        def __init__(self, chunks) -> None:
+            self._chunks = list(chunks)
 
         async def read(self, _n):
-            if self._i >= len(self._chunks):
-                return b""
-            chunk = self._chunks[self._i]
-            self._i += 1
-            return chunk
+            return self._chunks.pop(0) if self._chunks else b""
 
     sink = _Capture(40)
-    await _adrain_stream(_Stream(), sink)
+    await _adrain_stream(_Stream([b"A" * 50, b"B" * 50, b"END"]), sink)
     cs = sink.stream
 
     assert cs.total_chars == 103, "счётчик считает только голову — чтение обрывается"

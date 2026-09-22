@@ -28,7 +28,7 @@ from gc_core.tools.connect_mcp.client import (
     _merge_mcp_headers,
     _normalize_url,
 )
-from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.async_protocol import aexec_port, arun_backend_exec_raw
 from gc_core.tools.connect_mcp.client_port import McpClientPort
 from gc_core.utils.ssl_config import get_verify_ssl
 
@@ -262,8 +262,10 @@ class OsBackendStatelessClient(McpClientPort):
         """Асинхронный двойник :meth:`_require_python3`."""
         cached = getattr(self.os_backend, _CARRIER_CACHE_ATTR, None)
         if cached is None:
-            probe = await aexec_port(self.os_backend).aexec(
-                self._PROBE_COMMAND, timeout=self._probe_timeout(timeout)
+            # Сырой канал: проба носителя — внутренний вызов, профиль образа ей
+            # вреден (у develop так же).
+            probe = await arun_backend_exec_raw(
+                self.os_backend, self._PROBE_COMMAND, timeout=self._probe_timeout(timeout)
             )
             cached = self._remember_probe(probe)
         if not cached:

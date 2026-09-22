@@ -168,30 +168,6 @@ class WorkingMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def wrong_arguments_feedback_hint(
-        cls,
-        *,
-        received_args: str,
-        parsed_args: dict[str, Any] | None,
-        _message: str,
-    ) -> str | None:
-        args = parsed_args
-        if args is None and received_args:
-            try:
-                args = json.loads(received_args)
-            except json.JSONDecodeError:
-                return None
-        if not isinstance(args, dict) or "path" not in args:
-            return None
-        registers = ", ".join(REGISTER_ORDER)
-        return (
-            "💡 Hint: This tool is for INTERNAL AGENT MEMORY only — it does NOT write files to disk.\n"
-            f"Use `register` ({registers}) with `action` append/write/read/list.\n"
-            "To create files on the filesystem, use the filesystem write tool with "
-            "`path` (absolute) and `content`.\n"
-        )
-
-    @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
         return """Tool name: session_memory
 Tool description: Thread/session memory for THIS dialogue only — not project-wide remember-forever.

@@ -123,15 +123,3 @@ def build_text_answer_reject_feedback(result: ValidationResult) -> str:
     if not result.is_question:
         lines.extend(["", TEXT_ANSWER_REJECT_TOOL_HINT])
     return "\n".join(lines)
-
-
-def build_finish_gate_reject_technical_user_content(feedback: str) -> str:
-    """Technical user message after finish gate reject — continue the open turn."""
-    body = str(feedback or "").strip()
-    lines = [
-        "Finish gate rejected this turn: the handoff does not match the user's intent.",
-        "Continue working on the current turn; do not treat the turn as complete.",
-    ]
-    if body:
-        lines.extend(["", "Details:", body])
-    return "\n".join(lines)
