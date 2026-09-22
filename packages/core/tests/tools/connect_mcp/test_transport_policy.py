@@ -51,12 +51,19 @@ def test_persistent_session_does_not_break_stdio():
 
 
 def test_both_callers_use_the_same_helper():
-    """Гейт против повторного расхождения: своей копии правила быть не должно."""
+    """Гейт против повторного расхождения: своей копии правила быть не должно.
+
+    Резолв зовёт `api`; `registry` получает готовый `effective_transport`
+    параметром и хелпер не вызывает — его имя там держалось на НЕиспользуемом
+    импорте, то есть проверка «имя есть в исходнике» для него была холостой
+    (снят вместе с остальными F401). Поэтому наличие вызова спрашиваем у того,
+    кто резолвит, а у обоих — отсутствие своей копии правила.
+    """
     import inspect
 
     from gc_core.tools.connect_mcp import api, registry
 
+    assert "resolve_effective_transport(" in inspect.getsource(api)
     for mod in (api, registry):
         src = inspect.getsource(mod)
-        assert "resolve_effective_transport" in src, mod.__name__
         assert 'effective_transport = "stream_sse"' not in src, f"{mod.__name__}: правило снова продублировано"

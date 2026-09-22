@@ -68,7 +68,7 @@ def test_import_server_exits_cleanly_when_agent_config_broken():
             ),
         ):
             with pytest.raises(SystemExit) as exc_info:
-                pass
+                from gc_server import server  # noqa: F401  # сам импорт и есть предмет проверки
         assert "невалидный YAML" in str(exc_info.value)
     finally:
         _reset_server_module()
@@ -87,6 +87,6 @@ def test_import_server_exits_cleanly_when_server_config_broken():
             side_effect=yaml.YAMLError("boom"),
         ):
             with pytest.raises(SystemExit):
-                pass
+                from gc_server import server  # noqa: F401  # сам импорт и есть предмет проверки
     finally:
         _reset_server_module()
