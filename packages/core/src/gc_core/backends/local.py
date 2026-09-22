@@ -4,6 +4,7 @@ import asyncio
 import signal
 import codecs
 import hashlib
+import logging
 import os
 import stat as stat_module
 import threading
@@ -19,6 +20,8 @@ from gc_core.backends.protocol import (
 )
 from gc_core.backends.walk_util import WalkEntry, pruned_dir_predicate
 from gc_core.utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
+
+logger = logging.getLogger(__name__)
 
 
 def _is_real_dir(entry: os.DirEntry) -> bool:
@@ -793,57 +796,106 @@ def _drain_in_threads(proc) -> None:
     внуку писать в stderr, чей буфер иначе заполнится и остановит его насовсем.
     Потоки daemon — на выходе интерпретатора их никто не ждёт.
     """
-    for fd in _dup_pipe_fds(proc):
+    for end in _dup_pipe_ends(proc):
         threading.Thread(
             target=_read_until_eof,
-            args=(fd,),
+            args=(end,),
             daemon=True,
             name="exec-pipe-drain",
         ).start()
 
 
-def _dup_pipe_fds(proc) -> list:
-    """Копии дескрипторов наших концов stdout и stderr команды.
+def _dup_pipe_ends(proc) -> list:
+    """Копии наших концов stdout и stderr команды.
 
-    `os.dup` даёт независимый дескриптор того же открытого файла: закрытие
-    транспорта копию не трогает, и труба живёт, пока жива она. Транспорт
+    Копия — независимая ссылка на тот же открытый конец трубы: закрытие
+    транспорта её не трогает, и труба живёт, пока жива она. Транспорт
     приватный, поэтому на любой неожиданности возвращаем, что набрали:
-    дренаж потеряем, но вызов не уроним.
+    дренаж потеряем, но вызов не уроним — и скажем об этом в лог, иначе
+    сломанный дренаж выглядит как рабочий.
     """
     transport = getattr(proc, "_transport", None)
     if transport is None:
         return []
-    fds: list = []
+    ends: list = []
     for stream_fd in (1, 2):
         try:
             pipe = transport.get_pipe_transport(stream_fd).get_extra_info("pipe")
-            copy = os.dup(pipe.fileno())
-            # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
-            # без этого первое же чтение из потока даёт `BlockingIOError`, мы
-            # принимаем его за конец и закрываем трубу — ровно та беда, от
-            # которой уходим. Флаг общий с оригиналом, но его читателей уже
-            # отменили, а сам он закроется следом.
-            os.set_blocking(copy, True)
-            fds.append(copy)
-        except Exception:
-            continue
-    return fds
+            ends.append(_dup_pipe_end(pipe))
+        except Exception as exc:
+            logger.warning(
+                "exec: трубу %s команды не отдать потоку дренажа — фоновый "
+                "процесс команды получит ошибку записи: %r", stream_fd, exc,
+            )
+    return ends
 
 
-def _read_until_eof(fd: int) -> None:
+def _dup_pipe_end(pipe):
+    """Копия одного конца: дескриптор на POSIX, хэндл на Windows.
+
+    На Windows труба asyncio — `PipeHandle`, его `fileno()` отдаёт хэндл, а не
+    дескриптор, и `os.dup` на нём падает с EBADF. Хэндл копирует
+    `DuplicateHandle`.
+    """
+    if os.name == "nt":
+        import _winapi
+
+        current = _winapi.GetCurrentProcess()
+        return _winapi.DuplicateHandle(
+            current, pipe.handle, current, 0, False, _winapi.DUPLICATE_SAME_ACCESS
+        )
+    copy = os.dup(pipe.fileno())
+    # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
+    # без этого первое же чтение из потока даёт `BlockingIOError`, мы
+    # принимаем его за конец и закрываем трубу — ровно та беда, от
+    # которой уходим. Флаг общий с оригиналом, но его читателей уже
+    # отменили, а сам он закроется следом.
+    os.set_blocking(copy, True)
+    return copy
+
+
+def _read_until_eof(end: int) -> None:
     """Читать копию трубы до EOF и закрыть её.
 
     Прочитанное выбрасываем: результат вызова давно собран, а нужен тут сам
     факт чтения — труба, у которой есть живой читатель, не даёт писателю EPIPE.
     """
+    if os.name == "nt":
+        _read_handle_until_eof(end)
+        return
     try:
-        while os.read(fd, _READ_CHUNK):
+        while os.read(end, _READ_CHUNK):
             pass
     except OSError:
         pass
     finally:
         try:
-            os.close(fd)
+            os.close(end)
+        except OSError:
+            pass
+
+
+def _read_handle_until_eof(handle: int) -> None:
+    """Windows: читать копию хэндла до EOF и закрыть её.
+
+    asyncio открыл нашу сторону трубы с FILE_FLAG_OVERLAPPED, а синхронное
+    чтение такого хэндла Windows не гарантирует. Поэтому читаем overlapped и
+    ждём каждый результат — как `multiprocessing.connection.PipeConnection`.
+    EOF здесь — ERROR_BROKEN_PIPE: все писатели закрыли свой конец.
+    """
+    import _winapi
+
+    try:
+        while True:
+            ov, _ = _winapi.ReadFile(handle, _READ_CHUNK, overlapped=True)
+            _, err = ov.GetOverlappedResult(True)
+            if err == _winapi.ERROR_BROKEN_PIPE:
+                break
+    except OSError:
+        pass
+    finally:
+        try:
+            _winapi.CloseHandle(handle)
         except OSError:
             pass
 

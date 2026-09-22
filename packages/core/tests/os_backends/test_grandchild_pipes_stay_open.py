@@ -1,9 +1,10 @@
 """Фоновый внук команды переднего плана продолжает писать в свои потоки.
 
-`exec_command` запускает `/bin/sh -c …`, и его stdout/stderr — трубы к нам.
-Команда с `&` (а чаще — чужой скрипт, который сам уводит сервис в фон через
-`nohup`) оставляет внука, унаследовавшего эти трубы. Шелл вышел, но EOF не
-придёт: трубу закрывает ПОСЛЕДНИЙ писатель, а внук держит её часами.
+`exec_command` запускает `/bin/sh -c …` (на Windows — `cmd.exe /c …`), и его
+stdout/stderr — трубы к нам. Команда с `&` (в cmd.exe — `start /b`, а чаще —
+чужой скрипт, который сам уводит сервис в фон через `nohup`) оставляет внука,
+унаследовавшего эти трубы. Шелл вышел, но EOF не придёт: трубу закрывает
+ПОСЛЕДНИЙ писатель, а внук держит её часами.
 
 Ждать его мы не можем — тул обязан вернуться. Но и закрывать трубу нельзя:
 первая же запись внука даёт EPIPE, то есть SIGPIPE и смерть для обычной
@@ -16,15 +17,10 @@ import asyncio
 import os
 import shlex
 import sys
+import threading
 import time
 
-import pytest
-
 from gc_core.backends.local import LocalFsBackend
-
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="`&` в cmd.exe — разделитель команд, а не фон"
-)
 
 #: Заведомо больше `_DRAIN_JOIN_TIMEOUT_SEC` (2 с): внук должен проснуться
 #: после того, как прежний код уже закрыл бы трубы.
@@ -55,13 +51,38 @@ async def _status_when_written(path, timeout: float = 20.0) -> str:
     raise AssertionError(f"внук не отчитался за {timeout:.0f} с")
 
 
+def _background_command(tmp_path, marker) -> str:
+    """Команда, уводящая внука в фон средствами шелла: `&` в sh, `start /b` в cmd.exe.
+
+    Внук — файлом: многострочный `-c` через cmd.exe не передать.
+    """
+    child = tmp_path / "child.py"
+    child.write_text(_CHILD, encoding="utf-8")
+    if os.name == "nt":
+        return f'start /b "" "{sys.executable}" "{child}" "{marker}"'
+    return (
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(child))} "
+        f"{shlex.quote(str(marker))} &"
+    )
+
+
+async def _new_drain_threads_gone(before: set, timeout: float = 10.0) -> bool:
+    """Потоки дренажа, появившиеся после снимка `before`, дошли до EOF и вышли."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not [
+            t for t in threading.enumerate()
+            if t.name == "exec-pipe-drain" and t.ident not in before
+        ]:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
 async def test_a_grandchild_keeps_writing_after_the_tool_returned(tmp_path):
     """Команда вернулась, внук остался — и его записи не обрываются."""
     marker = tmp_path / "status"
-    command = (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} "
-        f"{shlex.quote(str(marker))} &"
-    )
+    command = _background_command(tmp_path, marker)
 
     started = time.monotonic()
     res = await LocalFsBackend().aexec(command, timeout=30)
@@ -87,10 +108,8 @@ async def test_a_grandchild_survives_the_end_of_a_turn_loop(tmp_path):
     этого не видит.
     """
     marker = tmp_path / "status"
-    command = (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} "
-        f"{shlex.quote(str(marker))} &"
-    )
+    command = _background_command(tmp_path, marker)
+    before = {t.ident for t in threading.enumerate()}
 
     def _turn():
         """Ровно то, что делает воркер TUI: ход в своём loop, в своём потоке."""
@@ -105,4 +124,8 @@ async def test_a_grandchild_survives_the_end_of_a_turn_loop(tmp_path):
     assert await _status_when_written(marker) == "ok", (
         "внук получил ошибку на записи после конца хода: loop ушёл и забрал с "
         "собой дренаж, а трубы закрылись под живым процессом"
+    )
+    assert await _new_drain_threads_gone(before), (
+        "внук вышел, а потоки дренажа живы: EOF не распознан, и каждая такая "
+        "команда оставляла бы поток до конца сеанса"
     )
