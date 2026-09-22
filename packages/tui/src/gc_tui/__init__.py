@@ -264,6 +264,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         app.run()
     finally:
+        # Процессы индекса путей (git ls-files) — первыми: поток сборки индекса — демон
+        # и умрёт вместе с процессом, а сам git пережил бы программу, дочитывая
+        # репозиторий без хозяина. Быстро и не бросает: ошибки гашения глотаются внутри.
+        from gc_tui.services import file_index
+        file_index.kill_running_processes()
         # Осознанно две РАЗНЫЕ модели гашения демонов: voice — light-switch
         # (lease-файлы, гасит последний живой клиент, безопасно при N TUI);
         # MCP — per-process («гашу только то, что сам поднял»). Не унифицировано:
