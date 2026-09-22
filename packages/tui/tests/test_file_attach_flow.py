@@ -733,7 +733,7 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
     sent = []
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             sent.append(list(messages))
 
         def stop_run(self):
@@ -788,7 +788,7 @@ async def test_escape_then_enter_sends_text_as_is(tmp_path, monkeypatch):
     sent = []
 
     class _Fake:
-        def run(self, messages, **kw):
+        async def arun(self, messages, **kw):
             sent.append(list(messages))
 
         def stop_run(self):
