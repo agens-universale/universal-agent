@@ -345,6 +345,28 @@ def _reap(proc: "subprocess.Popen") -> None:
         pass
 
 
+# Процессы, запущенные `_stream_bounded` и ещё не подобранные. При выходе из программы
+# их гасит `kill_running_processes`: поток сборки индекса — демон и умрёт вместе с
+# процессом, а запущенный им git — нет, он дочитывал бы репозиторий уже без хозяина и
+# без таймаута. Снимаются с учёта только после подбора — PID подобранного процесса мог
+# бы уже достаться другому.
+_running: set["subprocess.Popen"] = set()
+_running_lock = threading.Lock()
+_exiting = False        # выход начался — новых команд не запускаем
+
+
+def kill_running_processes() -> None:
+    """Выход из программы: погасить деревья всех ещё идущих команд индекса и больше
+    новых не запускать. Зовёт `main()` TUI в `finally` после `app.run()`."""
+    global _exiting
+    with _running_lock:
+        _exiting = True
+        procs = list(_running)
+    for proc in procs:
+        if proc.poll() is None:
+            _kill_process_tree(proc)
+
+
 def _stream_bounded(cmd: list[str], cwd: str, timeout: float,
                     on_chunk: Callable[[bytes], None]) -> bool:
     """Запустить команду и отдавать её stdout кусками в on_chunk. True — код
@@ -362,16 +384,34 @@ def _stream_bounded(cmd: list[str], cwd: str, timeout: float,
 
     Не subprocess.run: на Windows он после kill() ждёт закрытия пайпа без таймаута,
     а пайп держит переживший обёртку дочерний процесс — «таймаут 5 с» превращался
-    в ожидание полного прогона git (замер: 19 с на репозитории в 926 тыс. файлов)."""
+    в ожидание полного прогона git (замер: 19 с на репозитории в 926 тыс. файлов).
+
+    Запущенный процесс до подбора числится в реестре (`_running`) — его погасит
+    `kill_running_processes` при выходе из программы; после начала выхода команда не
+    запускается вовсе — False."""
     kwargs: dict = {}
     if os.name != "nt":
         kwargs["start_new_session"] = True      # своя группа — чтобы гасить её целиком
+    with _running_lock:
+        if _exiting:
+            return False
+        try:
+            proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, **kwargs)
+        except OSError:
+            return False
+        _running.add(proc)
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, **kwargs)
-    except OSError:
-        return False
+        return _pump_bounded(proc, cmd, timeout, on_chunk)
+    finally:
+        with _running_lock:
+            _running.discard(proc)
 
+
+def _pump_bounded(proc: "subprocess.Popen", cmd: list[str], timeout: float,
+                  on_chunk: Callable[[bytes], None]) -> bool:
+    """Тело `_stream_bounded` после запуска процесса: чтение служебным потоком с
+    дедлайном, гашение и подбор (контракт — там)."""
     failure: list[BaseException] = []
     stop = threading.Event()        # после таймаута вывод никому не нужен
 
