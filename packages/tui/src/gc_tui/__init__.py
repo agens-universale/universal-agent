@@ -261,9 +261,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Если апгрейд ЕСТЬ — стамп откладывается до закрытия PostUpdateScreen
     # (спека D, Task 10): иначе крэш до показа экрана «съедает» уведомление
     # об апгрейде на следующем запуске.
-    try:
-        app.run()
-    finally:
+
+    def _shutdown_runtime() -> None:
         # Осознанно две РАЗНЫЕ модели гашения демонов: voice — light-switch
         # (lease-файлы, гасит последний живой клиент, безопасно при N TUI);
         # MCP — per-process («гашу только то, что сам поднял»). Не унифицировано:
@@ -280,4 +279,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 pass
         if auto_mcp:
             shutdown_mcp_daemons()
+
+    # Уборка одна на оба выхода: штатный и аварийный — когда терминал умер, а
+    # Textual навсегда встал на записи в него (см. gc_tui.services.terminal_guard).
+    from gc_tui.services.terminal_guard import TerminalGuard
+
+    guard = TerminalGuard(_shutdown_runtime)
+    try:
+        guard.install()
+        app.run()
+    finally:
+        guard.close()
     return 0
