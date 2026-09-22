@@ -225,10 +225,14 @@ def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
     всё ещё может вытеснить соседей. Симлинк на папку показываем, но внутрь не
     идём (как os.walk без followlinks). `ignore_anywhere`/`ignore_root` —
     имена папок из корневого .gitignore (см. `_simple_gitignore_dirs`),
-    пропускаются наравне с `_IGNORE_DIRS`."""
+    пропускаются наравне с `_IGNORE_DIRS`. Начался выход из программы
+    (`kill_running_processes`) — обход останавливается на следующей папке и отдаёт
+    собранное как обрезанное: дочитывать проект в умирающем процессе некому."""
     out: list[str] = []
     queue: deque[str] = deque([""])
     while queue:
+        if _exiting:
+            return out, True
         rel_dir = queue.popleft()
         try:
             with os.scandir(os.path.join(root, rel_dir) if rel_dir else root) as it:
@@ -352,12 +356,14 @@ def _reap(proc: "subprocess.Popen") -> None:
 # бы уже достаться другому.
 _running: set["subprocess.Popen"] = set()
 _running_lock = threading.Lock()
-_exiting = False        # выход начался — новых команд не запускаем
+_exiting = False        # выход начался — новых команд не запускаем, обход диска прерываем
 
 
 def kill_running_processes() -> None:
-    """Выход из программы: погасить деревья всех ещё идущих команд индекса и больше
-    новых не запускать. Зовёт `main()` TUI в `finally` после `app.run()`."""
+    """Выход из программы: погасить деревья всех ещё идущих команд индекса, новых не
+    запускать и прервать обход диска — и запасной после погашенного git, и уже
+    идущий: процессор нужен остальной уборке при выходе. Зовёт `main()` TUI в
+    `finally` после `app.run()`."""
     global _exiting
     with _running_lock:
         _exiting = True

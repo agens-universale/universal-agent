@@ -774,6 +774,39 @@ def test_no_command_starts_once_exit_began(tmp_path):
     assert not marker.exists()
 
 
+def test_index_is_not_built_once_exit_began(tmp_path):
+    """После начала выхода индекс не обходит диск — ни вместо git, которого уже не
+    запустят, ни сразу (проект не под git): в умирающем процессе список никому не нужен,
+    а процессор нужен остальной уборке при выходе."""
+    from gc_tui.services import file_index
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x", encoding="utf-8")
+    file_index.kill_running_processes()
+    assert file_index._all_paths(str(tmp_path)) == ([], True)
+    assert file_index._all_paths(str(tmp_path), use_git=False) == ([], True)
+
+
+def test_walk_already_running_stops_once_exit_began(tmp_path, monkeypatch):
+    """Выход начался посреди обхода (проект не под git или git недавно не уложился —
+    сборка сразу идёт по диску): обход останавливается на следующей папке, а не
+    дочитывает проект в умирающем процессе. Собранное — с пометкой «неполный»."""
+    from gc_tui.services import file_index
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "deep.py").write_text("x", encoding="utf-8")
+    (tmp_path / "top.py").write_text("x", encoding="utf-8")
+    real_scandir = file_index.os.scandir
+
+    def scandir_then_exit(path):
+        it = real_scandir(path)
+        file_index.kill_running_processes()     # выход начался, пока читали первую папку
+        return it
+
+    monkeypatch.setattr(file_index.os, "scandir", scandir_then_exit)
+    paths, truncated = file_index._walk_paths(str(tmp_path))
+    assert sorted(paths) == ["a/", "top.py"]
+    assert truncated is True
+
+
 def test_shallowest_paths_equals_stable_sort_prefix_on_random_inputs():
     """Свойство отборщика на случайных входах (та же логика, что у fixed-example
     теста выше, только вход случайный): пока путей не больше потолка — порядок
