@@ -4208,12 +4208,12 @@ class TraceScreen(Screen):
         попасть — осознанно: вечная подсказка на огромном проекте хуже). Проверка
         диска — здесь, в потоке поиска, не в UI."""
         from gc_tui.services.file_index import names_existing_dir
-        truncated = truncated and not names_existing_dir(index.root, query)
         try:
+            truncated = truncated and not names_existing_dir(index.root, query)
             self.app.call_from_thread(self._on_file_search_done, index, query, entries, truncated)
         except Exception:
-            # Приложение уже закрыто (показывать некуда) или сбой в обработчике экрана —
-            # второй не должен пропасть молча.
+            # Приложение уже закрыто (показывать некуда), сбой проверки диска или сбой
+            # в обработчике экрана — ни один не должен пропасть молча.
             _log.warning("file search result dropped: root=%s query=%r", index.root, query,
                          exc_info=True)
 

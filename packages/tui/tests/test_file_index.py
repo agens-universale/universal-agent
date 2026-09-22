@@ -326,8 +326,9 @@ def test_path_index_builds_once_then_filters_in_memory(tmp_path, monkeypatch):
 
 
 def test_concurrent_searches_build_index_once(tmp_path, monkeypatch):
-    """Поиск зовут из фоновых потоков по одному на нажатие: пока первый собирает
-    список, второй ждёт его, а не запускает свой обход."""
+    """Поиск зовут потоки сеансов пикера: поток закрытого сеанса может ещё собирать
+    список, когда поток следующего уже ищет — тот ждёт на локе, а не запускает второй
+    обход диска."""
     import threading
     import time
     from gc_tui.services import file_index

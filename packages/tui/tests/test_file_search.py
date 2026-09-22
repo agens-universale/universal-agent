@@ -1,6 +1,7 @@
 """Сеанс фонового поиска пикера: один поток-демон, последний запрос побеждает."""
 import logging
 import threading
+import time
 
 from gc_tui.services.file_search import FileSearchSession
 
@@ -103,7 +104,9 @@ def test_close_during_build_skips_search_and_ends_thread():
     session, thread, results = _session(index)
     session.want("abc")
     assert index.build_entered.wait(5)
+    started = time.perf_counter()
     session.close()
+    assert time.perf_counter() - started < 1.0        # close не ждёт поток (сборка ещё придержана)
     index.build_gate.set()
     thread.join(5)
     assert not thread.is_alive()
