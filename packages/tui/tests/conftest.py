@@ -46,6 +46,18 @@ _SNAPSHOT_DRIFT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _snapshot_color_mode(request, monkeypatch):
+    """Цветные эталоны не должны зависеть от NO_COLOR терминала или CI.
+
+    Textual читает NO_COLOR при создании App и переводит кадр в оттенки
+    серого. Снимаем переменную только для snap_compare: обычные тесты
+    и проверка пользовательского режима без цвета сохраняют окружение.
+    """
+    if "snap_compare" in request.fixturenames:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+
+
 def pytest_configure(config):
     """Скрыть от syrupy наши `.svg`-копии эталонов.
 
@@ -142,12 +154,16 @@ def _isolate_model_list_cache():
 @pytest.fixture(autouse=True)
 def _isolate_slow_git_memo():
     """`gc_tui.services.file_index` помнит корни, где git не уложился в таймаут,
-    в модульном dict — иначе таймаут из одного теста отключал бы git соседям."""
+    в модульном dict — иначе таймаут из одного теста отключал бы git соседям.
+    Туда же флаг «выходим»: его ставит `main()` (её зовут тесты в том же процессе),
+    и после него индекс не запускал бы git никому из следующих."""
     from gc_tui.services import file_index
 
     file_index._slow_git_roots.clear()
+    file_index._exiting = False
     yield
     file_index._slow_git_roots.clear()
+    file_index._exiting = False
 
 
 @pytest.fixture(autouse=True)

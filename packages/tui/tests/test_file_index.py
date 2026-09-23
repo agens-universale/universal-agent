@@ -340,8 +340,9 @@ def test_path_index_builds_once_then_filters_in_memory(tmp_path, monkeypatch):
 
 
 def test_concurrent_searches_build_index_once(tmp_path, monkeypatch):
-    """Поиск зовут из фоновых потоков по одному на нажатие: пока первый собирает
-    список, второй ждёт его, а не запускает свой обход."""
+    """Поиск зовут потоки сеансов пикера: поток закрытого сеанса может ещё собирать
+    список, когда поток следующего уже ищет — тот ждёт на локе, а не запускает второй
+    обход диска."""
     import threading
     import time
 
@@ -605,6 +606,7 @@ def test_stream_bounded_kills_whole_process_tree_on_timeout(tmp_path):
     size = beat.stat().st_size
     time.sleep(0.7)
     assert beat.stat().st_size == size  # потомок мёртв
+    assert file_index._running == set()
 
 
 def test_parent_dir_queries_are_not_listed(tmp_path):
@@ -716,6 +718,7 @@ def test_stream_bounded_wait_is_bounded_even_if_tree_kill_fails(tmp_path, monkey
     with pytest.raises(subprocess.TimeoutExpired):
         file_index._stream_bounded([sys.executable, "-c", parent], str(tmp_path), 2.0, lambda chunk: None)
     assert time.perf_counter() - started < 8
+    assert file_index._running == set()
 
 
 def test_stream_bounded_stops_feeding_chunks_after_timeout(tmp_path, monkeypatch):
@@ -738,6 +741,124 @@ def test_stream_bounded_stops_feeding_chunks_after_timeout(tmp_path, monkeypatch
     assert seen > 0
     time.sleep(0.6)
     assert len(chunks) == seen
+    assert file_index._running == set()
+
+
+def test_stream_bounded_reader_failure_propagates_and_unregisters(tmp_path):
+    """Сбой разбора вывода (исключение в on_chunk) уходит вызывающему, а процесс
+    снимается с учёта — реестр не копит мёртвые записи."""
+    import sys
+    from gc_tui.services import file_index
+
+    def broken(chunk):
+        raise ValueError("parse failed")
+
+    with pytest.raises(ValueError):
+        file_index._stream_bounded([sys.executable, "-c", "print('x' * 100)"], str(tmp_path), 10.0, broken)
+    assert file_index._running == set()
+
+
+def test_kill_running_processes_kills_tree_of_running_command(tmp_path):
+    """Выход из программы посреди команды индекса: гасится всё дерево (git из PATH на
+    Windows — обёртка над настоящим git), вызов сразу возвращает False, реестр пуст.
+    Флаг «выходим» после теста сбрасывает автофикстура conftest."""
+    import sys
+    import threading
+    import time
+    from gc_tui.services import file_index
+
+    beat = tmp_path / "beat.txt"
+    # Потомок и родитель самоограничены (~20 с): если гашение сломают, тест упадёт на
+    # времени, а не повесит прогон и не оставит вечных сирот.
+    child = "import time, sys\nfor _ in range(200):\n    open(sys.argv[1], 'a').write('x')\n    time.sleep(0.1)\n"
+    parent = (
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}, sys.argv[1]])\n"
+        "time.sleep(20)\n"
+    )
+    result = []
+    worker = threading.Thread(
+        target=lambda: result.append(
+            file_index._stream_bounded(
+                [sys.executable, "-c", parent, str(beat)], str(tmp_path), 30.0, lambda chunk: None
+            )
+        ),
+        daemon=True,
+    )
+    worker.start()
+    deadline = time.monotonic() + 10
+    while not beat.exists() and time.monotonic() < deadline:  # ждём рождения потомка
+        time.sleep(0.05)
+    assert beat.exists()
+    file_index.kill_running_processes()
+    worker.join(10)
+    assert not worker.is_alive()
+    assert result == [False]
+    assert file_index._running == set()
+    time.sleep(0.5)
+    size = beat.stat().st_size
+    time.sleep(0.7)
+    assert beat.stat().st_size == size  # потомок мёртв
+
+
+def test_no_command_starts_once_exit_began(tmp_path):
+    """Обычный прогон реестр за собой чистит; после начала выхода индекс новых команд
+    не запускает — git, стартующий в ту же миллисекунду, не проскочит."""
+    import sys
+    from gc_tui.services import file_index
+
+    assert (
+        file_index._stream_bounded([sys.executable, "-c", "print('x')"], str(tmp_path), 10.0, lambda chunk: None)
+        is True
+    )
+    assert file_index._running == set()
+    marker = tmp_path / "started.txt"
+    file_index.kill_running_processes()
+    assert (
+        file_index._stream_bounded(
+            [sys.executable, "-c", "import sys; open(sys.argv[1], 'w').close()", str(marker)],
+            str(tmp_path),
+            10.0,
+            lambda chunk: None,
+        )
+        is False
+    )
+    assert not marker.exists()
+
+
+def test_index_is_not_built_once_exit_began(tmp_path):
+    """После начала выхода индекс не обходит диск — ни вместо git, которого уже не
+    запустят, ни сразу (проект не под git): в умирающем процессе список никому не нужен,
+    а процессор нужен остальной уборке при выходе."""
+    from gc_tui.services import file_index
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x", encoding="utf-8")
+    file_index.kill_running_processes()
+    assert file_index._all_paths(str(tmp_path)) == ([], True)
+    assert file_index._all_paths(str(tmp_path), use_git=False) == ([], True)
+
+
+def test_walk_already_running_stops_once_exit_began(tmp_path, monkeypatch):
+    """Выход начался посреди обхода (проект не под git или git недавно не уложился —
+    сборка сразу идёт по диску): обход останавливается на следующей папке, а не
+    дочитывает проект в умирающем процессе. Собранное — с пометкой «неполный»."""
+    from gc_tui.services import file_index
+
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "deep.py").write_text("x", encoding="utf-8")
+    (tmp_path / "top.py").write_text("x", encoding="utf-8")
+    real_scandir = file_index.os.scandir
+
+    def scandir_then_exit(path):
+        it = real_scandir(path)
+        file_index.kill_running_processes()  # выход начался, пока читали первую папку
+        return it
+
+    monkeypatch.setattr(file_index.os, "scandir", scandir_then_exit)
+    paths, truncated = file_index._walk_paths(str(tmp_path))
+    assert sorted(paths) == ["a/", "top.py"]
+    assert truncated is True
 
 
 def test_shallowest_paths_equals_stable_sort_prefix_on_random_inputs():

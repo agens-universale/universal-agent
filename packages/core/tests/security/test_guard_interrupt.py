@@ -30,9 +30,35 @@ def _blocking(seconds: float) -> str:
     return "человек ответил"
 
 
+def _raise_sigint() -> None:
+    """Возбудить SIGINT в ЭТОМ процессе, не задевая соседей по консоли.
+
+    На Windows `os.kill(pid, SIGINT)` — это `GenerateConsoleCtrlEvent`, и он
+    уходит ВСЕЙ группе процессов консоли: адресовать сигнал только себе там
+    нельзя. Прогон падал целиком вместе с pytest — файл убивал раннер, не
+    оставляя ни итога, ни строчки вывода, и полный `uv run pytest` на Windows
+    не доходил до конца вовсе.
+
+    `interrupt_main` симулирует приход того же сигнала в главном потоке и
+    вызывает зарегистрированный обработчик, то есть проверяемое поведение
+    сохраняется. Здесь это ещё и своевременно: вызов идёт с loop'а, из главного
+    потока, поэтому отложенный вызов разбирается на ближайшей границе байткода.
+
+    На POSIX остаётся НАСТОЯЩИЙ сигнал: он прерывает и блокирующий системный
+    вызов, а симуляция сработала бы только между байткодами — подменять его там
+    значило бы ослабить проверку.
+    """
+    if os.name == "nt":
+        import _thread
+
+        _thread.interrupt_main(signal.SIGINT)
+        return
+    os.kill(os.getpid(), signal.SIGINT)
+
+
 async def _fire_sigint(after: float = 0.2) -> None:
     await asyncio.sleep(after)
-    os.kill(os.getpid(), signal.SIGINT)
+    _raise_sigint()
 
 
 def _wrapped(on_interrupt, seen: list, *, thinks: float = 5.0):
@@ -118,7 +144,7 @@ async def test_overlapping_waits_keep_ctrl_c_for_the_one_still_waiting(safety_ne
 
     assert await asyncio.wait_for(first, 5) == "тул отработал"
     assert seen_a == ["человек ответил"], "первое ожидание не дождалось ответа"
-    os.kill(os.getpid(), signal.SIGINT)
+    _raise_sigint()
 
     assert await asyncio.wait_for(second, 3) == "тул отработал"
     assert seen_b == ["B"], f"Ctrl+C не дошёл до того, кто ещё ждёт: {seen_b}"

@@ -14,7 +14,9 @@
 """
 
 import json
+import os
 import shlex
+import subprocess
 import sys
 import time
 
@@ -34,8 +36,14 @@ _CHILD = (
 )
 
 
-def _command(ticks) -> str:
-    return f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} {shlex.quote(str(ticks))}"
+def _command(tmp_path, ticks) -> str:
+    """Команда запуска потомка в синтаксисе оболочки ЭТОЙ ОС. Скрипт — файлом: на
+    Windows команду исполняет cmd.exe, а он не понимает одинарных кавычек
+    `shlex.quote` и обрезает многострочный `-c` на первом переводе строки."""
+    child = tmp_path / "child.py"
+    child.write_text(_CHILD, encoding="utf-8")
+    argv = [sys.executable, str(child), str(ticks)]
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
 def test_background_works_through_the_tui_wrapper(tmp_path):
@@ -47,7 +55,7 @@ def test_background_works_through_the_tui_wrapper(tmp_path):
     ctx = tool._ctx
     ctx.os_backend = TrackingFsBackend(ctx.os_backend, ctx)
 
-    res = json.loads(tool(command=_command(ticks), run_in_background=True))
+    res = json.loads(tool(command=_command(tmp_path, ticks), run_in_background=True))
 
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, res

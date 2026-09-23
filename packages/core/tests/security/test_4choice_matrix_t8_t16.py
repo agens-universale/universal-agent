@@ -55,10 +55,21 @@ def test_t9_judge_prompt_has_insession_examples_section():
 
 @pytest.fixture
 def fake_tty(monkeypatch):
-    """Force sys.stdin.isatty() → True so prompt reads from a fake input."""
+    """Force sys.stdin.isatty() → True so prompt reads from a fake input.
+
+    На Windows `pollable_stdin_fd` возвращает None ВСЕГДА (select к консоли
+    неприменим), и опрос уходит в `msvcrt` — мимо подменённого stdin, то есть
+    ждёт настоящего нажатия клавиши и висит вечно. Этот набор проверяет
+    РАСКЛАДКУ клавиш, а не чтение ввода: консольный путь покрыт отдельно
+    (`test_confirm_windows_console.py`). Поэтому опрос консоли здесь снимается,
+    и проверка идёт через `input()`, для которого тест и писался.
+    """
+    from gc_core.security import path_policy
+
     fake_stdin = io.StringIO()
     fake_stdin.isatty = lambda: True  # type: ignore[attr-defined]
     monkeypatch.setattr(sys, "stdin", fake_stdin)
+    monkeypatch.setattr(path_policy, "_polling_console", lambda: None)
     return fake_stdin
 
 

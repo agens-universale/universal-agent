@@ -282,10 +282,6 @@
     "file_name": "file_index.py",
     "functions": [
       {
-        "name": "_stream_bounded",
-        "complexity": 19
-      },
-      {
         "name": "parse_at_segment",
         "complexity": 19
       },
@@ -299,7 +295,7 @@
       },
       {
         "name": "_walk_paths",
-        "complexity": 31
+        "complexity": 30
       }
     ]
   },

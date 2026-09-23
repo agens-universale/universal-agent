@@ -2,6 +2,8 @@
 
 import pytest
 
+from file_search_harness import settled
+
 
 def _mk(tmp_path):
     (tmp_path / "agents").mkdir()
@@ -22,7 +24,7 @@ async def test_view_space_opens_file_picker(tmp_path):
         inp.focus()
         inp.insert("/view age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is not None
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
@@ -62,7 +64,7 @@ async def test_at_inside_view_line_stays_file_arg_picker(tmp_path):
         inp.focus()
         inp.insert("/view @age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         # Ключевое: @-пикер НЕ перехватил (он нашёл бы agents/agent.py по 'age'
         # и был бы открыт); file-arg query '@age' совпадений не имеет →
@@ -84,7 +86,7 @@ async def test_view_complete_dir_drills_in_file_closes(tmp_path):
         inp.focus()
         inp.insert("/view agents")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         await pilot.press("tab")  # папка -> drill-in
         await pilot.pause(0.1)
@@ -110,7 +112,7 @@ async def test_view_escape_closes_picker_keeps_line(tmp_path):
         inp.focus()
         inp.insert("/view age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause(0.1)
@@ -137,7 +139,7 @@ async def test_view_at_prefixed_filename_completes_file_arg_not_at_branch(tmp_pa
         inp.focus()
         inp.insert("/view @age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is not None
         await pilot.press("tab")
@@ -164,7 +166,7 @@ async def test_view_enter_no_matches_submits_command(tmp_path):
         inp.focus()
         inp.insert("/view zzz/nope.txt")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is None  # совпадений нет → пикер скрыт
         await pilot.press("enter")
@@ -188,7 +190,7 @@ async def test_view_tab_cursor_left_of_arg_is_noop(tmp_path):
         inp.focus()
         inp.insert("/view age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is not None
         inp.cursor_location = (0, 3)
@@ -215,13 +217,14 @@ async def test_backspace_to_bare_command_closes_file_picker(tmp_path):
         inp.focus()
         inp.insert("/view age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is not None
+        search = scr._file_search
         for _ in range(4):
             await pilot.press("backspace")
         await pilot.pause(0.1)
-        await scr._file_search_worker.wait()
+        await settled(search)
         await pilot.pause()
         assert scr._file_picker is None
 
@@ -242,7 +245,7 @@ async def test_empty_matches_hide_picker_and_it_returns(tmp_path):
         inp.focus()
         inp.insert("/view zzz")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is None  # скрыт, не «нет совпадений»
         for _ in range(3):
@@ -250,7 +253,7 @@ async def test_empty_matches_hide_picker_and_it_returns(tmp_path):
         await pilot.pause(0.1)
         inp.insert("age")  # /view age — снова есть матчи
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is not None
 
@@ -270,7 +273,7 @@ async def test_at_segment_empty_matches_hide_picker(tmp_path):
         inp.focus()
         inp.insert("@zzz")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is None
 
@@ -320,7 +323,7 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
         inp.focus()
         inp.insert("/view agents/agent")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         # Клэмп оверлея ставит _sync_trace_max_height (call_after_refresh + poll-тик
         # экрана ~0.25 с): ассерты ниже про раскладку, ждём дольше одного тика.
         await pilot.pause(0.3)
