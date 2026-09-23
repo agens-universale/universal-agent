@@ -17,6 +17,13 @@ def _cfg():
     }
 
 
+@pytest.mark.parametrize("verify", [True, False, "/corp/root.pem"])
+def test_connection_probe_preserves_tls_mode(verify):
+    screen = _mk_screen(config={**_cfg(), "use_ssl": verify})
+    assert screen._probe_args_from_config()[2] == verify
+    assert screen._probe_args_from_config({**_cfg(), "use_ssl": "/profile/root.pem"})[2] == "/profile/root.pem"
+
+
 def _fake_probe(result):
     def probe_fn(endpoint, auth, verify, model, **kw):
         return result

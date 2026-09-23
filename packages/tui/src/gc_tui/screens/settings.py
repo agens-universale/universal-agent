@@ -1364,7 +1364,7 @@ class SettingsScreen(Screen):
         model = c.get("model") or ""
         if model == MODEL_SENTINEL:  # плейсхолдер шаблона — не слать его как имя модели
             model = ""
-        return endpoint, auth, bool(c.get("use_ssl", True)), model, proxy
+        return endpoint, auth, c.get("use_ssl", True), model, proxy
 
     def _start_config_probe(self) -> None:
         endpoint, auth, verify, model, proxy = self._probe_args_from_config()

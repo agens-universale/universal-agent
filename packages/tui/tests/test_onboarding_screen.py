@@ -1064,6 +1064,32 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
         )
 
 
+async def test_connection_auto_probe_preserves_ca_path(tmp_path):
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
+    from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    seen = []
+
+    def probe(endpoint, auth, verify, model, *, config_proxy=None):
+        seen.append(verify)
+        return ProbeResult("ok", 200, None, 5, "доступен")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        screen = _screen(config={"use_ssl": "/corp/root.pem"}, probe=probe)
+        await pilot.app.push_screen(screen)
+        await pilot.pause()
+        editor = screen.query_one(ConnectionEditor)
+        editor.escape_presets()
+        editor.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        await pilot.press("down")
+        await wait_until(pilot, lambda: bool(seen), "проба с корпоративным CA выполнена")
+        assert set(seen) == {"/corp/root.pem"}
+
+
 @pytest.mark.asyncio
 async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
     """Подстановка пресета (Enter на открытом списке) — тоже триггер авто-пробы,

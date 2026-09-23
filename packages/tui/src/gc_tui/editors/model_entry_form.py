@@ -266,7 +266,7 @@ class ModelEntryForm(Vertical):
         presets: list | None = None,
         effective_url: str = "",
         effective_auth: str | None = None,
-        verify: bool = True,
+        verify: bool | str = True,
         config_proxy: str | None = None,
         base_aliases=frozenset(),
         base_entry: dict | None = None,

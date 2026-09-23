@@ -121,7 +121,7 @@ def _payload_dict(raw) -> Optional[dict]:
 def _requests_get_ex(
     url: str,
     headers: dict,
-    verify: bool,
+    verify: bool | str,
     *,
     config_proxy: Optional[str] = None,
 ) -> HttpReply:
@@ -160,7 +160,7 @@ def _requests_post_ex(
     url: str,
     headers: dict,
     body: dict,
-    verify: bool,
+    verify: bool | str,
     *,
     config_proxy: Optional[str] = None,
 ) -> HttpReply:
@@ -194,13 +194,14 @@ def _requests_post_ex(
         )
 
 
-def _urllib_get_ex(url: str, headers: dict, verify: bool) -> HttpReply:
+def _urllib_get_ex(url: str, headers: dict, verify: bool | str) -> HttpReply:
     """Legacy urllib GET (без proxy). Оставлен для unit-тестов транспорта."""
-    import ssl
     import urllib.error
     import urllib.request
 
-    ctx = None if verify else ssl._create_unverified_context()  # noqa: S323  # NOSONAR: verify:false из конфига — осознанный opt-in, см. docs/code-quality.md
+    from gc_core.utils.async_http import build_ssl_context
+
+    ctx = build_ssl_context(verify)
     req = _request(url, headers)
     try:
         with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
@@ -229,7 +230,7 @@ def probe_fetch(
     completions_url: str,
     auth_header: Optional[str],
     *,
-    verify: bool = True,
+    verify: bool | str = True,
     config_proxy: Optional[str] = None,
     http_get_ex: Optional[Callable] = None,
 ) -> FetchOutcome:
@@ -271,7 +272,7 @@ def probe_post(
     auth_header: Optional[str],
     model: str,
     *,
-    verify: bool = True,
+    verify: bool | str = True,
     config_proxy: Optional[str] = None,
     http_post_ex: Optional[Callable] = None,
 ) -> tuple[Optional[int], str, int, Any]:
@@ -300,7 +301,7 @@ def fetch_models(
     completions_url: str,
     auth_header: Optional[str],
     *,
-    verify: bool = True,
+    verify: bool | str = True,
     config_proxy: Optional[str] = None,
     http_get: Optional[Callable] = None,
 ):

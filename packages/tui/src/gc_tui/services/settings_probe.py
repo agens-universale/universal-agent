@@ -80,7 +80,7 @@ class ProbeResult:
 def probe(
     endpoint: str,
     auth: Optional[str],
-    verify: bool,
+    verify: bool | str,
     model: str,
     *,
     config_proxy: Optional[str] = None,
@@ -171,7 +171,13 @@ def _verdict_from_post(status, net_err, lat, payload, dummy: bool) -> ProbeResul
 
 
 def probe_auth(
-    endpoint: str, auth: Optional[str], verify: bool, model: str, *, config_proxy: Optional[str] = None, post_ex=None
+    endpoint: str,
+    auth: Optional[str],
+    verify: bool | str,
+    model: str,
+    *,
+    config_proxy: Optional[str] = None,
+    post_ex=None,
 ) -> ProbeResult:
     """Вердикт об авторизации СТРОГО по chat/completions.
 
@@ -266,7 +272,13 @@ def interpret_auth(
 
 
 def probe_connection(
-    endpoint: str, token: Optional[str], verify: bool, model: str, *, config_proxy: Optional[str] = None, probe_fn=None
+    endpoint: str,
+    token: Optional[str],
+    verify: bool | str,
+    model: str,
+    *,
+    config_proxy: Optional[str] = None,
+    probe_fn=None,
 ) -> ProbeResult:
     """Полный вердикт «сервер + токен» для строки «Подключение».
 

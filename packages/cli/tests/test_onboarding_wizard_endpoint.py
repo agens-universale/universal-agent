@@ -108,6 +108,15 @@ def test_fetch_models_does_not_dial_the_placeholder_endpoint():
     assert dialed == []
 
 
+def test_fetch_models_preserves_custom_ca_path():
+    from unittest.mock import Mock
+
+    fetch = Mock(return_value=[])
+    cfg = {"completions_url": "https://model.example/v1/chat/completions", "use_ssl": "/corp/root.pem"}
+    assert wz._fetch_models(cfg, {}, fetch) == []
+    assert fetch.call_args.kwargs["verify"] == "/corp/root.pem"
+
+
 def test_model_step_on_placeholder_endpoint_offers_manual_input():
     """…и тем же текстом, что при отсутствующем адресе (`MODEL_NO_LIST` + свободный
     ввод): своего сообщения про заглушку у шага нет и заводить его незачем."""

@@ -643,7 +643,7 @@ class ModelsSectionEditor(Vertical):
         stack_base=None,
         effective_url: str = "",
         effective_auth: str | None = None,
-        verify: bool = True,
+        verify: bool | str = True,
         config_proxy: str | None = None,
         presets=(),
         active_level: str = "default",

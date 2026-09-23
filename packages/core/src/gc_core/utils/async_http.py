@@ -15,6 +15,7 @@ event loop. Клиент, созданный на одном loop и переи�
 from __future__ import annotations
 
 import asyncio
+import os
 import ssl
 import threading
 import weakref
@@ -36,7 +37,7 @@ _clients: dict[tuple, tuple] = {}
 def build_ssl_context(
     verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
-) -> Union[ssl.SSLContext, bool]:
+) -> ssl.SSLContext:
     """Собрать TLS-контекст из пары ``verify``/``cert``.
 
     Собираем сами, а не отдаём httpx: в его ``create_ssl_context`` ветка
@@ -47,12 +48,16 @@ def build_ssl_context(
     ``requests`` обрабатывал verify и cert независимо, и этот контракт мы
     обязаны сохранить.
 
-    ``verify=False`` возвращаем как есть — httpx сам сделает контекст без
-    проверки; собирать его руками смысла нет.
+    Клиентский сертификат загружается независимо от проверки сервера:
+    ``verify=False`` не должен отключать mTLS. Только явный False выключает
+    проверку; CA-путь сохраняет проверку цепочки и имени сервера.
     """
     if verify is False:
-        return False
-    if isinstance(verify, str):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False  # NOSONAR: явный opt-in verify=False; см. docs/code-quality.md
+        ctx.verify_mode = ssl.CERT_NONE  # NOSONAR: явный opt-in verify=False; см. docs/code-quality.md
+    elif isinstance(verify, str):
+        verify = os.path.expanduser(os.path.expandvars(verify))
         ctx = ssl.create_default_context(
             capath=verify if _is_dir(verify) else None,
             cafile=None if _is_dir(verify) else verify,
@@ -70,8 +75,6 @@ def build_ssl_context(
 
 
 def _is_dir(path: str) -> bool:
-    import os
-
     return os.path.isdir(path)
 
 

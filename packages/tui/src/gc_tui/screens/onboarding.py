@@ -598,7 +598,7 @@ class OnboardingScreen(Screen):
                 current=self._values.get("model", ""),
                 endpoint=endpoint,
                 auth=auth,
-                verify=bool(self._config.get("use_ssl", True)),
+                verify=self._config.get("use_ssl", True),
                 fetch=self._fetch,
                 # Список приезжает воркером: до него метить нечего, после —
                 # курсор встаёт на помеченную. Футер обещает роль Enter — догоняем.
@@ -883,7 +883,7 @@ class OnboardingScreen(Screen):
                 current=current,
                 endpoint=endpoint,
                 auth=auth,
-                verify=bool((self._config or {}).get("use_ssl", True)),
+                verify=(self._config or {}).get("use_ssl", True),
                 fetch=self._fetch,
                 input_id="onb-level-model",
                 on_loaded=self._refresh_footer,
@@ -1570,7 +1570,7 @@ class OnboardingScreen(Screen):
                 auth = (self._config.get("chat_completion_headers") or {}).get("Authorization")
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
-        verify = bool((self._config or {}).get("use_ssl", True))
+        verify = (self._config or {}).get("use_ssl", True)
         self._probe_gen += 1
         gen = self._probe_gen
         self._set_conn_probe_line(Text("проверяю…", style=DEEP_DIM))
@@ -1592,7 +1592,7 @@ class OnboardingScreen(Screen):
 
         self.run_worker(_work, thread=True, exclusive=True, name="onboarding-conn-probe")
 
-    def _run_connection_probe(self, url: str, auth, verify: bool, config_proxy):
+    def _run_connection_probe(self, url: str, auth, verify: bool | str, config_proxy):
         """Вердикт шага «Подключение» — той же differential-пробой, что в /settings:
         иначе мастер и настройки скажут про один сервер разное. Вынесен из воркера
         отдельным методом, чтобы проверяться без потока."""

@@ -18,6 +18,7 @@ from mcp.shared.exceptions import McpError
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.transport import _resolve_command
+from gc_core.utils.async_http import build_ssl_context
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 from gc_core.utils.url_addr import is_loopback
 
@@ -289,7 +290,7 @@ def _make_httpx_factory(
     proxies = resolve_proxies(None, dict(os.environ), url) if use_env_proxy else None
 
     def factory(headers: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, auth: Any = None):
-        ssl_context = httpx.create_ssl_context(verify=verify)
+        ssl_context = build_ssl_context(verify, cert)
         kwargs: Dict[str, Any] = dict(
             headers=headers,
             timeout=timeout,
@@ -297,8 +298,6 @@ def _make_httpx_factory(
             verify=ssl_context,
             trust_env=False,
         )
-        if cert is not None:
-            kwargs["cert"] = cert
         if proxies:
             # Тот же ssl-контекст, что и у основного клиента: прокси не повод
             # ослаблять проверку сертификата.
@@ -329,7 +328,7 @@ def _make_stream_http_client(
     from gc_core.utils.http_proxy import resolve_proxies
 
     headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
-    ssl_context = httpx.create_ssl_context(verify=verify)
+    ssl_context = build_ssl_context(verify, cert)
 
     # Контракт тот же, что у фабрики выше: netrc не читаем никогда
     # (`trust_env=False`), прокси резолвим явно. Иначе `persistent_session`
@@ -343,8 +342,6 @@ def _make_stream_http_client(
         verify=ssl_context,
         trust_env=False,
     )
-    if cert is not None:
-        kwargs["cert"] = cert
     if proxies:
         kwargs["mounts"] = {
             f"{scheme}://": httpx.AsyncHTTPTransport(proxy=proxy_url, verify=ssl_context, trust_env=False)

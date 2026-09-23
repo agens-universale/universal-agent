@@ -298,7 +298,7 @@ def _fetch_models(config: dict, values: dict, fetch=None):
     if not endpoint:
         return None
     try:
-        return fetch(endpoint, auth, verify=bool(config.get("use_ssl", True)))
+        return fetch(endpoint, auth, verify=config.get("use_ssl", True))
     except Exception:
         return None
 

@@ -55,7 +55,7 @@ class ModelEditor(Vertical):
         current: str,
         endpoint: str,
         auth: str | None,
-        verify: bool,
+        verify: bool | str,
         fetch,
         input_id: str = "onb-model",
         active: str = "",
