@@ -10,6 +10,7 @@ import time
 import uuid
 from collections import namedtuple
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -331,13 +332,14 @@ class TraceScreen(Screen):
         # Сеанс файлового пикера: индекс путей собирается один раз; достроенный
         # сбрасывается при закрытии пикера, ещё строящийся переживает закрытие и
         # подхватывается следующим сеансом (см. _close_file_picker). _file_query —
-        # последний запрошенный query (None = пикер не нужен). Опоздавший результат
-        # фонового поиска отбрасывается по паре «тот же объект индекса + тот же
-        # query»: сам по себе объект индекса сеансы НЕ различает.
+        # последний запрошенный query (None = пикер не нужен). Поиск по индексу считает
+        # один фоновый поток сеанса (_file_search). Опоздавший результат отбрасывается
+        # по паре «тот же объект индекса + тот же query»: сам по себе объект индекса
+        # сеансы НЕ различает.
         self._path_index = None          # file_index.PathIndex | None
         self._file_query: Optional[str] = None
         self._file_shown_query: Optional[str] = None   # для какого query показан список
-        self._file_search_worker = None  # textual.worker.Worker | None
+        self._file_search = None         # file_search.FileSearchSession | None
         self._skills_cache: Optional[list[dict]] = None
         # После Tab-completion в skill picker гасим один Changed-цикл, чтобы
         # on_text_area_changed не переоткрыл только что закрытый picker.
@@ -1492,8 +1494,11 @@ class TraceScreen(Screen):
         return True
 
     def on_unmount(self) -> None:
-        """App exit / снятие экрана — отпустить lock удерживаемого tid."""
+        """App exit / снятие экрана — отпустить lock удерживаемого tid и закрыть сеанс
+        поиска файлов (его поток не должен висеть без экрана)."""
         self._session_lock_release()
+        if self._file_search is not None:
+            self._file_search.close()
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -4163,11 +4168,13 @@ class TraceScreen(Screen):
         """Открыть/обновить файловый пикер по query.
 
         Листинг одной папки (пустой query, хвостовой '/') — дешёвое чтение диска,
-        показываем сразу. Поиск по проекту — только в фоновом потоке: сборка
-        индекса на большом проекте занимает секунды, в UI-потоке это фриз всего
-        приложения (и Ctrl-C в том числе). Результат применяет
-        _on_file_search_done, если ввод за это время не ушёл дальше."""
-        from gc_tui.services.file_index import PathIndex, list_dir, names_existing_dir
+        показываем сразу. Поиск по проекту — только в фоне: сборка индекса на большом
+        проекте занимает секунды, в UI-потоке это фриз всего приложения (и Ctrl-C в
+        том числе). Считает его один поток сеанса (FileSearchSession): нажатие только
+        отдаёт ему запрос. Результат применяет _on_file_search_done, если ввод за это
+        время не ушёл дальше."""
+        from gc_tui.services.file_index import PathIndex, list_dir
+        from gc_tui.services.file_search import FileSearchSession
         root = self._project_root()
         if (self._file_query is None and self._path_index is not None
                 and self._path_index.built):
@@ -4182,43 +4189,37 @@ class TraceScreen(Screen):
         index = self._path_index
         if index is None or index.root != root:
             index = self._path_index = PathIndex(root)
-
-        def _work() -> None:
-            entries: Optional[list] = None
-            try:
-                index.build()
-                # Пока ждали сборку, ввод мог уйти дальше: фильтровать устаревший
-                # запрос незачем — иначе после сборки каждый накопившийся поиск
-                # гонял бы полный фильтр, а Enter всё это время ждал бы. Чтение двух
-                # полей экрана из потока безопасно. Лишний фильтр безвреден: его
-                # результат отбросит обработчик. Пропуск безвреден ТОЛЬКО потому,
-                # что каждый _show_file_picker с поисковым запросом запускает свой
-                # поток: у последнего ввода всегда есть поток, который посчитает.
-                # Не запускать поток «если запрос не изменился» нельзя — Enter
-                # остался бы ждать результата, которого никто не принесёт.
-                if index is self._path_index and query == self._file_query:
-                    entries = index.search(query)
-            except Exception:
-                # Наружу нельзя: run_worker(exit_on_error=True) уронил бы весь TUI.
-                _log.warning("file search failed: root=%s query=%r", index.root, query,
-                             exc_info=True)
-                entries = []
-            # Подсказка «поиск неполный» не нужна, если запрос называет существующую
-            # папку: человек уже уточнил путь, а её прямых детей search дочитывает с
-            # диска целиком (совпадения по подстроке в других папках при этом могли
-            # в обрезанный индекс не попасть — осознанно: вечная подсказка на огромном
-            # проекте хуже). Проверка диска — здесь, в фоновом потоке, не в UI.
-            self.app.call_from_thread(
-                self._on_file_search_done, index, query, entries,
-                index.truncated and not names_existing_dir(index.root, query))
-
-        self._file_search_worker = self.run_worker(_work, thread=True, name="file-search")
+        search = self._file_search
+        if search is None or search.index is not index:
+            if search is not None:
+                search.close()                  # корень сменился посреди сеанса
+            search = self._file_search = FileSearchSession(
+                index, partial(self._post_file_search_result, index))
+        search.want(query)
         self.set_timer(self._FILE_SEARCH_NOTICE_DELAY,
                        lambda: self._show_file_search_pending(index, query))
 
-    def _on_file_search_done(self, index, query: str, entries: Optional[list], truncated: bool) -> None:
-        if entries is None or index is not self._path_index or query != self._file_query:
-            return  # не считали (устарел ещё в потоке) / сеанс сменился / ввод ушёл дальше
+    def _post_file_search_result(self, index, query: str, entries: list, truncated: bool) -> None:
+        """Результат поиска — в UI-поток. Выполняется в потоке поиска.
+
+        Подсказка «поиск неполный» не нужна, если запрос называет существующую папку:
+        человек уже уточнил путь, а её прямых детей search дочитывает с диска целиком
+        (совпадения по подстроке в других папках при этом могли в обрезанный индекс не
+        попасть — осознанно: вечная подсказка на огромном проекте хуже). Проверка
+        диска — здесь, в потоке поиска, не в UI."""
+        from gc_tui.services.file_index import names_existing_dir
+        try:
+            truncated = truncated and not names_existing_dir(index.root, query)
+            self.app.call_from_thread(self._on_file_search_done, index, query, entries, truncated)
+        except Exception:
+            # Приложение уже закрыто (показывать некуда), сбой проверки диска или сбой
+            # в обработчике экрана — ни один не должен пропасть молча.
+            _log.warning("file search result dropped: root=%s query=%r", index.root, query,
+                         exc_info=True)
+
+    def _on_file_search_done(self, index, query: str, entries: list, truncated: bool) -> None:
+        if index is not self._path_index or query != self._file_query:
+            return  # сеанс сменился / ввод ушёл дальше
         self._apply_file_entries(entries, truncated=truncated)
 
     def _show_file_search_pending(self, index, query: str) -> None:
@@ -4267,9 +4268,12 @@ class TraceScreen(Screen):
                                            total=total)
 
     def _close_file_picker(self) -> None:
-        # Конец сеанса: результат поиска в полёте устарел.
+        # Конец сеанса: результат поиска в полёте устарел, поток сеанса больше не нужен.
         self._file_query = None
         self._file_shown_query = None
+        if self._file_search is not None:
+            self._file_search.close()
+            self._file_search = None
         # Достроенный индекс сбрасываем: следующий «@» соберёт заново (появятся
         # файлы, созданные агентом). Ещё строящийся оставляем — свежее некуда, а
         # сброс запустил бы вторую сборку параллельно первой (её не остановить).

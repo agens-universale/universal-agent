@@ -139,11 +139,15 @@ def _isolate_model_list_cache():
 @pytest.fixture(autouse=True)
 def _isolate_slow_git_memo():
     """`gc_tui.services.file_index` помнит корни, где git не уложился в таймаут,
-    в модульном dict — иначе таймаут из одного теста отключал бы git соседям."""
+    в модульном dict — иначе таймаут из одного теста отключал бы git соседям.
+    Туда же флаг «выходим»: его ставит `main()` (её зовут тесты в том же процессе),
+    и после него индекс не запускал бы git никому из следующих."""
     from gc_tui.services import file_index
     file_index._slow_git_roots.clear()
+    file_index._exiting = False
     yield
     file_index._slow_git_roots.clear()
+    file_index._exiting = False
 
 
 @pytest.fixture(autouse=True)
