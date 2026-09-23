@@ -120,6 +120,8 @@ def find_dead_code() -> list:
     vulture = Vulture(ignore_names=IGNORE_NAMES, ignore_decorators=IGNORE_DECORATORS)
     paths = [str(ROOT / p) for p in PROD_PATHS + USAGE_PATHS + [WHITELIST] if (ROOT / p).exists()]
     vulture.scavenge(paths, exclude=EXCLUDE)
+    if vulture.exit_code:
+        raise RuntimeError("vulture could not analyze all input files")
     items = vulture.get_unused_code(min_confidence=PRIVATE_CONFIDENCE)
     return sorted(
         (i for i in items if _reported(i) and _in_prod(Path(i.filename))),
@@ -128,7 +130,11 @@ def find_dead_code() -> list:
 
 
 def main() -> int:
-    dead = find_dead_code()
+    try:
+        dead = find_dead_code()
+    except RuntimeError as exc:
+        print(f"dead-code: {exc}", file=sys.stderr)
+        return 2
     for item in dead:
         rel = Path(item.filename).resolve().relative_to(ROOT).as_posix()
         print(f"{rel}:{item.first_lineno}: {item.message} ({item.confidence}% confidence)")

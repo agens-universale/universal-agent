@@ -12,7 +12,8 @@
 * **S1192** — строковый литерал длиной >= MIN_LEN, встречающийся в одном файле
   >= THRESHOLD раз. Докстроки, куски f-строк, строковые аннотации и литералы
   вида идентификатора (``[\\w-]*``) не считаются, как и у Sonar.
-* **S6353** — ``[A-Za-z0-9_]`` вместо ``\\w``, ``[0-9]`` вместо ``\\d``.
+* **S6353** — ``[A-Za-z0-9_]`` вместо ``\\w``, ``[0-9]`` вместо ``\\d``
+  только в ASCII-режиме: для Unicode эти замены меняют множество символов.
 * **S5857** — ленивый квантификатор ``.*?x`` вместо ``[^x]*``.
 * **S5843** — сложность регулярки больше REGEX_MAX. Алгоритм откалиброван по
   отчёту Sonar, см. ``regex_complexity``.
@@ -39,7 +40,7 @@ S2589 (условие всегда истинно), S7507 (доступ к во�
 ключу), S3403 (сравнение значений несовместимых типов). См.
 docs/code-quality.md.
 
-Строка с ``NOSONAR`` глушит находки на ней — как и у самого Sonar.
+Комментарий с ``NOSONAR`` глушит находки на той же строке.
 
 Запуск: ``python scripts/sonar_like_check.py <пути...>``. Ненулевой код выхода
 при находках — для CI и pre-commit.
@@ -72,13 +73,9 @@ SKIP_FILES = {"conftest.py"}
 # (ключи словарей, идентификаторы, «utf-8») дублями не считаются.
 _IDENTIFIER_LIKE = re.compile(r"[\w-]*")
 
-# Тело класса символов и его разбор на токены («A-Z», «_»): одной регуляркой
-# «класс ровно из A-Z a-z 0-9 _» не выразить дешевле, чем за 21 по S5843, —
-# а чекер обязан проходить собственную проверку.
-_CLASS_BODY = re.compile(r"\[([^\]]*)\]")
-_CLASS_TOKEN = re.compile(r"[^\\]-[^\\]|\\?.")
-_WORD_RANGES = frozenset({"A-Z", "a-z", "0-9", "_"})
-_DIGIT_RANGES = frozenset({"0-9"})
+# Элементы AST ASCII-классов: порядок диапазонов не меняет множество символов.
+_WORD_RANGES = frozenset({("RANGE", (65, 90)), ("RANGE", (97, 122)), ("RANGE", (48, 57)), ("LITERAL", 95)})
+_DIGIT_RANGES = frozenset({("RANGE", (48, 57))})
 # Как у Sonar: ленивый квантификатор перед ОДНИМ символом, которым и заканчивается
 # паттерн/группа — только тогда замена на [^x]* эквивалентна.
 _RELUCTANT = re.compile(r"\.[*+]\?(\\?[^\\()\[\]{}|^$*+?.])(?=$|\)|\$)")
@@ -148,15 +145,52 @@ def check_duplicate_literals(path: Path, tree: ast.AST) -> list[str]:
 # --------------------------------------------------------------------------- #
 # S6353 / S5857 / S5843 — регулярки
 # --------------------------------------------------------------------------- #
-def _regex_call_patterns(tree: ast.AST) -> Iterator[tuple[int, str]]:
-    """Литералы, переданные первым аргументом в ``re.<func>(...)``."""
+_REGEX_FLAG_POSITION = {
+    "compile": 1,
+    "search": 2,
+    "match": 2,
+    "fullmatch": 2,
+    "findall": 2,
+    "finditer": 2,
+    "split": 3,
+    "sub": 4,
+    "subn": 4,
+}
+
+
+def _regex_flags(node: ast.expr) -> int | None:
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "re":
+        flag = re.RegexFlag.__members__.get(node.attr)
+        return int(flag) if flag is not None else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left, right = _regex_flags(node.left), _regex_flags(node.right)
+        return left | right if left is not None and right is not None else None
+    return None
+
+
+def _regex_arguments(node: ast.Call, position: int) -> tuple[ast.expr | None, int | None]:
+    keywords = {kw.arg: kw.value for kw in node.keywords}
+    if None in keywords:  # **kwargs могут задавать неизвестные flags
+        return None, None
+    pattern = node.args[0] if node.args else keywords.get("pattern")
+    flags = node.args[position] if len(node.args) > position else keywords.get("flags", ast.Constant(value=0))
+    return pattern, _regex_flags(flags)
+
+
+def _regex_call_patterns(tree: ast.AST) -> Iterator[tuple[int, str, int]]:
+    """Статические pattern/flags у API re, принимающих паттерн; не re.escape."""
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
+        if not isinstance(node, ast.Call):
             continue
         func = node.func
         is_re = isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "re"
-        if is_re and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-            yield node.args[0].lineno, node.args[0].value
+        if not is_re or func.attr not in _REGEX_FLAG_POSITION:
+            continue
+        pattern, flags = _regex_arguments(node, _REGEX_FLAG_POSITION[func.attr])
+        if isinstance(pattern, ast.Constant) and isinstance(pattern.value, str) and flags is not None:
+            yield pattern.lineno, pattern.value, flags
 
 
 _REPEATS = frozenset({"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"})
@@ -224,7 +258,7 @@ def _count_char_classes(pattern: str) -> int:
     return count
 
 
-def regex_complexity(pattern: str) -> int:
+def regex_complexity(pattern: str, flags: int = 0) -> int:
     """Сложность регулярки по правилу Sonar S5843 (эталон: 24 — см. тесты).
 
     ГРАНИЦА: ``re._parser`` схлопывает альтернативу из односимвольных ветвей
@@ -232,16 +266,42 @@ def regex_complexity(pattern: str) -> int:
     от Sonar. Счёт получается заниженным, то есть чекер скорее промолчит, чем
     соврёт; на калибровочных регулярках отчёта расхождения нет.
     """
-    return _structural_cost(_reparser.parse(pattern), 1) + _count_char_classes(pattern)
+    return _structural_cost(_reparser.parse(pattern, flags), 1) + _count_char_classes(pattern)
 
 
-def _class_bodies(pattern: str) -> list[frozenset[str]]:
-    """Наборы токенов каждого класса ``[...]`` в паттерне."""
-    return [frozenset(_CLASS_TOKEN.findall(body)) for body in _CLASS_BODY.findall(pattern)]
+def _scoped_regex_flags(flags: int, added: int, removed: int) -> int:
+    type_flags = re.ASCII | re.UNICODE | re.LOCALE
+    if added & type_flags:
+        flags &= ~type_flags
+    return (flags | added) & ~removed
 
 
-def _regex_hint(pattern: str) -> str | None:
-    bodies = _class_bodies(pattern)
+def _regex_children(name: str, value, flags: int) -> Iterator[tuple[Iterable, int]]:
+    if name == "SUBPATTERN":
+        yield value[3], _scoped_regex_flags(flags, value[1], value[2])
+    elif name in _REPEATS:
+        yield value[2], flags
+    elif name in _ASSERTS:
+        yield value[1], flags
+    elif name == "BRANCH":
+        yield from ((branch, flags) for branch in value[1])
+    elif name == "ATOMIC_GROUP":
+        yield value, flags
+    elif name == "GROUPREF_EXISTS":
+        yield from ((branch, flags) for branch in value[1:] if branch)
+
+
+def _ascii_classes(seq: Iterable, flags: int) -> Iterator[frozenset]:
+    for op, value in seq:
+        if op.name == "IN" and flags & re.ASCII:
+            yield frozenset((kind.name, item) for kind, item in value)
+        for child, child_flags in _regex_children(op.name, value, flags):
+            yield from _ascii_classes(child, child_flags)
+
+
+def _regex_hint(pattern: str, flags: int = 0) -> str | None:
+    parsed = _reparser.parse(pattern, flags)
+    bodies = list(_ascii_classes(parsed, parsed.state.flags))
     if _WORD_RANGES in bodies:
         return "S6353 use '\\w' instead of '[A-Za-z0-9_]'"
     if _DIGIT_RANGES in bodies:
@@ -255,14 +315,14 @@ def _regex_hint(pattern: str) -> str | None:
 
 def check_regex(path: Path, tree: ast.AST) -> list[str]:
     out = []
-    for lineno, pattern in _regex_call_patterns(tree):
-        hint = _regex_hint(pattern)
+    for lineno, pattern, flags in _regex_call_patterns(tree):
+        try:
+            hint = _regex_hint(pattern, flags)
+            score = regex_complexity(pattern, flags)
+        except (re.error, ValueError):
+            continue
         if hint:
             out.append(f"{path}:{lineno}: {hint} in {pattern!r}")
-        try:
-            score = regex_complexity(pattern)
-        except re.error:
-            continue
         if score > REGEX_MAX:
             out.append(
                 f"{path}:{lineno}: S5843 simplify this regular expression to reduce its complexity "
@@ -274,20 +334,61 @@ def check_regex(path: Path, tree: ast.AST) -> list[str]:
 # --------------------------------------------------------------------------- #
 # S5713 — лишний класс в кортеже except
 # --------------------------------------------------------------------------- #
-def _import_aliases(tree: ast.AST) -> dict[str, str]:
-    """Локальное имя -> полный путь, только для модулей стандартной библиотеки.
+def _scope_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """Узлы одной области: тела вложенных функций/классов разбираются отдельно."""
+    stack = list(scope.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, (*_SCOPES, ast.Lambda)):
+            stack.extend(ast.iter_child_nodes(node))
 
-    Сторонние пакеты не резолвим сознательно: чекер не должен зависеть от того,
-    что установлено в окружении, и уж тем более импортировать чужой код.
-    """
-    aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                aliases[alias.asname or alias.name.split(".")[0]] = alias.name
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            for alias in node.names:
-                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+
+def _bound_names(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        return [node.id]
+    if isinstance(node, (*_FUNC_DEFS, ast.ClassDef)):
+        return [node.name]
+    if isinstance(node, ast.ExceptHandler) and node.name:
+        return [node.name]
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return node.names
+    return []
+
+
+def _import_bindings(node: ast.AST) -> Iterator[tuple[str, str | None]]:
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            root = alias.name.split(".")[0]
+            yield alias.asname or root, alias.name if alias.asname else root
+    elif isinstance(node, ast.ImportFrom):
+        for alias in node.names:
+            target = f"{node.module}.{alias.name}" if node.module and node.level == 0 else None
+            yield alias.asname or alias.name, target
+
+
+def _scope_bindings(scope: ast.AST) -> dict[str, set]:
+    """Все связывания имени в одной области, без тел вложенных определений."""
+    bindings: dict[str, set] = {}
+    direct = set(scope.body)
+    for node in _scope_nodes(scope):
+        for name in _bound_names(node):
+            bindings.setdefault(name, set()).add(None)
+        for name, target in _import_bindings(node):
+            binding = (target, node.lineno) if node in direct and target else None
+            bindings.setdefault(name, set()).add(binding)
+    return bindings
+
+
+def _scope_aliases(scope: ast.AST, inherited: dict) -> dict:
+    """Только однозначные импорты. Присваивания и условные импорты затемняют имя."""
+    bindings = _scope_bindings(scope)
+    if isinstance(scope, _FUNC_DEFS):
+        for arg in ast.walk(scope.args):
+            if isinstance(arg, ast.arg):
+                bindings.setdefault(arg.arg, set()).add(None)
+    aliases = inherited.copy()
+    aliases.update((name, next(iter(values)) if len(values) == 1 else None) for name, values in bindings.items())
     return aliases
 
 
@@ -324,12 +425,17 @@ def _import_stdlib(dotted: str) -> object | None:
     return obj
 
 
-def _resolve_exception(node: ast.expr, aliases: dict[str, str]) -> type | None:
+def _resolve_exception(node: ast.expr, aliases: dict) -> type | None:
+    if "*" in aliases:
+        return None
     dotted = _dotted_name(node)
     if dotted is None:
         return None
     head, _, tail = dotted.partition(".")
-    full = aliases.get(head, head) + (f".{tail}" if tail else "")
+    binding = aliases.get(head, (head, 0))
+    if binding is None or binding[1] > node.lineno:
+        return None
+    full = binding[0] + (f".{tail}" if tail else "")
     obj = getattr(builtins, full, None) if "." not in full else None
     if obj is None:
         obj = _import_stdlib(full)
@@ -348,11 +454,21 @@ def _redundant_pair(classes: list[tuple[ast.expr, type]], index: int) -> tuple[s
     return None
 
 
+def _scope_handlers(scope: ast.AST, inherited: dict) -> Iterator[tuple[ast.ExceptHandler, dict]]:
+    aliases = _scope_aliases(scope, inherited)
+    for node in _scope_nodes(scope):
+        if isinstance(node, ast.ExceptHandler):
+            yield node, aliases
+        elif isinstance(node, (*_FUNC_DEFS, ast.ClassDef)):
+            # Атрибуты класса не являются замыканием для его методов.
+            parent = inherited if isinstance(scope, ast.ClassDef) else aliases
+            yield from _scope_handlers(node, parent)
+
+
 def check_redundant_except(path: Path, tree: ast.AST) -> list[str]:
-    aliases = _import_aliases(tree)
     out = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler) or not isinstance(node.type, ast.Tuple):
+    for node, aliases in _scope_handlers(tree, {}):
+        if not isinstance(node.type, ast.Tuple):
             continue
         classes = [(el, cls) for el in node.type.elts if (cls := _resolve_exception(el, aliases)) is not None]
         for index, (element, _) in enumerate(classes):
@@ -396,7 +512,8 @@ def _falls_through(body: list[ast.stmt]) -> bool:
     if isinstance(last, ast.If):
         return _falls_through(last.body) or _falls_through(last.orelse)
     if isinstance(last, (ast.With, ast.AsyncWith)):
-        return _falls_through(last.body)
+        # __exit__/__aexit__ может подавить исключение даже в теле с return.
+        return True
     if isinstance(last, ast.Try):
         branches = [last.body + last.orelse, *(h.body for h in last.handlers)]
         return _falls_through(last.finalbody) and any(_falls_through(b) for b in branches)
@@ -494,22 +611,41 @@ def check_identical_bodies(path: Path, tree: ast.AST) -> list[str]:
 _BLOCK_OWNERS = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)
 
 
-def _blocks_of(node: ast.AST) -> Iterator[list[ast.stmt]]:
+def _blocks_of(node: ast.AST) -> Iterator[tuple[str, list[ast.stmt]]]:
     """Блоки, которые Sonar считает пустыми. ``except`` он не проверяет."""
     for field in ("body", "orelse", "finalbody"):
         block = getattr(node, field, None)
         if block:
-            yield block
+            yield field, block
 
 
-def check_empty_blocks(path: Path, tree: ast.AST, comment_lines: set[int]) -> list[str]:
+def _block_start(node: ast.AST, field: str, block: list[ast.stmt], headers: list[tokenize.TokenInfo]) -> int:
+    if field == "body":
+        return node.lineno
+    keyword = "finally" if field == "finalbody" else "else"
+    return max(
+        (
+            tok.start[0]
+            for tok in headers
+            if tok.string == keyword
+            and tok.start[1] == node.col_offset
+            and node.lineno <= tok.start[0] <= block[0].lineno
+        ),
+        default=block[0].lineno,
+    )
+
+
+def check_empty_blocks(path: Path, tree: ast.AST, source: str) -> list[str]:
+    comment_lines = _comment_lines(source)
+    headers = [tok for tok in _python_tokens(source) if tok.type == tokenize.NAME and tok.string in {"else", "finally"}]
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, _BLOCK_OWNERS):
             continue
-        for block in _blocks_of(node):
+        for field, block in _blocks_of(node):
             only_pass = len(block) == 1 and isinstance(block[0], ast.Pass)
-            if only_pass and not (comment_lines & set(range(node.lineno, block[0].lineno + 1))):
+            start = _block_start(node, field, block, headers)
+            if only_pass and not (comment_lines & set(range(start, block[0].lineno + 1))):
                 out.append(f"{path}:{block[0].lineno}: S108 either remove or fill this block of code")
     return out
 
@@ -594,7 +730,8 @@ def check_html_tables(path: Path, text: str) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Обход файлов и запуск
 # --------------------------------------------------------------------------- #
-SUFFIXES = (".py", ".html")
+HTML_SUFFIX = ".html"
+SUFFIXES = (".py", HTML_SUFFIX)
 
 
 def _is_skipped(path: Path) -> bool:
@@ -611,9 +748,30 @@ def iter_files(paths: list[str]) -> Iterator[Path]:
             yield path
 
 
-def _nosonar_lines(source: str) -> set[int]:
-    """Строки с ``NOSONAR`` — как у самого Sonar, замечания на них не считаются."""
-    return {i for i, line in enumerate(source.splitlines(), 1) if "NOSONAR" in line}
+class _HtmlSuppressions(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines: set[int] = set()
+
+    def handle_comment(self, data: str) -> None:
+        start = self.getpos()[0]
+        self.lines.update(start + i for i, line in enumerate(data.splitlines()) if "NOSONAR" in line)
+
+
+def _python_tokens(source: str) -> Iterator[tokenize.TokenInfo]:
+    try:
+        yield from tokenize.generate_tokens(io.StringIO(source).readline)
+    except (tokenize.TokenError, SyntaxError):
+        return  # Ошибку исходника отдельно сообщает ast.parse; не угадываем комментарии.
+
+
+def _nosonar_lines(source: str, *, html: bool = False) -> set[int]:
+    """Подавление только настоящими комментариями, не литералами/атрибутами."""
+    if html:
+        parser = _HtmlSuppressions()
+        parser.feed(source)
+        return parser.lines
+    return {tok.start[0] for tok in _python_tokens(source) if tok.type == tokenize.COMMENT and "NOSONAR" in tok.string}
 
 
 def _comment_lines(source: str) -> set[int]:
@@ -622,11 +780,7 @@ def _comment_lines(source: str) -> set[int]:
     Хвостовой комментарий (``pass  # ждём следующего хода``) для Sonar тоже
     объяснение пустого блока, а ``#`` внутри строкового литерала — нет.
     """
-    try:
-        tokens = tokenize.generate_tokens(io.StringIO(source).readline)
-        return {tok.start[0] for tok in tokens if tok.type == tokenize.COMMENT}
-    except (tokenize.TokenError, SyntaxError):
-        return {i for i, line in enumerate(source.splitlines(), 1) if line.lstrip().startswith("#")}
+    return {tok.start[0] for tok in _python_tokens(source) if tok.type == tokenize.COMMENT}
 
 
 def _line_of(finding: str) -> int:
@@ -648,7 +802,7 @@ def check_python(path: Path, source: str) -> list[str]:
         *check_same_return(path, tree),
         *check_nested_conditional(path, tree),
         *check_identical_bodies(path, tree),
-        *check_empty_blocks(path, tree, _comment_lines(source)),
+        *check_empty_blocks(path, tree, source),
         *check_tls_verification(path, tree),
     ]
 
@@ -658,8 +812,8 @@ def check_file(path: Path) -> list[str]:
         source = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return [f"{path}: cannot read: {exc}"]
-    findings = check_html_tables(path, source) if path.suffix == ".html" else check_python(path, source)
-    nosonar = _nosonar_lines(source)
+    findings = check_html_tables(path, source) if path.suffix == HTML_SUFFIX else check_python(path, source)
+    nosonar = _nosonar_lines(source, html=path.suffix == HTML_SUFFIX)
     return [f for f in findings if _line_of(f) not in nosonar]
 
 

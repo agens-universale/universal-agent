@@ -28,4 +28,4 @@ fi
 if [ $# -eq 0 ]; then
   exec "${RUN[@]}" --all-files --hook-stage manual --show-diff-on-failure
 fi
-exec "${RUN[@]}" --hook-stage manual --files "$@"
+exec uv run --group lint python scripts/lint_paths.py "${RUN[@]}" -- "$@"

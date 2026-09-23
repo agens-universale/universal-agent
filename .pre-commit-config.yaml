@@ -132,3 +132,5 @@ repos:
         language: system
         files: '(^|/)pyproject\.toml$'
         pass_filenames: false
+        always_run: true
+        stages: [pre-commit, pre-push, manual]

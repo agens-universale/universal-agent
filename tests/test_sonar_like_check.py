@@ -91,7 +91,7 @@ def test_s5843_reported_only_above_threshold(tmp_path):
     assert _keys(hit) == ["S5843"]
     assert "from 24 to the 20 allowed" in hit[0]
     quiet = _findings(tmp_path, f'import re\nre.match(r"{QUIET_REGEX}", "")\n', name="quiet.py")
-    assert _keys(quiet) == ["S6353"]  # только подсказка про \w, не сложность
+    assert quiet == []  # ASCII-диапазон нельзя заменять Unicode-классом \w
 
 
 # --------------------------------------------------------------------------- #
@@ -106,7 +106,7 @@ def test_s5843_reported_only_above_threshold(tmp_path):
     ],
 )
 def test_regex_hints_found(tmp_path, pattern, key):
-    assert _keys(_findings(tmp_path, f'import re\nre.search(r"{pattern}", "")\n')) == [key]
+    assert _keys(_findings(tmp_path, f'import re\nre.search(r"{pattern}", "", flags=re.ASCII)\n')) == [key]
 
 
 @pytest.mark.parametrize("pattern", [r"\w+", r"\d{2}", r"[^<]*<", r"[A-Za-z_]+", r"[0-9a-f]+"])
@@ -369,3 +369,163 @@ def test_main_returns_one_on_finding(tmp_path, capsys):
     (tmp_path / "bad.py").write_text("if flag:\n    pass\n", encoding="utf-8")
     assert checker.main([str(tmp_path)]) == 1
     assert "S108" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "re.escape('[0-9]')",
+        "re.escape('[A-Za-z0-9_]')",
+        "re.escape(" + repr(CALIBRATION_REGEX) + ")",
+    ],
+)
+def test_regex_escape_is_literal_input(tmp_path, call):
+    assert _findings(tmp_path, "import re\n" + call) == []
+
+
+@pytest.mark.parametrize(
+    "call, expected",
+    [
+        ("re.compile('[0-9]', re.A)", True),
+        ("re.search(pattern='[0-9]', string='', flags=re.A | re.I)", True),
+        ("re.sub('[0-9]', '', '', 0, re.ASCII)", True),
+        ("re.split('[0-9]', '', 0, re.A)", True),
+        ("re.compile('(?a)[A-Za-z0-9_]+')", True),
+        ("re.compile('(?a:[0-9])')", True),
+        ("re.compile('(?a)(?u:[0-9])')", False),
+        ("re.compile('(?u:[0-9])', re.A)", False),
+        ("re.compile('[0-9]')", False),
+        ("re.compile('[A-Za-z0-9_]', re.I)", False),
+        ("re.compile('[0-9]', unknown_flags)", False),
+        ("re.compile('[0-9]', **options)", False),
+        (r"re.compile(r'\[0-9]', re.A)", False),
+    ],
+)
+def test_regex_hints_preserve_character_set(tmp_path, call, expected):
+    findings = _findings(tmp_path, "import re\n" + call)
+    assert ("S6353" in _keys(findings)) is expected
+
+
+def test_regex_unicode_ranges_have_different_semantics():
+    import re
+
+    for pattern, replacement, sample in [("[0-9]+", r"\d+", "١٢"), ("[A-Za-z0-9_]+", r"\w+", "привет")]:
+        assert re.fullmatch(pattern, sample) is None
+        assert re.fullmatch(replacement, sample) is not None
+        assert re.fullmatch(replacement, sample, re.A) is None
+
+
+@pytest.mark.parametrize(
+    "first, second, expected",
+    [
+        ("OSError", "ValueError", False),
+        ("ValueError", "OSError", True),
+    ],
+)
+def test_exception_imports_do_not_leak_between_functions(tmp_path, first, second, expected):
+    source = f"""def f():
+    from builtins import {first} as E
+    try:
+        int('bad')
+    except (ValueError, E):
+        return 1
+
+def g():
+    from builtins import {second} as E
+    return E
+"""
+    assert ("S5713" in _keys(_findings(tmp_path, source))) is expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import xml.etree.ElementTree\ntry:\n    run()\nexcept (SyntaxError, xml.etree.ElementTree.ParseError):\n    pass\n",
+        "import xml.etree.ElementTree as ET\ntry:\n    run()\nexcept (SyntaxError, ET.ParseError):\n    pass\n",
+        "from json import JSONDecodeError as E\ndef f():\n    try:\n        run()\n    except (ValueError, E):\n        pass\n",
+        "def outer():\n    from json import JSONDecodeError as E\n    def inner():\n        try:\n            run()\n        except (ValueError, E):\n            pass\n    return inner\n",
+        "from builtins import ValueError as E\nclass C:\n    from builtins import OSError as E\n    def f(self):\n        try:\n            run()\n        except (ValueError, E):\n            pass\n",
+    ],
+)
+def test_exception_imports_resolve_lexical_scope(tmp_path, source):
+    assert "S5713" in _keys(_findings(tmp_path, source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from builtins import ValueError as E\ndef f(E):\n    try:\n        run()\n    except (ValueError, E):\n        pass\n",
+        "from builtins import ValueError as E\nE = custom\ntry:\n    run()\nexcept (ValueError, E):\n    pass\n",
+        "def f():\n    if condition:\n        from builtins import ValueError as E\n    try:\n        run()\n    except (ValueError, E):\n        pass\n",
+        "class C:\n    from builtins import ValueError as E\n    def f(self):\n        try:\n            run()\n        except (ValueError, E):\n            pass\n",
+        "def f():\n    try:\n        run()\n    except (ValueError, E):\n        pass\n    from builtins import ValueError as E\n",
+    ],
+)
+def test_exception_unknown_bindings_are_not_guessed(tmp_path, source):
+    assert "S5713" not in _keys(_findings(tmp_path, source))
+
+
+@pytest.mark.parametrize("prefix, context", [("def", "with"), ("async def", "async with")])
+def test_same_return_allows_suppressing_context_manager(tmp_path, prefix, context):
+    source = f"""{prefix} f(x):
+    {context} manager():
+        if x == 0:
+            return 1
+        if x == 1:
+            return 1
+        raise ValueError(x)
+"""
+    assert "S3516" not in _keys(_findings(tmp_path, source))
+
+
+def test_same_return_after_context_still_reported(tmp_path):
+    source = "def f(x):\n    with manager():\n        if x:\n            return 1\n    return 1\n"
+    assert "S3516" in _keys(_findings(tmp_path, source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "if flag:\n    # explanation for the other branch\n    run()\nelse:\n    pass\n",
+        "try:\n    # explanation for try\n    run()\nfinally:\n    pass\n",
+        "for x in values:\n    # explanation for loop\n    run()\nelse:\n    pass\n",
+        "if flag:\n    run()\n    # still belongs to if\nelse:\n    pass\n",
+    ],
+)
+def test_empty_branch_cannot_borrow_another_comment(tmp_path, source):
+    assert "S108" in _keys(_findings(tmp_path, source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "if flag:\n    run()\nelse:  # intentionally empty\n    pass\n",
+        "try:\n    run()\nfinally:\n    # intentionally empty\n    pass\n",
+        "if flag:\n    run()\nelse:\n    pass  # intentionally empty\n",
+    ],
+)
+def test_empty_branch_owns_its_explanation(tmp_path, source):
+    assert "S108" not in _keys(_findings(tmp_path, source))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "result = 'NOSONAR' if a else (1 if b else 2)\n",
+        "result = '# NOSONAR' if a else (1 if b else 2)\n",
+    ],
+)
+def test_nosonar_in_data_does_not_suppress(tmp_path, source):
+    assert "S3358" in _keys(_findings(tmp_path, source))
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ('<table data-note="NOSONAR"></table>', True),
+        ("<table></table><!-- NOSONAR: intentional -->", False),
+        ("<!-- NOSONAR: another line -->\n<table></table>", True),
+    ],
+)
+def test_html_nosonar_is_only_a_comment_on_the_same_line(tmp_path, source, expected):
+    assert ("Web:S5256" in _keys(_findings(tmp_path, source, name="sample.html"))) is expected
