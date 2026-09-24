@@ -297,3 +297,26 @@ def test_convert_line_endings_to_crlf_and_to_lf():
 
 def test_convert_line_endings_leaves_bare_cr_alone():
     assert convert_line_endings("a\rb\n", "\r\n") == "a\rb\r\n"
+
+
+def test_split_lines_lf_ignores_everything_python_calls_a_line_break():
+    """Режем только по LF: `str.splitlines` знает семь лишних разделителей.
+
+    Git концом строки считает один `\n`. Всё остальное — вертикальная
+    табуляция, перевод страницы, одиночный `\r`, `\u2028` и соседи — для него
+    обычные символы ВНУТРИ строки. Разойдясь с ним здесь, разбор диффа сдвигает
+    номера строк и врёт в счётчиках (пятый раунд ревью, находка 3).
+    """
+    from gc_core.utils.file_text import split_lines_lf
+
+    for odd in ("\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+        text = f"a{odd}b"
+        assert text.splitlines() == ["a", "b"], "питон считает это концом строки"
+        assert split_lines_lf(text) == [text], "а git — нет"
+
+    assert split_lines_lf("") == []
+    assert split_lines_lf("a\nb") == ["a", "b"]
+    assert split_lines_lf("a\nb\n") == ["a", "b"]
+    assert split_lines_lf("a\nb", keepends=True) == ["a\n", "b"]
+    assert split_lines_lf("a\nb\n", keepends=True) == ["a\n", "b\n"]
+    assert split_lines_lf("\n", keepends=True) == ["\n"]
