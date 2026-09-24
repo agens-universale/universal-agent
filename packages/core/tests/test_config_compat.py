@@ -49,6 +49,15 @@ def test_untouched_config_yields_no_facts():
     assert compat.apply_compat({"backend": {"x": 1}}) == []
 
 
+def test_removed_diff_tui_keys_are_dropped_with_notice():
+    """Ключи умершего visual-diff не роняют старый config.yml (extra=forbid)."""
+    raw = {"diff_tui": {"preview_context_lines": 50, "full_file_max_lines": 300}}
+    facts = compat.apply_compat(raw)
+    assert raw["diff_tui"] == {}
+    assert len(facts) == 2
+    assert all("устарел и игнорируется" in f for f in facts)
+
+
 def test_llm_to_auxiliary_llm_rename_in_compat():
     """Реальный RENAMES: llm → auxiliary_llm до model_validate."""
     raw = {"chat_completions": {"llm": {"max_tokens": 1111}}}

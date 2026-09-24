@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, List, Tuple
 
 # {"старый.dotted.путь": "новый.dotted.путь"}
 RENAMES: Dict[str, str] = {
+    # лимит снимков «до правки» уехал из cache-mode legacy-стора в .gc/agent_edits
+    "diff_tui.cache_max_orig": "diff_tui.snapshots_max_files",
     # AliasChoices("auxiliary_llm", "llm") недостаточно: deep_merge user(llm)+project
     # (auxiliary_llm) оставляет оба ключа → extra=forbid «Extra inputs are not permitted».
     "chat_completions.llm": "chat_completions.auxiliary_llm",
@@ -24,6 +26,10 @@ RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
+    "diff_tui.preview_context_lines":
+        "экран правок считает дифф по журналу; контекст хэнков — diff_tui.hunk_context_lines",
+    "diff_tui.full_file_max_lines":
+        "порога больше нет: клавиша f на экране правок показывает файл целиком",
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"
