@@ -102,6 +102,45 @@ def _compute_deadline_iso(timeout_seconds: int) -> str:
     ).isoformat()
 
 
+def _copy_swarm_assets(
+    sandbox_path: str,
+    swarm_cfg: Dict[str, Any],
+    swarm_overrides: Dict[str, Any],
+) -> None:
+    # Опционально: swarm-specific prompt (agentmd_path) копируется в sandbox.
+    swarm_agentmd_path = swarm_cfg.get("agentmd_path") or ""
+    if swarm_agentmd_path and os.path.isfile(swarm_agentmd_path):
+        dst = os.path.join(sandbox_path, ".gc", "agent.md")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(swarm_agentmd_path, dst)
+        swarm_overrides["paths"]["agent_md_path"] = "/work/.gc/agent.md"
+
+    # Опционально: swarm-specific skills (skills_dir) — копируем содержимое.
+    # Промах по каталогу молчаливым быть не должен: без копирования
+    # paths.skills_data_path не переопределяется, песочница поднимается без
+    # скиллов, и sworm завершается «успешно» — ровно так и жил дефолт,
+    # указывавший в несуществующий <assets>/swarm_skills.
+    swarm_skills_dir = swarm_cfg.get("skills_dir") or ""
+    if swarm_skills_dir and os.path.isdir(swarm_skills_dir):
+        dst_skills = os.path.join(sandbox_path, ".gc", "skills")
+        if os.path.isdir(dst_skills):
+            shutil.rmtree(dst_skills)
+        shutil.copytree(swarm_skills_dir, dst_skills)
+        swarm_overrides["paths"]["skills_data_path"] = "/work/.gc/skills"
+    elif swarm_skills_dir and swarm_cfg.get("skills_dir_configured"):
+        # Кричим только про путь, который человек выписал руками: это ошибка
+        # конфигурации. Несуществующий ДЕФОЛТ означает лишь «swarm-скиллы не
+        # заводили» — законное состояние свежей установки, и предупреждать о нём
+        # на каждом запуске значит приучить пропускать это предупреждение мимо.
+        logger.warning(
+            "runtime config materialization: каталог скиллов %s не существует — "
+            "в песочницу ничего не скопировано, агент пойдёт БЕЗ swarm-скиллов. "
+            "Путь берётся из swarm.skills_dir в config_server.yml "
+            "(относительный — от каталога самого конфига).",
+            swarm_skills_dir,
+        )
+
+
 def _materialize_runtime_config(
     host_config_path: str,
     sandbox_path: str,
@@ -196,38 +235,7 @@ def _materialize_runtime_config(
         },
     }
 
-    # Опционально: swarm-specific prompt (agentmd_path) копируется в sandbox.
-    swarm_agentmd_path = swarm_cfg.get("agentmd_path") or ""
-    if swarm_agentmd_path and os.path.isfile(swarm_agentmd_path):
-        dst = os.path.join(sandbox_path, ".gc", "agent.md")
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copyfile(swarm_agentmd_path, dst)
-        swarm_overrides["paths"]["agent_md_path"] = "/work/.gc/agent.md"
-
-    # Опционально: swarm-specific skills (skills_dir) — копируем содержимое.
-    # Промах по каталогу молчаливым быть не должен: без копирования
-    # paths.skills_data_path не переопределяется, песочница поднимается без
-    # скиллов, и sworm завершается «успешно» — ровно так и жил дефолт,
-    # указывавший в несуществующий <assets>/swarm_skills.
-    swarm_skills_dir = swarm_cfg.get("skills_dir") or ""
-    if swarm_skills_dir and os.path.isdir(swarm_skills_dir):
-        dst_skills = os.path.join(sandbox_path, ".gc", "skills")
-        if os.path.isdir(dst_skills):
-            shutil.rmtree(dst_skills)
-        shutil.copytree(swarm_skills_dir, dst_skills)
-        swarm_overrides["paths"]["skills_data_path"] = "/work/.gc/skills"
-    elif swarm_skills_dir and swarm_cfg.get("skills_dir_configured"):
-        # Кричим только про путь, который человек выписал руками: это ошибка
-        # конфигурации. Несуществующий ДЕФОЛТ означает лишь «swarm-скиллы не
-        # заводили» — законное состояние свежей установки, и предупреждать о нём
-        # на каждом запуске значит приучить пропускать это предупреждение мимо.
-        logger.warning(
-            "runtime config materialization: каталог скиллов %s не существует — "
-            "в песочницу ничего не скопировано, агент пойдёт БЕЗ swarm-скиллов. "
-            "Путь берётся из swarm.skills_dir в config_server.yml "
-            "(относительный — от каталога самого конфига).",
-            swarm_skills_dir,
-        )
+    _copy_swarm_assets(sandbox_path, swarm_cfg, swarm_overrides)
 
     merged = deep_merge(raw, swarm_overrides)
 
@@ -262,6 +270,22 @@ def _make_swarm_id(system: str, task_id: str) -> str:
     system_norm = str(system or "").strip().lower()
     task_norm = str(task_id or "").strip()
     return f"swarm_{system_norm}_{task_norm}"
+
+
+def _try_materialize_runtime_config(
+    swarm_cfg: Dict[str, Any], sandbox_dir: str, swarm_id: str
+) -> None:
+    host_config_path = _resolve_host_config_path(swarm_cfg)
+    if host_config_path:
+        try:
+            _materialize_runtime_config(
+                host_config_path, sandbox_dir, swarm_cfg
+            )
+        except Exception:
+            logger.exception(
+                "swarm %s: runtime config materialization failed (proceeding without it)",
+                swarm_id,
+            )
 
 
 def start_swarm_process(
@@ -339,17 +363,7 @@ def start_swarm_process(
         # Шаг 1.10 (AR-1): материализуем runtime config.yml для CLI.
         # CLI внутри bwrap не сможет резолвить дефолтные пути config'а — нужно
         # положить его в /work/.gc/config.yml явно. Wrapper передаст --config.
-        host_config_path = _resolve_host_config_path(swarm_cfg)
-        if host_config_path:
-            try:
-                _materialize_runtime_config(
-                    host_config_path, sandbox_dir, swarm_cfg
-                )
-            except Exception:
-                logger.exception(
-                    "swarm %s: runtime config materialization failed (proceeding without it)",
-                    swarm_id,
-                )
+        _try_materialize_runtime_config(swarm_cfg, sandbox_dir, swarm_id)
 
         # Базовая метадата (совместимая с обычным meta.json) + swarm_meta.
         base_meta: Dict[str, Any] = {

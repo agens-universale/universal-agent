@@ -127,6 +127,29 @@ def find_entry(manifest, name: str):
     return None
 
 
+def _source_distribution_name(source: Path, root: Path) -> str | None:
+    for cand in _vendor_candidates(_source_dir_name(source), root):
+        pyproject = cand / _MANIFEST_NAME
+        if not pyproject.is_file():
+            continue
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            # Битый pyproject у одного кандидата не повод бросать поиск:
+            # следующим идёт external/vendor рабочей копии.
+            continue
+        name = (data.get("project") or {}).get("name")
+        if name:
+            return str(name)
+        # Имени нет — кандидат не подходит, но поиск не окончен: следующим
+        # идёт external/vendor рабочей копии, где имя объявлено. Прежний
+        # `return None` обрывал перебор на первом же неполном pyproject, и
+        # `gc-mcp remove` рапортовал успех, оставив пакет установленным, —
+        # тот самый тихий пропуск, ради которого соседний except и написан.
+        continue
+    return None
+
+
 def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
     """Имя дистрибутива для `pip uninstall`. Приоритет: явное install.dist
     (source-dir-независимо) → тип-специфичный фолбэк (pypi → package;
@@ -146,28 +169,7 @@ def _dist_name(entry: MCPEntry, root: Path = Path(".")) -> str | None:
     if itype == "pypi" and entry.install.package:
         return _pypi_distribution_name(entry.install.package)
     if itype == "source" and entry.install.source is not None:
-        for cand in _vendor_candidates(
-            _source_dir_name(entry.install.source), root
-        ):
-            pyproject = cand / _MANIFEST_NAME
-            if not pyproject.is_file():
-                continue
-            try:
-                data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-                # Битый pyproject у одного кандидата не повод бросать поиск:
-                # следующим идёт external/vendor рабочей копии.
-                continue
-            name = (data.get("project") or {}).get("name")
-            if name:
-                return str(name)
-            # Имени нет — кандидат не подходит, но поиск не окончен: следующим
-            # идёт external/vendor рабочей копии, где имя объявлено. Прежний
-            # `return None` обрывал перебор на первом же неполном pyproject, и
-            # `gc-mcp remove` рапортовал успех, оставив пакет установленным, —
-            # тот самый тихий пропуск, ради которого соседний except и написан.
-            continue
-        return None
+        return _source_distribution_name(entry.install.source, root)
     if itype == "wheel":
         pkg_path = (root / entry.path).resolve() / "dist"
         wheels = sorted(pkg_path.glob("*.whl"))

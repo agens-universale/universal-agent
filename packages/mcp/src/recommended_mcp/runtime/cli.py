@@ -260,42 +260,46 @@ def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
             print(f"[warn] {name} нет в манифесте — деинсталл пропущен")
 
 
+def _remove_all(keep_package: bool) -> None:
+    from recommended_mcp.runtime import wiring
+
+    names = list(wiring.wired_servers().keys())
+    for n in names:
+        wiring.unwire(n)
+    print(
+        f"[unwired] {', '.join(names)}"
+        if names
+        else "[info] нет подключённых MCP"
+    )
+    if keep_package:
+        print("[done] все MCP отключены (пакеты оставлены)")
+        return
+    import shutil
+
+    from gc_core.config_modules.env_vars import gc_paths
+
+    data = Path(gc_paths()["data"])
+    for sub in ("recommended_mcp", "node"):
+        d = data / sub
+        if d.exists():
+            try:
+                shutil.rmtree(d)
+                print(f"[wiped] {d}")
+            except OSError as exc:
+                print(
+                    f"[warn] не удалось удалить {d}: {exc} (закрой gc-ua, если daemon держит файлы, и повтори)"
+                )
+    print(
+        "[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — убрать вручную: playwright uninstall"
+    )
+    print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
+
+
 def _cmd_remove(
     name: Optional[str], keep_package: bool, remove_all: bool = False
 ) -> int:
-    from recommended_mcp.runtime import wiring
-
     if remove_all:
-        names = list(wiring.wired_servers().keys())
-        for n in names:
-            wiring.unwire(n)
-        print(
-            f"[unwired] {', '.join(names)}"
-            if names
-            else "[info] нет подключённых MCP"
-        )
-        if keep_package:
-            print("[done] все MCP отключены (пакеты оставлены)")
-            return 0
-        import shutil
-
-        from gc_core.config_modules.env_vars import gc_paths
-
-        data = Path(gc_paths()["data"])
-        for sub in ("recommended_mcp", "node"):
-            d = data / sub
-            if d.exists():
-                try:
-                    shutil.rmtree(d)
-                    print(f"[wiped] {d}")
-                except OSError as exc:
-                    print(
-                        f"[warn] не удалось удалить {d}: {exc} (закрой gc-ua, если daemon держит файлы, и повтори)"
-                    )
-        print(
-            "[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — убрать вручную: playwright uninstall"
-        )
-        print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
+        _remove_all(keep_package)
         return 0
     if not name:
         print("[error] укажи имя MCP или --all", file=sys.stderr)

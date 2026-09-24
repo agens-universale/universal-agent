@@ -85,6 +85,20 @@ def _warn(text: str, *, code: str, highlights: tuple[str, ...] = ()) -> None:
 _DEFAULT_DISABLE_HINT = "отключить автозапуск MCP — см. справку вашей команды"
 
 
+def _report_daemon_ready(name: str, server_cfg: dict[str, Any]) -> None:
+    url = server_cfg.get("url")
+    if not url:
+        return
+    print(f"[wait] {name}: {url}")
+    if wait_daemon_url_ready(str(url)):
+        print(f"[ready] {name}: {url}")
+    else:
+        print(
+            f"[warn] {name}: daemon not accepting connections at {url} "
+            f"after {_DEFAULT_READY_TIMEOUT_SEC:.0f}s"
+        )
+
+
 def ensure_daemons_for_agent(
     config_dict: dict[str, Any],
     *,
@@ -145,16 +159,6 @@ def ensure_daemons_for_agent(
             continue
         if not started:
             continue
-        url = server_cfg.get("url")
-        if not url:
-            continue
-        print(f"[wait] {entry.name}: {url}")
-        if wait_daemon_url_ready(str(url)):
-            print(f"[ready] {entry.name}: {url}")
-        else:
-            print(
-                f"[warn] {entry.name}: daemon not accepting connections at {url} "
-                f"after {_DEFAULT_READY_TIMEOUT_SEC:.0f}s"
-            )
+        _report_daemon_ready(entry.name, server_cfg)
 
     return supervisor

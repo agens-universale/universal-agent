@@ -103,6 +103,14 @@ def _popen_kwargs(env: dict[str, str] | None, cwd: Path | None) -> dict:
     return kwargs
 
 
+def _signal_pid_fallback(pid: int, signal_name: str) -> None:
+    try:
+        if os.name == "posix":
+            os.kill(pid, getattr(signal, signal_name))
+    except Exception:
+        pass
+
+
 def terminate_pid(pid: int, *, graceful_timeout: float = 5.0) -> None:
     """Остановить процесс и его группу/дерево по PID."""
     if not is_pid_alive(pid):
@@ -119,11 +127,7 @@ def terminate_pid(pid: int, *, graceful_timeout: float = 5.0) -> None:
     except ProcessLookupError:
         return
     except Exception:
-        try:
-            if os.name == "posix":
-                os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
+        _signal_pid_fallback(pid, "SIGTERM")
 
     deadline = time.monotonic() + graceful_timeout
     while time.monotonic() < deadline:
@@ -141,11 +145,7 @@ def terminate_pid(pid: int, *, graceful_timeout: float = 5.0) -> None:
                 capture_output=True,
             )
     except Exception:
-        try:
-            if os.name == "posix":
-                os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
+        _signal_pid_fallback(pid, "SIGKILL")
 
 
 def terminate_process(
@@ -211,6 +211,16 @@ class RunSupervisor:
             remove_pid(name, self.pids_dir)
         self._managed.clear()
 
+    def _check_managed_processes(self) -> None:
+        for name, proc in list(self._managed):
+            if proc.poll() is not None:
+                code = proc.returncode
+                remove_pid(name, self.pids_dir)
+                self._managed = [(n, p) for n, p in self._managed if n != name]
+                raise SupervisorError(
+                    f"mcp {name!r} exited unexpectedly (code {code})"
+                )
+
     def wait_until_signal(self) -> None:
         if threading.current_thread() is not threading.main_thread():
             raise SupervisorError(
@@ -233,16 +243,7 @@ class RunSupervisor:
             signal.signal(signal.SIGTERM, _handler)
         try:
             while not stop.is_set():
-                for name, proc in list(self._managed):
-                    if proc.poll() is not None:
-                        code = proc.returncode
-                        remove_pid(name, self.pids_dir)
-                        self._managed = [
-                            (n, p) for n, p in self._managed if n != name
-                        ]
-                        raise SupervisorError(
-                            f"mcp {name!r} exited unexpectedly (code {code})"
-                        )
+                self._check_managed_processes()
                 stop.wait(timeout=0.5)
         finally:
             signal.signal(signal.SIGINT, previous_int)

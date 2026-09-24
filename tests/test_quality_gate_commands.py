@@ -170,3 +170,72 @@ def test_dead_code_input_errors_fail_the_command(
     output = capsys.readouterr()
     assert "could not analyze" in output.err
     assert "0 finding(s)" not in output.out
+
+
+@pytest.mark.parametrize(
+    ("package", "module", "excluded"),
+    [
+        ("core", "gc_core", False),
+        ("cli", "gc_cli", False),
+        ("server", "gc_server", False),
+        ("mcp", "recommended_mcp", False),
+        ("tui", "gc_tui", True),
+        ("testkit", "gc_testkit", True),
+    ],
+)
+@pytest.mark.parametrize("via_hook", [False, True])
+def test_complexity_scope_without_snapshot(
+    repository, package, module, excluded, via_hook
+):
+    import shutil
+    import tomllib
+
+    # Реальный анализатор и реальные фильтры: нарушение блокирует рабочие
+    # пакеты, но TUI/testkit пропускаются как при обходе, так и в git-хуке.
+    pyproject = (REPO / "pyproject.toml").read_text()
+    (repository / "pyproject.toml").write_text(pyproject)
+    settings = tomllib.loads(pyproject)["tool"]["complexipy"]
+    for path in settings["paths"]:
+        (repository / path).mkdir(parents=True, exist_ok=True)
+    source = repository / "packages" / package / "src" / module / "complex.py"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        "def deep(value):\n"
+        + "".join("    " * depth + "if value:\n" for depth in range(1, 7))
+        + "    " * 7
+        + "return value\n"
+    )
+    binary = shutil.which("complexipy")
+    assert binary is not None
+    if via_hook:
+        config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
+        hook = next(
+            h for h in config["repos"][0]["hooks"] if h["id"] == "complexipy"
+        )
+        args = shlex.split(hook["entry"])
+        hook["entry"] = shlex.join(
+            [binary, *args[args.index("complexipy") + 1 :]]
+        )
+        config["repos"][0]["hooks"] = [hook]
+        (repository / ".pre-commit-config.yaml").write_text(
+            yaml.safe_dump(config)
+        )
+        command = [
+            sys.executable,
+            "-m",
+            "pre_commit",
+            "run",
+            "complexipy",
+            "--hook-stage",
+            "manual",
+            "--files",
+            str(source.relative_to(repository)),
+        ]
+    else:
+        command = [binary, "packages", "--failed", "--plain", "--color", "no"]
+    result = subprocess.run(command, capture_output=True, text=True)
+    output = result.stdout + result.stderr
+    assert result.returncode == (0 if excluded else 1), output
+    if not excluded:
+        assert "deep" in output
+    assert not (repository / "complexipy-snapshot.json").exists()

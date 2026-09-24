@@ -71,6 +71,73 @@ def _meta_timestamp(meta_path: str) -> Optional[datetime]:
     return max(candidates)
 
 
+def _remove_expired_dir(path: str, dry_run: bool, stats: dict) -> bool:
+    if not dry_run:
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            stats["errors"] += 1
+            return False
+    return True
+
+
+def _cleanup_thread_dirs(
+    threads_dir: str, cutoff: datetime, dry_run: bool, stats: dict
+) -> None:
+    for entry in sorted(os.listdir(threads_dir)):
+        entry_path = os.path.join(threads_dir, entry)
+        if not os.path.isdir(entry_path):
+            continue
+
+        meta_path = os.path.join(entry_path, "meta.json")
+        ts = _meta_timestamp(meta_path) if os.path.isfile(meta_path) else None
+        # Если meta.json нет/невалидный — fallback на mtime каталога.
+        if ts is None:
+            try:
+                ts = datetime.fromtimestamp(
+                    os.path.getmtime(entry_path),
+                    tz=UTC,
+                )
+            except OSError:
+                stats["errors"] += 1
+                continue
+
+        if ts >= cutoff:
+            stats["kept"] += 1
+            continue
+
+        if not _remove_expired_dir(entry_path, dry_run, stats):
+            continue
+        stats["threads_removed"] += 1
+        # Sandbox НЕ удаляем здесь — он чистится независимо, по своему mtime
+        # (ниже), как обычная чистка тредов по возрасту. Расцеплено намеренно:
+        # threads = запись о прогоне, sandbox = рабочий /work, у каждого свой TTL.
+
+
+def _cleanup_sandbox_dirs(
+    sandbox_root_dir: str, cutoff: datetime, dry_run: bool, stats: dict
+) -> None:
+    if os.path.isdir(sandbox_root_dir):
+        for entry in sorted(os.listdir(sandbox_root_dir)):
+            entry_path = os.path.join(sandbox_root_dir, entry)
+            if not os.path.isdir(entry_path):
+                continue
+            # Чистим ВСЕ песочницы старше TTL по их mtime (не только orphan'ы).
+            try:
+                mtime = datetime.fromtimestamp(
+                    os.path.getmtime(entry_path),
+                    tz=UTC,
+                )
+            except OSError:
+                stats["errors"] += 1
+                continue
+            if mtime >= cutoff:
+                continue  # свежая песочница — оставим
+            if not _remove_expired_dir(entry_path, dry_run, stats):
+                continue
+            stats["sandboxes_removed"] += 1
+
+
 def cleanup_threads(
     threads_dir: str,
     sandbox_root_dir: str,
@@ -96,64 +163,10 @@ def cleanup_threads(
     if not os.path.isdir(threads_dir):
         return stats
 
-    for entry in sorted(os.listdir(threads_dir)):
-        entry_path = os.path.join(threads_dir, entry)
-        if not os.path.isdir(entry_path):
-            continue
-
-        meta_path = os.path.join(entry_path, "meta.json")
-        ts = _meta_timestamp(meta_path) if os.path.isfile(meta_path) else None
-        # Если meta.json нет/невалидный — fallback на mtime каталога.
-        if ts is None:
-            try:
-                ts = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path),
-                    tz=UTC,
-                )
-            except OSError:
-                stats["errors"] += 1
-                continue
-
-        if ts >= cutoff:
-            stats["kept"] += 1
-            continue
-
-        # Удаляем threads/<id>/.
-        if not dry_run:
-            try:
-                shutil.rmtree(entry_path)
-            except OSError:
-                stats["errors"] += 1
-                continue
-        stats["threads_removed"] += 1
-        # Sandbox НЕ удаляем здесь — он чистится независимо, по своему mtime
-        # (ниже), как обычная чистка тредов по возрасту. Расцеплено намеренно:
-        # threads = запись о прогоне, sandbox = рабочий /work, у каждого свой TTL.
+    _cleanup_thread_dirs(threads_dir, cutoff, dry_run, stats)
 
     # Sandboxes — независимо, по СОБСТВЕННОМУ mtime (а не по мете threads).
-    if os.path.isdir(sandbox_root_dir):
-        for entry in sorted(os.listdir(sandbox_root_dir)):
-            entry_path = os.path.join(sandbox_root_dir, entry)
-            if not os.path.isdir(entry_path):
-                continue
-            # Чистим ВСЕ песочницы старше TTL по их mtime (не только orphan'ы).
-            try:
-                mtime = datetime.fromtimestamp(
-                    os.path.getmtime(entry_path),
-                    tz=UTC,
-                )
-            except OSError:
-                stats["errors"] += 1
-                continue
-            if mtime >= cutoff:
-                continue  # свежая песочница — оставим
-            if not dry_run:
-                try:
-                    shutil.rmtree(entry_path)
-                except OSError:
-                    stats["errors"] += 1
-                    continue
-            stats["sandboxes_removed"] += 1
+    _cleanup_sandbox_dirs(sandbox_root_dir, cutoff, dry_run, stats)
 
     return stats
 

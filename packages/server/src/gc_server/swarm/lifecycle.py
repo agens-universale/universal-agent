@@ -262,29 +262,15 @@ def _finalize_with_resource_violation(
     return storage.load_swarm_meta(threads_dir, swarm_id)
 
 
-def _enforce_resource_limits(
+def _enforce_disk_limit(
     threads_dir: str,
-    sandbox_root_dir: str,  # noqa: ARG001  # часть контракта: подпись менять нельзя
     swarm_id: str,
     meta: Dict[str, Any],
-    swarm_meta: Dict[str, Any],
-    *,
-    swarm_logs_dir: str = "",
+    limits: dict,
+    pid: Any,
+    sandbox_path: str,
+    swarm_logs_dir: str,
 ) -> Dict[str, Any] | None:
-    """Проверить disk/memory/cpu лимиты. Если нарушены — kill + финализация.
-
-    Вызывается из check_and_finalize только при heavy_checks=True (то есть из
-    monitor loop'а, не из lazy-чека endpoint'а — там это было бы слишком дорого).
-
-    Возвращает обновлённую meta если был violation; иначе None.
-    """
-    limits = swarm_meta.get("limits") or {}
-    if not isinstance(limits, dict):
-        return None
-
-    pid = swarm_meta.get("pid")
-    sandbox_path = swarm_meta.get("sandbox_path") or ""
-
     # --- Disk quota (шаг 2.2) ---
     disk_limit_mb = limits.get("disk_mb")
     if (
@@ -313,6 +299,16 @@ def _enforce_resource_limits(
                 ),
             )
 
+    return None
+
+
+def _enforce_memory_limit(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    limits: dict,
+    pid: Any,
+) -> Dict[str, Any] | None:
     # --- Memory limit через psutil (шаг 2.3) ---
     mem_limit_mb = limits.get("memory_mb")
     if (
@@ -345,6 +341,16 @@ def _enforce_resource_limits(
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
 
+    return None
+
+
+def _enforce_cpu_limit(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    limits: dict,
+    pid: Any,
+) -> Dict[str, Any] | None:
     # --- CPU limit через psutil (шаг 2.4) ---
     cpu_limit = limits.get("cpu_percent")
     if (
@@ -377,6 +383,90 @@ def _enforce_resource_limits(
                 )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
+
+    return None
+
+
+def _enforce_resource_limits(
+    threads_dir: str,
+    sandbox_root_dir: str,  # noqa: ARG001  # часть контракта: подпись менять нельзя
+    swarm_id: str,
+    meta: Dict[str, Any],
+    swarm_meta: Dict[str, Any],
+    *,
+    swarm_logs_dir: str = "",
+) -> Dict[str, Any] | None:
+    """Проверить disk/memory/cpu лимиты. Если нарушены — kill + финализация.
+
+    Вызывается из check_and_finalize только при heavy_checks=True (то есть из
+    monitor loop'а, не из lazy-чека endpoint'а — там это было бы слишком дорого).
+
+    Возвращает обновлённую meta если был violation; иначе None.
+    """
+    limits = swarm_meta.get("limits") or {}
+    if not isinstance(limits, dict):
+        return None
+
+    pid = swarm_meta.get("pid")
+    sandbox_path = swarm_meta.get("sandbox_path") or ""
+
+    disk_violation = _enforce_disk_limit(
+        threads_dir, swarm_id, meta, limits, pid, sandbox_path, swarm_logs_dir
+    )
+    if disk_violation is not None:
+        return disk_violation
+    memory_violation = _enforce_memory_limit(
+        threads_dir, swarm_id, meta, limits, pid
+    )
+    if memory_violation is not None:
+        return memory_violation
+    return _enforce_cpu_limit(threads_dir, swarm_id, meta, limits, pid)
+
+
+def _enforce_deadline(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    swarm_meta: Dict[str, Any],
+    swarm_logs_dir: str,
+) -> Dict[str, Any] | None:
+    deadline = _parse_iso_deadline(swarm_meta.get("deadline_at"))
+    if deadline is not None and _now_utc() > deadline:
+        pid = swarm_meta.get("pid")
+        if isinstance(pid, int) and _is_pid_alive(pid):
+            _kill_process_tree(pid)
+            logger.warning(
+                "swarm %s killed by Python-side timeout (deadline_at=%s)",
+                swarm_id,
+                swarm_meta.get("deadline_at"),
+            )
+            patch: Dict[str, Any] = {
+                "status": "timeout",
+                "finished_at": storage._utc_now_iso(),
+                "error_type": "timeout",
+                "error_message": (
+                    f"Killed by Python-side timeout after deadline {swarm_meta.get('deadline_at')}"
+                ),
+                "sandbox_status": "completed",
+            }
+            base_meta = {
+                "system": meta.get("system"),
+                "task_id": meta.get("task_id"),
+            }
+            _persist_agent_artifacts(
+                threads_dir,
+                swarm_id,
+                str(swarm_meta.get("sandbox_path") or ""),
+                swarm_logs_dir=swarm_logs_dir,
+            )
+            storage.save_swarm_meta(
+                threads_dir,
+                swarm_id,
+                base_meta=base_meta,
+                swarm_meta_patch=patch,
+            )
+            return storage.load_swarm_meta(threads_dir, swarm_id)
+        # Иначе — process уже сам завершился, fallthrough к completion.json.
 
     return None
 
@@ -421,43 +511,11 @@ def check_and_finalize(
     # Если deadline прошёл и процесс ещё жив — kill + status=timeout.
     # Это страховка поверх GNU timeout в wrapper'е (на минимальных
     # дистрибутивах timeout может отсутствовать).
-    deadline = _parse_iso_deadline(swarm_meta.get("deadline_at"))
-    if deadline is not None and _now_utc() > deadline:
-        pid = swarm_meta.get("pid")
-        if isinstance(pid, int) and _is_pid_alive(pid):
-            _kill_process_tree(pid)
-            logger.warning(
-                "swarm %s killed by Python-side timeout (deadline_at=%s)",
-                swarm_id,
-                swarm_meta.get("deadline_at"),
-            )
-            patch: Dict[str, Any] = {
-                "status": "timeout",
-                "finished_at": storage._utc_now_iso(),
-                "error_type": "timeout",
-                "error_message": (
-                    f"Killed by Python-side timeout after deadline {swarm_meta.get('deadline_at')}"
-                ),
-                "sandbox_status": "completed",
-            }
-            base_meta = {
-                "system": meta.get("system"),
-                "task_id": meta.get("task_id"),
-            }
-            _persist_agent_artifacts(
-                threads_dir,
-                swarm_id,
-                str(swarm_meta.get("sandbox_path") or ""),
-                swarm_logs_dir=swarm_logs_dir,
-            )
-            storage.save_swarm_meta(
-                threads_dir,
-                swarm_id,
-                base_meta=base_meta,
-                swarm_meta_patch=patch,
-            )
-            return storage.load_swarm_meta(threads_dir, swarm_id)
-        # Иначе — process уже сам завершился, fallthrough к completion.json.
+    timeout_result = _enforce_deadline(
+        threads_dir, swarm_id, meta, swarm_meta, swarm_logs_dir
+    )
+    if timeout_result is not None:
+        return timeout_result
 
     # 2.5. Resource limits (только для heavy_checks=True, шаги 2.2-2.4).
     if heavy_checks:

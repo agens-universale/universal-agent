@@ -27,11 +27,11 @@ pytest.importorskip(
     "starlette", reason="server-side dep, install via extra [server]"
 )
 
-# Swarm runs the CLI inside a bubblewrap (bwrap) sandbox — Linux-only. Off Linux
-# (e.g. macOS dev) these endpoint tests can't exercise real swarm behavior, so skip.
+# Запуск swarm и сигналы подменены: bubblewrap здесь не запускается.
+# Нужен POSIX API os.killpg, поэтому проверяем и на macOS.
 pytestmark = pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="swarm is Linux-only (bubblewrap sandbox)",
+    os.name != "posix",
+    reason="shutdown tests require POSIX process-group API",
 )
 
 
@@ -699,8 +699,8 @@ def test_logs_503_when_swarm_disabled(make_server):
 def test_shutdown_kills_active_sworms(make_server, monkeypatch):
     """Shutdown handler: SIGTERM → grace → SIGKILL + meta = unknown_failed.
 
-    Вызываем handler напрямую через asyncio, т.к. старый FastAPI on_event
-    ненадёжно triggers через TestClient context.
+    Запускаем shutdown через роутер приложения: проверяем и регистрацию
+    обработчика, и остановку процессов.
     """
     import asyncio
 
@@ -733,8 +733,14 @@ def test_shutdown_kills_active_sworms(make_server, monkeypatch):
 
     monkeypatch.setattr("asyncio.sleep", fast_sleep)
 
-    # Вызываем shutdown handler напрямую.
-    asyncio.run(server_mod._shutdown_swarm_processes())
+    # Monitor уже подставлен; startup не должен создавать настоящий поток.
+    monkeypatch.setattr(server_mod.app.router, "on_startup", [])
+
+    async def shutdown_app():
+        async with server_mod.app.router.lifespan_context(server_mod.app):
+            pass
+
+    asyncio.run(shutdown_app())
 
     assert sigterm_calls == [12345]
     from gc_server.swarm import storage as storage

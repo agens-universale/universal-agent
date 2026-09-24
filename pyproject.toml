@@ -177,8 +177,6 @@ paths = [
     "packages/core/src",
     "packages/mcp/src",
     "packages/server/src",
-    "packages/testkit/src",
-    "packages/tui/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",
@@ -186,6 +184,8 @@ paths = [
 max-complexity-allowed = 15
 
 exclude = [
+    "**/gc_tui/**",
+    "**/gc_testkit/**",
     "**/tests/**",
     "tests/**",
     "**/conftest.py",

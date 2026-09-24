@@ -34,6 +34,56 @@ def _meta_to_data_path(meta_path: str) -> str:
     return meta_path + ".l"
 
 
+def _cleanup_thread(
+    meta_path: str,
+    now: datetime,
+    cutoff: datetime,
+    dry_run: bool,
+    result: dict,
+) -> None:
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    if not isinstance(meta, dict):
+        result["skipped"] += 1
+        return
+
+    dt = _parse_datetime_maybe(meta.get("updated_at"))
+    if dt is None:
+        dt = _parse_datetime_maybe(meta.get("created_at"))
+    if dt is None:
+        result["skipped"] += 1
+        return
+
+    # Приведём к timezone-aware: naive-значение считаем локальным.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=now.tzinfo)
+
+    if dt >= cutoff:
+        result["skipped"] += 1
+        return
+
+    data_path = _meta_to_data_path(meta_path)
+
+    if dry_run:
+        result["removed_meta"] += 1
+        if os.path.exists(data_path):
+            result["removed_data"] += 1
+        return
+
+    try:
+        os.remove(meta_path)
+        result["removed_meta"] += 1
+    except FileNotFoundError:
+        pass
+
+    try:
+        if os.path.exists(data_path):
+            os.remove(data_path)
+            result["removed_data"] += 1
+    except FileNotFoundError:
+        pass
+
+
 def cleanup_threads(
     threads_dir: str,
     ttl_days: int = 7,
@@ -73,47 +123,7 @@ def cleanup_threads(
     for meta_path in sorted(meta_paths):
         result["scanned"] += 1
         try:
-            with open(meta_path, encoding="utf-8") as f:
-                meta = json.load(f)
-            if not isinstance(meta, dict):
-                result["skipped"] += 1
-                continue
-
-            dt = _parse_datetime_maybe(meta.get("updated_at"))
-            if dt is None:
-                dt = _parse_datetime_maybe(meta.get("created_at"))
-            if dt is None:
-                result["skipped"] += 1
-                continue
-
-            # Приведём к timezone-aware: naive-значение считаем локальным.
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=now.tzinfo)
-
-            if dt >= cutoff:
-                result["skipped"] += 1
-                continue
-
-            data_path = _meta_to_data_path(meta_path)
-
-            if dry_run:
-                result["removed_meta"] += 1
-                if os.path.exists(data_path):
-                    result["removed_data"] += 1
-                continue
-
-            try:
-                os.remove(meta_path)
-                result["removed_meta"] += 1
-            except FileNotFoundError:
-                pass
-
-            try:
-                if os.path.exists(data_path):
-                    os.remove(data_path)
-                    result["removed_data"] += 1
-            except FileNotFoundError:
-                pass
+            _cleanup_thread(meta_path, now, cutoff, dry_run, result)
         except Exception as e:
             result["errors"] += 1
             print(f"[cleanup] error for {meta_path}: {e!r}")

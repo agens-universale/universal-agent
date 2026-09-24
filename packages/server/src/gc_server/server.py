@@ -129,6 +129,56 @@ async def _startup_swarm_monitor() -> None:
     _swarm_monitor = monitor
 
 
+def _mark_swarm_shutdown(threads_dir: str, swarm_id: str) -> None:
+    # Обновляем meta — даже если процесс уже умер, обновляем статус
+    # на server_shutdown для аудита.
+    try:
+        existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+        if existing:
+            sm = existing.get("swarm_meta") or {}
+            current_status = str(sm.get("status", "")).strip().lower()
+            if current_status not in swarm_lifecycle.FINAL_STATUSES:
+                swarm_storage.save_swarm_meta(
+                    threads_dir,
+                    swarm_id,
+                    base_meta={
+                        "system": existing.get("system"),
+                        "task_id": existing.get("task_id"),
+                    },
+                    swarm_meta_patch={
+                        "status": "unknown_failed",
+                        "finished_at": swarm_storage._utc_now_iso(),
+                        "error_type": "server_shutdown",
+                        "error_message": "Killed during server shutdown",
+                        "sandbox_status": "completed",
+                    },
+                )
+    except Exception:
+        logger.exception("shutdown: failed to update meta for %s", swarm_id)
+
+
+def _terminate_swarm_groups(
+    threads_dir: str, active_ids: list[str]
+) -> list[tuple[str, int]]:
+    import signal
+
+    pids_to_kill = []
+    for swarm_id in active_ids:
+        meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+        if not meta:
+            continue
+        sm = meta.get("swarm_meta") or {}
+        pid = sm.get("pid")
+        if isinstance(pid, int) and swarm_lifecycle._is_pid_alive(pid):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                pids_to_kill.append((swarm_id, pid))
+            except OSError:
+                pass
+
+    return pids_to_kill
+
+
 @app.on_event("shutdown")
 async def _shutdown_swarm_processes() -> None:
     """Graceful shutdown: убить все живые sworm-процессы (шаг 3.3).
@@ -160,19 +210,7 @@ async def _shutdown_swarm_processes() -> None:
     logger.info("shutdown: terminating %d active sworm(s)", len(active_ids))
 
     # 1. SIGTERM для всех.
-    pids_to_kill = []
-    for swarm_id in active_ids:
-        meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-        if not meta:
-            continue
-        sm = meta.get("swarm_meta") or {}
-        pid = sm.get("pid")
-        if isinstance(pid, int) and swarm_lifecycle._is_pid_alive(pid):
-            try:
-                os.killpg(pid, signal.SIGTERM)
-                pids_to_kill.append((swarm_id, pid))
-            except OSError:
-                pass
+    pids_to_kill = _terminate_swarm_groups(threads_dir, active_ids)
 
     # 2. Grace period — CLI пытается дописать summary.
     await asyncio.sleep(3.0)
@@ -185,33 +223,7 @@ async def _shutdown_swarm_processes() -> None:
             except OSError:
                 pass
 
-        # Обновляем meta — даже если процесс уже умер, обновляем статус
-        # на server_shutdown для аудита.
-        try:
-            existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-            if existing:
-                sm = existing.get("swarm_meta") or {}
-                current_status = str(sm.get("status", "")).strip().lower()
-                if current_status not in swarm_lifecycle.FINAL_STATUSES:
-                    swarm_storage.save_swarm_meta(
-                        threads_dir,
-                        swarm_id,
-                        base_meta={
-                            "system": existing.get("system"),
-                            "task_id": existing.get("task_id"),
-                        },
-                        swarm_meta_patch={
-                            "status": "unknown_failed",
-                            "finished_at": swarm_storage._utc_now_iso(),
-                            "error_type": "server_shutdown",
-                            "error_message": "Killed during server shutdown",
-                            "sandbox_status": "completed",
-                        },
-                    )
-        except Exception:
-            logger.exception(
-                "shutdown: failed to update meta for %s", swarm_id
-            )
+        _mark_swarm_shutdown(threads_dir, swarm_id)
 
         monitor.unregister_active(swarm_id)
 
@@ -362,8 +374,7 @@ def _context_build_wait_s(raw: Any) -> float:
     return value
 
 
-@app.post("/events/webhook")
-async def events_webhook(request: Request):
+async def _read_request_payload(request: Request) -> dict:
     try:
         payload = await request.json()
     except Exception:
@@ -381,6 +392,10 @@ async def events_webhook(request: Request):
             },
         )
 
+    return payload
+
+
+def _request_task_identifiers(payload: dict) -> tuple[str, str | None]:
     try:
         task_id = ensure_task_id(payload)
     except ValueError as e:
@@ -400,6 +415,15 @@ async def events_webhook(request: Request):
             status_code=400,
             detail={"status": "error", "payload": f"invalid trace_id: {exc}"},
         )
+
+    return task_id, trace_id
+
+
+@app.post("/events/webhook")
+async def events_webhook(request: Request):
+    payload = await _read_request_payload(request)
+
+    task_id, trace_id = _request_task_identifiers(payload)
 
     # Определяем/нормализуем system: берём из payload["system"] или defaults.system.
     source_value = payload.get("system")
@@ -611,6 +635,28 @@ async def get_thread_logs(system: str, task_id: str):
     }
 
 
+def _thread_log_entry(meta: dict, name: str) -> dict:
+    system = meta.get("system")
+    if not isinstance(system, str) or not system.strip():
+        system = "unknown"
+
+    task_id = meta.get("thread_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        # legacy fallback: meta_<thread_id>.json
+        task_id = name.removeprefix("meta_").removesuffix(".json")
+
+    updated_at = meta.get("updated_at") or meta.get("created_at")
+    messages_count = meta.get("messages_count")
+
+    return {
+        "system": system,
+        "task_id": task_id,
+        "updated_at": updated_at,
+        "messages_count": messages_count,
+        "logs_url": f"/logs/{system}/{task_id}",
+    }
+
+
 @app.get("/logs/all")
 async def get_all_thread_logs():
     """
@@ -651,30 +697,46 @@ async def get_all_thread_logs():
         if not isinstance(meta, dict):
             continue
 
-        system = meta.get("system")
-        if not isinstance(system, str) or not system.strip():
-            system = "unknown"
-
-        task_id = meta.get("thread_id")
-        if not isinstance(task_id, str) or not task_id.strip():
-            # legacy fallback: meta_<thread_id>.json
-            task_id = name.removeprefix("meta_").removesuffix(".json")
-
-        updated_at = meta.get("updated_at") or meta.get("created_at")
-        messages_count = meta.get("messages_count")
-
-        out.append(
-            {
-                "system": system,
-                "task_id": task_id,
-                "updated_at": updated_at,
-                "messages_count": messages_count,
-                "logs_url": f"/logs/{system}/{task_id}",
-            }
-        )
+        out.append(_thread_log_entry(meta, name))
 
     out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
     return {"status": "ok", "logs": out}
+
+
+def _reject_existing_swarm(
+    existing: dict, system: str, task_id: str
+) -> JSONResponse | None:
+    if existing:
+        sm = existing.get("swarm_meta") or {}
+        if not isinstance(sm, dict):
+            sm = {}
+        current_status = str(sm.get("status", "")).strip().lower()
+        if current_status in {"queued", "running"}:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "rejected",
+                    "reason": "swarm_id_already_active",
+                    "system": system,
+                    "task_id": task_id,
+                    "current_status": current_status,
+                },
+            )
+        # Финальный статус → reject (AR-3).
+        if current_status in swarm_lifecycle.FINAL_STATUSES:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "rejected",
+                    "reason": "swarm_id_already_finalized",
+                    "system": system,
+                    "task_id": task_id,
+                    "current_status": current_status,
+                },
+            )
+        # Неизвестный/повреждённый статус — пропускаем как fresh start.
+
+    return None
 
 
 @app.post("/swarm/run")
@@ -688,44 +750,9 @@ async def swarm_run(request: Request):
             detail={"status": "error", "reason": "swarm_disabled"},
         )
 
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": "invalid JSON body"},
-        )
+    payload = await _read_request_payload(request)
 
-    if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "status": "error",
-                "payload": "JSON body must be an object",
-            },
-        )
-
-    # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
-    try:
-        task_id = ensure_task_id(payload)
-    except ValueError as e:
-        # Присланный task_id уезжает в имя каталога и дальше в пути ФС.
-        # Отвергаем ДО любого побочного эффекта, а не падаем позже в сторе.
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": f"invalid task_id: {e}"},
-        )
-    # trace_id — поле контекста задачи, а не часть запроса к модели. Снимаем его
-    # ДО того, как payload уедет в песочницу целиком: он доставляется ребёнку
-    # аргументом `-q`, то есть оставленный в теле трейс попал бы в промпт модели
-    # как текст задачи. Симметрично вебхуку.
-    try:
-        trace_id = normalize_trace_id(payload.pop("trace_id", None))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": f"invalid trace_id: {exc}"},
-        )
+    task_id, trace_id = _request_task_identifiers(payload)
     source_value = payload.get("system")
     defaults = SERVER_CONFIG.get("defaults") or {}
     default_system = str(defaults.get("system", "generic"))
@@ -767,35 +794,9 @@ async def swarm_run(request: Request):
     #   3) перезапись meta живого прогона.
     with _SWARM_RUN_LOCK:
         existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-        if existing:
-            sm = existing.get("swarm_meta") or {}
-            if not isinstance(sm, dict):
-                sm = {}
-            current_status = str(sm.get("status", "")).strip().lower()
-            if current_status in {"queued", "running"}:
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "status": "rejected",
-                        "reason": "swarm_id_already_active",
-                        "system": system,
-                        "task_id": task_id,
-                        "current_status": current_status,
-                    },
-                )
-            # Финальный статус → reject (AR-3).
-            if current_status in swarm_lifecycle.FINAL_STATUSES:
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "status": "rejected",
-                        "reason": "swarm_id_already_finalized",
-                        "system": system,
-                        "task_id": task_id,
-                        "current_status": current_status,
-                    },
-                )
-            # Неизвестный/повреждённый статус — пропускаем как fresh start.
+        rejection = _reject_existing_swarm(existing, system, task_id)
+        if rejection is not None:
+            return rejection
 
         # Лимит на количество одновременно работающих свормов.
         if monitor is not None:

@@ -62,9 +62,7 @@ repos:
         entry: uv run --group lint end-of-file-fixer
         language: system
         types: [text]
-        # complexipy-snapshot.json пишет сам complexipy и без финального
-        # перевода строки — иначе хуки правили бы его по очереди наперегонки.
-        exclude: '(^|/)tests/fixtures/|^packages/core/assets/prompts/|^complexipy-snapshot\.json$'
+        exclude: '(^|/)tests/fixtures/|^packages/core/assets/prompts/'
       - id: trailing-whitespace
         name: хвостовые пробелы
         entry: uv run --group lint trailing-whitespace-fixer --markdown-linebreak-ext=md
@@ -85,8 +83,7 @@ repos:
         language: system
         types_or: [python, pyi]
         require_serial: true
-      # Снимок (complexipy-snapshot.json) держит старый долг замороженным:
-      # новые нарушения блокируются, замороженные — нет.
+      # TUI и testkit исключены только из проверки сложности.
       # `--failed` печатает только нарушителей (файл, функция, сложность) и
       # возвращает ненулевой код; `--quiet` падал молча, без имени функции.
       - id: complexipy
@@ -94,7 +91,7 @@ repos:
         entry: uv run --group lint complexipy --max-complexity-allowed 15 --failed --plain --color no
         language: system
         types: [python]
-        exclude: '(^|/)tests/|conftest\.py$'
+        exclude: '(^|/)tests/|conftest\.py$|^packages/(tui|testkit)/'
         require_serial: true
       - id: sonar-like
         name: правила Sonar (sonar_like_check)
