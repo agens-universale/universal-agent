@@ -9,7 +9,10 @@ API:
 - `# heading`       → accent bold (без `#`)
 - inline `` `code` `` → slate code (без бэктиков)
 - списки `- item`   → ink, маркер `• `
-- fenced ``` блок ``` → code-block (мягкий серый)
+- fenced ``` блок ``` → code-block (мягкий серый); закрывает блок только голая
+  ограда (без info-строки), не короче открывающей (CommonMark) — вложенная
+  ограда с языком (например ```` ```bash ```` внутри ```` ```markdown ````)
+  остаётся содержимым; незакрытый блок тянется до конца текста
 """
 from __future__ import annotations
 
@@ -67,6 +70,23 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     return (aligns + ["left"] * ncols)[:ncols]
 
 
+_FENCE_RE = re.compile(r"^(`{3,})(.*)$")
+
+
+def _fence_open(line: str) -> tuple[int, str | None] | None:
+    """Открывающая ограда: (длина, метка языка или None); иначе None."""
+    m = _FENCE_RE.match(line)
+    if not m:
+        return None
+    return len(m.group(1)), (m.group(2).strip() or None)
+
+
+def _fence_closes(line: str, opened: int) -> bool:
+    """Закрывающая ограда — одни кавычки, не короче открывающей (CommonMark)."""
+    m = _FENCE_RE.match(line)
+    return bool(m) and len(m.group(1)) >= opened and not m.group(2).strip()
+
+
 def segment_answer(text: str) -> list[Block]:
     """Сегментирует ответ на прозовые прогоны (verbatim, пустые строки внутри
     сохранены, по краям срезаны) и code/table-блоки. kind ∈ {'prose','code-block','table'}."""
@@ -87,15 +107,20 @@ def segment_answer(text: str) -> list[Block]:
 
     while i < len(lines):
         ln = lines[i]
-        if ln.startswith("```"):
+        opened = _fence_open(ln)
+        if opened is not None:
             _flush()
-            lang_tag = ln[3:].strip() or None
+            fence_len, lang_tag = opened
             j = i + 1
             chunk: list[str] = []
-            while j < len(lines) and not lines[j].startswith("```"):
+            while j < len(lines) and not _fence_closes(lines[j], fence_len):
                 chunk.append(lines[j])
                 j += 1
-            segs.append(Block("code-block", "\n".join(chunk), lang_tag))
+            content = "\n".join(chunk)
+            # Пустой блок панелью не становится (Е2): ни кнопки копирования, ни рамки
+            # вокруг пустоты — обе половины ленты (финал и живой путь) читают сегменты.
+            if content.strip():
+                segs.append(Block("code-block", content, lang_tag))
             i = j + 1
             continue
         if "|" in ln and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
@@ -160,15 +185,18 @@ def render_prose(text: str) -> Text:
     heading/bullet; fenced-блоки и таблицы — plain (рамки/сетка только на финале).
     Возвращает rich.Text в нормальном цвете (INK)."""
     out = Text()
-    in_fence = False
+    in_fence = 0          # 0 — вне блока, иначе длина открывающей ограды
     for i, line in enumerate(text.split("\n")):
         if i:
             out.append("\n")
-        if line.startswith("```"):
-            in_fence = not in_fence
+        if in_fence:
+            if _fence_closes(line, in_fence):
+                in_fence = 0
             out.append(line, style=_INK)
             continue
-        if in_fence:
+        opened = _fence_open(line)
+        if opened is not None:
+            in_fence = opened[0]
             out.append(line, style=_INK)
             continue
         m = _PROSE_HEADING_RE.match(line)

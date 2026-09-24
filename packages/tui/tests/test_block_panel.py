@@ -239,6 +239,36 @@ async def test_ctrl_click_on_copy_button_opens_event_not_copy():
 
 
 @pytest.mark.asyncio
+async def test_ctrl_click_opens_event_exactly_once():
+    """Ctrl+клик по блоку открывает событие РОВНО один раз.
+
+    Живой клик обязателен: Textual зовёт ВСЕ одноимённые `on_click` по MRO, и
+    без `prevent_default()` на входе `ClickModelMixin.on_click` отработал бы
+    вторым — запрос уходил бы дважды, а экран события вставал бы стопкой.
+    Синтетический `panel.on_click(...)` идёт мимо диспетчера и разницы не видит.
+    """
+    from textual.app import App, ComposeResult
+
+    from gc_tui.messages import OpenEventRequest
+
+    received: list[int] = []
+
+    class _App(App):
+        CSS = "BlockPanel { height: auto; }"
+
+        def compose(self) -> ComposeResult:
+            yield BlockPanel.for_code(CODE, "python", event_no=11)
+
+        def on_open_event_request(self, message: OpenEventRequest) -> None:
+            received.append(message.event_no)
+
+    async with _App().run_test(size=(60, 20)) as pilot:
+        await pilot.click(".block-body", control=True)
+        await pilot.pause()
+        assert received == [11]
+
+
+@pytest.mark.asyncio
 async def test_double_click_focuses_panel_when_focusable():
     """Находка 5: двойной клик по телу ставит фокус на панель, если она
     focusable — иначе `Tab` после клика не продолжал бы с этого события.
@@ -289,9 +319,14 @@ async def test_partial_drag_inside_code_body_yields_fragment():
 
 
 @pytest.mark.asyncio
-async def test_partial_drag_on_clipped_line_yields_visible_part_only():
-    """Т-B (спека §6.10): строка шире панели — частичный drag отдаёт видимую
-    часть, а кнопка и двойной клик — строку целиком, включая невидимый хвост."""
+async def test_partial_drag_on_wrapped_line_yields_dragged_part_only():
+    """Т-B (спека §6.10): строка шире панели — частичный drag отдаёт ровно
+    протянутое, а кнопка и двойной клик — строку целиком.
+
+    Раньше такая строка ОБРЕЗАЛАСЬ, и хвост был недостижим; теперь она
+    переносится. Перенос отдан Textual, поэтому настоящих разрывов в тексте
+    нет — выделение и копия строки остаются целыми.
+    """
     from gc_testkit.tui_support import wait_until
 
     long_line = ("result = calculate_comprehensive_statistical_significance("
@@ -299,7 +334,7 @@ async def test_partial_drag_on_clipped_line_yields_visible_part_only():
     app = _Host(BlockPanel.for_code(long_line, "python", event_no=1))
     async with app.run_test(size=(40, 20)) as pilot:
         body = app.query_one(".block-body", Static)
-        assert body.size.width < len(long_line)   # строка реально обрезана
+        assert body.size.width < len(long_line)   # строка реально не влезает
 
         await pilot.mouse_down(body, offset=(0, 0))
         await pilot.hover(body, offset=(body.size.width - 1, 0))
@@ -323,8 +358,11 @@ async def test_partial_drag_on_clipped_line_yields_visible_part_only():
 
 @pytest.mark.asyncio
 async def test_focused_panel_background_is_focus_bg_not_band_bg(tui_app_factory):
-    """Т-C (спека §6.11): фон сфокусированной панели — $focus-bg, не $band-bg
-    (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не заметит)."""
+    """Т-C (спека §6.11): фон сфокусированной панели — $focus-bg, не фон покоя
+    (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не заметит).
+
+    Фон покоя — $block-bg: блоки ленты переехали на свой токен, тише полосы
+    баннеров ($band-bg)."""
     from gc_tui import palette
 
     panel = BlockPanel.for_code(CODE, "python", event_no=1, focusable=True)
@@ -334,10 +372,40 @@ async def test_focused_panel_background_is_focus_bg_not_band_bg(tui_app_factory)
         # фокус явно, чтобы проверить именно фон НЕ-сфокусированной панели.
         panel.blur()
         await pilot.pause()
-        assert panel.styles.background.hex == palette.BAND_BG.upper()
+        assert panel.styles.background.hex == palette.BLOCK_BG.upper()
         panel.focus()
         await pilot.pause()
         assert panel.styles.background.hex == palette.FOCUS_BG.upper()
+
+
+@pytest.mark.asyncio
+async def test_copy_button_click_does_not_focus_panel():
+    """Клик по ❐ копирует, но панель не выделяется.
+
+    Живой клик обязателен: фокус ставит экран на MouseDown, синтетический вызов
+    on_click() этого пути не проходит и разницы не увидит."""
+    panel = BlockPanel.for_code(CODE, "python", event_no=7, focusable=True)
+    app = _Host(panel)
+    async with app.run_test(size=(60, 20)) as pilot:
+        panel.blur()   # AUTO_FOCUS сам фокусирует единственный focusable-виджет
+        await pilot.pause()
+        await pilot.click(".block-copy")
+        await pilot.pause()
+        assert app.copied == [CODE]
+        assert not panel.has_focus
+
+
+@pytest.mark.asyncio
+async def test_body_click_focuses_panel():
+    """Позитивный контроль: клик по ТЕЛУ панели по-прежнему выделяет её."""
+    panel = BlockPanel.for_code(CODE, "python", event_no=7, focusable=True)
+    app = _Host(panel)
+    async with app.run_test(size=(60, 20)) as pilot:
+        panel.blur()
+        await pilot.pause()
+        await pilot.click(".block-body")
+        await pilot.pause()
+        assert panel.has_focus
 
 
 @pytest.mark.asyncio

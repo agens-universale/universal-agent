@@ -61,17 +61,31 @@ class BlockPanel(ClickModelMixin, Vertical):
     """
 
     ALLOW_SELECT = False   # выделяется тело, а не панель целиком
+    FOCUS_ON_CLICK = False  # выделение ставит on_click, и только за клик по телу
 
     # Отступы задаются ОДНИМ shorthand-правилом на селектор: Textual не мёржит
     # margin-*/padding-* из разных правил — второе затирает весь box.
     # `.block-header` margin-bottom — воздух между шапкой и содержимым блока;
     # `.block-copy` padding-right — чтобы кнопка не липла к правому краю панели.
+    # `.no-lang .block-header` (Д9) — без метки языка воздух под шапкой не нужен:
+    # строка с ⧉ и так пуста наполовину, код должен начинаться сразу под ней.
     DEFAULT_CSS = """
     BlockPanel { height: auto; width: 1fr; }
     BlockPanel .block-header { height: 1; width: 1fr; margin: 0 0 1 0; }
+    BlockPanel.no-lang .block-header { margin: 0 0 0 0; }
     BlockPanel .block-label { width: 1fr; height: 1; }
     BlockPanel .block-copy { width: auto; height: 1; padding: 0 1 0 0; }
     BlockPanel .block-body { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: clip; }
+    /* Код переносится, таблица — нет: у таблицы строка это ряд сетки, и перенос
+       её разрушает (её вместо этого подгоняет под ширину `table_to_text`).
+       Перенос отдан Textual, а не сделан вручную: свой рез вставил бы в текст
+       НАСТОЯЩИЕ разрывы, и выделение мышью отдавало бы строку разорванной —
+       а контракт `highlight_code`: `.plain` равен исходному коду. Цена —
+       перенос словесный: слишком длинное слово Textual сложит сам
+       (`text-overflow: fold`), но короткое первое слово может уехать на ряд
+       одно. Лимита строк у блока кода нет, поэтому точный счёт рядов, ради
+       которого дифф переносит себя сам, здесь не нужен. */
+    BlockPanel.code-block-panel .block-body { text-wrap: wrap; text-overflow: fold; }
     """
 
     def __init__(self, *, label: str, copy_payload: str, event_no: int,
@@ -82,6 +96,11 @@ class BlockPanel(ClickModelMixin, Vertical):
         self._event_no = event_no
         self.can_focus = focusable
         self._restore_timer = None
+        # Тело и его исходник ставят фабрики; объявлены здесь, чтобы панель,
+        # собранная в обход фабрики, не падала на `AttributeError` в обработчике
+        # resize вместо внятного пустого тела.
+        self._body_text = None
+        self._table_source = None
 
     # --- фабрики -----------------------------------------------------------
 
@@ -94,6 +113,8 @@ class BlockPanel(ClickModelMixin, Vertical):
         classes = "block-panel code-block-panel"
         if indent:
             classes += " code-indent"
+        if not lang:
+            classes += " no-lang"   # Д9: без метки языка — без воздуха под шапкой
         panel = cls(label=lang or "", copy_payload=normalize_code(content),
                     event_no=event_no, focusable=focusable, classes=classes)
         panel._body_text = highlight_code(content, lang)
@@ -174,7 +195,13 @@ class BlockPanel(ClickModelMixin, Vertical):
 
         Ctrl+клик по кнопке пропускает эту ветку: спека §2 обещает открытие
         события по Ctrl+клику с любой точки блока, а не только копирование.
+
+        `prevent_default()` на входе: Textual вызывает ВСЕ одноимённые хэндлеры
+        по MRO, и без него ClickModelMixin.on_click отработал бы вторым —
+        выделял бы панель за клик по кнопке и постил бы ВТОРОЙ запрос открытия
+        по Ctrl+клику. Миксин зовём сами, явным super() там, где он нужен.
         """
+        event.prevent_default()
         widget = getattr(event, "widget", None)
         if not event.ctrl and widget is not None and widget.has_class("block-copy"):
             event.stop()
@@ -185,7 +212,7 @@ class BlockPanel(ClickModelMixin, Vertical):
             self.query_one(".block-body", Static).text_select_all()
             self._copy_block()
             if self.can_focus:
-                self.focus()
+                self.focus(scroll_visible=False)
             return
         super().on_click(event)
 

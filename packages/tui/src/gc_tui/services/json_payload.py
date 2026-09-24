@@ -21,7 +21,7 @@ from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import Static
 
-from gc_tui.palette import BAND_BG, CODE_BLOCK
+from gc_tui.palette import BLOCK_BG, CODE_BLOCK
 
 _MAX_UNFOLD_DEPTH = 5
 
@@ -37,7 +37,7 @@ class PayloadBlocks(Vertical):
 
     DEFAULT_CSS = """
     PayloadBlocks { height: auto; width: 1fr; }
-    PayloadBlocks > Static { height: auto; width: 1fr; background: $band-bg; }
+    PayloadBlocks > Static { height: auto; width: 1fr; background: $block-bg; }
     """
 
 
@@ -219,7 +219,7 @@ def _multiline_block(value: str, indent: int) -> Text:
     prefix = " " * indent + "│ "
     text = Text()
     for line in value.replace("\r\n", "\n").split("\n"):
-        text.append(prefix + line + "\n", style=f"{CODE_BLOCK} on {BAND_BG}")
+        text.append(prefix + line + "\n", style=f"{CODE_BLOCK} on {BLOCK_BG}")
     return text
 
 
@@ -238,7 +238,7 @@ def _highlighted(pretty_json: str) -> Text:
         "",
         lexer="json",
         theme="solarized-dark",  # solarized-dark | monokai | nord
-        background_color=BAND_BG,
+        background_color=BLOCK_BG,
         word_wrap=True,
     )
     text = syntax.highlight(pretty_json)
