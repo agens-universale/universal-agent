@@ -207,6 +207,31 @@ def test_no_force_kill_when_cleanup_finished(patched, make_guard):
     assert patched.exit.codes == [129]
     assert patched.hooked.wait(DEADLINE)
 
+def test_close_force_kills_when_cleanup_fails(make_guard):
+    # Штатный выход — та же гарантия: упала уборка → добиваем, ошибка летит дальше.
+    forced: list[bool] = []
+
+    def cleanup() -> None:
+        raise RuntimeError("уборка упала")
+
+    guard = make_guard(cleanup, force_kill=lambda: forced.append(True))
+
+    with pytest.raises(RuntimeError):
+        guard.close()
+    guard.close()
+
+    assert forced == [True]
+
+
+def test_close_does_not_force_kill_after_cleanup(make_guard):
+    forced: list[bool] = []
+    guard = make_guard(_Cleanup(), force_kill=lambda: forced.append(True))
+
+    guard.close()
+
+    assert forced == []
+
+
 def test_hanging_cleanup_holds_neither_exit_hooks_nor_exit(patched, make_guard):
     # Уборка и хуки идут рядом, с общим дедлайном: зависшая уборка не съедает
     # время хуков, а выход приходит по бюджету.

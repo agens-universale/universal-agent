@@ -289,6 +289,7 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     class _SpyGuard(terminal_guard.TerminalGuard):
         def __init__(self, cleanup, **kw):
             super().__init__(cleanup, **kw)
+            self.given_force_kill = kw.get("force_kill")   # сторож обнуляет свой после выхода
             guards.append(self)
 
     class _FakeApp:
@@ -331,7 +332,7 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     assert rc == 0
     assert len(guards) == 1
     assert calls == ["ensure", "git", "mcp", "voice"]
-    assert guards[0]._force_kill is force_kill
+    assert guards[0].given_force_kill is force_kill
 
 
 def test_main_without_auto_mcp_gives_guard_nothing_to_force_kill(monkeypatch, tmp_path):
@@ -346,6 +347,7 @@ def test_main_without_auto_mcp_gives_guard_nothing_to_force_kill(monkeypatch, tm
     class _SpyGuard(terminal_guard.TerminalGuard):
         def __init__(self, cleanup, **kw):
             super().__init__(cleanup, **kw)
+            self.given_force_kill = kw.get("force_kill")   # сторож обнуляет свой после выхода
             guards.append(self)
 
     class _FakeApp:
@@ -368,7 +370,7 @@ def test_main_without_auto_mcp_gives_guard_nothing_to_force_kill(monkeypatch, tm
 
     rc = main(argv=["--config", str(_cfg_for_main(tmp_path)), "--no-auto-mcp"])
     assert rc == 0
-    assert guards[0]._force_kill is None
+    assert guards[0].given_force_kill is None
 
 
 @pytest.mark.parametrize("run_fails", [False, True])

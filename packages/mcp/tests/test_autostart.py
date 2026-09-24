@@ -461,3 +461,26 @@ def test_kill_mcp_daemons_now_delegates_to_supervisor(monkeypatch) -> None:
     monkeypatch.setattr(daemon_autostart, "_supervisor", None)
     daemon_autostart.kill_mcp_daemons_now()
     assert killed == [True]
+
+
+def test_failed_shutdown_leaves_daemons_to_kill_now(monkeypatch) -> None:
+    """Упало штатное гашение — супервизор не забываем: последний рубеж должен
+    добить тех, кого оно не погасило."""
+    from types import SimpleNamespace
+
+    from recommended_mcp.runtime import daemon_autostart
+
+    killed: list[bool] = []
+
+    def shutdown_managed() -> None:
+        raise RuntimeError("гашение упало")
+
+    monkeypatch.setattr(
+        daemon_autostart,
+        "_supervisor",
+        SimpleNamespace(shutdown_managed=shutdown_managed, kill_managed_now=lambda: killed.append(True)),
+    )
+    with pytest.raises(RuntimeError):
+        daemon_autostart.shutdown_mcp_daemons()
+    daemon_autostart.kill_mcp_daemons_now()
+    assert killed == [True]

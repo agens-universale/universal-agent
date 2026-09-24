@@ -67,9 +67,9 @@ class TerminalGuard:
     def __init__(
         self, cleanup: Callable[[], None], *, force_kill: Callable[[], None] | None = None
     ) -> None:
-        """`force_kill` — последний рубеж аварийного выхода: если уборка не
-        завершилась в бюджет (зависла, упала, не стартовала), он добивает то, что
-        она гасила, ДО `os._exit`. Обязан не блокировать: сигнал и возврат."""
+        """`force_kill` — последний рубеж: если уборка не завершилась (на аварийном
+        выходе — зависла, упала или не стартовала; на штатном — упала), он добивает
+        то, что она гасила. Однократный. Обязан не блокировать: сигнал и возврат."""
         self._cleanup = cleanup
         self._force_kill = force_kill
         self._cleaned = False
@@ -142,10 +142,23 @@ class TerminalGuard:
             for worker in workers:
                 worker.join(max(0.0, deadline - time.monotonic()))
         finally:
-            if not self._cleanup_done and self._force_kill is not None:
-                with contextlib.suppress(Exception):
-                    self._force_kill()
+            self._force_kill_if_unfinished()
             os._exit(EXIT_CODE)
+
+    def _force_kill_if_unfinished(self) -> None:
+        """Последний рубеж — однократно и только если уборка не завершилась."""
+        force_kill, self._force_kill = self._force_kill, None
+        if force_kill is not None and not self._cleanup_done:
+            with contextlib.suppress(Exception):
+                force_kill()
+
+    def _finish_cleanup(self) -> None:
+        """Штатная уборка; упала — добиваем, как на аварийном пути, а ошибка летит
+        дальше."""
+        try:
+            self.run_cleanup()
+        finally:
+            self._force_kill_if_unfinished()
 
     def run_cleanup(self) -> None:
         """Уборка — ровно один раз: повторный `close()` её не повторит. Штатная и
@@ -162,7 +175,7 @@ class TerminalGuard:
         Обработчик возвращается ПОСЛЕ уборки — SIGHUP посреди неё её не оборвёт;
         и даже если уборка упала."""
         if self._watcher is None:
-            self.run_cleanup()
+            self._finish_cleanup()
             return
         self._closed = True
         try:
@@ -172,7 +185,7 @@ class TerminalGuard:
         self._watcher.join()
         self._watcher = None
         try:
-            self.run_cleanup()
+            self._finish_cleanup()
         finally:
             signal.signal(
                 signal.SIGHUP,
