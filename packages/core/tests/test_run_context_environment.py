@@ -17,6 +17,7 @@ async def test_create_run_context_accepts_environment_and_builds_backend(tmp_pat
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
     ctx = await acreate_run_context(cfg, environment=sentinel_env)
     assert ctx.environment is sentinel_env
-    assert isinstance(ctx.os_backend, LocalFsBackend)
+    # свой Local приходит обёрнутым трекером правок (журнал во всех режимах)
+    assert isinstance(ctx.os_backend.inner, LocalFsBackend)
     assert ctx.workspace.backend is ctx.os_backend
     assert ctx.workspace.root == str(tmp_path.resolve())

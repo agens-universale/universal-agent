@@ -66,10 +66,28 @@ def test_resolve_harbor_rejects_non_string_exec_init():
         loop.close()
 
 
-async def test_create_run_context_sets_local_os_backend():
-    ctx = await acreate_run_context({"backend_api_mode": "chat_completions", "save_logs": False})
-    assert isinstance(ctx.os_backend, LocalFsBackend)
+async def test_create_run_context_wraps_local_os_backend_without_tui():
+    """Свой Local оборачивается трекером правок во всех режимах, не только в TUI."""
+    from gc_core.agent_edits.tracking import TrackingFsBackend
+
+    ctx = await acreate_run_context(
+        {"backend_api_mode": "chat_completions", "save_logs": False}
+    )
+    assert isinstance(ctx.os_backend, TrackingFsBackend)
+    assert isinstance(ctx.os_backend.inner, LocalFsBackend)
     assert getattr(ctx, "is_tui", False) is False
+
+
+async def test_create_run_context_tui_wraps_tracking():
+    from gc_core.agent_edits.tracking import TrackingFsBackend
+
+    ctx = await acreate_run_context(
+        {"backend_api_mode": "chat_completions", "save_logs": False},
+        is_tui=True,
+    )
+    assert isinstance(ctx.os_backend, TrackingFsBackend)
+    assert isinstance(ctx.os_backend.inner, LocalFsBackend)
+    assert ctx.is_tui is True
 
 
 async def test_create_run_context_explicit_override():
@@ -82,3 +100,31 @@ async def test_create_run_context_explicit_override():
     # explicit override: не оборачиваем Tracking
     assert ctx.os_backend is sentinel
     assert ctx.workspace.backend is sentinel
+
+
+async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
+    """Обёртка подменяет бэкенд в готовой области, а не пересобирает её.
+
+    Пересборка стоила бы ВТОРОЙ пробы записи в корень проекта — реальной
+    записи на диск на каждом старте, при том что докстринг `ExecutionWorkspace`
+    обещает ровно одну.
+    """
+    from gc_core import execution_workspace as ew
+    from gc_core.agent_edits.tracking import TrackingFsBackend
+
+    probes = []
+    real = ew.resolve_root_writable
+    monkeypatch.setattr(
+        ew, "resolve_root_writable",
+        lambda backend, root: (probes.append(root), real(backend, root))[1],
+    )
+
+    ctx = await acreate_run_context(
+        {"backend_api_mode": "chat_completions", "save_logs": False}
+    )
+
+    assert isinstance(ctx.os_backend, TrackingFsBackend)
+    assert len(probes) == 1, f"проба записи должна быть одна, а их {len(probes)}"
+    assert ctx.workspace.backend is ctx.os_backend, (
+        "рабочая область обязана смотреть на ту же обёртку, что и контекст"
+    )

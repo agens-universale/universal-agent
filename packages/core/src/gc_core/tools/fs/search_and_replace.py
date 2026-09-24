@@ -780,6 +780,17 @@ Update version string:
                 error={"type": "write_failed", "message": str(e)},
             )
 
+        from gc_core.agent_edits.recorder import record_edit  # nested: cycle with thread_store
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=raw,
+            new_bytes=out_bytes,
+            op="edit",
+            call_id=self._call_id,
+        )
+
         content_sha256 = sha256_hex_of_bytes(out_bytes)
         return _result(
             ok=True,

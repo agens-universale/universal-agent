@@ -9,7 +9,6 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
-import importlib
 
 from gc_core.intent_guard import guard as intent_guard_guard
 import pytest

@@ -1,21 +1,22 @@
-"""Обёртка diff-журнала обязана иметь свой асинхронный exec.
+"""Обёртка отслеживания обязана иметь свой асинхронный exec.
 
 Без него `aexec_port()` не находил у `TrackingFsBackend` ни `aexec`, ни
 `aexec_argv`, ни `arun_python` и подставлял `SyncExecAdapter`. Дальше шла
 цепочка: `to_thread(TrackingFsBackend.exec)` → `LocalFsBackend.exec` →
 `run_coro_blocking(self.aexec)` → ЕЩЁ ОДИН event loop в потоке пула. То есть
-КАЖДЫЙ `exec_command` в TUI стоил потока пула и вложенного loop.
+КАЖДЫЙ `exec_command` стоил бы потока пула и вложенного loop.
 
 Хуже цены — поведение на стопе: `to_thread` неотменяем, кооперативный стоп до
 подпроцесса не доходил, а `asyncio.run` хода на выходе ждёт
-`shutdown_default_executor`. После Esc поток жил до таймаута команды.
+`shutdown_default_executor`. После отмены хода поток жил бы до таймаута
+команды.
 """
 import asyncio
 
 import pytest
 
 from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
-from gc_tui.diff_tui.tracking import TrackingFsBackend
+from gc_core.agent_edits.tracking import TrackingFsBackend
 
 
 class _Inner:
@@ -81,7 +82,7 @@ async def test_cancellation_reaches_the_command():
     """Стоп обязан доходить до подпроцесса, а не ждать его таймаута.
 
     Это и есть разница между нативным портом и `to_thread`: поток неотменяем,
-    и после Esc он жил до конца команды.
+    и после отмены хода он жил бы до конца команды.
     """
     started = asyncio.Event()
     cancelled: list = []

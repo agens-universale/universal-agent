@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -150,8 +150,8 @@ async def acreate_run_context(
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
-    - ``is_tui=True`` только помечает контекст; diff-журнал включает сам TUI
-      (``gc_tui.diff_tui.tracking.attach_to_context``) — ядро о нём не знает.
+    - Свой LocalFsBackend → ``TrackingFsBackend`` (журнал правок) во всех
+      режимах: правки из CLI/server попадают в журнал треда так же, как из TUI.
     - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
       CLI/server не передают его → константный провайдер из ключа ``config_dict["level"]``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
@@ -372,7 +372,6 @@ def _finish_run_context(
     summary_trace_path = prep.summary_trace_path
     mcp_session_owner = prep.mcp_session_owner
     run_id = effective_run_id
-    os_backend = backend
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
@@ -451,14 +450,36 @@ def _finish_run_context(
         tools_cache=tools_cache,
         thread_store=thread_store,
     )
-    # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
-    # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
-    # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов
-    # ``wrap_local_for_tui``: это была ЕДИНСТВЕННАЯ зависимость ``gc_core`` от
-    # фронтенда, и 27.08.2026 её сняли разделением на пакеты. Вливание веток
-    # вернуло её — а вместе с ней и вторую обёртку поверх первой, потому что
-    # TUI к этому моменту уже оборачивает сам.
+    # ``is_tui`` контекст только ПОМЕЧАЕТ, обёртка от режима не зависит:
+    # ``TrackingFsBackend`` ставится ЗДЕСЬ и во всех режимах (CLI / server /
+    # TUI), потому что журнал правок — свойство прогона, а не интерфейса.
+    # Живёт обёртка в ``gc_core.agent_edits.tracking``, то есть зависимости
+    # ядра от фронтенда тут нет (страж ``tests/test_core_does_not_import_frontends``).
+    #
+    # Фронтенд свою обёртку ставить НЕ ДОЛЖЕН. Прежде её ставил сам TUI
+    # (``gc_tui.diff_tui.tracking.attach_to_context``), и при слиянии веток
+    # это уже приводило ко второй обёртке поверх первой — каждая правка
+    # уходила в журнал дважды. Точка установки ровно одна, и она здесь.
     ctx.is_tui = bool(is_tui)
+
+    # Флаг, а не ``os_backend is None``: после ``resolve_os_backend`` параметр
+    # уже не отличает «передали свой» от «собрали дефолтный» (см. докстринг
+    # ``backend_was_overridden``), и сравнение с ним делало условие вечно
+    # ложным, а обёртку — мёртвым кодом.
+    if not prep.backend_was_overridden:
+        from gc_core.agent_edits.tracking import wrap_local_for_tracking
+
+        wrapped = wrap_local_for_tracking(backend, ctx)
+        if wrapped is not backend:
+            ctx.os_backend = wrapped
+            # Подменяем бэкенд в готовой рабочей области, а не собираем её
+            # заново: обёртка делегирует внутрь всё, чем область себя измеряет
+            # (`default_cwd`, `isabs`, `is_sandbox`), поэтому корень, оболочка и
+            # имя ОС у неё те же. Пересборка стоила бы ВТОРОЙ пробы записи в
+            # корень проекта (`resolve_root_writable` → реальная запись на
+            # диск) на каждом старте — при том что докстринг области обещает
+            # ровно одну.
+            ctx.workspace = replace(ctx.workspace, backend=wrapped)
 
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",

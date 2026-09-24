@@ -7,6 +7,7 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import APPEND_HEAD_SAMPLE_BYTES, check_encoding_on_file_head, resolve_encoding_arg, try_encode_text_bytes, try_encode_text_bytes_for_append
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.security.path_policy import enforce_write_guard
+from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
 
 
 class AppendToFile(AbstractSimpleTool):
@@ -230,6 +231,14 @@ Usage:
         # Encode once according to whether we create or append.
         # Create-path (incl. size==0 existing file): leading BOM needed for utf-16/sig.
         # Append-path: pure payload without BOM (mid-file BOM corrupts utf-16/sig).
+        # ДВА разных вопроса, и раньше их нёс один флаг:
+        #   `is_create`   — нужен ли ведущий BOM (у пустого файла нужен);
+        #   `created_file` — новый ли это файл для ЖУРНАЛА.
+        # Пустой существующий файл отвечает «да» на первый и «нет» на второй.
+        # Слитые вместе, они делали `op="create"`, а откат такой записи файл
+        # УДАЛЯЕТ, базу не спрашивая: пустой закоммиченный `__init__.py` после
+        # дописывания и отката исчезал вместо возврата к пустому.
+        created_file = not exists
         is_create = not exists  # size==0 handled below
         if exists:
             try:
@@ -256,6 +265,21 @@ Usage:
             )
         assert payload_bytes is not None
 
+        from gc_core.agent_edits.recorder import is_recording, record_edit  # nested: cycle with thread_store
+
+        # Старый контент — ради baseline-снапшота и честного хэша файла в
+        # журнале. Тул сам файл целиком не читает, поэтому поднимаем его
+        # только когда запись правок ведётся и файл в пределах капа мутирующих
+        # тулов; иначе правка уйдёт в журнал как partial (кусок без baseline).
+        old_bytes = None
+        if not created_file and is_recording(self._ctx):
+            try:
+                if size <= fs_mutate_max_bytes(self._config_dict):
+                    old_bytes = await self._backend.read_bytes(path)
+            except Exception:
+                old_bytes = None
+        appended_bytes = payload_bytes
+
         try:
             if not is_create:
                 head = await self._backend.read_head_bytes(path, APPEND_HEAD_SAMPLE_BYTES)
@@ -278,6 +302,12 @@ Usage:
                     chunk = (
                         chunk.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
                     )
+                    # В журнал должно уйти то, что реально легло на диск.
+                    crlf_bytes, crlf_err = try_encode_text_bytes_for_append(
+                        chunk, encoding_used
+                    )
+                    if crlf_err is None and crlf_bytes is not None:
+                        appended_bytes = crlf_bytes
                 await self._backend.append(path, chunk, encoding=encoding_used)
             else:
                 await self._backend.write_bytes(path, payload_bytes)
@@ -290,12 +320,25 @@ Usage:
                 error={"type": "append_failed", "message": str(e)},
             )
 
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=appended_bytes if old_bytes is None else old_bytes + appended_bytes,
+            op="create" if created_file else "append",
+            call_id=self._call_id,
+            # create: дописанное и есть весь файл; append без old: только кусок
+            partial=old_bytes is None and not created_file,
+        )
+
         return self._result(
             ok=True,
             path=path,
             separator=separator,
-            created=is_create,
-            bytes_appended=len(payload_bytes),
+            created=created_file,
+            # appended_bytes, а не payload_bytes: при нормализации CRLF на диск
+            # могло лечь больше байт, чем в исходном payload (см. запись в журнал выше).
+            bytes_appended=len(appended_bytes),
             sha256=content_sha256,
             encoding_used=encoding_used,
             error=None,

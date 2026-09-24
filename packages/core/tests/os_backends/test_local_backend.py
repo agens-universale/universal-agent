@@ -132,8 +132,11 @@ async def test_tool_backend_resolution():
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
     ctx = await acreate_run_context(cfg)
     t = CallableTool(ReadFile(ctx=ctx))
-    assert isinstance(t._backend, LocalFsBackend)
+    # Свой Local приходит в тул ОБЁРНУТЫМ трекером правок — но ровно тем же
+    # объектом, что лежит в ctx.os_backend, поэтому утверждение про голый
+    # LocalFsBackend сюда не подходит: он теперь внутри, под `.inner`.
     assert t._backend is ctx.os_backend
+    assert isinstance(t._backend.inner, LocalFsBackend)
 
     sentinel = object()
     t2 = ReadFile.__new__(ReadFile)

@@ -6,6 +6,7 @@ from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import resolve_encoding_arg, sha256_hex_of_bytes, try_encode_text_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
 from gc_core.security.path_policy import enforce_write_guard
+from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
 
 
 class WriteToFile(AbstractSimpleTool):
@@ -257,6 +258,23 @@ Usage:
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
+        from gc_core.agent_edits.recorder import is_recording, record_edit  # nested: cycle with thread_store
+
+        # Контент до перезаписи — для журнала правок: тул нигде больше его не
+        # читает, а без него запись о перезаписи выглядит как создание файла
+        # (нет baseline-снапшота, весь файл в дифф как добавленный). Читаем
+        # только когда запись правок реально ведётся и файл в пределах капа
+        # мутирующих тулов — собственного гейта по размеру у этого тула нет.
+        old_bytes = None
+        if exists and is_recording(self._ctx):
+            try:
+                if await self._backend.getsize(path) <= fs_mutate_max_bytes(
+                    self._config_dict
+                ):
+                    old_bytes = await self._backend.read_bytes(path)
+            except Exception:
+                old_bytes = None
+
         try:
             out_bytes, encode_err = try_encode_text_bytes(normalized, encoding_used)
             if encode_err is not None:
@@ -277,6 +295,15 @@ Usage:
                 backup_path=backup_path,
                 error={"type": "write_failed", "message": str(e)},
             )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=out_bytes,
+            op="write" if exists else "create",
+            call_id=self._call_id,
+        )
 
         return self._result(
             ok=True,

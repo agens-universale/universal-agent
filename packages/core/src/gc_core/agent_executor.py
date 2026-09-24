@@ -34,7 +34,9 @@ from gc_core.message_policy.user_message_policy import extract_real_user_message
 from gc_core.states import State, SharedStateData
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_report, build_run_usage_dict
-from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
+from gc_core.thread_store import (ThreadSession, make_message_key, purge_thread_snapshots,
+                                  resolve_threads_dir, update_runtime_meta)
+from gc_core.execution_workspace import launch_root_from_config
 from gc_core.trace_id import trace_id_from_config
 from gc_core.tools.subagents.active_scope import (
     active_parent_call_id,
@@ -42,7 +44,8 @@ from gc_core.tools.subagents.active_scope import (
     try_enqueue_user_message,
 )
 from gc_core.tools.subagents.selection import subagents_enabled
-from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
+from gc_core.tools.subagents.sidecar import (bind_thread_identity, bind_turn_identity,
+                                            clear_thread_identity, mint_turn_id)
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
@@ -271,6 +274,13 @@ class AgentExecutor:
                 from gc_core.thread_store_async import athread_store
 
                 await athread_store(_reset_store).areset(system_id, thread_id)
+                # Снимки баз — не забота хранилища: тем же ``reset`` ходит
+                # запасной путь компакции, где сносить базы отката нельзя.
+                # Пользовательский сброс знает, что чистит, и чистит здесь.
+                purge_thread_snapshots(
+                    resolve_threads_dir(config_dict), system_id, thread_id,
+                    launch_root=launch_root_from_config(config_dict),
+                )
             thread_session = await ThreadSession.afrom_config(
                 config_dict=config_dict,
                 system_id=system_id,
@@ -318,6 +328,9 @@ class AgentExecutor:
         else:
             system_id = system or "cli"
             clear_thread_identity(self._ctx)
+        # Turn identity: свежий id на каждый run(), независимо от треда — без
+        # него нечем будет пометить записи журнала правок текущего хода.
+        bind_turn_identity(self._ctx, mint_turn_id())
         is_cli_mode = system_id == "cli"
 
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте

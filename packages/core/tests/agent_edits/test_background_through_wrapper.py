@@ -1,16 +1,17 @@
-"""Фоновый запуск обязан работать ЧЕРЕЗ обёртку TUI, а не только на бэкенде.
+"""Фоновый запуск обязан работать ЧЕРЕЗ обёртку отслеживания, а не только на бэкенде.
 
 Ровно здесь фоновый режим и сломался в первой редакции: метод жил только на
-`LocalFsBackend`, а TUI при сборке контекста всегда оборачивает бэкенд в
-`TrackingFsBackend` (`attach_to_context` в `app.py`, безусловно). Вызов падал
-`AttributeError`, то есть в единственном месте, где фоновый режим и нужен —
-там, где человек поднимает `npm run dev`, — он не работал вовсе.
+`LocalFsBackend`, а `TrackingFsBackend` ставится из `run_context` безусловно,
+во ВСЕХ режимах (CLI / server / TUI). Вызов падал `AttributeError`, то есть в
+единственном месте, где фоновый режим и нужен — там, где человек поднимает
+`npm run dev`, — он не работал вовсе.
 
 Почему этого не поймал прежний набор: тесты фонового режима звали
 `LocalFsBackend` напрямую либо строили тулу через `with_local_ctx`, где бэкенд
 тоже голый. Проверялся путь, который написан, а не тот, по которому ходит
-пользователь. Структурный сторож паритета (`test_tracking.py`) ловит пропажу
-метода, но не отвечает на вопрос «а работает ли оно целиком».
+пользователь. Структурный сторож паритета (`test_tracking_backend_delegates_
+full_backend_surface` в `test_tracking.py`) ловит пропажу метода, но не
+отвечает на вопрос «а работает ли оно целиком».
 """
 import json
 import os
@@ -19,8 +20,8 @@ import subprocess
 import sys
 import time
 
+from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.tools.exec.execute_command import ExecuteCommand
-from gc_tui.diff_tui.tracking import TrackingFsBackend
 
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
@@ -46,8 +47,8 @@ def _command(tmp_path, ticks) -> str:
     return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
-def test_background_works_through_the_tui_wrapper(tmp_path):
-    """Сквозной путь: тула → обёртка TUI → бэкенд. Процесс запущен и работает."""
+def test_background_works_through_the_wrapper(tmp_path):
+    """Сквозной путь: тула → обёртка отслеживания → бэкенд. Процесс запущен и работает."""
     project = tmp_path / "proj"
     project.mkdir()
     ticks = tmp_path / "ticks.log"
@@ -90,7 +91,10 @@ def test_backend_without_background_refuses_honestly(tmp_path):
 
     Так ведёт себя песочница Harbor: параметр в схеме есть, возможности нет.
     Модель должна получить внятную причину и уйти в передний план, а не
-    сообщение про отсутствующий атрибут.
+    сообщение про отсутствующий атрибут. Обёртки здесь нет намеренно — отказ
+    случается ДО того, как тул вообще позвал бы `aspawn_background`, и с
+    обёрткой поверх бэкенда ведёт себя так же (она лишь пробрасывает
+    `supports_background`, см. тест выше).
     """
     class _NoBackground:
         supports_background = False

@@ -105,7 +105,7 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
     if not confirm_available(ctx):
         return CONFIRM_DENY_ONCE
 
-    # Lazy: security → tools на module load ломает import graph (paths/diff_tui).
+    # Lazy: security → tools на module load ломает import graph.
     from gc_core.tools.subagents.progress import emit_progress
     # Nested: path_policy → confirm_port cycle if imported at module top.
     from gc_core.security.path_policy import prompt_user_confirmation_choice
