@@ -91,7 +91,7 @@ def build_default_registry() -> CommandRegistry:
         Command("help", (), "", "Справка по командам", hotkey="F1 · Ctrl+/"),
         Command("sessions", (), "", "Список сессий — выбрать и продолжить",
                 hotkey="F2 · Ctrl+S"),
-        Command("diff", (), "", "Просмотр pending-диффов, принять/откатить",
+        Command("diff", (), "", "Правки агента: обзор, принятие, откат",
                 hotkey="F3 · Ctrl+D"),
         Command("view", (), "<path>", "Постраничный просмотр текстового файла",
                 arg_file=True),

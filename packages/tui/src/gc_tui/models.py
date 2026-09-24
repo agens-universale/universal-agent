@@ -56,5 +56,10 @@ class TraceEvent:
     message_id: Optional[str] = None
     call_id: Optional[str] = None
     tool_name: Optional[str] = None
+    # wire-имя тула — как его зовёт реестр (fs_append_file, а не append_to_file);
+    # заполняется только у kind="call" (Д11/R3), только для ПОКАЗА в ToolCallRow.
+    # tool_name остаётся каноническим id — на нём завязана логика маппера/экрана
+    # (COGNITIVE_TOOLS, "intermediate_reply"/"submit_solution"/"subagent_*" и т.д.).
+    wire_name: Optional[str] = None
     hidden: bool = False  # True → не рендерить в трейс (но kind учитывается polling-логикой)
     summary_content: str = ""  # очищенный текст сводки (только для kind="summary")
