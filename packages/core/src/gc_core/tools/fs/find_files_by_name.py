@@ -14,7 +14,10 @@ from gc_core.config_modules.fs_tools import (
     parse_find_files_by_name_config,
 )
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
+from gc_core.security.path_policy import (
+    _extract_config_dict,
+    resolve_tool_context,
+)
 from gc_core.security.read_guard import (
     ReadGuardViolation,
     _resolve_skills_root,
@@ -26,7 +29,10 @@ from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.fs.cooperative import LoopYielder
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    classify_content_from_sample,
+)
 from gc_core.utils.fs_search_walk import (
     HARD_EXCLUDE_NESTED_DOT_DIRS,
     effective_exclude_dir_names,
@@ -39,7 +45,9 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 
 
-def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Pattern:
+def _compile_glob_fullmatch(
+    pattern: str, *, case_insensitive: bool
+) -> re.Pattern:
     flags = re.IGNORECASE if case_insensitive else 0
     return re.compile(f"^{glob_to_regex(pattern)}$", flags)
 
@@ -49,7 +57,9 @@ class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
         _cfg = parse_find_files_by_name_config(config_dict)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
@@ -77,7 +87,9 @@ class FindFilesByName(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": ("Absolute directory to search under. Must be an existing directory."),
+                        "description": (
+                            "Absolute directory to search under. Must be an existing directory."
+                        ),
                     },
                     "query": {
                         "type": "string",
@@ -119,7 +131,9 @@ class FindFilesByName(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         skip = hard_exclude_dir_names_for_prompt()
         _cfg = parse_find_files_by_name_config(config_dict)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
@@ -212,12 +226,18 @@ class FindFilesByName(AbstractSimpleTool):
     def _resolve_config(self) -> FsFindFilesByNameConfig:
         """Load find_files_by_name limits from config (FsToolsConfig.find_files_by_name)."""
         context = resolve_tool_context(self)
-        cfg_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
-        return parse_find_files_by_name_config(cfg_dict if isinstance(cfg_dict, dict) else {})
+        cfg_dict = _extract_config_dict(
+            self, getattr(context, "ctx", None), {}
+        )
+        return parse_find_files_by_name_config(
+            cfg_dict if isinstance(cfg_dict, dict) else {}
+        )
 
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
-        config_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
+        config_dict = _extract_config_dict(
+            self, getattr(context, "ctx", None), {}
+        )
         cfg = parse_read_guard_config(config_dict)
         if not cfg.enabled:
             return None, None, None
@@ -226,7 +246,9 @@ class FindFilesByName(AbstractSimpleTool):
         return cfg, context.launch_root, extra_allowed
 
     @staticmethod
-    def _read_guard_pass(filepath: str, rg_cfg, rg_root, rg_extra=None) -> bool:
+    def _read_guard_pass(
+        filepath: str, rg_cfg, rg_root, rg_extra=None
+    ) -> bool:
         if rg_cfg is None:
             return True
         try:
@@ -241,7 +263,9 @@ class FindFilesByName(AbstractSimpleTool):
         return True
 
     @staticmethod
-    def _build_matcher(query: str, *, case_insensitive: bool) -> Callable[[str, str], bool]:
+    def _build_matcher(
+        query: str, *, case_insensitive: bool
+    ) -> Callable[[str, str], bool]:
         """Return matcher(rel_path, basename) -> bool."""
         q = query.replace("\\", "/")
         if not q:
@@ -253,7 +277,10 @@ class FindFilesByName(AbstractSimpleTool):
             patterns = [q]
             if "/" not in q and not q.startswith("**/"):
                 patterns.append("**/" + q)
-            compiled = [_compile_glob_fullmatch(p, case_insensitive=case_insensitive) for p in patterns]
+            compiled = [
+                _compile_glob_fullmatch(p, case_insensitive=case_insensitive)
+                for p in patterns
+            ]
 
             def _match_glob(rel: str, _base: str) -> bool:
                 rel_n = rel.replace("\\", "/")
@@ -276,7 +303,9 @@ class FindFilesByName(AbstractSimpleTool):
 
         return _match_sub
 
-    async def _probe_file_meta(self, filepath: str, size_bytes: Optional[int] = None) -> Dict[str, Any]:
+    async def _probe_file_meta(
+        self, filepath: str, size_bytes: Optional[int] = None
+    ) -> Dict[str, Any]:
         """size / binary for a matched file; never raises.
 
         ``size_bytes`` comes with the walk row when the backend knows it
@@ -289,7 +318,9 @@ class FindFilesByName(AbstractSimpleTool):
             except OSError:
                 size_bytes = None
         try:
-            sample = await self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
+            sample = await self._backend.read_head_bytes(
+                filepath, BINARY_SAMPLE_BYTES
+            )
             classification = classify_content_from_sample(filepath, sample)
             is_binary = classification.is_binary
         except OSError:
@@ -299,7 +330,9 @@ class FindFilesByName(AbstractSimpleTool):
             meta["is_binary"] = True
         return meta
 
-    async def _entry(self, filepath: str, is_dir: bool, size: Optional[int] = None) -> Dict[str, Any]:
+    async def _entry(
+        self, filepath: str, is_dir: bool, size: Optional[int] = None
+    ) -> Dict[str, Any]:
         # Default match is a visible text file: omit type/is_hidden/is_binary
         # unless they differ (directory / hidden / binary). size_bytes stays
         # for triage.
@@ -314,9 +347,17 @@ class FindFilesByName(AbstractSimpleTool):
             entry.update(await self._probe_file_meta(filepath, size))
         return entry
 
-    def _arg_error(self, path: Any, query: Any, max_matches: Any, _result: Callable[..., str]) -> Optional[str]:
+    def _arg_error(
+        self,
+        path: Any,
+        query: Any,
+        max_matches: Any,
+        _result: Callable[..., str],
+    ) -> Optional[str]:
         if not isinstance(path, str):
-            return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
+            return _result(
+                ok=False, error={"type": "invalid_argument", "field": "path"}
+            )
         if not self._backend.isabs(path):
             return _result(
                 ok=False,
@@ -336,10 +377,15 @@ class FindFilesByName(AbstractSimpleTool):
                 },
             )
         if not isinstance(max_matches, int) or max_matches < 1:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "max_matches"})
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "max_matches"},
+            )
         return None
 
-    def _make_should_descend(self, root_norm: str, exclude_names: Any, rg: tuple) -> Callable[[str], bool]:
+    def _make_should_descend(
+        self, root_norm: str, exclude_names: Any, rg: tuple
+    ) -> Callable[[str], bool]:
         def _should_descend(abs_dir: str) -> bool:
             name = os.path.basename(os.path.normpath(abs_dir))
             if os.path.normpath(abs_dir) == root_norm:
@@ -357,13 +403,21 @@ class FindFilesByName(AbstractSimpleTool):
         return _should_descend
 
     async def _awalk_matches(
-        self, path: str, matcher: Callable[[str, str], bool], rg: tuple, *, max_visited: int, max_matches: int
+        self,
+        path: str,
+        matcher: Callable[[str, str], bool],
+        rg: tuple,
+        *,
+        max_visited: int,
+        max_matches: int,
     ) -> Tuple[List[Dict[str, Any]], int, str]:
         """``(matches, visited, stop_reason)``; исключения обхода — наружу."""
         exclude_names = effective_exclude_dir_names()
         walk_iter = self._backend.iter_walk_entries(
             path,
-            should_descend=self._make_should_descend(os.path.normpath(path), exclude_names, rg),
+            should_descend=self._make_should_descend(
+                os.path.normpath(path), exclude_names, rg
+            ),
             prune_names=tuple(sorted(exclude_names)),
             prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
         )
@@ -380,7 +434,9 @@ class FindFilesByName(AbstractSimpleTool):
             if visited > max_visited:
                 return matches, visited, "max_visited"
             abs_path = self._backend.join(path, rel)
-            if not self._read_guard_pass(abs_path, *rg) or not matcher(rel, base):
+            if not self._read_guard_pass(abs_path, *rg) or not matcher(
+                rel, base
+            ):
                 continue
             matches.append(await self._entry(abs_path, is_d, size=entry.size))
             if len(matches) >= max_matches:
@@ -408,8 +464,16 @@ class FindFilesByName(AbstractSimpleTool):
 
         path_for_report = path if isinstance(path, str) else ""
         query_for_report = query if isinstance(query, str) else None
-        ci = case_insensitive if isinstance(case_insensitive, bool) else bool(case_insensitive)
-        mm = max_matches if isinstance(max_matches, int) else default_max_matches
+        ci = (
+            case_insensitive
+            if isinstance(case_insensitive, bool)
+            else bool(case_insensitive)
+        )
+        mm = (
+            max_matches
+            if isinstance(max_matches, int)
+            else default_max_matches
+        )
 
         _rg_cfg, _rg_root, _rg_extra = self._resolve_read_guard()
         _result = functools.partial(
@@ -444,14 +508,25 @@ class FindFilesByName(AbstractSimpleTool):
         rg = (_rg_cfg, _rg_root, _rg_extra)
         try:
             matches, visited, stop_reason = await self._awalk_matches(
-                path, matcher, rg, max_visited=max_visited, max_matches=max_matches
+                path,
+                matcher,
+                rg,
+                max_visited=max_visited,
+                max_matches=max_matches,
             )
         except WalkOutputTooLargeError as e:
-            return _result(ok=False, error={"type": "walk_too_large", "message": str(e)})
+            return _result(
+                ok=False, error={"type": "walk_too_large", "message": str(e)}
+            )
         except PermissionError as e:
-            return _result(ok=False, error={"type": "permission_denied", "message": str(e)})
+            return _result(
+                ok=False,
+                error={"type": "permission_denied", "message": str(e)},
+            )
         except Exception as e:
-            return _result(ok=False, error={"type": "unexpected_error", "message": str(e)})
+            return _result(
+                ok=False, error={"type": "unexpected_error", "message": str(e)}
+            )
 
         truncated = stop_reason != "completed"
 

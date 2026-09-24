@@ -148,7 +148,7 @@ filterwarnings = [
 # репозиторий, кроме вендорного кода.
 [tool.ruff]
 target-version = "py311"
-line-length = 120
+line-length = 79
 extend-exclude = ["external", ".venv", "packages/*/external"]
 
 [tool.ruff.format]
