@@ -79,8 +79,8 @@ def patched(monkeypatch):
 def make_guard(patched):
     guards: list[TerminalGuard] = []
 
-    def make(cleanup) -> TerminalGuard:
-        guard = TerminalGuard(cleanup)
+    def make(cleanup, force_kill=None) -> TerminalGuard:
+        guard = TerminalGuard(cleanup, force_kill=force_kill)
         guards.append(guard)
         return guard
 
@@ -163,6 +163,49 @@ def test_exit_hooks_run_even_if_cleanup_fails(monkeypatch, patched, make_guard):
     assert patched.exit_hooks == ["atexit"]
     assert patched.exit.codes == [129]
 
+
+
+def test_force_kill_before_exit_when_cleanup_misses_budget(monkeypatch, patched, make_guard):
+    # Уборка не уложилась в бюджет — последний рубеж добивает демонов ДО os._exit,
+    # не дожидаясь её: гарантия «сирот нет» не зависит от того, что в уборке зависло.
+    events: list[object] = []
+    monkeypatch.setattr(terminal_guard.os, "_exit", lambda code: events.append(("exit", code)))
+    release = threading.Event()
+    guard = make_guard(lambda: release.wait(), force_kill=lambda: events.append("force"))
+    try:
+        guard._emergency_exit()
+        assert events == ["force", ("exit", 129)]
+    finally:
+        release.set()
+        patched.hooked.wait(DEADLINE)
+
+
+def test_force_kill_when_cleanup_fails(monkeypatch, patched, make_guard):
+    # Упавшая уборка могла не погасить демонов — добиваем.
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)
+    forced: list[bool] = []
+
+    def cleanup() -> None:
+        raise RuntimeError("уборка упала")
+
+    guard = make_guard(cleanup, force_kill=lambda: forced.append(True))
+
+    guard._emergency_exit()
+
+    assert forced == [True]
+    assert patched.exit.codes == [129]
+    assert patched.hooked.wait(DEADLINE)
+
+
+def test_no_force_kill_when_cleanup_finished(patched, make_guard):
+    forced: list[bool] = []
+    guard = make_guard(_Cleanup(), force_kill=lambda: forced.append(True))
+
+    guard._emergency_exit()
+
+    assert forced == []
+    assert patched.exit.codes == [129]
+    assert patched.hooked.wait(DEADLINE)
 
 def test_hanging_cleanup_holds_neither_exit_hooks_nor_exit(patched, make_guard):
     # Уборка и хуки идут рядом, с общим дедлайном: зависшая уборка не съедает

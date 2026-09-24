@@ -327,6 +327,20 @@ class RunSupervisor:
             remove_pid(name, self.pids_dir)
         self._managed.clear()
 
+    def kill_managed_now(self) -> None:
+        """Последний рубеж аварийного выхода: SIGKILL всем своим демонам сразу, без
+        ожидания и печати. Штатное гашение могло не уложиться в бюджет выхода —
+        живыми их всё равно не оставляем. Группу уже забранного лидера не трогаем:
+        его номер мог достаться чужому процессу."""
+        for _, proc in list(self._managed):
+            if proc.returncode is not None:
+                continue
+            if os.name == "posix":
+                with contextlib.suppress(OSError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                _taskkill(proc.pid, force=True)
+
     def wait_until_signal(self) -> None:
         if threading.current_thread() is not threading.main_thread():
             raise SupervisorError("wait_until_signal must run on the main thread")

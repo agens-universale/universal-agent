@@ -307,3 +307,40 @@ def test_windows_termination_is_polite_to_all_then_forces_survivors(
         ["taskkill", "/PID", "33", "/T"],
         ["taskkill", "/PID", "22", "/T", "/F"],
     ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="группы процессов — только POSIX")
+def test_kill_managed_now_kills_all_at_once_and_spares_reaped_leader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Последний рубеж аварийного выхода: SIGKILL всем своим демонам сразу, без
+    ожидания. Группу уже забранного лидера не трогаем — его номер мог достаться
+    чужому процессу."""
+    supervisor = RunSupervisor(pids_dir=tmp_path)
+    deaf = [
+        subprocess.Popen([sys.executable, "-c", _DEAF_DAEMON], **_popen_kwargs(None, None))
+        for _ in range(2)
+    ]
+    reaped = MagicMock()
+    reaped.pid, reaped.returncode = 424242, 0
+    supervisor._managed.extend([("a", deaf[0]), ("b", deaf[1]), ("gone", reaped)])
+    signalled: list[int] = []
+    real_killpg = os.killpg
+
+    def killpg(pgid: int, sig: int) -> None:
+        signalled.append(pgid)
+        real_killpg(pgid, sig)
+
+    try:
+        time.sleep(0.5)   # обработчик SIG_IGN успел встать
+        monkeypatch.setattr(os, "killpg", killpg)
+        started = time.monotonic()
+        supervisor.kill_managed_now()
+        elapsed = time.monotonic() - started
+        monkeypatch.undo()
+        assert elapsed < 0.5
+        assert sorted(signalled) == sorted(proc.pid for proc in deaf)
+        assert [proc.wait(timeout=5) for proc in deaf] == [-signal.SIGKILL, -signal.SIGKILL]
+    finally:
+        for proc in deaf:
+            _kill_leftovers(proc, None)

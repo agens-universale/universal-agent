@@ -31,11 +31,11 @@ from typing import Callable
 EXIT_CODE = 128 + 1           # как у процесса, убитого SIGHUP
 POLL_S = 1.0                  # период проверки терминала
 # Уборка идёт шагами, и каждый ограничен graceful-таймаутом супервизора (5 с)
-# независимо от числа демонов: голос, затем все MCP-демоны разом. Параллельно
+# независимо от числа демонов: все MCP-демоны разом, затем голос. Параллельно
 # хуки atexit закрывают stdio-MCP-серверы (браузер) — до ~15 с на сессию. Бюджет
 # покрывает худший случай с запасом, так что SIGKILL глухим к SIGTERM уходит
 # раньше os._exit; в обычном случае выход не ждёт — сторож ждёт ровно до конца
-# уборки.
+# уборки. Не уложилась уборка — перед выходом добивает `force_kill`.
 CLEANUP_BUDGET_S = 20.0
 
 
@@ -64,9 +64,16 @@ def _silence_output() -> None:
 class TerminalGuard:
     """Сторож терминала: при его смерти — уборка и выход процесса."""
 
-    def __init__(self, cleanup: Callable[[], None]) -> None:
+    def __init__(
+        self, cleanup: Callable[[], None], *, force_kill: Callable[[], None] | None = None
+    ) -> None:
+        """`force_kill` — последний рубеж аварийного выхода: если уборка не
+        завершилась в бюджет (зависла, упала, не стартовала), он добивает то, что
+        она гасила, ДО `os._exit`. Обязан не блокировать: сигнал и возврат."""
         self._cleanup = cleanup
+        self._force_kill = force_kill
         self._cleaned = False
+        self._cleanup_done = False
         self._closed = False
         self._watcher: threading.Thread | None = None
         self._wake_r = self._wake_w = -1
@@ -119,7 +126,9 @@ class TerminalGuard:
         `os._exit` — в `finally`: исключение аварийного пути (поток не стартовал)
         иначе молча убило бы сторожа, и процесс снова висел бы. Не вышло заглушить
         вывод (нет свободных fd) — убираемся всё равно: печать гашения MCP мёртвый
-        терминал терпит сама."""
+        терминал терпит сама. Уборка не завершилась — перед выходом последний
+        рубеж `force_kill`: живыми демонов не оставляем, что бы в уборке ни
+        зависло."""
         try:
             with contextlib.suppress(OSError):
                 _silence_output()
@@ -133,6 +142,9 @@ class TerminalGuard:
             for worker in workers:
                 worker.join(max(0.0, deadline - time.monotonic()))
         finally:
+            if not self._cleanup_done and self._force_kill is not None:
+                with contextlib.suppress(Exception):
+                    self._force_kill()
             os._exit(EXIT_CODE)
 
     def run_cleanup(self) -> None:
@@ -143,6 +155,7 @@ class TerminalGuard:
             return
         self._cleaned = True
         self._cleanup()
+        self._cleanup_done = True
 
     def close(self) -> None:
         """Штатный выход: снять сторожа, убраться, вернуть сигналы как были.

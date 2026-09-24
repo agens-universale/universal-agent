@@ -78,3 +78,11 @@ def shutdown_mcp_daemons() -> None:
         _supervisor.shutdown_managed()
     finally:
         _supervisor = None
+
+
+def kill_mcp_daemons_now() -> None:
+    """Последний рубеж аварийного выхода TUI: SIGKILL daemon'ам этого процесса
+    без ожидания — если штатное `shutdown_mcp_daemons()` не уложилось в бюджет."""
+    supervisor = _supervisor   # штатное гашение может обнулить его параллельно
+    if supervisor is not None:
+        supervisor.kill_managed_now()

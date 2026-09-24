@@ -275,7 +275,9 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     """Аварийный выход сторожа терминала и штатный `finally` зовут одну уборку
     main(), и она выполняется ровно раз — иначе демоны либо сиротеют, либо
     гасятся дважды. В неё же входят процессы индекса путей: при аварийном выходе
-    git пикера тоже гасится."""
+    git пикера тоже гасится. Порядок: git пикера, MCP-демоны, голос — MCP раньше
+    голоса, чтобы зависший голосовой шаг не оставил демонов без SIGTERM. Сторож
+    получает последний рубеж — добивание MCP-демонов этого запуска."""
     pytest.importorskip("textual")
 
     from gc_tui import app as tui_app
@@ -285,8 +287,8 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     guards: list = []
 
     class _SpyGuard(terminal_guard.TerminalGuard):
-        def __init__(self, cleanup):
-            super().__init__(cleanup)
+        def __init__(self, cleanup, **kw):
+            super().__init__(cleanup, **kw)
             guards.append(self)
 
     class _FakeApp:
@@ -312,12 +314,15 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
-        lambda: calls.append("shutdown"),
+        lambda: calls.append("mcp"),
     )
-    released: list[bool] = []
-    monkeypatch.setattr(autostart, "release_voice_service", lambda: released.append(True))
-    killed: list[bool] = []
-    monkeypatch.setattr(file_index, "kill_running_processes", lambda: killed.append(True))
+
+    def force_kill() -> None:
+        calls.append("force")
+
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.kill_mcp_daemons_now", force_kill)
+    monkeypatch.setattr(autostart, "release_voice_service", lambda: calls.append("voice"))
+    monkeypatch.setattr(file_index, "kill_running_processes", lambda: calls.append("git"))
 
     from gc_tui import main
 
@@ -325,9 +330,45 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     rc = main(argv=["--config", str(cfg_path)])
     assert rc == 0
     assert len(guards) == 1
-    assert calls == ["ensure", "shutdown"]
-    assert released == [True]
-    assert killed == [True]
+    assert calls == ["ensure", "git", "mcp", "voice"]
+    assert guards[0]._force_kill is force_kill
+
+
+def test_main_without_auto_mcp_gives_guard_nothing_to_force_kill(monkeypatch, tmp_path):
+    """Без автозапуска MCP-демонов нет — и добивать сторожу нечего."""
+    pytest.importorskip("textual")
+
+    from gc_tui import app as tui_app
+    from gc_tui.services import terminal_guard
+
+    guards: list = []
+
+    class _SpyGuard(terminal_guard.TerminalGuard):
+        def __init__(self, cleanup, **kw):
+            super().__init__(cleanup, **kw)
+            guards.append(self)
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            pass
+
+        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+            self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr(terminal_guard, "TerminalGuard", _SpyGuard)
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+
+    from gc_tui import main
+
+    rc = main(argv=["--config", str(_cfg_for_main(tmp_path)), "--no-auto-mcp"])
+    assert rc == 0
+    assert guards[0]._force_kill is None
 
 
 @pytest.mark.parametrize("run_fails", [False, True])
