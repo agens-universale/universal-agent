@@ -309,7 +309,7 @@ def _make_httpx_factory(
         timeout: Optional[float] = None,
         auth: Any = None,
     ):
-        ssl_context = build_ssl_context(verify, cert)
+        ssl_context = build_ssl_context(verify, cert, trust_env=True)
         kwargs: Dict[str, Any] = dict(
             headers=headers,
             timeout=timeout,
@@ -349,7 +349,7 @@ def _make_stream_http_client(
     from gc_core.utils.http_proxy import resolve_proxies
 
     headers = _merge_mcp_headers(token=token, extra_headers=extra_headers)
-    ssl_context = build_ssl_context(verify, cert)
+    ssl_context = build_ssl_context(verify, cert, trust_env=True)
 
     # Контракт тот же, что у фабрики выше: netrc не читаем никогда
     # (`trust_env=False`), прокси резолвим явно. Иначе `persistent_session`
@@ -564,9 +564,7 @@ def _is_session_terminated(exc: BaseException) -> bool:
     return _SESSION_TERMINATED_MARKER in str(exc)
 
 
-async def _enter_session(
-    transport_cm: Any, *, read_timeout: Optional[float] = None
-) -> Tuple[Any, Any]:
+async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
     """Войти в транспорт и ``ClientSession``, откатив всё при ошибке.
 
     ``initialize()`` падает не в теории: сервер отвечает не тем протоколом,
@@ -578,13 +576,7 @@ async def _enter_session(
     Возвращает ``(session, cm_stack)``; стек в порядке открытия.
     """
     read_stream, write_stream = await transport_cm.__aenter__()
-    session = ClientSession(
-        read_stream,
-        write_stream,
-        read_timeout_seconds=None
-        if read_timeout is None
-        else timedelta(seconds=read_timeout),
-    )
+    session = ClientSession(read_stream, write_stream)
     try:
         await session.__aenter__()
     except BaseException:
@@ -1109,7 +1101,7 @@ async def alist_tools_stream_stdio(
 
 async def _call_tool_stream_stdio_async(
     server_cfg: Dict[str, Any],
-    timeout: float,
+    timeout: float,  # noqa: ARG001  # единый API транспорта; долгий stdio-тул ждём без таймаута
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -1130,11 +1122,7 @@ async def _call_tool_stream_stdio_async(
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(
-            read_stream,
-            write_stream,
-            read_timeout_seconds=timedelta(seconds=timeout),
-        ) as session,
+        ClientSession(read_stream, write_stream) as session,
     ):
         await session.initialize()
 
@@ -1162,7 +1150,7 @@ async def _call_tool_stream_stdio_async(
 async def _call_tool_stream_stdio_persistent(
     server_key: str,
     server_cfg: Dict[str, Any],
-    timeout: float,
+    timeout: float,  # noqa: ARG001  # единый API транспорта; долгий stdio-тул ждём без таймаута
     tool_name: str,
     arguments: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -1184,9 +1172,7 @@ async def _call_tool_stream_stdio_persistent(
             cwd=server_cfg.get("cwd") or None,
         )
         transport_cm = stdio_client(params)
-        new_session, cm_stack = await _enter_session(
-            transport_cm, read_timeout=timeout
-        )
+        new_session, cm_stack = await _enter_session(transport_cm)
         _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
@@ -1228,6 +1214,8 @@ async def acall_tool_stream_stdio(
 
     При persistent_session=true субпроцесс и ClientSession держатся живыми
     между вызовами (одна Chromium-сессия на весь цикл работы агента).
+    Таймаут discovery не ограничивает выполнение тула: повтор после локального
+    таймаута мог бы дублировать побочный эффект и потерять состояние браузера.
     """
     if bool(server_cfg.get("persistent_session")):
         # Ключ по команде+args, чтобы одинаковые сервера делили сессию.

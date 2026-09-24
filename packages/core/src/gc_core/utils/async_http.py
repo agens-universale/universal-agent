@@ -37,6 +37,8 @@ _clients: dict[tuple, tuple] = {}
 def build_ssl_context(
     verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
+    *,
+    trust_env: bool = False,
 ) -> ssl.SSLContext:
     """Собрать TLS-контекст из пары ``verify``/``cert``.
 
@@ -51,6 +53,10 @@ def build_ssl_context(
     Клиентский сертификат загружается независимо от проверки сервера:
     ``verify=False`` не должен отключать mTLS. Только явный False выключает
     проверку; CA-путь сохраняет проверку цепочки и имени сервера.
+
+    ``trust_env`` учитывает SSL_CERT_FILE/SSL_CERT_DIR только при verify=True,
+    как httpx. Для MCP включён ради корпоративных CA; клиенты модели
+    по-прежнему берут CA из явного конфига. На netrc и прокси флаг не влияет.
     """
     if verify is False:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -64,9 +70,7 @@ def build_ssl_context(
             cafile=None if _is_dir(verify) else verify,
         )
     else:
-        import certifi
-
-        ctx = ssl.create_default_context(cafile=certifi.where())
+        ctx = httpx.create_ssl_context(verify=True, trust_env=trust_env)
     if cert:
         if isinstance(cert, str):
             ctx.load_cert_chain(cert)

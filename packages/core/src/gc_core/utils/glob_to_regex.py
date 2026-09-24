@@ -70,9 +70,10 @@ def _parse_star(glob_pattern: str, regex: str, i: int) -> tuple[str, int]:
     if i + 2 < n and glob_pattern[i + 2] == "/":
         # **/ -> match any subdirectory depth
         return regex + "(?:.+/)?", i + 3
-    if (i + 2) >= n and glob_pattern[i - 1] == "/":
-        # end **
-        return regex[: i - 1] + ".*", i + 2
+    if i > 0 and (i + 2) >= n and glob_pattern[i - 1] == "/":
+        # Убираем только последний slash из regex, а не индекс из glob:
+        # экранирование и уже раскрытые wildcard меняют длину префикса.
+        return regex[:-1] + "(?:/.*)?", i + 2
     if i > 0 and glob_pattern[i - 1] == "/":
         # /** at start or middle
         return regex + "(?:/.+)?", i + 2

@@ -21,4 +21,8 @@ ddgs-mcp = "ddgs_mcp.server:main"
 where = ["src"]
 include = ["ddgs_mcp*"]
 
+# Секция намеренно пустая: закрепляет pytest rootdir за этим пакетом.
+# Без неё pytest берёт корень монорепозитория, и плагин gc_testkit подменяет
+# trafilatura/readability заглушками. Тесты остаются зелёными, но перестают
+# проверять реальное извлечение текста. Не удалять.
 [tool.pytest.ini_options]

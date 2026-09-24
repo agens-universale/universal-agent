@@ -221,3 +221,93 @@ async def test_proxy_uses_the_same_tls_context_as_direct_client(
     finally:
         await client.aclose()
         await aclose_clients()
+
+
+@pytest.fixture
+def env_ca(tls_files, tmp_path, monkeypatch):
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    hashed_dir = tmp_path / "ca"
+    hashed_dir.mkdir()
+    subject_hash = subprocess.check_output(
+        [
+            "openssl",
+            "x509",
+            "-hash",
+            "-noout",
+            "-in",
+            str(tls_files / "trusted.pem"),
+        ],
+        text=True,
+    ).strip()
+    shutil.copyfile(
+        tls_files / "trusted.pem", hashed_dir / f"{subject_hash}.0"
+    )
+    return {
+        "SSL_CERT_FILE": str(tls_files / "trusted.pem"),
+        "SSL_CERT_DIR": str(hashed_dir),
+    }
+
+
+@pytest.mark.parametrize("env_name", ["SSL_CERT_FILE", "SSL_CERT_DIR"])
+@pytest.mark.parametrize("kind", ["model", "mcp-sse", "mcp-stream"])
+async def test_environment_ca_preserves_transport_policy(
+    tls_files, env_ca, monkeypatch, env_name, kind
+):
+    monkeypatch.setenv(env_name, env_ca[env_name])
+    cert = (str(tls_files / "trusted.pem"), str(tls_files / "trusted.key"))
+    with https_server(tls_files, require_client=True) as url:
+        client = make_client(kind, True, cert, url)
+        try:
+            if kind == "model":
+                # Клиенты модели по-прежнему требуют CA в явном конфиге.
+                with pytest.raises(
+                    httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"
+                ):
+                    await client.get(url, timeout=2)
+            else:
+                response = await client.get(url, timeout=2)
+                assert response.json()["client_cert"] is True
+                with pytest.raises(
+                    httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"
+                ):
+                    await client.get(
+                        url.replace("localhost", "127.0.0.1"), timeout=2
+                    )
+        finally:
+            await client.aclose()
+            await aclose_clients()
+
+
+@pytest.mark.parametrize("kind", ["mcp-sse", "mcp-stream"])
+async def test_mcp_ca_precedence(tls_files, env_ca, monkeypatch, kind):
+    # HTTPX предпочитает SSL_CERT_FILE каталогу, а явный verify — окружению.
+    monkeypatch.setenv("SSL_CERT_FILE", str(tls_files / "other.pem"))
+    monkeypatch.setenv("SSL_CERT_DIR", env_ca["SSL_CERT_DIR"])
+    with https_server(tls_files) as url:
+        environment = make_client(kind, True, None, url)
+        explicit = make_client(kind, str(tls_files / "trusted.pem"), None, url)
+        try:
+            with pytest.raises(
+                httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"
+            ):
+                await environment.get(url, timeout=2)
+            assert (await explicit.get(url, timeout=2)).status_code == 200
+        finally:
+            await environment.aclose()
+            await explicit.aclose()
+
+
+@pytest.mark.parametrize("verify", [True, False])
+def test_mcp_invalid_environment_ca_is_not_silently_ignored(
+    tmp_path, monkeypatch, verify
+):
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "missing-ca.pem"))
+    if verify:
+        with pytest.raises(FileNotFoundError):
+            build_ssl_context(verify, trust_env=True)
+    else:
+        assert (
+            build_ssl_context(verify, trust_env=True).verify_mode
+            == ssl.CERT_NONE
+        )
