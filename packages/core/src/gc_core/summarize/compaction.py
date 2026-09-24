@@ -11,6 +11,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.summary import SUMMARY_CHARS_PER_TOKEN
 from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total
 from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_precheck, log_compaction_started, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, logger_from_ctx
 from gc_core.summarize.summary_message_body import build_dialog_summary_content, resolve_intent_log_preview_chars
@@ -185,7 +186,7 @@ def _prompt_token_estimate(
     tags: Sequence[str],
     strip_think: bool,
 ) -> int | None:
-    """Input последнего главного prompt плюс длина хвоста // 2.
+    """Input последнего главного prompt плюс хвост по курсу ``SUMMARY_CHARS_PER_TOKEN``.
 
     Числа или границы нет — None, токенное плечо молчит. Хвост — сообщения
     после уже посчитанного prompt; всю историю второй раз не считаем.
@@ -203,7 +204,7 @@ def _prompt_token_estimate(
     tail_chars = calc_history_chars_for_trigger(
         tail, tags=tags, strip_think=strip_think
     )
-    return tokens + tail_chars // 2
+    return tokens + tail_chars // SUMMARY_CHARS_PER_TOKEN
 
 
 def exceeded_summary_triggers(

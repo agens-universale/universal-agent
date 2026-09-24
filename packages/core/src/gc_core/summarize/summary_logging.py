@@ -415,6 +415,23 @@ def log_pre_run_max_rounds(
     )
 
 
+def log_token_trigger_no_prompt_tokens(
+    logger: Any | None,
+    *,
+    thread_id: Any,
+    threshold: int,
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "summary_token_trigger_no_prompt_tokens thread_id=%s threshold=%s: "
+        "нет prompt_tokens от провайдера, а история по символам уже выше порога — "
+        "сжатие по токенам не срабатывает",
+        thread_id,
+        threshold,
+    )
+
+
 def _threshold_log_suffix(trigger_threshold_chars: int | None) -> str:
     if trigger_threshold_chars is not None and trigger_threshold_chars > 0:
         return f" threshold={trigger_threshold_chars}"

@@ -42,6 +42,7 @@ from gc_core.config_modules.summary import (
     DEFAULT_MAX_DIALOGUE_CHARS,
     DEFAULT_MAX_MESSAGE_CHARS,
     DEFAULT_TURN_END_TRIGGER_RATIO,
+    SUMMARY_CHARS_PER_TOKEN,
     SummaryConfig,
 )
 from gc_core.config_modules.strip_tags_projection import (
@@ -205,7 +206,10 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     if cfg.summary.max_accumulated_summary_chars <= 0:
         cfg.summary.max_accumulated_summary_chars = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
     if cfg.summary.incremental_batch_chars is None or cfg.summary.incremental_batch_chars <= 0:
-        trigger = cfg.summary.chat_completions_summary_trigger_chars
+        trigger = (
+            cfg.summary.chat_completions_summary_trigger_chars
+            or cfg.summary.chat_completions_summary_trigger_tokens * SUMMARY_CHARS_PER_TOKEN
+        )
         cfg.summary.incremental_batch_chars = (
             int(trigger * DEFAULT_INCREMENTAL_BATCH_MULTIPLIER) if trigger > 0 else 0
         )

@@ -316,3 +316,120 @@ async def test_compact_writes_null_prompt_fields_to_meta():
             encoding="utf-8",
         ).read()
         assert '"last_main_prompt_tokens": null' in raw
+
+
+def _loop_state(*messages):
+    return SimpleNamespace(
+        messages=[{"role": "system", "content": "S", "id": "sys"}, *messages],
+        last_main_prompt_tokens=None,
+        last_main_prompt_message_count=None,
+        backend_api_mode="chat_completions",
+        dialog_steps_offset=0,
+        previous_response_id=None,
+        user_intent_log=[],
+        current_user_intent=[],
+        shared=None,
+    )
+
+
+def _coordinator(state, logger, *, chars=0, tokens=0):
+    return RunSummaryCoordinator(
+        ctx=SimpleNamespace(config_dict={}),
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=chars,
+        summary_trigger_tokens=tokens,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+        logger=logger,
+    )
+
+
+def _step(coord, state, step, *, prompt_tokens):
+    """Хук перед запросом, затем сам запрос: провайдер сообщает prompt_tokens."""
+    batch = [_user(f"step {step}", f"s{step}")]
+    state.messages.extend(batch)
+    run_coro(coord.apre_backend_compaction_hook(batch, "user_ask"))
+    usage = {"prompt_tokens": prompt_tokens} if prompt_tokens is not None else {}
+    remember_main_prompt_tokens(
+        state, usage, len(state.messages), backend_mode="chat_completions"
+    )
+
+
+def _warnings(caplog, event):
+    return [r for r in caplog.records if r.getMessage().startswith(event)]
+
+
+def test_no_prompt_tokens_warns_once_when_history_over_threshold(caplog):
+    import logging
+
+    # 1000 символов истории ≈ 500 токенов — выше порога 100, а числа провайдера нет.
+    state = _loop_state(_user("x" * 1000, "big"))
+    coord = _coordinator(state, logging.getLogger("t-no-usage"), tokens=100)
+    caplog.set_level(logging.WARNING, logger="t-no-usage")
+    for step in range(4):
+        _step(coord, state, step, prompt_tokens=None)
+    assert len(_warnings(caplog, "summary_token_trigger_no_prompt_tokens")) == 1
+
+
+def test_no_prompt_tokens_small_history_is_silent(caplog):
+    import logging
+
+    state = _loop_state()
+    coord = _coordinator(state, logging.getLogger("t-no-usage-small"), tokens=10_000)
+    caplog.set_level(logging.WARNING, logger="t-no-usage-small")
+    for step in range(4):
+        _step(coord, state, step, prompt_tokens=None)
+    assert caplog.records == []
+
+
+def test_first_hook_of_run_without_number_is_silent(caplog):
+    import logging
+
+    # Старый тред без числа в meta: до первого ответа провайдера порог честно ждёт.
+    state = _loop_state(_user("x" * 1000, "big"))
+    coord = _coordinator(state, logging.getLogger("t-first-hook"), tokens=100)
+    caplog.set_level(logging.WARNING, logger="t-first-hook")
+    run_coro(coord.apre_backend_compaction_hook([state.messages[-1]], "user_ask"))
+    assert caplog.records == []
+
+
+def test_compaction_outside_coordinator_does_not_fake_missing_usage(caplog):
+    import logging
+
+    # Turn-end или тул session_compact сбрасывают число мимо pre-backend хука;
+    # следующий хук видит None, но провайдер usage присылает.
+    # Порог выше сводки: после сжатия история по символам снова ниже порога.
+    state = _loop_state(_user("x" * 5000, "big"))
+    coord = _coordinator(state, logging.getLogger("t-outside"), tokens=1000)
+    caplog.set_level(logging.WARNING, logger="t-outside")
+    _step(coord, state, 0, prompt_tokens=50)
+    apply_summary_state_patch(
+        state=state, raw_summary="short", last_dialog_steps="", summarized_messages_count=1
+    )
+    assert state.last_main_prompt_tokens is None
+    _step(coord, state, 1, prompt_tokens=50)
+    assert _warnings(caplog, "summary_token_trigger_no_prompt_tokens") == []
+
+
+def test_prompt_tokens_present_no_usage_warning(caplog):
+    import logging
+
+    state = _loop_state()
+    coord = _coordinator(state, logging.getLogger("t-usage-ok"), tokens=10_000)
+    caplog.set_level(logging.WARNING, logger="t-usage-ok")
+    for step in range(3):
+        _step(coord, state, step, prompt_tokens=50)
+    assert caplog.records == []
+
+
+def test_chars_only_config_never_warns_about_tokens(caplog):
+    import logging
+
+    state = _loop_state()
+    coord = _coordinator(state, logging.getLogger("t-chars"), chars=10**9)
+    caplog.set_level(logging.WARNING, logger="t-chars")
+    for step in range(3):
+        _step(coord, state, step, prompt_tokens=None)
+    assert caplog.records == []
+
