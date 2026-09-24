@@ -12,15 +12,18 @@ from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.summary import SUMMARY_CHARS_PER_TOKEN
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     exceeded_summary_triggers,
+    history_exceeds_summary_trigger,
 )
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     append_summary_trace_record,
     log_compaction_failed,
     log_pre_run_max_rounds,
+    log_token_trigger_no_prompt_tokens,
 )
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
 from gc_core.thread_store import make_message_key
@@ -292,6 +295,10 @@ class RunSummaryCoordinator:
         self._proj_tags = projection_tags_from_config(
             getattr(ctx, "config_dict", None)
         )
+        # Слепой токенный порог: был ли уже хук (значит, и главный запрос) и
+        # сказано ли об этом в лог в этом прогоне.
+        self._backend_requested = False
+        self._blind_token_trigger_warned = False
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -396,6 +403,33 @@ class RunSummaryCoordinator:
         gc.collect()
 
 
+    def _warn_if_token_trigger_blind(self) -> None:
+        """Раз за прогон сказать в лог, что токенный порог не может сработать.
+
+        Зовётся в начале pre-backend хука. Числа нет и после сжатия (любого, в том
+        числе мимо координатора), поэтому слепым порог признаётся, только когда
+        история по символам уже выше него. Первый хук прогона пропускается —
+        число ещё не успело прийти.
+        """
+        if (
+            self._backend_requested
+            and not self._blind_token_trigger_warned
+            and getattr(self._state, "last_main_prompt_tokens", None) is None
+            and history_exceeds_summary_trigger(
+                state=self._state,
+                summary_trigger_chars=self._summary_trigger_tokens * SUMMARY_CHARS_PER_TOKEN,
+                tags=self._proj_tags,
+                strip_think=True,
+            )
+        ):
+            self._blind_token_trigger_warned = True
+            log_token_trigger_no_prompt_tokens(
+                self._logger,
+                thread_id=getattr(self._thread_session, "thread_id", None),
+                threshold=self._summary_trigger_tokens,
+            )
+        self._backend_requested = True
+
     async def apre_backend_compaction_hook(
         self,
         current_messages: list[dict],
@@ -411,6 +445,8 @@ class RunSummaryCoordinator:
             return
         if self._summary_trigger_chars <= 0 and self._summary_trigger_tokens <= 0:
             return
+        if self._summary_trigger_tokens > 0:
+            self._warn_if_token_trigger_blind()
         hits = exceeded_summary_triggers(
             state=state,
             summary_trigger_chars=self._summary_trigger_chars,
