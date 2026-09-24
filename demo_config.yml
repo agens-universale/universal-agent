@@ -416,9 +416,12 @@ intent_scope:
 
 summary:
   chat_completions_summary_trigger_chars: 200000
+  # 0 — токенный порог выключен. Иначе input последнего главного запроса плюс хвост // 2.
   chat_completions_summary_trigger_tokens: 0
   # Turn-end compaction после accept submit_solution (по умолчанию = 60% trigger)
   chat_completions_summary_turn_end_trigger_chars: 120000
+  # 0 — токенный turn-end выключен. Нет ключа — 60% от токенного mid-turn.
+  chat_completions_summary_turn_end_trigger_tokens: 0
   incremental_batch_chars: 280000
   max_message_chars: 30000
   max_dialogue_chars: 1000000
