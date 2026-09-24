@@ -112,7 +112,10 @@ def test_reset_thread_files_removes_subagents_sidecar(tmp_path: Path) -> None:
     data.write_text("y\n", encoding="utf-8")
     other.write_text("z\n", encoding="utf-8")
 
-    deleted = reset_thread_files(str(threads_dir), system_id="cli", thread_id="demo")
+    deleted = reset_thread_files(
+        str(threads_dir), system_id="cli", thread_id="demo",
+        launch_root=str(tmp_path),
+    )
 
     assert str(sidecar) in deleted
     assert not sidecar.exists()
@@ -213,7 +216,7 @@ def test_reset_thread_files_resets_seq_counter(tmp_path):
     r2 = _append_call(td, 2)
     assert r2["seq"] == 2
 
-    reset_thread_files(td, system_id="cli", thread_id="t1")
+    reset_thread_files(td, system_id="cli", thread_id="t1", launch_root=str(tmp_path))
 
     r3 = _append_call(td, 3)
     assert r3["seq"] == 1, "после reset счётчик должен сброситься"

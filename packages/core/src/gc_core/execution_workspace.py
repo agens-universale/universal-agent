@@ -206,6 +206,22 @@ def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
     return text or None
 
 
+def launch_root_from_config(config: Optional[Dict[str, Any]]) -> str:
+    """Корень проекта НА ХОСТЕ по одному конфигу, без бэкенда.
+
+    Для вызывающих, которым корень нужен ДО сборки контекста запуска —
+    например сбросу треда (``thread_store.reset_thread_files``), который
+    чистит снимки в ``<корень>/.gc``. Цепочка та же, что у невиртуального
+    ветвления ``resolve_execution_root``: ключ конфига, затем текущий каталог.
+
+    Песочный бэкенд отдаёт корень в координатах КОНТЕЙНЕРА, и здесь его знать
+    неоткуда: у вызывающих до контекста бэкенда ещё нет. На хосте такой путь
+    всё равно не существует, так что уборка по нему ничего не найдёт и
+    ничего не сломает.
+    """
+    return _config_root_raw(config) or os.getcwd()
+
+
 def resolve_execution_root(
     backend: FsBackend,
     config: Optional[Dict[str, Any]] = None,
@@ -283,6 +299,7 @@ __all__ = [
     "WorkspaceRootUnknownError",
     "aprime_backend_cwd",
     "build_execution_workspace",
+    "launch_root_from_config",
     "discover_backend_cwd",
     "host_os_label",
     "resolve_execution_os",

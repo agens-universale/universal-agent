@@ -137,7 +137,11 @@ class FileThreadStore(ThreadStoreBase):
         return bool(discard_message_by_id(self._dir, system_id, thread_id, message_id))
 
     def reset(self, system_id: str, thread_id: str) -> List[str]:
-        return reset_thread_files(self._dir, system_id, thread_id)
+        # ``launch_root=""`` — осознанно: хранилище знает каталог тредов, но не
+        # проект, а тем же ``reset`` пользуется запасной путь компакции, где
+        # сносить базы отката нельзя. Снимки убирает пользовательский сброс
+        # (``thread_store.purge_thread_snapshots``), а не хранилище.
+        return reset_thread_files(self._dir, system_id, thread_id, launch_root="")
 
     # --- трассы субагентов -------------------------------------------------
 
