@@ -44,16 +44,27 @@ def test_not_loopback(url):
 
 def test_same_service_ignores_the_form_of_a_local_address():
     """Человек пишет `localhost`, батарейка — `127.0.0.1`; сервис за ними один."""
-    assert same_service("http://localhost:8735/v1", "http://127.0.0.1:8735/v1") is True
+    assert (
+        same_service("http://localhost:8735/v1", "http://127.0.0.1:8735/v1")
+        is True
+    )
 
 
 def test_different_port_is_a_different_service():
-    assert same_service("http://localhost:8735/v1", "http://localhost:9999/v1") is False
+    assert (
+        same_service("http://localhost:8735/v1", "http://localhost:9999/v1")
+        is False
+    )
 
 
 def test_remote_address_is_never_the_same_service():
     """Даже при совпадении порта: облачный STT — не локальная батарейка."""
-    assert same_service("https://api.groq.com:8735/v1", "http://127.0.0.1:8735/v1") is False
+    assert (
+        same_service(
+            "https://api.groq.com:8735/v1", "http://127.0.0.1:8735/v1"
+        )
+        is False
+    )
 
 
 def test_missing_port_is_not_a_match():
@@ -67,5 +78,11 @@ def test_broken_port_does_not_raise():
     `urlsplit(...).port` на «:87x5» бросает ValueError. Без обёртки агент падал сырым
     исключением вместо предупреждения о конфиге (ревью 2026-08-07).
     """
-    assert same_service("http://localhost:87x5/v1", "http://127.0.0.1:8x/v1") is False
-    assert same_service("http://localhost:87x5/v1", "http://127.0.0.1:8735/v1") is False
+    assert (
+        same_service("http://localhost:87x5/v1", "http://127.0.0.1:8x/v1")
+        is False
+    )
+    assert (
+        same_service("http://localhost:87x5/v1", "http://127.0.0.1:8735/v1")
+        is False
+    )

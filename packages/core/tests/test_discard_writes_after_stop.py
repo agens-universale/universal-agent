@@ -50,7 +50,9 @@ async def test_persist_callback_skipped_when_discard_and_stop():
 async def test_persist_callback_called_when_not_discarding():
     """Если discard_writes_after_stop=False (default) — callback вызывается как обычно даже на stop."""
     state = _make_state()
-    state.stop_requested = True  # стоп есть, но discard False (CLI/server поведение)
+    state.stop_requested = (
+        True  # стоп есть, но discard False (CLI/server поведение)
+    )
 
     persisted: list = []
 
@@ -138,5 +140,10 @@ async def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    await ex.arun([{"role": "user", "content": "x"}], thread_id="t", start_new_thread=True, system="cli")
+    await ex.arun(
+        [{"role": "user", "content": "x"}],
+        thread_id="t",
+        start_new_thread=True,
+        system="cli",
+    )
     assert ex._state.discard_writes_after_stop is False

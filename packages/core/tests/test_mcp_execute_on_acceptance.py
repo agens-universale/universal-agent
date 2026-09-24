@@ -13,13 +13,19 @@ def _mcp():
     from a stale module object — `isinstance` and `pytest.raises` would then
     silently miss against the identically-named class the code actually returns.
     """
-    from gc_core.tools.connect_mcp import client_port, execute_on, os_backend_client
+    from gc_core.tools.connect_mcp import (
+        client_port,
+        execute_on,
+        os_backend_client,
+    )
 
     return client_port, execute_on, os_backend_client
 
 
 class _ExecResult:
-    def __init__(self, stdout="", stderr="", return_code=0, stdout_hit_capture_cap=False):
+    def __init__(
+        self, stdout="", stderr="", return_code=0, stdout_hit_capture_cap=False
+    ):
         self.stdout = stdout
         self.stderr = stderr
         self.return_code = return_code
@@ -36,10 +42,21 @@ class _Sandbox:
         self.codes = []
         self.execs = []
 
-    def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    def exec_argv(
+        self,
+        argv,
+        *,
+        stdin=None,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
         _, _, obc = _mcp()
         self.codes.append(stdin)
-        return _ExecResult(stdout=obc.EXEC_RESULT_MARKER + json.dumps(self.answers.pop(0)))
+        return _ExecResult(
+            stdout=obc.EXEC_RESULT_MARKER + json.dumps(self.answers.pop(0))
+        )
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         self.execs.append(command)
@@ -89,7 +106,11 @@ async def test_sidecar_tool_is_listed_and_callable_and_sessions_are_not_reused()
     )
     client = eo.resolve_mcp_client(
         "user_server",
-        {"transport": "stream_http", "url": "http://user-server:8000/mcp", "execute_on": "os_backend"},
+        {
+            "transport": "stream_http",
+            "url": "http://user-server:8000/mcp",
+            "execute_on": "os_backend",
+        },
         os_backend=backend,
     )
     assert await client.alist_tools(timeout=30.0) == [{"name": "ask_user"}]
@@ -105,13 +126,28 @@ async def test_stdio_process_starts_in_the_backend_not_on_the_agent_host():
     class _StdioSandbox:
         is_sandbox = True
 
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        def exec_argv(
+            self,
+            argv,
+            *,
+            stdin=None,
+            cwd=None,
+            timeout=None,
+            env=None,
+            capture_max_chars=None,
+        ):
             calls.append(argv)
             return _ExecResult(
                 stdout="\n".join(
                     [
                         json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
-                        json.dumps({"jsonrpc": "2.0", "id": "gc-tools/list", "result": {"tools": []}}),
+                        json.dumps(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": "gc-tools/list",
+                                "result": {"tools": []},
+                            }
+                        ),
                     ]
                 )
             )
@@ -121,7 +157,11 @@ async def test_stdio_process_starts_in_the_backend_not_on_the_agent_host():
 
     client = eo.resolve_mcp_client(
         "srv",
-        {"transport": "stdio", "command": "srv-bin", "execute_on": "os_backend"},
+        {
+            "transport": "stdio",
+            "command": "srv-bin",
+            "execute_on": "os_backend",
+        },
         os_backend=_StdioSandbox(),
     )
     await client.alist_tools(timeout=20.0)
@@ -134,7 +174,12 @@ def test_session_bound_transports_error_instead_of_falling_back(transport):
     with pytest.raises(eo.McpExecuteOnError):
         eo.resolve_mcp_client(
             "srv",
-            {"transport": transport, "url": "http://x", "command": "c", "execute_on": "os_backend"},
+            {
+                "transport": transport,
+                "url": "http://x",
+                "command": "c",
+                "execute_on": "os_backend",
+            },
             os_backend=_Sandbox([]),
         )
 
@@ -144,7 +189,11 @@ def test_same_config_on_local_backend_uses_the_agent_path_without_exec():
     local = _Local()
     client = eo.resolve_mcp_client(
         "srv",
-        {"transport": "stream_http", "url": "http://x", "execute_on": "os_backend"},
+        {
+            "transport": "stream_http",
+            "url": "http://x",
+            "execute_on": "os_backend",
+        },
         os_backend=local,
     )
     assert isinstance(client, cp.AgentRuntimeClient)
@@ -172,7 +221,11 @@ async def test_agent_locus_server_details_never_enter_exec():
     )
     sidecar = eo.resolve_mcp_client(
         "sidecar",
-        {"transport": "stream_http", "url": "http://user-server:8000/mcp", "execute_on": "os_backend"},
+        {
+            "transport": "stream_http",
+            "url": "http://user-server:8000/mcp",
+            "execute_on": "os_backend",
+        },
         os_backend=backend,
     )
     await sidecar.alist_tools(timeout=10.0)
@@ -194,13 +247,26 @@ async def test_missing_carrier_is_an_error_and_installs_nothing():
             self.execs.append(command)
             return _ExecResult(stdout="", return_code=1)
 
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        def exec_argv(
+            self,
+            argv,
+            *,
+            stdin=None,
+            cwd=None,
+            timeout=None,
+            env=None,
+            capture_max_chars=None,
+        ):
             raise AssertionError("must not run python3 when it is absent")
 
     backend = _BareSandbox()
     client = eo.resolve_mcp_client(
         "srv",
-        {"transport": "http", "url": "http://x/mcp", "execute_on": "os_backend"},
+        {
+            "transport": "http",
+            "url": "http://x/mcp",
+            "execute_on": "os_backend",
+        },
         os_backend=backend,
     )
     with pytest.raises(obc.McpExecCarrierError):
@@ -214,7 +280,16 @@ async def test_truncated_exec_output_is_an_error():
     class _TruncatingSandbox:
         is_sandbox = True
 
-        def exec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        def exec_argv(
+            self,
+            argv,
+            *,
+            stdin=None,
+            cwd=None,
+            timeout=None,
+            env=None,
+            capture_max_chars=None,
+        ):
             _, _, obc = _mcp()
             return _ExecResult(
                 stdout=obc.EXEC_RESULT_MARKER + '{"status": 200, "bo',
@@ -264,9 +339,15 @@ async def test_mixed_config_keeps_both_servers_alive():
     )
     sidecar_client = eo.resolve_mcp_client(
         "sidecar",
-        {"transport": "stream_http", "url": "http://user-server:8000/mcp", "execute_on": "os_backend"},
+        {
+            "transport": "stream_http",
+            "url": "http://user-server:8000/mcp",
+            "execute_on": "os_backend",
+        },
         os_backend=backend,
     )
     assert isinstance(agent_client, cp.AgentRuntimeClient)
     assert isinstance(sidecar_client, obc.OsBackendStatelessClient)
-    assert await sidecar_client.alist_tools(timeout=10.0) == [{"name": "ask_user"}]
+    assert await sidecar_client.alist_tools(timeout=10.0) == [
+        {"name": "ask_user"}
+    ]

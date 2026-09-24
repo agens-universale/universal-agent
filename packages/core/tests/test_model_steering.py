@@ -21,7 +21,12 @@ def test_agent_config_rejects_non_string_steering():
 
 
 def test_resolve_model_steering_text():
-    assert resolve_model_steering_text({"model_steering": "Cap exploratory reads."}) == "Cap exploratory reads."
+    assert (
+        resolve_model_steering_text(
+            {"model_steering": "Cap exploratory reads."}
+        )
+        == "Cap exploratory reads."
+    )
 
 
 def test_resolve_model_steering_empty_is_none():
@@ -48,8 +53,14 @@ def test_merge_steering_only():
 
 
 def test_merge_none_when_empty():
-    assert merge_special_instructions_with_model_steering(None, config_dict={}) is None
-    assert merge_special_instructions_with_model_steering("  ", config_dict={}) is None
+    assert (
+        merge_special_instructions_with_model_steering(None, config_dict={})
+        is None
+    )
+    assert (
+        merge_special_instructions_with_model_steering("  ", config_dict={})
+        is None
+    )
 
 
 def test_render_injects_merged_steering_into_slot():
@@ -65,4 +76,7 @@ def test_render_injects_merged_steering_into_slot():
         specific_role=None,
         special_instructions=merged,
     )
-    assert "<special_instructions>BASE\n\n### Model steering\nPrefer act.</special_instructions>" in out
+    assert (
+        "<special_instructions>BASE\n\n### Model steering\nPrefer act.</special_instructions>"
+        in out
+    )

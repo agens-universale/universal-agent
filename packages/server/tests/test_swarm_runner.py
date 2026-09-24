@@ -114,11 +114,15 @@ def test_start_swarm_creates_sandbox_dir(base_swarm_cfg, mock_popen):
         task_id="t1",
         payload={},
     )
-    sandbox_path = os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_ci_t1")
+    sandbox_path = os.path.join(
+        base_swarm_cfg["sandbox_root_dir"], "swarm_ci_t1"
+    )
     assert os.path.isdir(sandbox_path)
 
 
-def test_start_swarm_writes_meta_with_running_status(base_swarm_cfg, mock_popen):
+def test_start_swarm_writes_meta_with_running_status(
+    base_swarm_cfg, mock_popen
+):
     runner.start_swarm_process(
         base_swarm_cfg,
         system="g",
@@ -154,7 +158,9 @@ def test_start_swarm_deadline_at_matches_timeout(base_swarm_cfg, mock_popen):
     assert 595 < delta < 605
 
 
-def test_start_swarm_popen_called_with_start_new_session(base_swarm_cfg, mock_popen):
+def test_start_swarm_popen_called_with_start_new_session(
+    base_swarm_cfg, mock_popen
+):
     """Критично для AR-6 / шага 2.1: PID == PGID для os.killpg позже."""
     runner.start_swarm_process(
         base_swarm_cfg,
@@ -166,7 +172,9 @@ def test_start_swarm_popen_called_with_start_new_session(base_swarm_cfg, mock_po
     assert kwargs.get("start_new_session") is True
 
 
-def test_start_swarm_popen_called_with_wrapper_path(base_swarm_cfg, mock_popen):
+def test_start_swarm_popen_called_with_wrapper_path(
+    base_swarm_cfg, mock_popen
+):
     runner.start_swarm_process(
         base_swarm_cfg,
         system="g",
@@ -178,7 +186,9 @@ def test_start_swarm_popen_called_with_wrapper_path(base_swarm_cfg, mock_popen):
     assert args[0] == [base_swarm_cfg["wrapper_path"]]
 
 
-def test_start_swarm_env_contains_required_swarm_vars(base_swarm_cfg, mock_popen):
+def test_start_swarm_env_contains_required_swarm_vars(
+    base_swarm_cfg, mock_popen
+):
     runner.start_swarm_process(
         base_swarm_cfg,
         system="ci",
@@ -206,7 +216,9 @@ def test_start_swarm_env_contains_required_swarm_vars(base_swarm_cfg, mock_popen
     assert json.loads(env["SWARM_PAYLOAD_JSON"]) == {"q": "go"}
 
 
-def test_start_swarm_env_inherits_host_environ(base_swarm_cfg, mock_popen, monkeypatch):
+def test_start_swarm_env_inherits_host_environ(
+    base_swarm_cfg, mock_popen, monkeypatch
+):
     """env Popen должен наследовать host environ, а не быть пустым."""
     monkeypatch.setenv("MY_HOST_VAR", "host_value")
     runner.start_swarm_process(
@@ -220,7 +232,9 @@ def test_start_swarm_env_inherits_host_environ(base_swarm_cfg, mock_popen, monke
     assert env["MY_HOST_VAR"] == "host_value"
 
 
-def test_start_swarm_writes_queued_meta_before_popen(base_swarm_cfg, mock_popen):
+def test_start_swarm_writes_queued_meta_before_popen(
+    base_swarm_cfg, mock_popen
+):
     """До Popen meta уже есть, в статусе queued. После — running с PID.
 
     Порядок «сначала след, потом процесс» закрывает окно, в котором живой
@@ -255,7 +269,9 @@ def test_start_swarm_writes_queued_meta_before_popen(base_swarm_cfg, mock_popen)
     )
 
     before = state["meta_before_popen"]
-    assert before, "meta обязана существовать ДО Popen — иначе процесс может остаться без учёта"
+    assert before, (
+        "meta обязана существовать ДО Popen — иначе процесс может остаться без учёта"
+    )
     assert before["swarm_meta"]["status"] == "queued"
 
     meta = storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
@@ -263,7 +279,9 @@ def test_start_swarm_writes_queued_meta_before_popen(base_swarm_cfg, mock_popen)
     assert meta["swarm_meta"]["pid"] == 999
 
 
-def test_start_swarm_live_process_is_never_unaccounted(base_swarm_cfg, mock_popen):
+def test_start_swarm_live_process_is_never_unaccounted(
+    base_swarm_cfg, mock_popen
+):
     """Popen удался, запись running упала — meta всё равно на диске.
 
     Ровно тот случай, ради которого meta пишется заранее: процесс уже живёт, и
@@ -299,7 +317,9 @@ def test_start_swarm_live_process_is_never_unaccounted(base_swarm_cfg, mock_pope
     assert meta["swarm_meta"]["status"] == "queued"
 
 
-def test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox(base_swarm_cfg, mock_popen):
+def test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox(
+    base_swarm_cfg, mock_popen
+):
     """Провал Popen не должен оставлять ни meta, ни песочницы."""
     mock_popen.side_effect = OSError("boom")
 
@@ -311,8 +331,13 @@ def test_start_swarm_popen_failure_leaves_no_meta_and_no_sandbox(base_swarm_cfg,
             payload={},
         )
 
-    assert storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t") == {}
-    assert not os.path.isdir(os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t"))
+    assert (
+        storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
+        == {}
+    )
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
 
 
 def test_start_swarm_failure_before_popen_also_removes_sandbox(
@@ -341,17 +366,23 @@ def test_start_swarm_failure_before_popen_also_removes_sandbox(
         )
 
     mock_popen.assert_not_called()
-    assert not os.path.isdir(os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t"))
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
 
 
-def test_start_swarm_missing_wrapper_rejected_before_popen(base_swarm_cfg, mock_popen, tmp_path):
+def test_start_swarm_missing_wrapper_rejected_before_popen(
+    base_swarm_cfg, mock_popen, tmp_path
+):
     """Несуществующий wrapper_path — отказ ДО Popen и без следов на диске.
 
     Ровно этот случай давал HTTP 500 на первом POST /swarm/run: шаблон
     config_server.yml остался с "scripts/run-cli-in-sandbox.sh", который после
     переезда обёртки внутрь пакета резолвился в gc_server/swarm/scripts/.
     """
-    base_swarm_cfg["wrapper_path"] = str(tmp_path / "nope" / "run-cli-in-sandbox.sh")
+    base_swarm_cfg["wrapper_path"] = str(
+        tmp_path / "nope" / "run-cli-in-sandbox.sh"
+    )
 
     with pytest.raises(FileNotFoundError):
         runner.start_swarm_process(
@@ -362,8 +393,13 @@ def test_start_swarm_missing_wrapper_rejected_before_popen(base_swarm_cfg, mock_
         )
 
     mock_popen.assert_not_called()
-    assert storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t") == {}
-    assert not os.path.isdir(os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t"))
+    assert (
+        storage.load_swarm_meta(base_swarm_cfg["threads_dir"], "swarm_g_t")
+        == {}
+    )
+    assert not os.path.isdir(
+        os.path.join(base_swarm_cfg["sandbox_root_dir"], "swarm_g_t")
+    )
 
 
 def test_start_swarm_non_executable_wrapper_rejected_before_popen(
@@ -388,7 +424,9 @@ def test_start_swarm_non_executable_wrapper_rejected_before_popen(
     mock_popen.assert_not_called()
 
 
-def test_start_swarm_optional_agentmd_skills_in_env(base_swarm_cfg, mock_popen):
+def test_start_swarm_optional_agentmd_skills_in_env(
+    base_swarm_cfg, mock_popen
+):
     base_swarm_cfg["agentmd_path"] = "/host/agent.md"
     base_swarm_cfg["skills_dir"] = "/host/skills"
     runner.start_swarm_process(
@@ -585,7 +623,10 @@ def test_materialize_silent_when_skills_dir_not_configured(tmp_path, caplog):
         runner._materialize_runtime_config(
             str(host_cfg),
             str(sandbox),
-            {"skills_dir": str(default_missing), "skills_dir_configured": False},
+            {
+                "skills_dir": str(default_missing),
+                "skills_dir_configured": False,
+            },
         )
 
     assert "скилл" not in caplog.text.lower()
@@ -604,7 +645,9 @@ def test_materialize_missing_host_config_uses_empty_base(tmp_path):
     assert written["paths"]["threads_data_path"] == "/work/.gc/threads"
 
 
-def test_start_swarm_creates_runtime_config_in_sandbox(base_swarm_cfg, mock_popen, tmp_path):
+def test_start_swarm_creates_runtime_config_in_sandbox(
+    base_swarm_cfg, mock_popen, tmp_path
+):
     """start_swarm_process должен вызвать materialize → файл существует."""
     host_cfg = tmp_path / "host.yml"
     host_cfg.write_text("backend: {api_mode: chat_completions}\n")
@@ -621,7 +664,9 @@ def test_start_swarm_creates_runtime_config_in_sandbox(base_swarm_cfg, mock_pope
     assert os.path.exists(runtime_cfg)
 
 
-def test_start_swarm_materialize_failure_does_not_block(base_swarm_cfg, mock_popen, monkeypatch):
+def test_start_swarm_materialize_failure_does_not_block(
+    base_swarm_cfg, mock_popen, monkeypatch
+):
     """Если материализация падает — sworm всё равно стартует (graceful)."""
     monkeypatch.setattr(
         runner,
@@ -672,7 +717,9 @@ def test_start_swarm_passes_agent_dep_dir_env(base_swarm_cfg, mock_popen):
     assert env["SWARM_AGENT_DEP_DIR"] == "/opt/gc-cli/mcp-deps"
 
 
-def test_start_swarm_passes_extra_mounts_newline_joined(base_swarm_cfg, mock_popen):
+def test_start_swarm_passes_extra_mounts_newline_joined(
+    base_swarm_cfg, mock_popen
+):
     base_swarm_cfg["extra_mounts"] = [
         "/root/.cache/ms-playwright",
         "/root/.npm",
@@ -690,7 +737,9 @@ def test_start_swarm_passes_extra_mounts_newline_joined(base_swarm_cfg, mock_pop
     assert lines == ["/root/.cache/ms-playwright", "/root/.npm"]
 
 
-def test_start_swarm_extended_mount_envs_empty_when_missing(base_swarm_cfg, mock_popen):
+def test_start_swarm_extended_mount_envs_empty_when_missing(
+    base_swarm_cfg, mock_popen
+):
     runner.start_swarm_process(
         base_swarm_cfg,
         system="g",
@@ -742,7 +791,9 @@ def test_materialize_applies_project_local_overlay(tmp_path, monkeypatch):
     assert written["agent"]["use_server_subagents"] is False
 
 
-def test_materialize_project_overlay_skipped_when_same_file(tmp_path, monkeypatch):
+def test_materialize_project_overlay_skipped_when_same_file(
+    tmp_path, monkeypatch
+):
     """Если host_config_path == <cwd>/.gc/config.yml — самомержа не должно быть."""
     import yaml as _yaml
 
@@ -767,7 +818,9 @@ def test_materialize_applies_swarm_env_paths(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars as _ev
 
     host_cfg = tmp_path / "host.yml"
-    host_cfg.write_text("paths:\n  agent_md_path: /base/agent.md\n  skills_data_path: /base/skills\n")
+    host_cfg.write_text(
+        "paths:\n  agent_md_path: /base/agent.md\n  skills_data_path: /base/skills\n"
+    )
 
     # Перевзять env_vars singleton с новыми значениями.
     monkeypatch.setenv("SWARM_AGENTMD_PATH", "/swarm/agent.md")
@@ -834,7 +887,9 @@ def test_materialize_applies_agent_overrides_raw(tmp_path):
     assert written["backend"]["api_mode"] == "responses"
 
 
-def test_materialize_swarm_specific_overrides_win_over_agent_overrides(tmp_path):
+def test_materialize_swarm_specific_overrides_win_over_agent_overrides(
+    tmp_path,
+):
     """Swarm-specific override (paths.threads_data_path=/work/...) должен побеждать
     даже если пользователь пытается переопределить его в agent_overrides."""
     import yaml as _yaml
@@ -878,7 +933,9 @@ def test_materialize_agent_overrides_empty_noop(tmp_path):
 # --- Внешний trace_id в песочнице ---------------------------------------------
 
 
-def test_start_swarm_env_trace_id_empty_when_absent(base_swarm_cfg, mock_popen):
+def test_start_swarm_env_trace_id_empty_when_absent(
+    base_swarm_cfg, mock_popen
+):
     """Трейс не задан → переменная пустая, обёртка не добавит --trace-id."""
     runner.start_swarm_process(
         base_swarm_cfg,

@@ -34,20 +34,31 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
 def validate_model_alias(alias: str) -> None:
     """Алиас models.<alias> не может совпадать с зарезервированным словом уровня."""
     if alias in RESERVED_WORDS:
-        raise ValueError(f"models: имя '{alias}' зарезервировано ({', '.join(RESERVED_WORDS)})")
+        raise ValueError(
+            f"models: имя '{alias}' зарезервировано ({', '.join(RESERVED_WORDS)})"
+        )
 
 
 def validate_level_value(value: str) -> str:
     """level ∉ LEVELS — ошибка; auto получает отдельную подсказку (появится в волне C)."""
     if value == "auto":
-        raise ValueError("level: значение 'auto' появится с функцией авто-выбора — пока недоступно")
+        raise ValueError(
+            "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
+        )
     if value not in LEVELS:
-        raise ValueError(f"level должен быть одним из {LEVELS}, получено '{value}'")
+        raise ValueError(
+            f"level должен быть одним из {LEVELS}, получено '{value}'"
+        )
     return value
 
 
 def connection_parts(
-    *, url: Any, token: Any, completions_url: Any, proxy: Any, authorization: Any
+    *,
+    url: Any,
+    token: Any,
+    completions_url: Any,
+    proxy: Any,
+    authorization: Any,
 ) -> tuple[bool, bool]:
     """§2, ЕДИНОЕ определение «адрес задан» / «токен задан» для всех точек проверки.
 
@@ -70,7 +81,9 @@ def connection_parts(
     )
 
 
-def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = "") -> str:
+def resolve_entry_address(
+    *, url: Any, completions_url: Any, inherited: Any = ""
+) -> str:
     """ДЕЙСТВУЮЩИЙ адрес записи реестра — одна or-цепочка на всех, кто её произносит:
     свой `url` → своё второе написание `backend.completions_url` → унаследованный из
     эффективной секции `backend`. Тем же порядком резолвит рантайм
@@ -87,7 +100,9 @@ def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = ""
     return url or completions_url or inherited or ""
 
 
-def _pair_violation(label: str, has_address: bool, has_token: bool) -> str | None:
+def _pair_violation(
+    label: str, has_address: bool, has_token: bool
+) -> str | None:
     """Текст отказа правила пары (§3) или None, если пара целая. Один на обе точки —
     иначе формулировки разъезжаются так же, как разъехались бы определения."""
     if has_address and not has_token:
@@ -113,8 +128,14 @@ def _unresolved_pair_refs(entry) -> list[str]:
 
     if not isinstance(entry, dict):
         return []
-    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-    headers = backend.get("chat_completion_headers") if isinstance(backend.get("chat_completion_headers"), dict) else {}
+    backend = (
+        entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    )
+    headers = (
+        backend.get("chat_completion_headers")
+        if isinstance(backend.get("chat_completion_headers"), dict)
+        else {}
+    )
     names: list[str] = []
     for value in (
         entry.get("url"),
@@ -129,7 +150,9 @@ def _unresolved_pair_refs(entry) -> list[str]:
     return names
 
 
-def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> None:
+def validate_registry_pairs(
+    raw: dict, source: str = "", *, raw_source=None
+) -> None:
     """§3, точка B: проверка правила пары на СЫРОМ документе одного слоя, до слияния.
 
     Нужна отдельно от валидатора `ModelEntry`: слои сливаются `deep_merge` рекурсивно по
@@ -156,9 +179,15 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
     for alias, entry in models.items():
         if not isinstance(entry, dict):
             continue
-        backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+        backend = (
+            entry.get("backend")
+            if isinstance(entry.get("backend"), dict)
+            else {}
+        )
         headers = (
-            backend.get("chat_completion_headers") if isinstance(backend.get("chat_completion_headers"), dict) else {}
+            backend.get("chat_completion_headers")
+            if isinstance(backend.get("chat_completion_headers"), dict)
+            else {}
         )
         problem = _pair_violation(
             f"{prefix}models.{alias}",
@@ -171,7 +200,9 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
             ),
         )
         if problem:
-            names = _unresolved_pair_refs(((raw_source or {}).get("models") or {}).get(alias))
+            names = _unresolved_pair_refs(
+                ((raw_source or {}).get("models") or {}).get(alias)
+            )
             if names:
                 raise ValueError(
                     f"{prefix}models.{alias}: не задана переменная окружения "
@@ -199,13 +230,18 @@ class ModelEntry(BaseModel):
         if (
             self.token is not None
             and self.backend is not None
-            and self.backend.chat_completion_headers.get("Authorization") is not None
+            and self.backend.chat_completion_headers.get("Authorization")
+            is not None
         ):
             raise ValueError(
                 "models.<alias>: token и backend.chat_completion_headers.Authorization "
                 "заданы одновременно — оставьте что-то одно"
             )
-        if self.url is not None and self.backend is not None and self.backend.completions_url:
+        if (
+            self.url is not None
+            and self.backend is not None
+            and self.backend.completions_url
+        ):
             raise ValueError(
                 "models.<alias>: url и backend.completions_url — два написания одного и того же — оставьте что-то одно"
             )
@@ -221,9 +257,15 @@ class ModelEntry(BaseModel):
         return connection_parts(
             url=self.url,
             token=self.token,
-            completions_url=backend.completions_url if backend is not None else None,
+            completions_url=backend.completions_url
+            if backend is not None
+            else None,
             proxy=backend.proxy if backend is not None else None,
-            authorization=(backend.chat_completion_headers.get("Authorization") if backend is not None else None),
+            authorization=(
+                backend.chat_completion_headers.get("Authorization")
+                if backend is not None
+                else None
+            ),
         )
 
     @model_validator(mode="after")
@@ -255,13 +297,21 @@ class ModelEntry(BaseModel):
         backend = self.backend
         if backend is None or any(self._connection_parts()):
             return False
-        return not backend.use_ssl or bool(backend.cert_path) or bool(backend.key_path)
+        return (
+            not backend.use_ssl
+            or bool(backend.cert_path)
+            or bool(backend.key_path)
+        )
 
     @property
     def authorization_header(self) -> str | None:
         """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
         иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        if self.token is None or not self.token or self.token.startswith("Bearer "):
+        if (
+            self.token is None
+            or not self.token
+            or self.token.startswith("Bearer ")
+        ):
             return self.token
         return f"Bearer {self.token}"
 
@@ -295,5 +345,7 @@ class AssignConfig(BaseModel):
     @classmethod
     def _forbid_main(cls, data: Any) -> Any:
         if isinstance(data, dict) and "main" in data:
-            raise ValueError("assign.main запрещён — основной трейс управляется уровнем, не привязкой")
+            raise ValueError(
+                "assign.main запрещён — основной трейс управляется уровнем, не привязкой"
+            )
         return data

@@ -29,7 +29,11 @@ import httpx
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _INVALID_ARGUMENT = "invalid_argument"
-_EMPTY_META: Dict[str, Optional[str]] = {"title": None, "description": None, "lang": None}
+_EMPTY_META: Dict[str, Optional[str]] = {
+    "title": None,
+    "description": None,
+    "lang": None,
+}
 
 
 def _response_url(exc: Exception) -> "str | None":
@@ -39,7 +43,9 @@ def _response_url(exc: Exception) -> "str | None":
     return str(url) if url is not None else None
 
 
-def http_error_failure(exc: httpx.HTTPError, attempt: int, attempts: int) -> Optional[Dict[str, Any]]:
+def http_error_failure(
+    exc: httpx.HTTPError, attempt: int, attempts: int
+) -> Optional[Dict[str, Any]]:
     """kwargs ошибки для ``_result`` — либо None, если попытку стоит повторить.
 
     Повторяем только то, что лечится повтором: сеть (статуса нет), 429 и 5xx,
@@ -53,7 +59,9 @@ def http_error_failure(exc: httpx.HTTPError, attempt: int, attempts: int) -> Opt
         ok=False,
         final_url=_response_url(exc),
         status_code=status,
-        content_type=getattr(getattr(exc, "response", None), "headers", {}).get("Content-Type")
+        content_type=getattr(
+            getattr(exc, "response", None), "headers", {}
+        ).get("Content-Type")
         if getattr(exc, "response", None) is not None
         else None,
         result_type="error",
@@ -67,7 +75,9 @@ def http_error_failure(exc: httpx.HTTPError, attempt: int, attempts: int) -> Opt
     )
 
 
-def preview_from_stripped(stripped: str, max_preview_chars: int) -> "tuple[str, bool]":
+def preview_from_stripped(
+    stripped: str, max_preview_chars: int
+) -> "tuple[str, bool]":
     """Превью из текста без тегов: обрезка до ``max_preview_chars`` и заголовок."""
     truncated = len(stripped) > max_preview_chars
     if truncated:
@@ -103,23 +113,36 @@ class FetchUrlBase(AbstractSimpleTool):
     fetch_url_cache_max_size = 10
     max_retries = 2
     retry_backoff_seconds = 1.0
-    default_user_agent = (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
+    default_user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     #: ``application/*``, которые НЕ считаются бинарными. У каждого тула свой
     #: набор (``fetch_url`` включает ``x-www-form-urlencoded``, ``simple`` — нет).
     _NON_BINARY_APPLICATION_TYPES: Tuple[str, ...]
 
-    _PROXY_SCHEMES = ("http://", "https://", "socks5://", "socks5h://", "socks4://", "socks4a://")
+    _PROXY_SCHEMES = (
+        "http://",
+        "https://",
+        "socks5://",
+        "socks5h://",
+        "socks4://",
+        "socks4a://",
+    )
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
 
     @classmethod
-    def _tool_spec(cls, *, description: str, timeout_description: str, preview_description: str) -> Dict[str, Any]:
+    def _tool_spec(
+        cls,
+        *,
+        description: str,
+        timeout_description: str,
+        preview_description: str,
+    ) -> Dict[str, Any]:
         """Схема ``exec_fetch_url``: у тулов свои описание и тексты двух полей, остальное общее."""
         return {
             "type": "function",
@@ -164,7 +187,7 @@ class FetchUrlBase(AbstractSimpleTool):
         }
 
     @classmethod
-    def _result(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+    def _result(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         cls,
         *,
         url: str,
@@ -212,7 +235,13 @@ class FetchUrlBase(AbstractSimpleTool):
             "total_chars": total_chars,
             "has_more": has_more,
         }
-        payload.update({key: value for key, value in optional.items() if value is not None})
+        payload.update(
+            {
+                key: value
+                for key, value in optional.items()
+                if value is not None
+            }
+        )
         if has_more is not None and offset is not None and limit is not None:
             payload["next_offset"] = offset + limit if has_more else None
         if cache_hit is not None:
@@ -242,7 +271,9 @@ class FetchUrlBase(AbstractSimpleTool):
             return f"{url}||proxy={proxy}"
         return url
 
-    def _get_from_cache(self, cache_key: str) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
+    def _get_from_cache(
+        self, cache_key: str
+    ) -> Optional[Tuple[str, Dict[str, Optional[str]]]]:
         """Возвращает (content, meta) для закэшированного ключа или None.
 
         При cache-hit обновляет LRU-порядок: только что читанный ключ становится
@@ -261,7 +292,9 @@ class FetchUrlBase(AbstractSimpleTool):
         cache.move_to_end(cache_key)
         return content, meta
 
-    def _put_to_cache(self, cache_key: str, content: str, meta: Dict[str, Optional[str]]) -> None:
+    def _put_to_cache(
+        self, cache_key: str, content: str, meta: Dict[str, Optional[str]]
+    ) -> None:
         """Записывает страницу в кэш и эвиктирует самые старые при превышении лимита."""
         cache = self._get_cache()
         if cache is None:
@@ -274,7 +307,9 @@ class FetchUrlBase(AbstractSimpleTool):
     # --- прокси --------------------------------------------------------------
 
     @classmethod
-    def _normalize_proxy(cls, proxy: Optional[str]) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    def _normalize_proxy(
+        cls, proxy: Optional[str]
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
         """Возвращает (normalized_proxy | None, error | None)."""
         if proxy is None:
             return None, None
@@ -298,7 +333,9 @@ class FetchUrlBase(AbstractSimpleTool):
     # --- метаданные страницы -------------------------------------------------
 
     @staticmethod
-    def _normalize_meta(meta: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
+    def _normalize_meta(
+        meta: Optional[Dict[str, Any]],
+    ) -> Dict[str, Optional[str]]:
         normalized: Dict[str, Optional[str]] = dict(_EMPTY_META)
         if not isinstance(meta, dict):
             return normalized
@@ -325,7 +362,11 @@ class FetchUrlBase(AbstractSimpleTool):
         if not html:
             return meta
 
-        title_match = re.search(r"<title\b[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+        title_match = re.search(
+            r"<title\b[^>]*>(.*?)</title>",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
         if title_match:
             title = cls._meta_title_text(title_match.group(1)).strip()
             meta["title"] = title or None
@@ -333,14 +374,22 @@ class FetchUrlBase(AbstractSimpleTool):
         html_match = re.search(r"<html\b([^>]*)>", html, flags=re.IGNORECASE)
         if html_match:
             attrs = html_match.group(1)
-            lang_match = re.search(r"""\blang\s*=\s*(['"])(.*?)\1""", attrs, flags=re.IGNORECASE | re.DOTALL)
+            lang_match = re.search(
+                r"""\blang\s*=\s*(['"])(.*?)\1""",
+                attrs,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
             if lang_match:
-                lang = html_lib.unescape(re.sub(r"\s+", " ", lang_match.group(2))).strip()
+                lang = html_lib.unescape(
+                    re.sub(r"\s+", " ", lang_match.group(2))
+                ).strip()
                 meta["lang"] = lang or None
 
         description_raw = cls._find_meta_description(html)
         if description_raw is not None:
-            description = html_lib.unescape(re.sub(r"\s+", " ", description_raw)).strip()
+            description = html_lib.unescape(
+                re.sub(r"\s+", " ", description_raw)
+            ).strip()
             meta["description"] = description or None
 
         return cls._normalize_meta(meta)
@@ -405,10 +454,14 @@ class FetchUrlBase(AbstractSimpleTool):
                 printable += 1
         return (printable / max(len(sample), 1)) < 0.75
 
-    def _is_binary_response(self, content_type: str, raw_content: bytes) -> bool:
+    def _is_binary_response(
+        self, content_type: str, raw_content: bytes
+    ) -> bool:
         content_type_binary = self._is_binary_content_type(content_type)
         content_type_text = self._is_text_like_content_type(content_type)
-        return content_type_binary or (not content_type_text and self._looks_binary_bytes(raw_content))
+        return content_type_binary or (
+            not content_type_text and self._looks_binary_bytes(raw_content)
+        )
 
     # --- проверка аргументов -------------------------------------------------
 
@@ -425,7 +478,9 @@ class FetchUrlBase(AbstractSimpleTool):
             error=error,
         )
 
-    def _fetch_arg_error(self, timeout, max_preview_chars, offset, limit) -> "Optional[Dict[str, Any]]":
+    def _fetch_arg_error(
+        self, timeout, max_preview_chars, offset, limit
+    ) -> "Optional[Dict[str, Any]]":
         if timeout is not None and not isinstance(timeout, int):
             return {"type": _INVALID_ARGUMENT, "field": "timeout"}
         if not isinstance(max_preview_chars, int) or max_preview_chars <= 0:
@@ -436,13 +491,27 @@ class FetchUrlBase(AbstractSimpleTool):
             return {"type": _INVALID_ARGUMENT, "field": "limit"}
         return None
 
-    def _url_or_timeout_error(self, normalized_url: str, timeout) -> "Optional[Dict[str, Any]]":
+    def _url_or_timeout_error(
+        self, normalized_url: str, timeout
+    ) -> "Optional[Dict[str, Any]]":
         if not normalized_url:
-            return {"type": _INVALID_ARGUMENT, "field": "url", "message": "URL cannot be empty."}
+            return {
+                "type": _INVALID_ARGUMENT,
+                "field": "url",
+                "message": "URL cannot be empty.",
+            }
         if not normalized_url.startswith(("http://", "https://")):
-            return {"type": _INVALID_ARGUMENT, "field": "url", "message": "URL must start with http:// or https://."}
+            return {
+                "type": _INVALID_ARGUMENT,
+                "field": "url",
+                "message": "URL must start with http:// or https://.",
+            }
         if (timeout or self.timeout_seconds) <= 0:
-            return {"type": _INVALID_ARGUMENT, "field": "timeout", "message": "timeout must be greater than 0."}
+            return {
+                "type": _INVALID_ARGUMENT,
+                "field": "timeout",
+                "message": "timeout must be greater than 0.",
+            }
         return None
 
     def _begin_fetch(
@@ -460,13 +529,19 @@ class FetchUrlBase(AbstractSimpleTool):
         ``(None, запрос)`` — пора идти в сеть.
         """
         if not isinstance(url, str):
-            return self._result(ok=False, url=str(url), error={"type": _INVALID_ARGUMENT, "field": "url"}), None
+            return self._result(
+                ok=False,
+                url=str(url),
+                error={"type": _INVALID_ARGUMENT, "field": "url"},
+            ), None
 
         _result = functools.partial(self._result, url=url)
 
         if limit is None:
             limit = self.max_content_chars
-        arg_error = self._fetch_arg_error(timeout, max_preview_chars, offset, limit)
+        arg_error = self._fetch_arg_error(
+            timeout, max_preview_chars, offset, limit
+        )
         if arg_error is not None:
             return _result(ok=False, error=arg_error), None
         normalized_proxy, proxy_error = self._normalize_proxy(proxy)
@@ -494,13 +569,22 @@ class FetchUrlBase(AbstractSimpleTool):
                 meta=cached_meta,
             )
             return _result(**payload), None
-        return None, FetchRequest(normalized_url, normalized_proxy, effective_timeout, offset, limit, cache_key)
+        return None, FetchRequest(
+            normalized_url,
+            normalized_proxy,
+            effective_timeout,
+            offset,
+            limit,
+            cache_key,
+        )
 
     def _browser_headers(self) -> Dict[str, str]:
         """Заголовки «как у браузера»: без них часть сайтов отдаёт заглушку."""
         return {
             "User-Agent": self.default_user_agent,
-            "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            ),
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate",
             "Cache-Control": "no-cache",
@@ -518,14 +602,26 @@ class FetchUrlBase(AbstractSimpleTool):
 
     # --- конверты ответа -----------------------------------------------------
 
-    def _slice_content(self, content: str, offset: int, limit: int) -> Dict[str, Any]:
+    def _slice_content(
+        self, content: str, offset: int, limit: int
+    ) -> Dict[str, Any]:
         total_chars = len(content)
         if offset >= total_chars:
-            return {"content": "", "returned_chars": 0, "total_chars": total_chars, "has_more": False}
+            return {
+                "content": "",
+                "returned_chars": 0,
+                "total_chars": total_chars,
+                "has_more": False,
+            }
         chunk = content[offset : offset + limit]
         returned_chars = len(chunk)
         has_more = offset + returned_chars < total_chars
-        return {"content": chunk, "returned_chars": returned_chars, "total_chars": total_chars, "has_more": has_more}
+        return {
+            "content": chunk,
+            "returned_chars": returned_chars,
+            "total_chars": total_chars,
+            "has_more": has_more,
+        }
 
     def _content_payload(
         self,
@@ -562,7 +658,9 @@ class FetchUrlBase(AbstractSimpleTool):
             error=None,
         )
 
-    def _binary_payload(self, final_url, status_code, content_type, offset: int, limit: int) -> Dict[str, Any]:
+    def _binary_payload(
+        self, final_url, status_code, content_type, offset: int, limit: int
+    ) -> Dict[str, Any]:
         """Бинарный ответ: байты в чат не отдаём, только пометку."""
         return dict(
             ok=True,
@@ -608,5 +706,8 @@ class FetchUrlBase(AbstractSimpleTool):
             truncated=truncated,
             max_preview_chars=max_preview_chars if truncated else None,
             meta=meta,
-            error={"type": "extraction_failed", "message": "Could not extract readable text. Returned preview."},
+            error={
+                "type": "extraction_failed",
+                "message": "Could not extract readable text. Returned preview.",
+            },
         )

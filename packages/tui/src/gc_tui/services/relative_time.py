@@ -32,7 +32,9 @@ def parse_iso_utc(value) -> Optional[datetime]:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
-def format_relative_local(iso_utc: str, *, now: Optional[datetime] = None) -> str:
+def format_relative_local(
+    iso_utc: str, *, now: Optional[datetime] = None
+) -> str:
     """ISO-время (UTC) → русская относительная локальная строка.
 
     <1м «только что»; <60м «N мин назад»; <24ч «N ч назад»; далее по

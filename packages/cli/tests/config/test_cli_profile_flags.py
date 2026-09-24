@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-from gc_core.config import apply_cli_overrides, cli_forces_legacy_model, load_config_ex
+from gc_core.config import (
+    apply_cli_overrides,
+    cli_forces_legacy_model,
+    load_config_ex,
+)
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.model_router import ModelRouter
@@ -108,7 +112,9 @@ def test_force_legacy_true_when_model_override_and_registry_nonempty():
 
 def test_force_legacy_true_when_completions_url_override_and_registry_nonempty():
     cfg = {"models": {"flash": {}}}
-    apply_cli_overrides(cfg, extra_overrides={"completions_url": "http://x/v1"})
+    apply_cli_overrides(
+        cfg, extra_overrides={"completions_url": "http://x/v1"}
+    )
     assert cli_forces_legacy_model(cfg) is True
 
 
@@ -136,8 +142,14 @@ def test_profile_override_wins_over_config_pointer(isolated_cwd, tmp_path):
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "other"})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "other.yml", {"agent": {"model": "other-model"}})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {"agent": {"model": "work-model"}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "other.yml",
+        {"agent": {"model": "other-model"}},
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {"agent": {"model": "work-model"}},
+    )
 
     cfg, meta = load_config_ex(str(base_config), profile_override="work")
 
@@ -145,7 +157,9 @@ def test_profile_override_wins_over_config_pointer(isolated_cwd, tmp_path):
     assert cfg["model"] == "work-model"
 
 
-def test_flat_profile_key_names_active_profile_not_config_pointer(isolated_cwd, tmp_path):
+def test_flat_profile_key_names_active_profile_not_config_pointer(
+    isolated_cwd, tmp_path
+):
     """Плоский `profile` — ДЕЙСТВУЮЩИЙ профиль, а не указатель из файлов.
 
     Документу профиля запрещено нести ключ `profile:`, поэтому после мержа он
@@ -154,14 +168,22 @@ def test_flat_profile_key_names_active_profile_not_config_pointer(isolated_cwd, 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "home"})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "home.yml", {"agent": {"model": "home-model"}})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {"agent": {"model": "work-model"}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "home.yml",
+        {"agent": {"model": "home-model"}},
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {"agent": {"model": "work-model"}},
+    )
 
     cfg, meta = load_config_ex(str(base_config), profile_override="work")
     assert cfg["profile"] == meta.active_name == "work"
 
     # Сессионное снятие профиля (§9.1) — тоже действующее состояние, не пойнтер.
-    cleared, cleared_meta = load_config_ex(str(base_config), profile_override="")
+    cleared, cleared_meta = load_config_ex(
+        str(base_config), profile_override=""
+    )
     assert cleared["profile"] == "" and cleared_meta.active_name is None
 
     # Без override плоский ключ по-прежнему равен указателю конфига.
@@ -175,11 +197,18 @@ def test_flat_profile_key_names_active_profile_not_config_pointer(isolated_cwd, 
 def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "work", "level": "max"})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"})
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {"profile": "work", "level": "max"},
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
+    )
 
     cfg, meta = load_config_ex(str(base_config))
-    assert cfg["level"] == "light"  # профиль побеждает конфиг-указатель (ось 1)
+    assert (
+        cfg["level"] == "light"
+    )  # профиль побеждает конфиг-указатель (ось 1)
 
     apply_cli_overrides(cfg, extra_overrides={"level": "default"})
     assert cfg["level"] == "default"  # CLI побеждает профиль
@@ -188,7 +217,9 @@ def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
 # --- Интеграция: --model при непустом реестре -> force_legacy=True, security профиля жива --
 
 
-def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_security(isolated_cwd, tmp_path):
+def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_security(
+    isolated_cwd, tmp_path
+):
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(
@@ -216,7 +247,9 @@ def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_
     # флаг модели не имеет права молча снимать security-настройки профиля.
     assert cfg["write_guard"]["enabled"] is True
 
-    router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=True)
+    router = ModelRouter(
+        cfg, level_provider=lambda: "default", force_legacy=True
+    )
 
     main_resolved = router.resolve("main")
     assert main_resolved.alias is None
@@ -232,7 +265,9 @@ def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_
     assert subagent_resolved.model == "forced-model"
 
 
-def test_model_override_without_registry_is_plain_legacy_not_forced(isolated_cwd, tmp_path):
+def test_model_override_without_registry_is_plain_legacy_not_forced(
+    isolated_cwd, tmp_path
+):
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
@@ -241,7 +276,11 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(isolated_cwd
 
     assert cli_forces_legacy_model(cfg) is False
 
-    router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=cli_forces_legacy_model(cfg))
+    router = ModelRouter(
+        cfg,
+        level_provider=lambda: "default",
+        force_legacy=cli_forces_legacy_model(cfg),
+    )
     resolved = router.resolve("main")
     assert resolved.model == "forced-model"
     assert resolved.source == "легаси"
@@ -264,11 +303,18 @@ def test_cli_models_override_carries_its_own_token_to_the_router():
     apply_cli_overrides(
         cfg,
         extra_overrides={
-            "models": {"gc": {"url": "https://own/v1/chat/completions", "token": "sk-own"}},
+            "models": {
+                "gc": {
+                    "url": "https://own/v1/chat/completions",
+                    "token": "sk-own",
+                }
+            },
         },
     )
 
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+        "main"
+    )
 
     assert resolved.url == "https://own/v1/chat/completions"
     assert resolved.authorization == "Bearer sk-own"

@@ -25,7 +25,9 @@ async def test_skills_item_single_card_scrolls_both_wraps(monkeypatch):
     from textual.widgets import Static
 
     scrolled: list = []
-    monkeypatch.setattr(Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self))
+    monkeypatch.setattr(
+        Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self)
+    )
 
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(SkillsScreen(skills=_SKILLS))
@@ -64,7 +66,9 @@ def _seed_session(threads_dir, i):
 
 
 @pytest.mark.asyncio
-async def test_sessions_item_single_card_scrolls_both_wraps(tmp_path, monkeypatch):
+async def test_sessions_item_single_card_scrolls_both_wraps(
+    tmp_path, monkeypatch
+):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
@@ -75,11 +79,15 @@ async def test_sessions_item_single_card_scrolls_both_wraps(tmp_path, monkeypatc
         _seed_session(tmp_path, i)
 
     scrolled: list = []
-    monkeypatch.setattr(Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self))
+    monkeypatch.setattr(
+        Static, "scroll_visible", lambda self, *a, **k: scrolled.append(self)
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
         await pilot.pause()
         listview = pilot.app.screen.query_one("#sessions-list", VerticalScroll)
         assert len(listview.query(".card")) == 5

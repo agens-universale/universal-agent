@@ -4,7 +4,9 @@ from uuid import uuid4
 from gc_core.utils.prod_auth import AuthConnector
 
 
-def build_auth_connector(config_dict: Dict[str, Any]) -> Optional[AuthConnector]:
+def build_auth_connector(
+    config_dict: Dict[str, Any],
+) -> Optional[AuthConnector]:
     verify = config_dict.get("use_ssl", True)
     auth_cfg = config_dict.get("agent_auth") or {}
     if not auth_cfg:
@@ -12,7 +14,9 @@ def build_auth_connector(config_dict: Dict[str, Any]) -> Optional[AuthConnector]
 
     entry_point = auth_cfg.get("auth_endpoint")
     if not entry_point:
-        raise ValueError("agent_auth.auth_endpoint is required when agent_auth is configured")
+        raise ValueError(
+            "agent_auth.auth_endpoint is required when agent_auth is configured"
+        )
     env_name = auth_cfg.get("env_name", "surface_cli")
     env_version = auth_cfg.get("env_version", "0.0.1")
     plugin_name = auth_cfg.get("plugin_name", "surf-cli-plugin")

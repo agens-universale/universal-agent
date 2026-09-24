@@ -11,7 +11,10 @@ def resolve_path_from_config_dir(path_value: str, config_dir: str) -> str:
 
 
 def maybe_override_and_resolve(
-    maybe_env_value: Optional[str], key: str, config_dict: Dict[str, Any], config_dir: str
+    maybe_env_value: Optional[str],
+    key: str,
+    config_dict: Dict[str, Any],
+    config_dir: str,
 ) -> None:
     if not isinstance(maybe_env_value, str):
         return
@@ -21,7 +24,9 @@ def maybe_override_and_resolve(
     config_dict[key] = resolve_path_from_config_dir(env_value, config_dir)
 
 
-def apply_swarm_env_overrides(config_dict: Dict[str, Any], config_dir: str) -> None:
+def apply_swarm_env_overrides(
+    config_dict: Dict[str, Any], config_dir: str
+) -> None:
     if env_vars.env.swarm_agentmd_path is not None:
         maybe_override_and_resolve(
             str(env_vars.env.swarm_agentmd_path),

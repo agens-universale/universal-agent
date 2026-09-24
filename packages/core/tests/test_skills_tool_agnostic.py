@@ -63,28 +63,42 @@ def test_skills_tree_has_markdown():
     assert _md_files(), f"no markdown found under {SKILLS_DIR}"
 
 
-@pytest.mark.parametrize("md", _md_files(), ids=lambda p: str(p.relative_to(SKILLS_DIR)))
+@pytest.mark.parametrize(
+    "md", _md_files(), ids=lambda p: str(p.relative_to(SKILLS_DIR))
+)
 def test_no_runtime_tool_names(md):
     offenders = []
     for i, line in enumerate(md.read_text(encoding="utf-8").splitlines(), 1):
         m = _FORBIDDEN_RE.search(line)
         if m:
-            offenders.append(f"{md.relative_to(SKILLS_DIR)}:{i}: {m.group(1)} :: {line.strip()}")
+            offenders.append(
+                f"{md.relative_to(SKILLS_DIR)}:{i}: {m.group(1)} :: {line.strip()}"
+            )
             continue
         m = _FORBIDDEN_SCIENCE_MCP_RE.search(line)
         if m:
-            offenders.append(f"{md.relative_to(SKILLS_DIR)}:{i}: {m.group(0)} :: {line.strip()}")
-    assert not offenders, "hardcoded runtime tool name(s):\n" + "\n".join(offenders)
+            offenders.append(
+                f"{md.relative_to(SKILLS_DIR)}:{i}: {m.group(0)} :: {line.strip()}"
+            )
+    assert not offenders, "hardcoded runtime tool name(s):\n" + "\n".join(
+        offenders
+    )
 
 
 def test_skill_discovery_tools_not_flagged():
     assert not _FORBIDDEN_RE.search('skills_load("supercoder:brainstorming")')
     assert not _FORBIDDEN_RE.search("skills_list(pack='supercoder')")
-    assert not _FORBIDDEN_RE.search("skills_run_script(skill_id='skill-creator'")
-    assert not _FORBIDDEN_SCIENCE_MCP_RE.search('skills_load("science-article-creator:scientific-research")')
+    assert not _FORBIDDEN_RE.search(
+        "skills_run_script(skill_id='skill-creator'"
+    )
+    assert not _FORBIDDEN_SCIENCE_MCP_RE.search(
+        'skills_load("science-article-creator:scientific-research")'
+    )
 
 
-@pytest.mark.parametrize("rel", ["executing-plans/SKILL.md", "systematic-debugging/SKILL.md"])
+@pytest.mark.parametrize(
+    "rel", ["executing-plans/SKILL.md", "systematic-debugging/SKILL.md"]
+)
 def test_supercoder_durability_semantic_preserved(rel):
     body = (SUPERCODER_DIR / rel).read_text(encoding="utf-8").lower()
     assert "summariz" in body, (

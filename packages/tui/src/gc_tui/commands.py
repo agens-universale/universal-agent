@@ -90,23 +90,63 @@ def build_default_registry() -> CommandRegistry:
 
     cmds = [
         Command("help", (), "", "Справка по командам", hotkey="F1 · Ctrl+/"),
-        Command("sessions", (), "", "Список сессий — выбрать и продолжить", hotkey="F2 · Ctrl+S"),
-        Command("diff", (), "", "Просмотр pending-диффов, принять/откатить", hotkey="F3 · Ctrl+D"),
-        Command("view", (), "<path>", "Постраничный просмотр текстового файла", arg_file=True),
-        Command("notices", (), "", "Уведомления (старт + runtime)", hotkey="F4 · Ctrl+O"),
+        Command(
+            "sessions",
+            (),
+            "",
+            "Список сессий — выбрать и продолжить",
+            hotkey="F2 · Ctrl+S",
+        ),
+        Command(
+            "diff",
+            (),
+            "",
+            "Просмотр pending-диффов, принять/откатить",
+            hotkey="F3 · Ctrl+D",
+        ),
+        Command(
+            "view",
+            (),
+            "<path>",
+            "Постраничный просмотр текстового файла",
+            arg_file=True,
+        ),
+        Command(
+            "notices",
+            (),
+            "",
+            "Уведомления (старт + runtime)",
+            hotkey="F4 · Ctrl+O",
+        ),
         Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
-        Command("config", (), "", "Конфиг сессии + пути к файлам", hotkey="F5 · Ctrl+G"),
+        Command(
+            "config",
+            (),
+            "",
+            "Конфиг сессии + пути к файлам",
+            hotkey="F5 · Ctrl+G",
+        ),
         # Перечисляет секции экрана (`SECTIONS`, tui/screens/settings.py) — строку
         # видно при каждом открытии палитры, расхождение с составом читается как
         # «секции нет». Без ведущего «Настройки:»: имя команды стоит колонкой слева,
         # а описание тут самое длинное — префикс двигал бы колонку хоткеев вправо
         # ради слова, которое уже прочитано.
         Command(
-            "settings", (), "", "Подключение, модели, профили, MCP, голосовой ввод, режимы, обновление", hotkey="F6"
+            "settings",
+            (),
+            "",
+            "Подключение, модели, профили, MCP, голосовой ввод, режимы, обновление",
+            hotkey="F6",
         ),
         # Стоп и отмена здесь не перечисляются: их показывает сама пилюля записи
         # («Ctrl+T / Enter — стоп · Esc — отмена»), пока диктовка идёт.
-        Command("voice", (), "", "Голосовой ввод: надиктовать сообщение", hotkey="Ctrl+T"),
+        Command(
+            "voice",
+            (),
+            "",
+            "Голосовой ввод: надиктовать сообщение",
+            hotkey="Ctrl+T",
+        ),
         Command(
             "export",
             (),
@@ -126,7 +166,13 @@ def build_default_registry() -> CommandRegistry:
         Command("status", (), "", "Состояние текущей сессии"),
         Command("stop", (), "", "Остановить активную задачу", hotkey="Ctrl+C"),
         Command("mcp", (), "", "MCP-серверы и их тулы"),
-        Command("buffer", (), "", "Буфер сессии — текст собранных копий", hotkey="F7"),
+        Command(
+            "buffer",
+            (),
+            "",
+            "Буфер сессии — текст собранных копий",
+            hotkey="F7",
+        ),
         Command("quit", (), "", "Выход", hotkey="Esc"),
         # Переключатели палитры «чем работаем» (←/→/Enter, спека §12.1):
         # уровень модели и профиль — над группой строгости завершения хода.
@@ -141,7 +187,9 @@ def build_default_registry() -> CommandRegistry:
             "profiles",
             (),
             "[профиль]",
-            _cap(f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"),
+            _cap(
+                f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"
+            ),
             is_toggle=True,
             arg_options_provider=profile_picker_options,
             arg_hint_provider=profile_picker_hint,

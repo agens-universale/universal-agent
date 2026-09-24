@@ -122,7 +122,9 @@ def apply_overrides(cfg: Dict[str, Any], overrides: Dict[str, Any]) -> None:
             cfg[key.explicit_flag] = True
 
 
-def diff_vs_base(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+def diff_vs_base(
+    base: Dict[str, Any], overrides: Dict[str, Any]
+) -> Dict[str, Any]:
     """Переопределения, отличающиеся от ДЕЙСТВУЮЩЕГО умолчания базового
     конфига — инструмент сравнения сессии с базой (слой API; сейчас без
     потребителя в UI, ближайший — будущая фича /rigor).

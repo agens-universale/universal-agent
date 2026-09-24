@@ -75,7 +75,15 @@ class BlockPanel(ClickModelMixin, Vertical):
     BlockPanel .block-body { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: clip; }
     """
 
-    def __init__(self, *, label: str, copy_payload: str, event_no: int, focusable: bool, classes: str) -> None:
+    def __init__(
+        self,
+        *,
+        label: str,
+        copy_payload: str,
+        event_no: int,
+        focusable: bool,
+        classes: str,
+    ) -> None:
         super().__init__(classes=classes)
         self._label = label
         self._copy_payload = copy_payload
@@ -87,7 +95,13 @@ class BlockPanel(ClickModelMixin, Vertical):
 
     @classmethod
     def for_code(
-        cls, content: str, lang: str | None, *, event_no: int, focusable: bool = False, indent: bool = False
+        cls,
+        content: str,
+        lang: str | None,
+        *,
+        event_no: int,
+        focusable: bool = False,
+        indent: bool = False,
     ) -> BlockPanel:
         """Код: метка — язык (если известен), копия — чистый код без обрамления."""
         from gc_tui.services.code_render import highlight_code, normalize_code
@@ -194,7 +208,11 @@ class BlockPanel(ClickModelMixin, Vertical):
         события по Ctrl+клику с любой точки блока, а не только копирование.
         """
         widget = getattr(event, "widget", None)
-        if not event.ctrl and widget is not None and widget.has_class("block-copy"):
+        if (
+            not event.ctrl
+            and widget is not None
+            and widget.has_class("block-copy")
+        ):
             event.stop()
             self._copy_block()
             return
@@ -212,7 +230,9 @@ class BlockPanel(ClickModelMixin, Vertical):
         self.query_one(".block-copy", Static).update(DONE_GLYPH)
         if self._restore_timer is not None:
             self._restore_timer.stop()
-        self._restore_timer = self.set_timer(COPY_FEEDBACK_S, self._restore_copy_glyph)
+        self._restore_timer = self.set_timer(
+            COPY_FEEDBACK_S, self._restore_copy_glyph
+        )
 
     def _restore_copy_glyph(self) -> None:
         self._restore_timer = None

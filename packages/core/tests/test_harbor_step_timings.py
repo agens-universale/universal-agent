@@ -23,7 +23,9 @@ def timings_mod(monkeypatch):
 
     core._arequest_backend_canonical = _arequest_backend_canonical
 
-    async def _aapply_tool(*, tool_name, arguments, ctx, state, run_agent_func=None, call_id=None):
+    async def _aapply_tool(
+        *, tool_name, arguments, ctx, state, run_agent_func=None, call_id=None
+    ):
         # A subagent tool calls the backend from inside the tool span.
         if tool_name == "subagent":
             await core._arequest_backend_canonical([], state, ctx)
@@ -42,7 +44,9 @@ def timings_mod(monkeypatch):
     monkeypatch.setitem(sys.modules, "gc_core.processing_responses", core)
     monkeypatch.setattr(gc_core, "processing_responses", core, raising=False)
     monkeypatch.syspath_prepend(str(HARBOR))
-    for key in [k for k in sys.modules if k.startswith("adapters.step_timings")]:
+    for key in [
+        k for k in sys.modules if k.startswith("adapters.step_timings")
+    ]:
         del sys.modules[key]
     import adapters.step_timings as mod
 
@@ -52,7 +56,10 @@ def timings_mod(monkeypatch):
 
 
 def _read(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
 
 
 def test_llm_and_tool_spans_are_recorded_per_step(timings_mod, tmp_path):
@@ -61,7 +68,11 @@ def test_llm_and_tool_spans_are_recorded_per_step(timings_mod, tmp_path):
     sink.attach()
     state = SimpleNamespace(steps=3, default_model="test-model")
     asyncio.run(core._arequest_backend_canonical([], state, None))
-    asyncio.run(core.aapply_tool(tool_name="execute_command", arguments="", ctx=None, state=state))
+    asyncio.run(
+        core.aapply_tool(
+            tool_name="execute_command", arguments="", ctx=None, state=state
+        )
+    )
     sink.close()
 
     records = _read(tmp_path / "timings.jsonl")
@@ -81,7 +92,11 @@ def test_subagent_llm_is_nested_and_not_double_counted(timings_mod, tmp_path):
     sink = mod.StepTimings(tmp_path / "timings.jsonl")
     sink.attach()
     state = SimpleNamespace(steps=1, default_model="m")
-    asyncio.run(core.aapply_tool(tool_name="subagent", arguments="", ctx=None, state=state))
+    asyncio.run(
+        core.aapply_tool(
+            tool_name="subagent", arguments="", ctx=None, state=state
+        )
+    )
     sink.close()
 
     ends = [r for r in _read(tmp_path / "timings.jsonl") if r["ev"] == "end"]
@@ -97,7 +112,11 @@ def test_failing_tool_is_recorded_and_reraised(timings_mod, tmp_path):
     sink.attach()
     state = SimpleNamespace(steps=0, default_model="m")
     with pytest.raises(RuntimeError):
-        asyncio.run(core.aapply_tool(tool_name="boom", arguments="", ctx=None, state=state))
+        asyncio.run(
+            core.aapply_tool(
+                tool_name="boom", arguments="", ctx=None, state=state
+            )
+        )
     sink.close()
 
     end = _read(tmp_path / "timings.jsonl")[-1]
@@ -111,5 +130,12 @@ def test_detached_sink_leaves_the_core_untouched(timings_mod, tmp_path):
     sink.attach()
     sink.close()
     state = SimpleNamespace(steps=0, default_model="m")
-    assert asyncio.run(core.aapply_tool(tool_name="x", arguments="", ctx=None, state=state)) == "tool-result"
+    assert (
+        asyncio.run(
+            core.aapply_tool(
+                tool_name="x", arguments="", ctx=None, state=state
+            )
+        )
+        == "tool-result"
+    )
     assert not (tmp_path / "timings.jsonl").read_text(encoding="utf-8")

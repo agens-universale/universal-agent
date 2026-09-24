@@ -31,7 +31,9 @@ async def test_responses_error_carries_the_body(monkeypatch):
         return httpx.Response(404, text=body)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(_dispatch))
-    monkeypatch.setattr(connect_backend, "get_async_client", lambda **kw: client)
+    monkeypatch.setattr(
+        connect_backend, "get_async_client", lambda **kw: client
+    )
     logger = _Logger()
 
     with pytest.raises(httpx.HTTPStatusError):
@@ -44,4 +46,6 @@ async def test_responses_error_carries_the_body(monkeypatch):
             logger=logger,
         )
 
-    assert any("невидимка" in line for line in logger.errors), f"тело ошибки потеряно, в логе только: {logger.errors}"
+    assert any("невидимка" in line for line in logger.errors), (
+        f"тело ошибки потеряно, в логе только: {logger.errors}"
+    )

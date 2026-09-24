@@ -186,7 +186,9 @@ def _detect_source_layer(skill_path: Path) -> str:
         # Hardcoded fallback per-OS
         home = Path.home()
         if sys.platform.startswith(("linux", "darwin")):
-            user_skills_path = (home / ".local" / "share" / "gc" / "skills").resolve()
+            user_skills_path = (
+                home / ".local" / "share" / "gc" / "skills"
+            ).resolve()
         else:
             user_skills_path = (home / ".gc" / "skills").resolve()
 
@@ -219,7 +221,12 @@ def _generate_readme(
     """Generate README.md content for archive root."""
     fm = _extract_frontmatter(skill_path)
     version = fm.get("version") or "—"
-    description = (fm.get("description") or "").strip().replace("\n  ", " ").replace("\n", " ")
+    description = (
+        (fm.get("description") or "")
+        .strip()
+        .replace("\n  ", " ")
+        .replace("\n", " ")
+    )
     today = _date.today().isoformat()
 
     demo_section = ""
@@ -360,7 +367,9 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
     has_demo = dev_dir.is_dir() and any(dev_dir.iterdir())
 
     try:
-        with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(
+            skill_filename, "w", zipfile.ZIP_DEFLATED
+        ) as zipf:
             # Generate README.md (always at archive root, before skill content)
             readme_content = _generate_readme(
                 skill_path=skill_path,
@@ -373,7 +382,9 @@ def package_skill(skill_path, output_dir=None, source_layer=None):
             _add_tree(zipf, skill_path, Path(skill_id), skip_label="Skipped")
             # Bundle _dev/ as demo/ in archive
             if dev_dir.is_dir():
-                _add_tree(zipf, dev_dir, Path("demo"), skip_label="Skipped (demo)")
+                _add_tree(
+                    zipf, dev_dir, Path("demo"), skip_label="Skipped (demo)"
+                )
 
         print(f"\nSuccessfully packaged skill to: {skill_filename}")
 
@@ -406,7 +417,10 @@ def _resolve_invocation() -> tuple[str, str | None, str | None]:
                 sys.exit(2)
             skill_path = payload.get("skill_path")
             if not skill_path:
-                print("Error: 'skill_path' is required in stdin JSON", file=sys.stderr)
+                print(
+                    "Error: 'skill_path' is required in stdin JSON",
+                    file=sys.stderr,
+                )
                 sys.exit(2)
             return (
                 str(skill_path),
@@ -414,7 +428,9 @@ def _resolve_invocation() -> tuple[str, str | None, str | None]:
                 payload.get("source_layer"),
             )
 
-    parser = argparse.ArgumentParser(description="Package a skill folder into skill-<id>.zip")
+    parser = argparse.ArgumentParser(
+        description="Package a skill folder into skill-<id>.zip"
+    )
     parser.add_argument("skill_path", help="Path to the skill folder")
     parser.add_argument(
         "output_dir_pos",

@@ -55,12 +55,18 @@ def render_current_user_intent_block(current_jsonl: str) -> str:
     return f"<current_user_intent>\n{body}\n</current_user_intent>"
 
 
-def resolve_intent_log_preview_chars(summary_params: Mapping[str, Any] | None) -> int:
+def resolve_intent_log_preview_chars(
+    summary_params: Mapping[str, Any] | None,
+) -> int:
     """``summary_params.intent_log_preview_chars`` (closed-log tail budget in characters)."""
     if not isinstance(summary_params, Mapping):
         return DEFAULT_INTENT_LOG_PREVIEW_CHARS
     try:
-        value = int(summary_params.get("intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS))
+        value = int(
+            summary_params.get(
+                "intent_log_preview_chars", DEFAULT_INTENT_LOG_PREVIEW_CHARS
+            )
+        )
     except (TypeError, ValueError):
         value = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
@@ -77,14 +83,18 @@ def build_intent_blocks_prefix(
     Closed log: ``tail_preview``. Open turn: full JSONL. См. ``build_dialog_summary_content``.
     """
     safe_chars = (
-        int(intent_log_preview_chars) if int(intent_log_preview_chars) > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
+        int(intent_log_preview_chars)
+        if int(intent_log_preview_chars) > 0
+        else DEFAULT_INTENT_LOG_PREVIEW_CHARS
     )
     preview = tail_preview(list(closed_records), safe_chars)
     parts: list[str] = []
     log_block = render_user_intent_log_block(preview)
     if log_block:
         parts.append(log_block)
-    current_block = render_current_user_intent_block(serialize(list(open_records)))
+    current_block = render_current_user_intent_block(
+        serialize(list(open_records))
+    )
     if current_block:
         parts.append(current_block)
     if not parts:
@@ -131,7 +141,9 @@ def build_dialog_summary_content(
             lines.append("")
             lines.append(log_section)
 
-    current_section = render_current_user_intent_block(current_user_intent_jsonl)
+    current_section = render_current_user_intent_block(
+        current_user_intent_jsonl
+    )
     if current_section:
         lines.append("")
         lines.append(current_section)

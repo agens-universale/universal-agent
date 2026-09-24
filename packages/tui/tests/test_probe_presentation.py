@@ -17,44 +17,89 @@ def test_none_result_is_not_checked():
 
 def test_ok_with_an_accepted_token_says_both():
     r = ProbeResult("ok", 200, None, 42, "токен принят", auth_state="accepted")
-    assert connection_line_text(r).plain == "✓ сервер доступен · ✓ токен принят"
+    assert (
+        connection_line_text(r).plain == "✓ сервер доступен · ✓ токен принят"
+    )
 
 
 def test_ok_without_authorization_names_that_instead_of_the_token():
-    r = ProbeResult("ok", 200, None, 42, "доступ без токена — авторизация не требуется", auth_state="not_required")
-    assert connection_line_text(r).plain == "✓ сервер доступен · авторизация не требуется"
+    r = ProbeResult(
+        "ok",
+        200,
+        None,
+        42,
+        "доступ без токена — авторизация не требуется",
+        auth_state="not_required",
+    )
+    assert (
+        connection_line_text(r).plain
+        == "✓ сервер доступен · авторизация не требуется"
+    )
 
 
 def test_ok_without_a_verdict_about_the_token_stays_neutral():
     """Сырой config-probe (auth_state=None) о токене не знает ничего: утверждать
     «принят» по одному «ок» сервера нечестно. Литерал в detail сам по себе тоже
     ничего не «включает» — вердикт только из auth_state."""
-    assert connection_line_text(ProbeResult("ok", 200, None, 42, "доступен")).plain == "✓ сервер доступен"
-    text_only = ProbeResult("ok", 200, None, 42, "токен принят")  # без auth_state
+    assert (
+        connection_line_text(
+            ProbeResult("ok", 200, None, 42, "доступен")
+        ).plain
+        == "✓ сервер доступен"
+    )
+    text_only = ProbeResult(
+        "ok", 200, None, 42, "токен принят"
+    )  # без auth_state
     assert "токен принят" not in connection_line_text(text_only).plain
 
 
 def test_401_with_a_token_blames_the_token_not_the_server():
-    r = ProbeResult("rejected", 401, None, 5, "токен отклонён (401)", auth_state="rejected")
-    assert connection_line_text(r).plain == "✓ сервер доступен · ✗ токен отклонён (401)"
+    r = ProbeResult(
+        "rejected", 401, None, 5, "токен отклонён (401)", auth_state="rejected"
+    )
+    assert (
+        connection_line_text(r).plain
+        == "✓ сервер доступен · ✗ токен отклонён (401)"
+    )
 
 
 def test_401_without_a_token_says_the_server_wants_one():
     """Токена не было вовсе — отклонять было нечего: «токен отклонён» тут ложь."""
-    r = ProbeResult("rejected", 401, None, 5, "сервер требует авторизацию (401)", auth_state="required")
-    assert connection_line_text(r).plain == "✓ сервер доступен · ⚠ сервер требует авторизацию (401)"
+    r = ProbeResult(
+        "rejected",
+        401,
+        None,
+        5,
+        "сервер требует авторизацию (401)",
+        auth_state="required",
+    )
+    assert (
+        connection_line_text(r).plain
+        == "✓ сервер доступен · ⚠ сервер требует авторизацию (401)"
+    )
 
 
 def test_only_a_network_failure_blames_the_server():
-    r = ProbeResult("unknown", None, None, 0, "нет соединения (timeout)", offline=True)
+    r = ProbeResult(
+        "unknown", None, None, 0, "нет соединения (timeout)", offline=True
+    )
     assert connection_line_text(r).plain == "✗ сервер недоступен"
 
 
 def test_a_refusal_on_the_merits_is_a_refusal_not_a_failed_check():
     """Сервер ОТВЕТИЛ отказом (404 про путь/модель, нелатиница в токене) — проверка
     состоялась, и «не удалось проверить» было бы неправдой."""
-    r = ProbeResult("rejected", 404, None, 12, "отклонено сервером (404): проверьте имя модели")
-    assert connection_line_text(r).plain == "✗ отклонено сервером (404): проверьте имя модели"
+    r = ProbeResult(
+        "rejected",
+        404,
+        None,
+        12,
+        "отклонено сервером (404): проверьте имя модели",
+    )
+    assert (
+        connection_line_text(r).plain
+        == "✗ отклонено сервером (404): проверьте имя модели"
+    )
     # Нелатиница в токене: запрос не ушёл вовсе (статуса нет), но данные назвал сам
     # редактор — валить это на лежачий сервер значит скрыть исправимую причину.
     bad_token = ProbeResult(
@@ -73,12 +118,21 @@ def test_an_inconclusive_answer_keeps_its_reason():
     """Свой сбой и не-вердиктный ответ статуса не теряют причину: сервер жив, а
     сказать про него нечего — раньше и то и другое печаталось как «недоступен»."""
     r = ProbeResult("unknown", 500, None, 10, "сервер ответил 500")
-    assert connection_line_text(r).plain == "? не удалось проверить: сервер ответил 500"
-    internal = ProbeResult("unknown", None, None, 0, "внутренняя ошибка проверки: boom")
+    assert (
+        connection_line_text(r).plain
+        == "? не удалось проверить: сервер ответил 500"
+    )
+    internal = ProbeResult(
+        "unknown", None, None, 0, "внутренняя ошибка проверки: boom"
+    )
     line = connection_line_text(internal).plain
     assert "внутренняя ошибка" in line and "сервер недоступен" not in line
     canary = ProbeResult(
-        "unknown", 400, None, 9, "не удалось подтвердить токен: на заведомо неверный сервер отвечает так же (400)"
+        "unknown",
+        400,
+        None,
+        9,
+        "не удалось подтвердить токен: на заведомо неверный сервер отвечает так же (400)",
     )
     line = connection_line_text(canary).plain
     assert "подтвердить токен" in line and "сервер недоступен" not in line
@@ -100,7 +154,9 @@ def test_save_warning_is_silent_when_there_is_nothing_to_say():
 def test_save_warning_blames_the_token_when_the_token_was_judged():
     from gc_tui.services.probe_presentation import save_warning
 
-    r = ProbeResult("rejected", 401, None, 5, "токен отклонён (401)", auth_state="rejected")
+    r = ProbeResult(
+        "rejected", 401, None, 5, "токен отклонён (401)", auth_state="rejected"
+    )
     assert save_warning(r) == "сервер отклонил токен — проверьте"
 
 
@@ -109,7 +165,14 @@ def test_save_warning_names_the_missing_token_not_a_rejected_one():
     было нечего — «сервер отклонил токен» здесь неправда."""
     from gc_tui.services.probe_presentation import save_warning
 
-    r = ProbeResult("rejected", 401, None, 5, "сервер требует авторизацию (401)", auth_state="required")
+    r = ProbeResult(
+        "rejected",
+        401,
+        None,
+        5,
+        "сервер требует авторизацию (401)",
+        auth_state="required",
+    )
     assert "отклонил" not in save_warning(r)
     assert "требует авторизацию" in save_warning(r)
 
@@ -119,7 +182,13 @@ def test_save_warning_does_not_call_a_model_404_a_token_problem():
     про имя модели. Прежний текст называл это отклонённым токеном."""
     from gc_tui.services.probe_presentation import save_warning
 
-    r = ProbeResult("rejected", 404, None, 5, "отклонено сервером (404): проверьте адрес и имя модели")
+    r = ProbeResult(
+        "rejected",
+        404,
+        None,
+        5,
+        "отклонено сервером (404): проверьте адрес и имя модели",
+    )
     text = save_warning(r)
     assert "токен" not in text
     assert "проверьте адрес и имя модели" in text
@@ -131,7 +200,11 @@ def test_save_warning_does_not_call_a_live_server_unreachable():
     from gc_tui.services.probe_presentation import save_warning
 
     r = ProbeResult(
-        "unknown", 400, None, 5, "не удалось подтвердить токен: на заведомо неверный сервер отвечает так же (400)"
+        "unknown",
+        400,
+        None,
+        5,
+        "не удалось подтвердить токен: на заведомо неверный сервер отвечает так же (400)",
     )
     text = save_warning(r)
     assert "недоступен" not in text
@@ -141,7 +214,9 @@ def test_save_warning_does_not_call_a_live_server_unreachable():
 def test_save_warning_blames_the_server_only_when_it_did_not_answer():
     from gc_tui.services.probe_presentation import save_warning
 
-    r = ProbeResult("unknown", None, None, 5, "нет соединения (timeout)", offline=True)
+    r = ProbeResult(
+        "unknown", None, None, 5, "нет соединения (timeout)", offline=True
+    )
     assert save_warning(r) == "проверить не удалось — сервер недоступен"
 
 
@@ -151,9 +226,15 @@ def test_save_warning_blames_the_server_only_when_it_did_not_answer():
 def test_token_accepted_trusts_the_differential_verdict():
     from gc_tui.services.probe_presentation import token_accepted
 
-    accepted = ProbeResult("ok", 200, None, 5, "токен принят", auth_state="accepted")
-    not_required = ProbeResult("ok", 200, None, 5, "доступ без токена", auth_state="not_required")
-    rejected = ProbeResult("rejected", 401, None, 5, "токен отклонён (401)", auth_state="rejected")
+    accepted = ProbeResult(
+        "ok", 200, None, 5, "токен принят", auth_state="accepted"
+    )
+    not_required = ProbeResult(
+        "ok", 200, None, 5, "доступ без токена", auth_state="not_required"
+    )
+    rejected = ProbeResult(
+        "rejected", 401, None, 5, "токен отклонён (401)", auth_state="rejected"
+    )
     assert token_accepted(accepted, has_token=True) is True
     assert token_accepted(not_required, has_token=True) is True
     assert token_accepted(rejected, has_token=True) is False
@@ -176,7 +257,13 @@ def test_token_accepted_reads_the_real_route_without_the_differential():
     о теле: живой GigaCode на неверное имя модели отвечает 404 при рабочем токене."""
     from gc_tui.services.probe_presentation import token_accepted
 
-    r = ProbeResult("rejected", 404, None, 12, "отклонено сервером (404): проверьте адрес и имя модели")
+    r = ProbeResult(
+        "rejected",
+        404,
+        None,
+        12,
+        "отклонено сервером (404): проверьте адрес и имя модели",
+    )
     assert token_accepted(r, has_token=True) is True
 
 
@@ -213,9 +300,16 @@ def test_token_accepted_says_nothing_when_the_probe_never_got_a_verdict():
     и в ветке «токена нет вовсе», — сказать нечего."""
     from gc_tui.services.probe_presentation import token_accepted
 
-    offline = ProbeResult("unknown", None, None, 0, "нет соединения", offline=True)
+    offline = ProbeResult(
+        "unknown", None, None, 0, "нет соединения", offline=True
+    )
     canary = ProbeResult(
-        "unknown", 400, None, 8, "сервер отвечает, но токен не различает", body_signature="no-connected-db"
+        "unknown",
+        400,
+        None,
+        8,
+        "сервер отвечает, но токен не различает",
+        body_signature="no-connected-db",
     )
     assert token_accepted(offline, has_token=True) is None
     assert token_accepted(canary, has_token=True) is None

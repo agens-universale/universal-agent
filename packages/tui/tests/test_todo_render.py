@@ -1,7 +1,10 @@
 """Билдеры rich.Text чек-листов — канон spec 2026-07-31 §1-§3."""
 
 from gc_tui import palette
-from gc_tui.services.todo_render import build_main_todo_lines, build_subagent_todo_lines
+from gc_tui.services.todo_render import (
+    build_main_todo_lines,
+    build_subagent_todo_lines,
+)
 from gc_tui.services.trace_mapper import _todo_checklist_summary
 from rich.text import Text
 
@@ -63,13 +66,22 @@ def test_main_empty_is_cleared_line():
 
 
 def test_main_builder_plain_matches_summary_parity():
-    assert _text(build_main_todo_lines(ITEMS)).plain == f"session_todo   {_todo_checklist_summary(ITEMS)}"
-    assert _text(build_main_todo_lines([])).plain == f"session_todo   {_todo_checklist_summary([])}"
+    assert (
+        _text(build_main_todo_lines(ITEMS)).plain
+        == f"session_todo   {_todo_checklist_summary(ITEMS)}"
+    )
+    assert (
+        _text(build_main_todo_lines([])).plain
+        == f"session_todo   {_todo_checklist_summary([])}"
+    )
 
 
 def test_subagent_empty_is_cleared_line():
     # Достижимо с v3 (каждый вызов развёрнут): очистка тоже идёт через билдер.
-    assert _text(build_subagent_todo_lines([])).plain == "session_todo   чек-лист субагента очищен"
+    assert (
+        _text(build_subagent_todo_lines([])).plain
+        == "session_todo   чек-лист субагента очищен"
+    )
 
 
 def test_subagent_header_and_indent():
@@ -84,7 +96,10 @@ def test_subagent_completed_struck_muted_open_tool_name():
     assert "strike" in done_style and palette.MUTED.lower() in done_style
     # Живая часть (→/○ и заголовок) — в тон именам тулов блока (доводка 2026-08-01).
     assert palette.TOOL_NAME.lower() in spans["Написать тесты"]
-    assert palette.TOOL_NAME.lower() in spans["session_todo   чек-лист субагента 1/3"]
+    assert (
+        palette.TOOL_NAME.lower()
+        in spans["session_todo   чек-лист субагента 1/3"]
+    )
 
 
 # --- общая обвязка строк для всех каналов -----------------------------------
@@ -140,5 +155,7 @@ def test_todo_block_classes_by_channel():
 
     main = build_todo_block(ITEMS, subagent=False)
     sub = build_todo_block(ITEMS, subagent=True)
-    assert main.has_class("todo-block") and not main.has_class("todo-block-nested")
+    assert main.has_class("todo-block") and not main.has_class(
+        "todo-block-nested"
+    )
     assert sub.has_class("todo-block-nested")

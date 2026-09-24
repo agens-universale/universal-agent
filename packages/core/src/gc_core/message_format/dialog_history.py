@@ -3,7 +3,10 @@
 import html
 from typing import Any, Callable, Dict, List, Sequence, TypeVar
 
-from gc_core.message_format.serialization import message_text_for_summary, strip_original_user_messages_block
+from gc_core.message_format.serialization import (
+    message_text_for_summary,
+    strip_original_user_messages_block,
+)
 from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     is_technical_user_message_text,
@@ -45,7 +48,9 @@ def truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + " ... [TEXT CUTTED]"
 
 
-_TOOL_BLOB_TYPES = frozenset({"function_call", "tool_call", "function_call_output", "tool_call_output"})
+_TOOL_BLOB_TYPES = frozenset(
+    {"function_call", "tool_call", "function_call_output", "tool_call_output"}
+)
 
 
 def _xml_escape_body(text: str) -> str:
@@ -81,10 +86,16 @@ def message_text_limited(
     tags: Sequence[str] = (),
     strip_think: bool = True,
 ) -> str:
-    text = strip_original_user_messages_block(message_text_for_summary(message, tags=tags, strip_think=strip_think))
+    text = strip_original_user_messages_block(
+        message_text_for_summary(message, tags=tags, strip_think=strip_think)
+    )
     if max_message_chars <= 0:
         return text
-    msg_type = str(message.get("type") or "message") if isinstance(message, dict) else "message"
+    msg_type = (
+        str(message.get("type") or "message")
+        if isinstance(message, dict)
+        else "message"
+    )
     if msg_type in _TOOL_BLOB_TYPES:
         header, sep, dump = text.partition("\n")
         if sep:
@@ -107,8 +118,14 @@ def build_history_text(
     rows: List[str] = []
     for idx, msg in enumerate(messages, start=1):
         content_text = user_content_to_text(msg.get("content")).strip()
-        per_limit = 0 if is_dialog_summary_user_message_text(content_text) else max_message_chars
-        text = message_text_limited(msg, per_limit, tags=tags, strip_think=strip_think).strip()
+        per_limit = (
+            0
+            if is_dialog_summary_user_message_text(content_text)
+            else max_message_chars
+        )
+        text = message_text_limited(
+            msg, per_limit, tags=tags, strip_think=strip_think
+        ).strip()
         if not text:
             continue
         rows.append(f'<message n="{idx}">\n{text}\n</message>')
@@ -132,11 +149,17 @@ def trim_history_to_max_dialogue_chars(
     return _tail_by_limit(
         messages,
         max_dialogue_chars,
-        lambda msg: len(message_text_limited(msg, max_message_chars, tags=tags, strip_think=strip_think)),
+        lambda msg: len(
+            message_text_limited(
+                msg, max_message_chars, tags=tags, strip_think=strip_think
+            )
+        ),
     )
 
 
-def trim_original_user_messages_to_max_chars(messages: List[str], max_chars: int) -> List[str]:
+def trim_original_user_messages_to_max_chars(
+    messages: List[str], max_chars: int
+) -> List[str]:
     return _tail_by_limit(messages, max_chars, len)
 
 
@@ -151,7 +174,9 @@ def _is_tool_call_output(msg: Dict[str, Any]) -> bool:
 def _is_technical_user(m: Dict[str, Any]) -> bool:
     if str(m.get("role", "")).strip().lower() != "user":
         return False
-    return is_technical_user_message_text(user_content_to_text(m.get("content")))
+    return is_technical_user_message_text(
+        user_content_to_text(m.get("content"))
+    )
 
 
 def _pair_tool_calls(messages: List[Dict[str, Any]]) -> Dict[int, int]:
@@ -172,7 +197,9 @@ def _pair_tool_calls(messages: List[Dict[str, Any]]) -> Dict[int, int]:
     return fc_to_fco
 
 
-def _collect_user_turn(messages: List[Dict[str, Any]], i: int, consumed: set[int]) -> tuple:
+def _collect_user_turn(
+    messages: List[Dict[str, Any]], i: int, consumed: set[int]
+) -> tuple:
     """Ход пользователя с позиции i: user (+технические user) до ответа assistant → (turn, next_i)."""
     turn: List[Dict[str, Any]] = [messages[i]]
     j = i + 1
@@ -204,7 +231,9 @@ def _collect_user_turn(messages: List[Dict[str, Any]], i: int, consumed: set[int
     return turn, j
 
 
-def group_into_turns(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+def group_into_turns(
+    messages: List[Dict[str, Any]],
+) -> List[List[Dict[str, Any]]]:
     if not messages:
         return []
     turns: List[List[Dict[str, Any]]] = []
@@ -259,7 +288,12 @@ def split_turns_into_char_batches(
     current_chars = 0
     for turn in turns:
         turn_chars = sum(
-            len(message_text_limited(msg, max_message_chars, tags=tags, strip_think=strip_think)) for msg in turn
+            len(
+                message_text_limited(
+                    msg, max_message_chars, tags=tags, strip_think=strip_think
+                )
+            )
+            for msg in turn
         )
         if current and current_chars + turn_chars > batch_chars_limit:
             batches.append(current)
@@ -292,7 +326,9 @@ def format_last_dialog_steps(
     for idx, turn in enumerate(tail, start=start_idx):
         rendered: List[str] = []
         for msg in turn:
-            text = message_text_limited(msg, message_max_chars, tags=tags, strip_think=strip_think).strip()
+            text = message_text_limited(
+                msg, message_max_chars, tags=tags, strip_think=strip_think
+            ).strip()
             if text:
                 rendered.append(text)
         text = "\n".join(rendered).strip()

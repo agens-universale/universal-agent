@@ -84,7 +84,9 @@ def test_read_cp1251_with_explicit_encoding_and_alias(tmp_path):
     assert res["encoding_used"] == "cp1251"
     assert res["content"] == text
 
-    aliased = json.loads(with_local_ctx(ReadFile)(path=str(p), encoding="windows-1251"))
+    aliased = json.loads(
+        with_local_ctx(ReadFile)(path=str(p), encoding="windows-1251")
+    )
     assert aliased["ok"] is True
     assert aliased["encoding_used"] == "cp1251"
     assert aliased["content"] == text
@@ -124,7 +126,9 @@ def test_read_default_selects_whole_file(tmp_path):
 
 def test_read_offset_without_limit_reads_to_eof(tmp_path):
     p = tmp_path / "big.txt"
-    p.write_text("\n".join(f"line {i}" for i in range(1, 601)), encoding="utf-8")
+    p.write_text(
+        "\n".join(f"line {i}" for i in range(1, 601)), encoding="utf-8"
+    )
     res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=501))
     assert res["start_line"] == 501
     assert res["end_line"] == 600
@@ -135,7 +139,9 @@ def test_read_offset_without_limit_reads_to_eof(tmp_path):
 def test_explicit_line_slice_unchanged(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
-    by_page = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=2, limit=2))
+    by_page = json.loads(
+        with_local_ctx(ReadFile)(path=str(p), offset=2, limit=2)
+    )
     assert by_page["content"] == "b\nc\n"
     assert by_page["truncated"] is True
     assert by_page["next_offset"] == 4
@@ -145,8 +151,12 @@ def test_line_window_sixty_short_lines_is_inline_json(tmp_path):
     lines = [f"code {i}" for i in range(1, 121)]
     text = "\n".join(lines) + "\n"
     p = tmp_path / "mod.py"
-    p.write_text(text, encoding="utf-8", newline="")  # иначе на Windows на диске CRLF
-    res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=10, limit=60))
+    p.write_text(
+        text, encoding="utf-8", newline=""
+    )  # иначе на Windows на диске CRLF
+    res = json.loads(
+        with_local_ctx(ReadFile)(path=str(p), offset=10, limit=60)
+    )
     assert res["ok"] is True
     assert res["start_line"] == 10
     assert res["end_line"] == 69
@@ -176,7 +186,9 @@ def test_read_offset_limit_validation_and_clamp(tmp_path):
     p.write_text("1\n2\n3\n", encoding="utf-8")
     tool = with_local_ctx(ReadFile)
     bad_offset = json.loads(tool(path=str(p), offset="1"))  # type: ignore[arg-type]
-    assert bad_offset["ok"] is False and bad_offset["error"]["field"] == "offset"
+    assert (
+        bad_offset["ok"] is False and bad_offset["error"]["field"] == "offset"
+    )
     bad_limit = json.loads(tool(path=str(p), limit="2"))  # type: ignore[arg-type]
     assert bad_limit["ok"] is False and bad_limit["error"]["field"] == "limit"
     clamped = json.loads(tool(path=str(p), offset=0, limit=0))
@@ -203,7 +215,11 @@ def test_single_huge_line_not_sliced_by_read(tmp_path):
 def test_rejects_file_over_max_bytes(tmp_path):
     p = tmp_path / "huge.txt"
     p.write_bytes(b"x" * 200)
-    res = json.loads(with_local_ctx(ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}})(path=str(p)))
+    res = json.loads(
+        with_local_ctx(
+            ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}}
+        )(path=str(p))
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "file_too_large"
     assert res["file_size_bytes"] == 200
@@ -218,7 +234,11 @@ def test_rejects_file_over_max_bytes(tmp_path):
 def test_reads_file_at_max_bytes_boundary(tmp_path):
     p = tmp_path / "ok.txt"
     p.write_bytes(b"y" * 100)
-    res = json.loads(with_local_ctx(ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}})(path=str(p)))
+    res = json.loads(
+        with_local_ctx(
+            ReadFile, config_dict={"fs_tools": {"max_read_bytes": 100}}
+        )(path=str(p))
+    )
     assert res["ok"] is True
     assert res["file_size_bytes"] == 100
     assert len(res["content"]) == 100
@@ -229,7 +249,9 @@ def test_file_size_bytes_on_not_found_and_success(tmp_path):
     p.write_text("ab", encoding="utf-8")
     ok = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert ok["file_size_bytes"] == 2
-    missing = json.loads(with_local_ctx(ReadFile)(path=str(tmp_path / "nope.txt")))
+    missing = json.loads(
+        with_local_ctx(ReadFile)(path=str(tmp_path / "nope.txt"))
+    )
     assert missing["file_size_bytes"] is None
 
 

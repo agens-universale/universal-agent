@@ -1,6 +1,9 @@
 """TDD: strip_tagged_blocks / strip_think_blocks — non-greedy closed + unclosed tail."""
 
-from gc_core.message_projection.projectors.strip_tagged_blocks import strip_tagged_blocks, strip_think_blocks
+from gc_core.message_projection.projectors.strip_tagged_blocks import (
+    strip_tagged_blocks,
+    strip_think_blocks,
+)
 
 
 def test_strip_closed_think_keeps_remainder():
@@ -22,7 +25,9 @@ def test_strip_non_greedy_two_closed_blocks_keeps_prose():
 
 def test_strip_non_greedy_nested_quoted_first_close():
     # Non-greedy: first <think> → first </think>, prose after may remain dirty.
-    content = "<think>рассуждаю про <think>цитата</think> теги и ещё</think>Ответ."
+    content = (
+        "<think>рассуждаю про <think>цитата</think> теги и ещё</think>Ответ."
+    )
     assert strip_think_blocks(content) == "теги и ещё</think>Ответ."
 
 
@@ -55,10 +60,15 @@ def test_strip_tagged_blocks_extra_tag():
 
 def test_strip_tagged_blocks_think_then_extra():
     text = "<think>t</think> mid <redacted_thinking>r</redacted_thinking> end"
-    assert strip_tagged_blocks(text, ("think", "redacted_thinking")) == "mid  end"
+    assert (
+        strip_tagged_blocks(text, ("think", "redacted_thinking")) == "mid  end"
+    )
 
 
 def test_strip_think_blocks_equals_tagged_think_only():
     text = "<think>x</think>Y <redacted_thinking>z</redacted_thinking>"
     assert strip_think_blocks(text) == strip_tagged_blocks(text, ("think",))
-    assert strip_think_blocks(text) == "Y <redacted_thinking>z</redacted_thinking>"
+    assert (
+        strip_think_blocks(text)
+        == "Y <redacted_thinking>z</redacted_thinking>"
+    )

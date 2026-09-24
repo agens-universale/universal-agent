@@ -41,12 +41,25 @@ def _write(tool, *, path, content, **kw) -> dict:
 
 
 def _edit(tool, *, path, edits, expected_file_sha256, **kw) -> dict:
-    return json.loads(tool(path=str(path), edits=edits, expected_file_sha256=expected_file_sha256, **kw))
+    return json.loads(
+        tool(
+            path=str(path),
+            edits=edits,
+            expected_file_sha256=expected_file_sha256,
+            **kw,
+        )
+    )
 
 
 def _sr(tool, *, path, search, replace, expected_file_sha256, **kw) -> dict:
     return json.loads(
-        tool(path=str(path), search=search, replace=replace, expected_file_sha256=expected_file_sha256, **kw)
+        tool(
+            path=str(path),
+            search=search,
+            replace=replace,
+            expected_file_sha256=expected_file_sha256,
+            **kw,
+        )
     )
 
 
@@ -60,7 +73,9 @@ def _assert_fresh_sha_ok(env: dict, path, *, applied_expected=True) -> str:
     assert env.get("error") is None, env
     sha = env["sha256"]
     assert sha is not None, env
-    assert sha == _disk_sha(path), f"returned sha256 != on-disk sha256; envelope sha={sha}"
+    assert sha == _disk_sha(path), (
+        f"returned sha256 != on-disk sha256; envelope sha={sha}"
+    )
     assert "stale_file" not in json.dumps(env), env
     return sha
 
@@ -79,7 +94,9 @@ def _assert_fresh_sha_ok(env: dict, path, *, applied_expected=True) -> str:
     ],
     ids=["ascii", "cyrillic", "mixed_unicode"],
 )
-def test_write_sha_accepted_by_apply_file_edits(tmp_path, content, search, replace):
+def test_write_sha_accepted_by_apply_file_edits(
+    tmp_path, content, search, replace
+):
     p = tmp_path / "a.txt"
     w = _write(with_local_ctx(WriteToFile), path=p, content=content)
     sha = _assert_fresh_sha_ok(w, p)
@@ -101,7 +118,9 @@ def test_write_then_edit_then_edit_chain_never_stale(tmp_path):
     """Two consecutive edits, each feeding the previous op's returned sha as
     expected_file_sha256 — the exact agent loop that D-3 fixed."""
     p = tmp_path / "chain.txt"
-    w = _write(with_local_ctx(WriteToFile), path=p, content="alpha beta gamma\n")
+    w = _write(
+        with_local_ctx(WriteToFile), path=p, content="alpha beta gamma\n"
+    )
     sha0 = _assert_fresh_sha_ok(w, p)
 
     e1 = _edit(
@@ -155,7 +174,11 @@ def test_append_sha_accepted_by_apply_file_edits(tmp_path):
     p = tmp_path / "app.txt"
     _write(with_local_ctx(WriteToFile), path=p, content="seed\n")
 
-    a = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="tail line", separator="\n"))
+    a = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="tail line", separator="\n"
+        )
+    )
     assert a["ok"] is True, a
     assert a["sha256"] == _disk_sha(p), a
     sha = a["sha256"]
@@ -177,7 +200,11 @@ def test_append_then_edit_chain_never_stale(tmp_path):
     p = tmp_path / "appchain.txt"
     _write(with_local_ctx(WriteToFile), path=p, content="base")
     # grow the file in two append steps, editing after each
-    a1 = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="one", separator="\n"))
+    a1 = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="one", separator="\n"
+        )
+    )
     assert a1["sha256"] == _disk_sha(p)
 
     e1 = _edit(
@@ -188,7 +215,11 @@ def test_append_then_edit_chain_never_stale(tmp_path):
     )
     sha1 = _assert_fresh_sha_ok(e1, p)
 
-    a2 = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="two", separator="\n"))
+    a2 = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="two", separator="\n"
+        )
+    )
     assert a2["sha256"] == _disk_sha(p)
 
     e2 = _edit(
@@ -216,10 +247,14 @@ def test_append_then_edit_chain_never_stale(tmp_path):
     ],
     ids=["utf-8", "utf-8-sig", "cp1251", "latin-1"],
 )
-def test_write_with_encoding_sha_accepted_by_edit(tmp_path, encoding, content, search, replace):
+def test_write_with_encoding_sha_accepted_by_edit(
+    tmp_path, encoding, content, search, replace
+):
     p = tmp_path / f"enc_{encoding.replace('-', '_')}.txt"
 
-    w = _write(with_local_ctx(WriteToFile), path=p, content=content, encoding=encoding)
+    w = _write(
+        with_local_ctx(WriteToFile), path=p, content=content, encoding=encoding
+    )
     assert w["ok"] is True, w
     assert w["encoding_used"] == encoding, w
     assert w["sha256"] == _disk_sha(p), w
@@ -245,7 +280,9 @@ def test_write_with_newline_mode_sha_accepted_by_edit(tmp_path, newline):
     content = "first\r\nsecond\rthird\n"
     p = tmp_path / f"nl_{newline}.txt"
 
-    w = _write(with_local_ctx(WriteToFile), path=p, content=content, newline=newline)
+    w = _write(
+        with_local_ctx(WriteToFile), path=p, content=content, newline=newline
+    )
     assert w["ok"] is True, w
     assert w["sha256"] == _disk_sha(p), w
     sha = w["sha256"]

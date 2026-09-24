@@ -45,16 +45,24 @@ class TransportSpy:
 
 def sse_body(*payloads: dict, done: bool = True) -> str:
     """Тело SSE-стрима из готовых чанков."""
-    body = "".join(f"data: {json.dumps(p, ensure_ascii=False)}\n\n" for p in payloads)
+    body = "".join(
+        f"data: {json.dumps(p, ensure_ascii=False)}\n\n" for p in payloads
+    )
     return body + ("data: [DONE]\n\n" if done else "")
 
 
-def json_response(payload: dict, status: int = 200) -> Callable[[httpx.Request], httpx.Response]:
+def json_response(
+    payload: dict, status: int = 200
+) -> Callable[[httpx.Request], httpx.Response]:
     return lambda request: httpx.Response(status, json=payload)
 
 
-def stream_response(body: str, status: int = 200) -> Callable[[httpx.Request], httpx.Response]:
-    return lambda request: httpx.Response(status, text=body, headers={"content-type": "text/event-stream"})
+def stream_response(
+    body: str, status: int = 200
+) -> Callable[[httpx.Request], httpx.Response]:
+    return lambda request: httpx.Response(
+        status, text=body, headers={"content-type": "text/event-stream"}
+    )
 
 
 def install_transport(
@@ -71,7 +79,9 @@ def install_transport(
 
     spy = TransportSpy()
     if handler is None:
-        handler = json_response({"id": "x", "choices": [{"message": {"content": "ok"}}]})
+        handler = json_response(
+            {"id": "x", "choices": [{"message": {"content": "ok"}}]}
+        )
 
     def _recording_handler(request: httpx.Request) -> httpx.Response:
         spy.requests.append(request)

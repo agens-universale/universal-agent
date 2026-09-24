@@ -15,7 +15,10 @@ class _Tool:
 
 def _ctx(cwd, confirm=False):
     return types.SimpleNamespace(
-        config_dict={"launch_root": str(cwd), "write_guard": {"enabled": True, "mode": "deny"}},
+        config_dict={
+            "launch_root": str(cwd),
+            "write_guard": {"enabled": True, "mode": "deny"},
+        },
         is_tui=False,
         tui_confirm=None,
         logger=None,
@@ -27,22 +30,33 @@ def test_operational_gc_write_denied(tmp_path, monkeypatch):
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = _ctx(tmp_path)
-    res = _Tool(ctx).write(path=str(tmp_path / ".gc" / "config.yml"), content="x")
+    res = _Tool(ctx).write(
+        path=str(tmp_path / ".gc" / "config.yml"), content="x"
+    )
     assert json.loads(res)["ok"] is False  # заблокировано floor-ом
 
 
-def test_operational_gc_write_denied_even_when_guard_disabled(tmp_path, monkeypatch):
+def test_operational_gc_write_denied_even_when_guard_disabled(
+    tmp_path, monkeypatch
+):
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = types.SimpleNamespace(
-        config_dict={"launch_root": str(tmp_path), "write_guard": {"enabled": False}},
+        config_dict={
+            "launch_root": str(tmp_path),
+            "write_guard": {"enabled": False},
+        },
         is_tui=False,
         tui_confirm=None,
         logger=None,
     )
-    res = _Tool(ctx).write(path=str(tmp_path / ".gc" / "config.yml"), content="x")
-    assert json.loads(res)["ok"] is False  # floor blocks even when write_guard disabled
+    res = _Tool(ctx).write(
+        path=str(tmp_path / ".gc" / "config.yml"), content="x"
+    )
+    assert (
+        json.loads(res)["ok"] is False
+    )  # floor blocks even when write_guard disabled
 
 
 def test_skills_write_allowed(tmp_path, monkeypatch):
@@ -51,7 +65,9 @@ def test_skills_write_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     ctx = _ctx(tmp_path)
     (tmp_path / ".gc" / "skills" / "foo").mkdir(parents=True)
-    res = _Tool(ctx).write(path=str(tmp_path / ".gc" / "skills" / "foo" / "SKILL.md"), content="x")
+    res = _Tool(ctx).write(
+        path=str(tmp_path / ".gc" / "skills" / "foo" / "SKILL.md"), content="x"
+    )
     assert json.loads(res)["ok"] is True
 
 
@@ -64,14 +80,19 @@ import types as _types
 def _ctx_ask_tui(launch_root, tui_confirm):
     """ctx для mode=ask в TUI-режиме."""
     return _types.SimpleNamespace(
-        config_dict={"launch_root": str(launch_root), "write_guard": {"enabled": True, "mode": "ask"}},
+        config_dict={
+            "launch_root": str(launch_root),
+            "write_guard": {"enabled": True, "mode": "ask"},
+        },
         is_tui=True,
         tui_confirm=tui_confirm,
         logger=None,
     )
 
 
-def test_instruction_file_confirm_cached_by_decision_key(tmp_path, monkeypatch):
+def test_instruction_file_confirm_cached_by_decision_key(
+    tmp_path, monkeypatch
+):
     """Повторная запись инструкц-файла (AGENTS.md) в одном прогоне НЕ переспрашивает:
     первый ответ кэшируется по decision_key, остальные правки авто-проходят."""
     from gc_core.config_modules import env_vars
@@ -86,7 +107,10 @@ def test_instruction_file_confirm_cached_by_decision_key(tmp_path, monkeypatch):
         return "once"
 
     ctx = _types.SimpleNamespace(
-        config_dict={"launch_root": str(tmp_path), "write_guard": {"enabled": True, "mode": "deny"}},
+        config_dict={
+            "launch_root": str(tmp_path),
+            "write_guard": {"enabled": True, "mode": "deny"},
+        },
         is_tui=True,
         tui_confirm=tui_confirm,
         logger=None,
@@ -100,7 +124,9 @@ def test_instruction_file_confirm_cached_by_decision_key(tmp_path, monkeypatch):
 
     r2 = _Tool(ctx).write(path=agents_md, content="b")
     assert json.loads(r2)["ok"] is True
-    assert len(calls) == 1, f"повторная запись того же файла не должна переспрашивать, calls={calls}"
+    assert len(calls) == 1, (
+        f"повторная запись того же файла не должна переспрашивать, calls={calls}"
+    )
 
 
 def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
@@ -112,7 +138,9 @@ def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     recorded = []
-    tui_confirm = lambda **kw: recorded.append(kw) or "once"  # 3-значный контракт: once=разрешить
+    tui_confirm = lambda **kw: (
+        recorded.append(kw) or "once"
+    )  # 3-значный контракт: once=разрешить
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")
@@ -120,7 +148,9 @@ def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     import json
 
     res = _Tool(ctx).write(path=out_path, content="x")
-    assert json.loads(res)["ok"] is True, "Banner confirmed → write should pass"
+    assert json.loads(res)["ok"] is True, (
+        "Banner confirmed → write should pass"
+    )
     assert recorded, "tui_confirm должен быть вызван (баннер показан)"
 
 

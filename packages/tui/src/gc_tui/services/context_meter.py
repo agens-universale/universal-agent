@@ -62,6 +62,11 @@ def render_context_meter(chars: int, threshold: int) -> Text | None:
 
     t = Text()
     for i, ch in enumerate(cells):
-        bold = ch != " " and i >= pct_start and pct > 90  # проценты жирным при кризисе
-        t.append(ch, style=Style(color=_WHITE, bgcolor=_cell_bg(i, filled), bold=bold))
+        bold = (
+            ch != " " and i >= pct_start and pct > 90
+        )  # проценты жирным при кризисе
+        t.append(
+            ch,
+            style=Style(color=_WHITE, bgcolor=_cell_bg(i, filled), bold=bold),
+        )
     return t

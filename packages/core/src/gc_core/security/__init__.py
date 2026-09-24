@@ -24,7 +24,9 @@ from gc_core.security.path_policy import (
     resolve_existing_parent,
     resolve_tool_context,
 )
-from gc_core.security.read_guard import ReadGuardConfig as ReadGuardRuntimeConfig
+from gc_core.security.read_guard import (
+    ReadGuardConfig as ReadGuardRuntimeConfig,
+)
 from gc_core.security.read_guard import (
     ReadGuardViolation,
     check_read_path_allowed,

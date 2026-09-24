@@ -41,7 +41,9 @@ class EmbeddedChoiceError(Exception):
     (finish_reason='error' с пустым выбором: транзиентный сбой → ретраить).
     Оба дают status_code=None, но раскладываются по-разному."""
 
-    def __init__(self, message, *, status_code=None, metadata=None, raw_code=None):
+    def __init__(
+        self, message, *, status_code=None, metadata=None, raw_code=None
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.metadata = metadata
@@ -200,7 +202,9 @@ _KNOWN_FINISH_KINDS = {
 
 
 class FinishDecision(NamedTuple):
-    accept: bool  # принять payload в историю (не крашиться/не ретраить транспорт)
+    accept: (
+        bool  # принять payload в историю (не крашиться/не ретраить транспорт)
+    )
     unknown: bool  # finish_reason незнакомый → залогировать warning
     kind: str  # stop | tool_calls | length | blocked | unknown
 
@@ -256,9 +260,13 @@ def normalize_finish_reason(
     """
     key = _finish_reason_key(finish_reason)
     if key is not None and key in _KNOWN_FINISH_KINDS:
-        return FinishDecision(accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key])
+        return FinishDecision(
+            accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
+        )
     if has_content or has_tool_calls or has_reasoning:
-        return FinishDecision(accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN)
+        return FinishDecision(
+            accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN
+        )
     return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)
 
 

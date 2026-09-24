@@ -47,16 +47,24 @@ class TestDefaultByMode:
         assert gc_force_collect_enabled({}, is_tui=True) is True
 
     def test_server_default_off(self):
-        assert gc_force_collect_enabled({}, is_tui=False, is_cli_mode=False) is False
+        assert (
+            gc_force_collect_enabled({}, is_tui=False, is_cli_mode=False)
+            is False
+        )
 
     def test_cli_and_tui_both_on(self):
-        assert gc_force_collect_enabled({}, is_tui=True, is_cli_mode=True) is True
+        assert (
+            gc_force_collect_enabled({}, is_tui=True, is_cli_mode=True) is True
+        )
 
 
 class TestEdgeCases:
     def test_none_config_dict(self):
         assert gc_force_collect_enabled(None, is_cli_mode=True) is True
-        assert gc_force_collect_enabled(None, is_tui=False, is_cli_mode=False) is False
+        assert (
+            gc_force_collect_enabled(None, is_tui=False, is_cli_mode=False)
+            is False
+        )
 
     def test_empty_config(self):
         assert gc_force_collect_enabled({}, is_tui=True) is True

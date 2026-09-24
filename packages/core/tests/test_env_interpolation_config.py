@@ -16,7 +16,9 @@ def test_load_config_resolves_env_in_mcp_and_headers(tmp_path, monkeypatch):
         {
             "backend": {
                 "api_mode": "chat_completions",
-                "chat_completion_headers": {"Authorization": "Bearer ${ENV:OR_KEY}"},
+                "chat_completion_headers": {
+                    "Authorization": "Bearer ${ENV:OR_KEY}"
+                },
             },
             "mcp": {
                 "servers": {
@@ -50,9 +52,16 @@ def test_cli_override_file_placeholder(tmp_path):
     config_dict: dict = {}
     apply_cli_overrides(
         config_dict,
-        extra_overrides={"chat_completion_headers": {"Authorization": f"Bearer ${{FILE:{f}}}"}},
+        extra_overrides={
+            "chat_completion_headers": {
+                "Authorization": f"Bearer ${{FILE:{f}}}"
+            }
+        },
     )
-    assert config_dict["chat_completion_headers"]["Authorization"] == "Bearer cli-secret"
+    assert (
+        config_dict["chat_completion_headers"]["Authorization"]
+        == "Bearer cli-secret"
+    )
 
 
 def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
@@ -72,7 +81,9 @@ def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
         '  completions_url: "http://h/v1/chat/completions"\n'
         '  request_timeout_sec: "${ENV:GC_BACKEND_TIMEOUT}"\n'
     )
-    config_mod.validate_config_text(text)  # не бросает: ${ENV:} резолвится как в load_config_ex
+    config_mod.validate_config_text(
+        text
+    )  # не бросает: ${ENV:} резолвится как в load_config_ex
 
 
 def test_validate_config_text_interpolates_before_compat(monkeypatch):
@@ -101,5 +112,7 @@ def test_validate_config_text_interpolates_before_compat(monkeypatch):
     monkeypatch.setattr(layers_mod, "resolve_env_placeholders", spy_interp)
     monkeypatch.setattr(layers_mod, "apply_compat", spy_compat)
 
-    config_mod.validate_config_text('backend:\n  completions_url: "http://h/v1/chat/completions"\n')
+    config_mod.validate_config_text(
+        'backend:\n  completions_url: "http://h/v1/chat/completions"\n'
+    )
     assert calls == ["interp", "compat"]

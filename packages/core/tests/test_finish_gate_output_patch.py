@@ -108,6 +108,8 @@ def test_patch_function_call_output_returns_updated_message():
             "output": '{"tool":"turn_finish","ok":true}',
         }
     ]
-    updated = patch_function_call_output(messages, call_id="c1", new_output='{"tool":"turn_finish","ok":false}')
+    updated = patch_function_call_output(
+        messages, call_id="c1", new_output='{"tool":"turn_finish","ok":false}'
+    )
     assert updated is not None
     assert json.loads(messages[0]["output"])["ok"] is False

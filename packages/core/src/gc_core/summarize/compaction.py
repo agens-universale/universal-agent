@@ -1,10 +1,17 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
 from gc_core.loop_detector.detector import clear as clear_loop_detector
-from gc_core.message_format.serialization import calc_history_chars_for_trigger, calc_messages_chars_total
-from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+from gc_core.message_format.serialization import (
+    calc_history_chars_for_trigger,
+    calc_messages_chars_total,
+)
+from gc_core.message_policy.todo_context import (
+    render_todo_for_persistent_state,
+)
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
@@ -19,9 +26,17 @@ from gc_core.summarize.summary_logging import (
     log_summary_slice_fallback,
     logger_from_ctx,
 )
-from gc_core.summarize.summary_message_body import build_dialog_summary_content, resolve_intent_log_preview_chars
-from gc_core.summarize.summary_spec import agent_summary_slice_mode, slice_summary
-from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
+from gc_core.summarize.summary_message_body import (
+    build_dialog_summary_content,
+    resolve_intent_log_preview_chars,
+)
+from gc_core.summarize.summary_spec import (
+    agent_summary_slice_mode,
+    slice_summary,
+)
+from gc_core.summarize.thread_summarizer import (
+    asummarize_dialog_via_chat_completions,
+)
 from gc_core.summarize.working_memory_gateway import (
     REGISTER_ORDER,
     WorkingMemoryDeltas,
@@ -34,7 +49,9 @@ from gc_core.summarize.working_memory_gateway import (
     render_session_memory_for_summary_message,
 )
 from gc_core.utils.aio_compat import await_callback
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 
 
 def without_system_messages(messages_list: List[dict]) -> List[dict]:
@@ -77,7 +94,11 @@ def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
     if ctx is None:
         return resolve_intent_log_preview_chars(None)
     cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
+    summary_params = (
+        cfg.get("summary_params")
+        if isinstance(cfg.get("summary_params"), dict)
+        else {}
+    )
     return resolve_intent_log_preview_chars(summary_params)
 
 
@@ -92,7 +113,11 @@ def _ensure_shared(state: Any):
 
 
 def _patched_snapshot(
-    snapshot, memory_append_deltas, memory_replace_deltas, memory_append_touched, memory_replace_touched
+    snapshot,
+    memory_append_deltas,
+    memory_replace_deltas,
+    memory_append_touched,
+    memory_replace_touched,
 ):
     """Снимок памяти после патча summary: replace-патч приоритетнее append-патча."""
     append_deltas = coerce_working_memory_deltas(memory_append_deltas)
@@ -123,7 +148,10 @@ def _previous_messages(state: Any) -> list:
 
 def _first_system_message(messages: list):
     for msg in messages:
-        if isinstance(msg, dict) and str(msg.get("role", "")).strip().lower() == "system":
+        if (
+            isinstance(msg, dict)
+            and str(msg.get("role", "")).strip().lower() == "system"
+        ):
             return msg
     return None
 
@@ -150,17 +178,23 @@ def apply_summary_state_patch(
         memory_replace_touched,
     )
 
-    wm_dict = {name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER}
+    wm_dict = {
+        name: snapshot.to_dict().get(name, "") for name in REGISTER_ORDER
+    }
     shared.working_memory = wm_dict
 
     session_memory_block = render_session_memory_for_summary_message(snapshot)
     # Чек-лист едет в baseline дословно, как session_memory: после сжатия
     # вызовы session_todo вырезаны, и это единственный канал до модели.
-    session_todo_block = render_todo_for_persistent_state(read_session_todo_from_state(state))
+    session_todo_block = render_todo_for_persistent_state(
+        read_session_todo_from_state(state)
+    )
     closed_records = list(getattr(state, "user_intent_log", []) or [])
     open_records = list(getattr(state, "current_user_intent", []) or [])
     preview_chars = (
-        resolve_intent_log_preview_chars({"intent_log_preview_chars": intent_log_preview_chars})
+        resolve_intent_log_preview_chars(
+            {"intent_log_preview_chars": intent_log_preview_chars}
+        )
         if intent_log_preview_chars is not None
         else resolve_intent_log_preview_chars(None)
     )
@@ -173,13 +207,17 @@ def apply_summary_state_patch(
         current_user_intent_jsonl=serialize(open_records),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
-    state.dialog_steps_offset = prev_offset + max(0, int(summarized_messages_count or 0))
+    state.dialog_steps_offset = prev_offset + max(
+        0, int(summarized_messages_count or 0)
+    )
     state.previous_response_id = None
 
     summary_message = {
         "role": "user",
         "content": wrap_technical_user_content(
-            (f"Summarized context from previous dialogue.\n{summary_message_content.strip()}"),
+            (
+                f"Summarized context from previous dialogue.\n{summary_message_content.strip()}"
+            ),
             technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
         ),
         "id": generate_message_id_func("m_sum"),
@@ -205,7 +243,12 @@ def history_exceeds_summary_trigger(
     if summary_trigger_chars <= 0:
         return False
     full_messages = without_system_messages(getattr(state, "messages", []))
-    return calc_history_chars_for_trigger(full_messages, tags=tags, strip_think=strip_think) > summary_trigger_chars
+    return (
+        calc_history_chars_for_trigger(
+            full_messages, tags=tags, strip_think=strip_think
+        )
+        > summary_trigger_chars
+    )
 
 
 def _fill_trace_final_output(trace: Dict[str, Any], **fields: Any) -> None:
@@ -221,7 +264,9 @@ def _archive_suffix_of(summary_event: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _build_summary_payload(state: Any, summary_message_content: str) -> Dict[str, Any]:
+def _build_summary_payload(
+    state: Any, summary_message_content: str
+) -> Dict[str, Any]:
     # nested: cycle with persistence → states → tools → summarize
     from gc_core.persistence.schema import serialize_shared_block
 
@@ -232,10 +277,16 @@ def _build_summary_payload(state: Any, summary_message_content: str) -> Dict[str
         # поля (confirm_rules, fetch_url_cache, …) — детерминированно при ручном
         # /compact (там нет post-run heal) и при обрыве рана.
         "shared": serialize_shared_block(getattr(state, "shared", None)),
-        "user_intent_log": serialize_for_meta(list(getattr(state, "user_intent_log", []) or [])),
-        "current_user_intent": serialize_for_meta(list(getattr(state, "current_user_intent", []) or [])),
+        "user_intent_log": serialize_for_meta(
+            list(getattr(state, "user_intent_log", []) or [])
+        ),
+        "current_user_intent": serialize_for_meta(
+            list(getattr(state, "current_user_intent", []) or [])
+        ),
         "user_turn_seq": int(getattr(state, "user_turn_seq", 0) or 0),
-        "dialog_steps_offset": int(getattr(state, "dialog_steps_offset", 0) or 0),
+        "dialog_steps_offset": int(
+            getattr(state, "dialog_steps_offset", 0) or 0
+        ),
     }
 
 
@@ -260,8 +311,12 @@ async def arun_summary_compaction(
     thread_id = getattr(state, "thread_id", None)
     tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
     full_messages = without_system_messages(getattr(state, "messages", []))
-    trigger_volume = calc_history_chars_for_trigger(full_messages, tags=tags, strip_think=True)
-    serialized_chars = calc_messages_chars_total(full_messages, tags=tags, strip_think=True)
+    trigger_volume = calc_history_chars_for_trigger(
+        full_messages, tags=tags, strip_think=True
+    )
+    serialized_chars = calc_messages_chars_total(
+        full_messages, tags=tags, strip_think=True
+    )
     log_ctx = SummaryCompactionLog(
         trigger_reason=trigger_reason,
         thread_id=thread_id,
@@ -277,7 +332,9 @@ async def arun_summary_compaction(
     )
 
     source_user_log = list(getattr(state, "user_intent_log", []) or [])
-    source_current_intent = list(getattr(state, "current_user_intent", []) or [])
+    source_current_intent = list(
+        getattr(state, "current_user_intent", []) or []
+    )
     memory_snapshot = read_snapshot_from_state(state)
     summary_result = await asummarize_dialog_via_chat_completions(
         ctx=ctx,
@@ -295,7 +352,11 @@ async def arun_summary_compaction(
     num_batches = int(summary_result.get("num_batches") or 0)
     trace = summary_result.get("trace")
     memory_patch = trace.get("memory_patch") if isinstance(trace, dict) else {}
-    patch_executed = bool(memory_patch.get("executed")) if isinstance(memory_patch, dict) else False
+    patch_executed = (
+        bool(memory_patch.get("executed"))
+        if isinstance(memory_patch, dict)
+        else False
+    )
     agent_slice = agent_summary_slice_mode(
         num_batches=num_batches,
         patch_executed=patch_executed,
@@ -310,8 +371,12 @@ async def arun_summary_compaction(
             raw_summary_chars=len(raw_summary),
         )
         agent_summary_text = raw_summary
-    memory_append_deltas = coerce_working_memory_deltas(summary_result.get("memory_append_deltas"))
-    memory_replace_deltas = coerce_working_memory_deltas(summary_result.get("memory_replace_deltas"))
+    memory_append_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_append_deltas")
+    )
+    memory_replace_deltas = coerce_working_memory_deltas(
+        summary_result.get("memory_replace_deltas")
+    )
     memory_append_touched = summary_result.get("memory_append_touched")
     memory_replace_touched = summary_result.get("memory_replace_touched")
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
@@ -344,7 +409,10 @@ async def arun_summary_compaction(
         "summary_payload": summary_payload,
         "summary_trace": summary_result.get("trace", {}),
         "newly_summarized_message_id": str(
-            state.messages[0].get("id") if isinstance(getattr(state, "messages", []), list) and state.messages else ""
+            state.messages[0].get("id")
+            if isinstance(getattr(state, "messages", []), list)
+            and state.messages
+            else ""
         ),
     }
     if on_summary_applied is not None:
@@ -357,10 +425,14 @@ async def arun_summary_compaction(
         tags=tags,
         strip_think=True,
     )
-    ratio = round((new_serialized / serialized_chars), 4) if serialized_chars > 0 else 0.0
-    delta_chars = sum(len(v) for v in memory_append_deltas.to_dict().values()) + sum(
-        len(v) for v in memory_replace_deltas.to_dict().values()
+    ratio = (
+        round((new_serialized / serialized_chars), 4)
+        if serialized_chars > 0
+        else 0.0
     )
+    delta_chars = sum(
+        len(v) for v in memory_append_deltas.to_dict().values()
+    ) + sum(len(v) for v in memory_replace_deltas.to_dict().values())
     log_compaction_completed(
         logger,
         log_ctx,
@@ -390,8 +462,12 @@ async def amaybe_run_summary_compaction(
         return False
     tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
     full_messages = without_system_messages(getattr(state, "messages", []))
-    trigger_volume = calc_history_chars_for_trigger(full_messages, tags=tags, strip_think=True)
-    serialized_chars = calc_messages_chars_total(full_messages, tags=tags, strip_think=True)
+    trigger_volume = calc_history_chars_for_trigger(
+        full_messages, tags=tags, strip_think=True
+    )
+    serialized_chars = calc_messages_chars_total(
+        full_messages, tags=tags, strip_think=True
+    )
     log_compaction_precheck(
         logger,
         trigger_reason=trigger_reason,

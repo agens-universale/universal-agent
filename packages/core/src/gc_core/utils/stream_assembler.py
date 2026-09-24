@@ -124,7 +124,9 @@ class StreamAssembler:
 
     def __init__(self, on_delta: Optional[OnDelta] = None) -> None:
         self._on_delta = on_delta
-        self._splitter = _InlineThinkSplitter() if on_delta is not None else None
+        self._splitter = (
+            _InlineThinkSplitter() if on_delta is not None else None
+        )
         self._content_parts: List[str] = []
         self._reasoning_parts: List[str] = []
         self._tool_calls: Dict[int, Dict[str, Any]] = {}
@@ -214,7 +216,11 @@ class StreamAssembler:
         idx = tc.get("index", 0)
         slot = self._tool_calls.setdefault(
             idx,
-            {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+            {
+                "id": None,
+                "type": "function",
+                "function": {"name": "", "arguments": ""},
+            },
         )
         if tc.get("id"):
             slot["id"] = tc["id"]
@@ -248,12 +254,20 @@ class StreamAssembler:
         if self._reasoning_parts:
             message["reasoning_content"] = "".join(self._reasoning_parts)
         if self._tool_calls:
-            message["tool_calls"] = [self._tool_calls[i] for i in sorted(self._tool_calls)]
+            message["tool_calls"] = [
+                self._tool_calls[i] for i in sorted(self._tool_calls)
+            ]
 
         result: Dict[str, Any] = {
             "id": self._resp_id,
             "model": self._model,
-            "choices": [{"index": 0, "message": message, "finish_reason": self._finish_reason}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": self._finish_reason,
+                }
+            ],
         }
         if self._usage is not None:
             result["usage"] = self._usage

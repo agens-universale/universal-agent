@@ -26,7 +26,9 @@ def test_normalize_strips_angle_brackets():
 
 
 def test_normalize_warn_drop_invalid(caplog):
-    cfg = StripTagsProjectionConfig(tags=["", "  ", "bad/name", "has space", "ok_tag", "think", "THINK"])
+    cfg = StripTagsProjectionConfig(
+        tags=["", "  ", "bad/name", "has space", "ok_tag", "think", "THINK"]
+    )
     with caplog.at_level("WARNING"):
         normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == ["ok_tag", "think"]
@@ -40,8 +42,18 @@ def test_normalize_strip_think_default_true():
 def test_persist_reasoning_content_default_false():
     assert persist_reasoning_content_from_config({}) is False
     assert persist_reasoning_content_from_config(None) is False
-    assert persist_reasoning_content_from_config({"strip_tags_projection": {"strip_think": True}}) is False
-    assert persist_reasoning_content_from_config({"strip_tags_projection": {"strip_think": False}}) is True
+    assert (
+        persist_reasoning_content_from_config(
+            {"strip_tags_projection": {"strip_think": True}}
+        )
+        is False
+    )
+    assert (
+        persist_reasoning_content_from_config(
+            {"strip_tags_projection": {"strip_think": False}}
+        )
+        is True
+    )
 
 
 def test_normalize_keeps_think_in_tags():

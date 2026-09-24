@@ -10,7 +10,9 @@ async def test_branch_captured_on_new_session(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "current_branch", lambda cwd: "feat/captured")
+    monkeypatch.setattr(
+        main_mod, "current_branch", lambda cwd: "feat/captured"
+    )
     from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
@@ -22,7 +24,9 @@ async def test_branch_captured_on_new_session(tmp_path, monkeypatch):
         await pilot.pause()
         tid = pilot.app.tui_state.active_task_id
         assert tid is not None
-        meta = FileTaskStore(threads_dir=str(tmp_path), system="cli").get_task_meta(tid)
+        meta = FileTaskStore(
+            threads_dir=str(tmp_path), system="cli"
+        ).get_task_meta(tid)
         assert meta.get("tui", {}).get("branch") == "feat/captured"
 
 

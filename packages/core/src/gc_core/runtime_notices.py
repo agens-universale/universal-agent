@@ -118,7 +118,10 @@ def mark_runtime_notices_seen() -> None:
 def push_runtime_notice(notice: Notice) -> None:
     with _lock:
         for existing in _notices:
-            if existing.code == notice.code and existing.message == notice.message:
+            if (
+                existing.code == notice.code
+                and existing.message == notice.message
+            ):
                 return
         _notices.append(notice)
         if len(_notices) > _MAX_NOTICES:
@@ -170,7 +173,12 @@ def _detail_from_body(body: str) -> str:
         return body.strip()
     if not isinstance(parsed, dict):
         return ""
-    return str(parsed.get("message") or parsed.get("error") or parsed.get("detail") or "").strip()
+    return str(
+        parsed.get("message")
+        or parsed.get("error")
+        or parsed.get("detail")
+        or ""
+    ).strip()
 
 
 def notice_from_llm_failure(
@@ -208,7 +216,9 @@ def maybe_push_llm_failure_notice(
 ) -> None:
     if not enabled:
         return
-    push_runtime_notice(notice_from_llm_failure(exc, request_label=request_label, url=url))
+    push_runtime_notice(
+        notice_from_llm_failure(exc, request_label=request_label, url=url)
+    )
 
 
 def notice_from_fallback_to_active(
@@ -224,7 +234,9 @@ def notice_from_fallback_to_active(
     субагентов; пусто для служебных потребителей."""
     suffix = f" ({mode})" if mode else ""
     message = f"{who}{suffix}: {failed_alias} недоступна — выполнено активной {active_model}"
-    return Notice("warning", "fallback_to_active", message, (failed_alias, active_model))
+    return Notice(
+        "warning", "fallback_to_active", message, (failed_alias, active_model)
+    )
 
 
 def maybe_push_fallback_to_active_notice(
@@ -238,5 +250,10 @@ def maybe_push_fallback_to_active_notice(
     if not enabled:
         return
     push_runtime_notice(
-        notice_from_fallback_to_active(who=who, failed_alias=failed_alias, active_model=active_model, mode=mode)
+        notice_from_fallback_to_active(
+            who=who,
+            failed_alias=failed_alias,
+            active_model=active_model,
+            mode=mode,
+        )
     )

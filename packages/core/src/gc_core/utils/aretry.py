@@ -20,19 +20,29 @@ _T = TypeVar("_T")
 
 
 def _wrap_async(
-    func: Callable[..., Awaitable[_T]], prepare: Callable[[dict], _PreparedCall], policy: _RetryPolicy
+    func: Callable[..., Awaitable[_T]],
+    prepare: Callable[[dict], _PreparedCall],
+    policy: _RetryPolicy,
 ) -> Callable[..., Awaitable[_T]]:
     async def wrapper(*args: Any, **kwargs: Any) -> _T:
         call = prepare(kwargs)
         if not call.use_retry or policy.max_attempts <= 1:
             return await func(*args, **call.kwargs)
-        return await _run_with_retries_async(func, args, call.kwargs, policy, logger=call.logger, url=call.url)
+        return await _run_with_retries_async(
+            func, args, call.kwargs, policy, logger=call.logger, url=call.url
+        )
 
     return wrapper
 
 
 async def _run_with_retries_async(
-    func: Callable[..., Awaitable[_T]], args: tuple, kwargs: dict, policy: _RetryPolicy, *, logger: Any, url: Any
+    func: Callable[..., Awaitable[_T]],
+    args: tuple,
+    kwargs: dict,
+    policy: _RetryPolicy,
+    *,
+    logger: Any,
+    url: Any,
 ) -> _T:
     delay = float(policy.initial_delay_sec)
     last_exc: Optional[Exception] = None

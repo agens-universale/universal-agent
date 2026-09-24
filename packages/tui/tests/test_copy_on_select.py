@@ -30,14 +30,20 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
         # Копирование ловим на транспорте, а не на OSC 52: с 2026-08-04 терминалу
         # последовательность шлётся только в SSH и как запасной путь, локально
         # работает нативная запись (см. services/clipboard_ops._send_osc52).
-        monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: copied.append(text) or True)
+        monkeypatch.setattr(
+            clipboard_ops,
+            "write_clipboard",
+            lambda text: copied.append(text) or True,
+        )
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "стартуй"
         await pilot.press("enter")
@@ -58,7 +64,11 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
         # результат, а не фиксированную паузу.
         from gc_testkit.tui_support import wait_until
 
-        await wait_until(pilot, lambda: copied == ["фрагмент"], "текст ушёл в системный буфер")
+        await wait_until(
+            pilot,
+            lambda: copied == ["фрагмент"],
+            "текст ушёл в системный буфер",
+        )
         assert stop_called["flag"] is False
 
 
@@ -74,7 +84,9 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
         seen.append((text, toast, blocking))
         return True
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         monkeypatch.setattr(clipboard_ops, "copy_out", fake_copy_out)
         # patch на экземпляре через модуль, которым пользуется app — переопределим метод
@@ -82,11 +94,15 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
             "gc_tui.app.copy_out",
             fake_copy_out,
         )
-        monkeypatch.setattr(pilot.app, "_current_selection", lambda: "выделено")
+        monkeypatch.setattr(
+            pilot.app, "_current_selection", lambda: "выделено"
+        )
         pilot.app.post_message(events.TextSelected())
         # debounce 150ms — ждём flush
         await pilot.pause(0.25)
-        assert seen == [("выделено", False, False)]  # toast=False, blocking=False
+        assert seen == [
+            ("выделено", False, False)
+        ]  # toast=False, blocking=False
 
 
 @pytest.mark.asyncio
@@ -100,7 +116,9 @@ async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
         seen.append(text)
         return True
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
         seq = {"n": 0}
@@ -129,7 +147,9 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
         seen.append(text)
         return True
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
         monkeypatch.setattr(pilot.app, "_current_selection", lambda: "")
@@ -139,7 +159,9 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_copy_block_request_wins_race_with_pending_select_copy(tmp_path, monkeypatch):
+async def test_copy_block_request_wins_race_with_pending_select_copy(
+    tmp_path, monkeypatch
+):
     """Двойной клик по таблице: сам жест рождает TextSelected (drag выделяет
     тело целиком → псевдографика ставится в очередь на автокопию), а следом
     CopyBlockRequest кладёт markdown. Без отмены отложенной автокопии debounce
@@ -157,12 +179,18 @@ async def test_copy_block_request_wins_race_with_pending_select_copy(tmp_path, m
         seen.append(text)
         return True
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
         monkeypatch.setattr("gc_tui.screens.main.copy_out", fake_copy_out)
-        monkeypatch.setattr(pilot.app, "_push_session_copy_buffer", lambda payload: None)
-        monkeypatch.setattr(pilot.app, "_current_selection", lambda: pseudographics)
+        monkeypatch.setattr(
+            pilot.app, "_push_session_copy_buffer", lambda payload: None
+        )
+        monkeypatch.setattr(
+            pilot.app, "_current_selection", lambda: pseudographics
+        )
 
         # Drag/double-click выделяет тело — автокопия видимого ставится в очередь.
         pilot.app.post_message(events.TextSelected())
@@ -185,7 +213,9 @@ async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import DiffViewerScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         viewer = DiffViewerScreen(
             title="дифф · M · src/x.py",

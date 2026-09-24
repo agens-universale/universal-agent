@@ -12,7 +12,9 @@ from gc_core.utils.stream_assembler import StreamAssembler
 
 
 def _lines(*payloads):
-    return [f"data: {json.dumps(p, ensure_ascii=False)}" for p in payloads] + ["data: [DONE]"]
+    return [f"data: {json.dumps(p, ensure_ascii=False)}" for p in payloads] + [
+        "data: [DONE]"
+    ]
 
 
 def _delta(content=None, **extra):
@@ -28,7 +30,10 @@ def test_assembles_content_and_usage_from_lines():
     for line in _lines(
         _delta("при"),
         _delta("вет"),
-        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"completion_tokens": 2}},
+        {
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {"completion_tokens": 2},
+        },
     ):
         asm.feed_line(line)
     asm.flush()
@@ -73,7 +78,10 @@ def test_think_tag_split_across_chunks():
     assert kinds.get("think") == "рассуждение"
     assert kinds.get("answer") == "ответ"
     # content сохраняется дословно, вместе с тегами: их снимает downstream
-    assert asm.result()["choices"][0]["message"]["content"] == "<think>рассуждение</think>ответ"
+    assert (
+        asm.result()["choices"][0]["message"]["content"]
+        == "<think>рассуждение</think>ответ"
+    )
 
 
 def test_tool_calls_are_joined_by_index():
@@ -82,12 +90,23 @@ def test_tool_calls_are_joined_by_index():
         json.dumps(
             _delta(
                 tool_calls=[
-                    {"index": 0, "id": "c1", "type": "function", "function": {"name": "calc", "arguments": '{"a"'}}
+                    {
+                        "index": 0,
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "calc", "arguments": '{"a"'},
+                    }
                 ]
             )
         )
     )
-    asm.feed_payload(json.dumps(_delta(tool_calls=[{"index": 0, "function": {"arguments": ": 1}"}}])))
+    asm.feed_payload(
+        json.dumps(
+            _delta(
+                tool_calls=[{"index": 0, "function": {"arguments": ": 1}"}}]
+            )
+        )
+    )
     asm.flush()
 
     calls = asm.result()["choices"][0]["message"]["tool_calls"]

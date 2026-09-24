@@ -6,7 +6,9 @@ async def test_indicator_persists_done_after_completed(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("t-1")
         await pilot.pause()

@@ -43,7 +43,12 @@ def build_compaction_label(num: int, comp: dict) -> str:
 
 
 def build_block_widgets(
-    text: str, *, prose_bullet: bool, event_no: int, bullet: str = "● ", kind_class_base: str = "line-agent"
+    text: str,
+    *,
+    prose_bullet: bool,
+    event_no: int,
+    bullet: str = "● ",
+    kind_class_base: str = "line-agent",
 ) -> list:
     """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе (трейс/превью);
     False — без него (баннер ask_human). `bullet`/`kind_class_base` переопределяют маркер и
@@ -82,7 +87,11 @@ def build_block_widgets(
             )
             focus_set = True
             continue
-        kind_class = kind_class_base if not first_prose_seen else f"{kind_class_base} line-agent-cont"
+        kind_class = (
+            kind_class_base
+            if not first_prose_seen
+            else f"{kind_class_base} line-agent-cont"
+        )
         marker = bullet if not first_prose_seen else "  "
         prefix = marker if prose_bullet else ""
         first_prose_seen = True
@@ -99,7 +108,9 @@ def build_block_widgets(
     return widgets
 
 
-def build_answered_question_widget(question, *, event_no: int = 0, extra_classes: str = ""):
+def build_answered_question_widget(
+    question, *, event_no: int = 0, extra_classes: str = ""
+):
     """Отвеченный вопрос ask_human как строка истории: серая round-рамка
     (CSS .answered-question) + янтарный маркер '?'. Тех-префикс 'ask_human:'
     не добавляем. Общий для live (main) и readonly (preview) путей.
@@ -116,7 +127,13 @@ def build_answered_question_widget(question, *, event_no: int = 0, extra_classes
     content.append("? ", style=RUN_COLOR)
     content.append(question, style=DIM)
     cls = ("answered-question " + extra_classes).strip()
-    return TraceRow(prefix="", content=content, kind_class=cls, event_no=event_no, focusable=True)
+    return TraceRow(
+        prefix="",
+        content=content,
+        kind_class=cls,
+        event_no=event_no,
+        focusable=True,
+    )
 
 
 def is_tool_group_start(mount_target) -> bool:
@@ -142,7 +159,11 @@ def build_intermediate_widgets(summary: str, *, event_no: int) -> list:
     """·-реплика intermediate_reply: тот же markdown/код-пайплайн, что и проза
     (build_agent_widgets), но маркер «· » и класс line-intermediate."""
     return build_block_widgets(
-        summary, prose_bullet=True, event_no=event_no, bullet="· ", kind_class_base="line-intermediate"
+        summary,
+        prose_bullet=True,
+        event_no=event_no,
+        bullet="· ",
+        kind_class_base="line-intermediate",
     )
 
 
@@ -175,7 +196,9 @@ def raw_output(ev) -> Optional[str]:
     return None
 
 
-def _mount_summary_widgets(mount_target, label: str, body_text: str, event_no: int) -> None:
+def _mount_summary_widgets(
+    mount_target, label: str, body_text: str, event_no: int
+) -> None:
     """Маркер сжатия (свёрнут) + тело (.hidden) для read-only превью.
     Toggle — ТОЛЬКО по клику мышью (on_click постит SummaryToggleRequest;
     обработчик — PreviewScreen.on_summary_toggle_request). Маркер НЕ focusable:
@@ -185,7 +208,11 @@ def _mount_summary_widgets(mount_target, label: str, body_text: str, event_no: i
 
     mount_target.mount(
         SummaryMarker(
-            prefix="▸ ", content=f"──── {label} ────", kind_class="summary-marker", event_no=event_no, focusable=False
+            prefix="▸ ",
+            content=f"──── {label} ────",
+            kind_class="summary-marker",
+            event_no=event_no,
+            focusable=False,
         )
     )
     if body_text:
@@ -215,11 +242,19 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             return
         for w in build_agent_widgets(ev.summary, event_no=ev.no):
             mount_target.mount(w)
-        comment = ev.full_payload.get("_submit_comment") if isinstance(ev.full_payload, dict) else None
+        comment = (
+            ev.full_payload.get("_submit_comment")
+            if isinstance(ev.full_payload, dict)
+            else None
+        )
         if comment:
             mount_target.mount(
                 TraceRow(
-                    prefix="* ", content=note_text(comment), kind_class="line-note", event_no=ev.no, focusable=False
+                    prefix="* ",
+                    content=note_text(comment),
+                    kind_class="line-note",
+                    event_no=ev.no,
+                    focusable=False,
                 )
             )
     elif ev.kind == "call":
@@ -230,7 +265,9 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             event_no=ev.no,
         )
         if is_tool_group_start(mount_target):
-            row.add_class("tool-group-start")  # первый tool в группе — верхний отступ
+            row.add_class(
+                "tool-group-start"
+            )  # первый tool в группе — верхний отступ
         calls[row.call_id] = row
         mount_target.mount(row)
     elif ev.kind in ("result", "error"):
@@ -240,9 +277,21 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
         else:
             prefix = "   " if ev.kind == "result" else "   [!] "
             cls = "line-ok" if ev.kind == "result" else "line-error"
-            mount_target.mount(TraceRow(prefix=prefix, content=ev.summary, kind_class=cls, event_no=ev.no))
+            mount_target.mount(
+                TraceRow(
+                    prefix=prefix,
+                    content=ev.summary,
+                    kind_class=cls,
+                    event_no=ev.no,
+                )
+            )
     elif ev.kind == "summary":
-        _mount_summary_widgets(mount_target, ev.summary or "контекст сжат", (ev.summary_content or "").strip(), ev.no)
+        _mount_summary_widgets(
+            mount_target,
+            ev.summary or "контекст сжат",
+            (ev.summary_content or "").strip(),
+            ev.no,
+        )
     elif ev.kind == "error_msg":
         # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с известным
         # call_id финализирует свою строку-вызов ✗ и не дублируется [!]-строкой.
@@ -253,9 +302,18 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             err_row.set_result(summary=ev.summary, error=True)
             calls.pop(ev.call_id, None)
         else:
-            mount_target.mount(TraceRow(prefix="[!] ", content=ev.summary, kind_class="line-error", event_no=ev.no))
+            mount_target.mount(
+                TraceRow(
+                    prefix="[!] ",
+                    content=ev.summary,
+                    kind_class="line-error",
+                    event_no=ev.no,
+                )
+            )
     elif ev.kind == "ask_human":
-        mount_target.mount(build_answered_question_widget(ev.summary, event_no=ev.no))
+        mount_target.mount(
+            build_answered_question_widget(ev.summary, event_no=ev.no)
+        )
     elif ev.kind == "todo":
         # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
         # живого канала в main.py), здесь только монтируем.
@@ -263,31 +321,61 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
 
         from gc_tui.services.todo_render import build_todo_block
 
-        items = todo_items_from_arguments((ev.full_payload or {}).get("arguments"))
-        mount_target.mount(build_todo_block(items, subagent=False, indent="   ", event_no=ev.no))
+        items = todo_items_from_arguments(
+            (ev.full_payload or {}).get("arguments")
+        )
+        mount_target.mount(
+            build_todo_block(
+                items, subagent=False, indent="   ", event_no=ev.no
+            )
+        )
     else:
         m = TAG_RE.match(ev.summary or "")
         if m:
             mount_target.mount(
-                TraceRow(prefix=f"[{m.group('tag')}] ", content=m.group("rest"), kind_class="line-meta", event_no=ev.no)
+                TraceRow(
+                    prefix=f"[{m.group('tag')}] ",
+                    content=m.group("rest"),
+                    kind_class="line-meta",
+                    event_no=ev.no,
+                )
             )
         else:
-            mount_target.mount(TraceRow(prefix="", content=ev.summary or "", kind_class="line-meta", event_no=ev.no))
+            mount_target.mount(
+                TraceRow(
+                    prefix="",
+                    content=ev.summary or "",
+                    kind_class="line-meta",
+                    event_no=ev.no,
+                )
+            )
 
 
-def _mount_skill_marker_readonly(mount_target, skill_id: str, event_no: int) -> None:
+def _mount_skill_marker_readonly(
+    mount_target, skill_id: str, event_no: int
+) -> None:
     """[skill] <id> загружен — паритет с MainScreen._mount_skill_marker (read-only).
     skill_loaded ставится только когда скилл реально загрузился → всегда «загружен»."""
     from gc_tui.widgets.trace_row import TraceRow
 
     row = TraceRow(
-        prefix="[skill] ", content=f"`{skill_id}` загружен", kind_class="line-meta", event_no=event_no, focusable=False
+        prefix="[skill] ",
+        content=f"`{skill_id}` загружен",
+        kind_class="line-meta",
+        event_no=event_no,
+        focusable=False,
     )
     row.add_class("skill-marker")
     mount_target.mount(row)
 
 
-def _render_record_readonly(mount_target, rec: dict, no: int, calls: dict, skipped_call_ids: set | None = None) -> int:
+def _render_record_readonly(
+    mount_target,
+    rec: dict,
+    no: int,
+    calls: dict,
+    skipped_call_ids: set | None = None,
+) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
     как _render_event на основном экране."""
@@ -296,13 +384,17 @@ def _render_record_readonly(mount_target, rec: dict, no: int, calls: dict, skipp
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return no
-    ev = map_message(payload, no=no, ts=rec.get("ts", ""), skipped_call_ids=skipped_call_ids)
+    ev = map_message(
+        payload, no=no, ts=rec.get("ts", ""), skipped_call_ids=skipped_call_ids
+    )
     # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
     # даёт ev=None, но маркер [skill] всё равно нужен в превью.
     sk = payload.get("skill_loaded")
     if ev is None:
         if sk:
-            _mount_skill_marker_readonly(mount_target, sk, no)  # mid-run: только маркер
+            _mount_skill_marker_readonly(
+                mount_target, sk, no
+            )  # mid-run: только маркер
         return no
     no += 1
     if ev.hidden:
@@ -321,7 +413,9 @@ def render_thread_readonly(mount_target, records: list) -> None:
 
     no = 1
     calls: dict = {}
-    skipped = collect_skipped_call_ids(rec.get("payload") for rec in records if isinstance(rec, dict))
+    skipped = collect_skipped_call_ids(
+        rec.get("payload") for rec in records if isinstance(rec, dict)
+    )
     for rec in records:
         no = _render_record_readonly(mount_target, rec, no, calls, skipped)
 
@@ -337,7 +431,10 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
     no = 1
     calls: dict = {}
     skipped = collect_skipped_call_ids(
-        rec.get("payload") for seg in segments for rec in seg.get("messages", []) if isinstance(rec, dict)
+        rec.get("payload")
+        for seg in segments
+        for rec in seg.get("messages", [])
+        if isinstance(rec, dict)
     )
     # Дедуп по id: preserved last-user-message лежит в двух соседних сегментах
     # (архив + live) — иначе реплика дублируется вокруг маркера сжатия.
@@ -354,7 +451,9 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
         comp = seg.get("compacted_by")
         if comp:
             label = build_compaction_label(seg.get("index", 0) + 1, comp)
-            _mount_summary_widgets(mount_target, label, (comp.get("synthesis") or "").strip(), no)
+            _mount_summary_widgets(
+                mount_target, label, (comp.get("synthesis") or "").strip(), no
+            )
             no += 1
     return calls
 
@@ -398,10 +497,19 @@ def merge_nested_readonly(mount_target, records: list, calls: dict) -> None:
             nested_rows[tool_call_id] = row
         _mount_after(parent_call_id, row)
 
-    def _finish(*, parent_call_id, tool_call_id="", ok=True, error_brief=None, **_kw):  # noqa: ARG001  # часть контракта: подпись менять нельзя
+    def _finish(
+        *,
+        parent_call_id,  # noqa: ARG001  # параметр контракта callback
+        tool_call_id="",
+        ok=True,
+        error_brief=None,
+        **_kw,
+    ):
         row = nested_rows.get(tool_call_id)
         if row is not None:
-            row.set_result(summary="" if ok else (error_brief or "error"), error=not ok)
+            row.set_result(
+                summary="" if ok else (error_brief or "error"), error=not ok
+            )
 
     def _prose(*, parent_call_id, prose, **_kw):
         text = (prose or "").strip()
@@ -424,14 +532,27 @@ def merge_nested_readonly(mount_target, records: list, calls: dict) -> None:
             return
         _mount_after(
             parent_call_id,
-            TraceRow(prefix=NESTED_USER_PREFIX, content=text, kind_class=LINE_USER_CLASS, event_no=0, focusable=False),
+            TraceRow(
+                prefix=NESTED_USER_PREFIX,
+                content=text,
+                kind_class=LINE_USER_CLASS,
+                event_no=0,
+                focusable=False,
+            ),
         )
 
     def _child_summary(*, parent_call_id, prose="", **_kw):
-        _prose(parent_call_id=parent_call_id, prose=prose or CHILD_SUMMARY_LABEL)
+        _prose(
+            parent_call_id=parent_call_id, prose=prose or CHILD_SUMMARY_LABEL
+        )
 
     def _todo(*, parent_call_id, tool_call_id="", todo_items=None, **_kw):  # noqa: ARG001  # часть контракта: подпись менять нельзя
-        _mount_after(parent_call_id, build_todo_block(todo_items or [], subagent=True, indent=NESTED_PREFIX))
+        _mount_after(
+            parent_call_id,
+            build_todo_block(
+                todo_items or [], subagent=True, indent=NESTED_PREFIX
+            ),
+        )
 
     apply_sidecar_nested_actions(
         plan_sidecar_nested_actions(records),

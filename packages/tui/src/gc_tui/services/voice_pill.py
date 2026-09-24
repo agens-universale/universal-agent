@@ -140,11 +140,17 @@ def _recording_cells(frame: int, bands: tuple) -> list[str]:
     return cells
 
 
-def render_pill(stage: str, elapsed: float, frame: int, bands: tuple = ()) -> Text:
+def render_pill(
+    stage: str, elapsed: float, frame: int, bands: tuple = ()
+) -> Text:
     """stage: "recording" | "transcribing" → Text ровно PILL_WIDTH ячеек.
 
     bands — спектр микрофона по полосам 0..1 (эквалайзер записи)."""
-    timer = format_rec_time(elapsed) if stage == "recording" else format_stt_time(elapsed)
+    timer = (
+        format_rec_time(elapsed)
+        if stage == "recording"
+        else format_stt_time(elapsed)
+    )
     if stage == "recording":
         cells = _recording_cells(frame, bands)
     else:
@@ -156,5 +162,10 @@ def render_pill(stage: str, elapsed: float, frame: int, bands: tuple = ()) -> Te
         cells[t_start - 1] = " "  # зазор-воздух между анимацией и таймером
     text = Text()
     for i, ch in enumerate(cells):
-        text.append(ch, style=Style(color=TEXT_ON_FILL, bgcolor=_gradient_bg(i / (PILL_WIDTH - 1))))
+        text.append(
+            ch,
+            style=Style(
+                color=TEXT_ON_FILL, bgcolor=_gradient_bg(i / (PILL_WIDTH - 1))
+            ),
+        )
     return text

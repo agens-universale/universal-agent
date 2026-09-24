@@ -38,7 +38,9 @@ def _load_checker():
 checker = _load_checker()
 
 
-def _findings(tmp_path: Path, source: str, name: str = "sample.py") -> list[str]:
+def _findings(
+    tmp_path: Path, source: str, name: str = "sample.py"
+) -> list[str]:
     path = tmp_path / name
     path.write_text(source, encoding="utf-8")
     return checker.check_file(path)
@@ -76,7 +78,10 @@ def test_s5843_calibration_yaml_key_regex_is_within_limit():
         (r"[a-z]+", 2),  # класс +1, повтор +1
         (r"(ab|cd)", 1),  # первая «|» стоит «уровень»
         (r"(ab|cd|ef)", 2),  # каждая следующая — +1
-        (r"(a|b)", 0),  # парсер схлопывает односимвольные ветви в класс — см. докстроку
+        (
+            r"(a|b)",
+            0,
+        ),  # парсер схлопывает односимвольные ветви в класс — см. докстроку
         (r"(?=ab)", 1),  # lookahead
         (r"(a)\1", 1),  # обратная ссылка
         (r"(?:a+)+", 3),  # вложенный повтор: 1 + 2
@@ -87,10 +92,16 @@ def test_s5843_cost_model(pattern, expected):
 
 
 def test_s5843_reported_only_above_threshold(tmp_path):
-    hit = _findings(tmp_path, f'import re\nre.search(r"""{CALIBRATION_REGEX}""", "")\n')
+    hit = _findings(
+        tmp_path, f'import re\nre.search(r"""{CALIBRATION_REGEX}""", "")\n'
+    )
     assert _keys(hit) == ["S5843"]
     assert "from 24 to the 20 allowed" in hit[0]
-    quiet = _findings(tmp_path, f'import re\nre.match(r"{QUIET_REGEX}", "")\n', name="quiet.py")
+    quiet = _findings(
+        tmp_path,
+        f'import re\nre.match(r"{QUIET_REGEX}", "")\n',
+        name="quiet.py",
+    )
     assert quiet == []  # ASCII-диапазон нельзя заменять Unicode-классом \w
 
 
@@ -106,12 +117,21 @@ def test_s5843_reported_only_above_threshold(tmp_path):
     ],
 )
 def test_regex_hints_found(tmp_path, pattern, key):
-    assert _keys(_findings(tmp_path, f'import re\nre.search(r"{pattern}", "", flags=re.ASCII)\n')) == [key]
+    assert _keys(
+        _findings(
+            tmp_path,
+            f'import re\nre.search(r"{pattern}", "", flags=re.ASCII)\n',
+        )
+    ) == [key]
 
 
-@pytest.mark.parametrize("pattern", [r"\w+", r"\d{2}", r"[^<]*<", r"[A-Za-z_]+", r"[0-9a-f]+"])
+@pytest.mark.parametrize(
+    "pattern", [r"\w+", r"\d{2}", r"[^<]*<", r"[A-Za-z_]+", r"[0-9a-f]+"]
+)
 def test_regex_hints_silent(tmp_path, pattern):
-    assert _findings(tmp_path, f'import re\nre.search(r"{pattern}", "")\n') == []
+    assert (
+        _findings(tmp_path, f'import re\nre.search(r"{pattern}", "")\n') == []
+    )
 
 
 def test_regex_rules_ignore_non_re_calls(tmp_path):
@@ -158,13 +178,21 @@ def test_s1192_ignores_docstrings_and_annotations(tmp_path):
     ("handler", "redundant"),
     [
         ("except (PermissionError, OSError):", "PermissionError"),  # подкласс
-        ("except (OSError, PermissionError):", "PermissionError"),  # порядок не важен
+        (
+            "except (OSError, PermissionError):",
+            "PermissionError",
+        ),  # порядок не важен
         ("except (ValueError, json.JSONDecodeError):", "json.JSONDecodeError"),
-        ("except (asyncio.TimeoutError, TimeoutError):", "TimeoutError"),  # один и тот же объект
+        (
+            "except (asyncio.TimeoutError, TimeoutError):",
+            "TimeoutError",
+        ),  # один и тот же объект
     ],
 )
 def test_s5713_found(tmp_path, handler, redundant):
-    source = f"import asyncio\nimport json\n\ntry:\n    pass\n{handler}\n    pass\n"
+    source = (
+        f"import asyncio\nimport json\n\ntry:\n    pass\n{handler}\n    pass\n"
+    )
     findings = [f for f in _findings(tmp_path, source) if " S5713 " in f]
     assert len(findings) == 1
     assert redundant in findings[0]
@@ -221,10 +249,14 @@ def test_s3516_counts_raise_as_exit(tmp_path):
 # S3358 — тернарный внутри тернарного
 # --------------------------------------------------------------------------- #
 def test_s3358_found(tmp_path):
-    assert _keys(_findings(tmp_path, "x = 1 if a else (2 if b else 3)\n")) == ["S3358"]
+    assert _keys(_findings(tmp_path, "x = 1 if a else (2 if b else 3)\n")) == [
+        "S3358"
+    ]
 
 
-@pytest.mark.parametrize("source", ["x = 1 if a else 2\n", "x = [1 if a else 2, 3 if b else 4]\n"])
+@pytest.mark.parametrize(
+    "source", ["x = 1 if a else 2\n", "x = [1 if a else 2, 3 if b else 4]\n"]
+)
 def test_s3358_silent(tmp_path, source):
     assert _findings(tmp_path, source) == []
 
@@ -326,7 +358,11 @@ def test_s5527_silent(tmp_path, source):
 # Web:S5256 — таблица без описания
 # --------------------------------------------------------------------------- #
 def test_table_without_caption_found(tmp_path):
-    findings = _findings(tmp_path, "<html><body><table><tr><td>1</td></tr></table></body></html>", name="p.html")
+    findings = _findings(
+        tmp_path,
+        "<html><body><table><tr><td>1</td></tr></table></body></html>",
+        name="p.html",
+    )
     assert _keys(findings) == ["Web:S5256"]
 
 
@@ -339,7 +375,12 @@ def test_table_without_caption_found(tmp_path):
     ],
 )
 def test_table_with_description_silent(tmp_path, table):
-    assert _findings(tmp_path, f"<html><body>{table}</body></html>", name="p.html") == []
+    assert (
+        _findings(
+            tmp_path, f"<html><body>{table}</body></html>", name="p.html"
+        )
+        == []
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -351,7 +392,13 @@ def test_nosonar_silences_the_line(tmp_path):
 
 
 def test_iter_files_skips_vendor_and_tests(tmp_path):
-    for rel in ("src/app.py", "tests/test_app.py", "external/vendor.py", "src/conftest.py", "docs/page.html"):
+    for rel in (
+        "src/app.py",
+        "tests/test_app.py",
+        "external/vendor.py",
+        "src/conftest.py",
+        "docs/page.html",
+    ):
         target = tmp_path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
@@ -360,7 +407,9 @@ def test_iter_files_skips_vendor_and_tests(tmp_path):
 
 
 def test_main_returns_zero_on_clean_tree(tmp_path, capsys):
-    (tmp_path / "ok.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "ok.py").write_text(
+        "def run():\n    return 1\n", encoding="utf-8"
+    )
     assert checker.main([str(tmp_path)]) == 0
     assert "0 finding(s)" in capsys.readouterr().out
 
@@ -409,7 +458,10 @@ def test_regex_hints_preserve_character_set(tmp_path, call, expected):
 def test_regex_unicode_ranges_have_different_semantics():
     import re
 
-    for pattern, replacement, sample in [("[0-9]+", r"\d+", "١٢"), ("[A-Za-z0-9_]+", r"\w+", "привет")]:
+    for pattern, replacement, sample in [
+        ("[0-9]+", r"\d+", "١٢"),
+        ("[A-Za-z0-9_]+", r"\w+", "привет"),
+    ]:
         assert re.fullmatch(pattern, sample) is None
         assert re.fullmatch(replacement, sample) is not None
         assert re.fullmatch(replacement, sample, re.A) is None
@@ -422,7 +474,9 @@ def test_regex_unicode_ranges_have_different_semantics():
         ("ValueError", "OSError", True),
     ],
 )
-def test_exception_imports_do_not_leak_between_functions(tmp_path, first, second, expected):
+def test_exception_imports_do_not_leak_between_functions(
+    tmp_path, first, second, expected
+):
     source = f"""def f():
     from builtins import {first} as E
     try:
@@ -465,8 +519,12 @@ def test_exception_unknown_bindings_are_not_guessed(tmp_path, source):
     assert "S5713" not in _keys(_findings(tmp_path, source))
 
 
-@pytest.mark.parametrize("prefix, context", [("def", "with"), ("async def", "async with")])
-def test_same_return_allows_suppressing_context_manager(tmp_path, prefix, context):
+@pytest.mark.parametrize(
+    "prefix, context", [("def", "with"), ("async def", "async with")]
+)
+def test_same_return_allows_suppressing_context_manager(
+    tmp_path, prefix, context
+):
     source = f"""{prefix} f(x):
     {context} manager():
         if x == 0:
@@ -527,5 +585,9 @@ def test_nosonar_in_data_does_not_suppress(tmp_path, source):
         ("<!-- NOSONAR: another line -->\n<table></table>", True),
     ],
 )
-def test_html_nosonar_is_only_a_comment_on_the_same_line(tmp_path, source, expected):
-    assert ("Web:S5256" in _keys(_findings(tmp_path, source, name="sample.html"))) is expected
+def test_html_nosonar_is_only_a_comment_on_the_same_line(
+    tmp_path, source, expected
+):
+    assert (
+        "Web:S5256" in _keys(_findings(tmp_path, source, name="sample.html"))
+    ) is expected

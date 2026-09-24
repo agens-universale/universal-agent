@@ -33,11 +33,15 @@ def normalize_trace_id(value: Any) -> Optional[str]:
     if not text:
         return None
     if len(text) > MAX_TRACE_ID_LEN:
-        raise ValueError(f"trace_id длиннее {MAX_TRACE_ID_LEN} символов: {len(text)}")
+        raise ValueError(
+            f"trace_id длиннее {MAX_TRACE_ID_LEN} символов: {len(text)}"
+        )
     for ch in text:
         code = ord(ch)
         if code < 0x20 or code == 0x7F:
-            raise ValueError("trace_id не должен содержать управляющие символы (включая CR, LF и tab)")
+            raise ValueError(
+                "trace_id не должен содержать управляющие символы (включая CR, LF и tab)"
+            )
     # HTTP-заголовки кодируются latin-1 (RFC 7230), поэтому кириллица, эмодзи и
     # прочее вне 0-255 роняют КАЖДЫЙ запрос к модели с UnicodeEncodeError. Хуже
     # того, ошибка ретраебельна: 5 попыток со снами 10/20/40/80s на каждый вызов,
@@ -59,7 +63,10 @@ def trace_id_slug(value: str) -> str:
     (включая ``/``, ``\\``, точки и не-ASCII) → ``_``. Обрезка до
     ``MAX_TRACE_SLUG_LEN``. Именно поэтому в путь идёт слаг, а не сырое значение.
     """
-    chars = [ch if (ch.isascii() and (ch.isalnum() or ch in "-_")) else "_" for ch in value]
+    chars = [
+        ch if (ch.isascii() and (ch.isalnum() or ch in "-_")) else "_"
+        for ch in value
+    ]
     return "".join(chars)[:MAX_TRACE_SLUG_LEN]
 
 
@@ -75,7 +82,9 @@ def trace_id_from_config(config_dict: Optional[Dict[str, Any]]) -> str:
     return str(raw).strip()
 
 
-def trace_header_name(config_dict: Optional[Dict[str, Any]], default: str) -> str:
+def trace_header_name(
+    config_dict: Optional[Dict[str, Any]], default: str
+) -> str:
     """Имя заголовка для trace_id: ``agent.trace_id_header_name`` или ``default``.
 
     Дефолты разные по назначению: для бэкенда модели — ``x_trace_id``, для MCP —

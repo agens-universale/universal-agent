@@ -33,8 +33,13 @@ def _write_yaml(path: Path, body: dict) -> None:
 
 
 _BASE_WITH_A_WHOLE_PAIR = {
-    "backend": {"api_mode": "chat_completions", "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
-    "models": {"gc": {"url": "https://good/v1/chat/completions", "token": "sk-base"}},
+    "backend": {
+        "api_mode": "chat_completions",
+        "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+    },
+    "models": {
+        "gc": {"url": "https://good/v1/chat/completions", "token": "sk-base"}
+    },
 }
 
 
@@ -42,14 +47,19 @@ def test_layer_with_half_a_pair_is_rejected_with_the_file_path():
     from gc_core.config_modules.model_registry import validate_registry_pairs
 
     raw = {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}}
-    with pytest.raises(ValueError, match=r"/proj/\.gc/config\.yml.*models\.gc"):
+    with pytest.raises(
+        ValueError, match=r"/proj/\.gc/config\.yml.*models\.gc"
+    ):
         validate_registry_pairs(raw, source="/proj/.gc/config.yml")
 
 
 def test_layer_with_a_whole_pair_passes():
     from gc_core.config_modules.model_registry import validate_registry_pairs
 
-    validate_registry_pairs({"models": {"gc": {"url": "https://h/v1", "token": "sk"}}}, source="/p/config.yml")
+    validate_registry_pairs(
+        {"models": {"gc": {"url": "https://h/v1", "token": "sk"}}},
+        source="/p/config.yml",
+    )
 
 
 def test_explicit_null_is_not_a_key():
@@ -57,8 +67,12 @@ def test_explicit_null_is_not_a_key():
     без него становится половиной (§3, третий случай дизъюнкции)."""
     from gc_core.config_modules.model_registry import validate_registry_pairs
 
-    with pytest.raises(ValueError, match="задан свой токен, но не задан адрес"):
-        validate_registry_pairs({"models": {"gc": {"url": None, "token": "sk"}}})
+    with pytest.raises(
+        ValueError, match="задан свой токен, но не задан адрес"
+    ):
+        validate_registry_pairs(
+            {"models": {"gc": {"url": None, "token": "sk"}}}
+        )
 
 
 def test_document_without_registry_passes():
@@ -74,10 +88,14 @@ def test_cli_models_override_goes_through_the_rule():
 
     cfg = {}
     with pytest.raises(ValueError, match="--models.*задан свой адрес"):
-        apply_cli_overrides(cfg, extra_overrides={"models": {"gc": {"url": "https://evil/v1"}}})
+        apply_cli_overrides(
+            cfg, extra_overrides={"models": {"gc": {"url": "https://evil/v1"}}}
+        )
 
 
-def test_project_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, tmp_path):
+def test_project_layer_cannot_take_the_base_token_to_its_own_url(
+    isolated_cwd, tmp_path
+):
     """§9.7, главный сценарий правила: слои сливаются `deep_merge` рекурсивно по ключам,
     поэтому проектный `.gc/config.yml` с ОДНИМ url поверх полной пары базы даёт итоговую
     запись с полной парой — токен базы уходит на адрес проекта, и проверка итогового
@@ -87,13 +105,20 @@ def test_project_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}},
+    )
 
-    with pytest.raises(ValueError, match=r"\.gc[\\/]config\.yml: models\.gc: задан свой адрес"):
+    with pytest.raises(
+        ValueError, match=r"\.gc[\\/]config\.yml: models\.gc: задан свой адрес"
+    ):
         load_config_ex(str(base))
 
 
-def test_profile_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, tmp_path):
+def test_profile_layer_cannot_take_the_base_token_to_its_own_url(
+    isolated_cwd, tmp_path
+):
     """§9.8, тот же сценарий носителем-профилем: контент профиля мержится ПОВЕРХ всех
     файловых слоёв, значит и он способен подменить один адрес под чужим токеном."""
     from gc_core.config import load_config_ex
@@ -101,14 +126,19 @@ def test_profile_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
     base = tmp_path / "base_config.yml"
     _write_yaml(base, dict(_BASE_WITH_A_WHOLE_PAIR, profile="work"))
     _write_yaml(
-        isolated_cwd / ".gc" / "profiles" / "work.yml", {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}}
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}},
     )
 
-    with pytest.raises(ValueError, match=r"work\.yml: models\.gc: задан свой адрес"):
+    with pytest.raises(
+        ValueError, match=r"work\.yml: models\.gc: задан свой адрес"
+    ):
         load_config_ex(str(base))
 
 
-def test_managed_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, tmp_path):
+def test_managed_layer_cannot_take_the_base_token_to_its_own_url(
+    isolated_cwd, tmp_path
+):
     """§9.8, третий слой: machine-managed оверлей (`config.local.yml`, его пишет
     `gc-mcp install`) идёт тем же `deep_merge` и правилу не подсуден иначе, чем своей
     проверкой до слияния."""
@@ -117,9 +147,14 @@ def test_managed_layer_cannot_take_the_base_token_to_its_own_url(isolated_cwd, t
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
-    _write_yaml(managed_config_path(), {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}})
+    _write_yaml(
+        managed_config_path(),
+        {"models": {"gc": {"url": "https://evil/v1/chat/completions"}}},
+    )
 
-    with pytest.raises(ValueError, match=r"config\.local\.yml: models\.gc: задан свой адрес"):
+    with pytest.raises(
+        ValueError, match=r"config\.local\.yml: models\.gc: задан свой адрес"
+    ):
         load_config_ex(str(base))
 
 
@@ -128,7 +163,10 @@ def test_pre_write_validator_accepts_what_the_loader_accepts(tmp_path):
     точка A), а следующий старт читает его загрузчиком (там ещё и точка B). Разъехавшиеся
     определения «адрес задан» дали бы записанный файл, который не грузится: `url: ""` для
     рантайма — «наследуется вся пара», и обе стороны обязаны сказать это одинаково."""
-    from gc_core.config_modules.profiles import load_profile_document, validate_profile_text
+    from gc_core.config_modules.profiles import (
+        load_profile_document,
+        validate_profile_text,
+    )
 
     body = 'models:\n  gc:\n    url: ""\n'
     path = tmp_path / "work.yml"
@@ -141,15 +179,22 @@ def test_pre_write_validator_accepts_what_the_loader_accepts(tmp_path):
 def test_pre_write_validator_rejects_what_the_loader_rejects(tmp_path):
     """Симметрия: `url: ""` со своим токеном — половина пары, и отказывают ОБЕ стороны
     одним текстом. Иначе Settings записывает файл, который следующий старт отвергает."""
-    from gc_core.config_modules.profiles import load_profile_document, validate_profile_text
+    from gc_core.config_modules.profiles import (
+        load_profile_document,
+        validate_profile_text,
+    )
 
     body = 'models:\n  gc:\n    url: ""\n    token: sk-own\n'
     path = tmp_path / "work.yml"
     path.write_text(body, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="задан свой токен, но не задан адрес"):
+    with pytest.raises(
+        ValueError, match="задан свой токен, но не задан адрес"
+    ):
         validate_profile_text(body)
-    with pytest.raises(ValueError, match="задан свой токен, но не задан адрес"):
+    with pytest.raises(
+        ValueError, match="задан свой токен, но не задан адрес"
+    ):
         load_profile_document(path)
 
 
@@ -163,16 +208,23 @@ def test_base_config_half_a_pair_names_its_own_file(isolated_cwd, tmp_path):
     _write_yaml(
         base,
         {
-            "backend": {"api_mode": "chat_completions", "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
+            "backend": {
+                "api_mode": "chat_completions",
+                "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+            },
             "models": {"gc": {"url": "https://evil/v1/chat/completions"}},
         },
     )
 
-    with pytest.raises(ValueError, match=r"base_config\.yml: models\.gc: задан свой адрес"):
+    with pytest.raises(
+        ValueError, match=r"base_config\.yml: models\.gc: задан свой адрес"
+    ):
         load_config_ex(str(base))
 
 
-def test_layer_removing_only_the_address_is_caught_on_the_merged_document(isolated_cwd, tmp_path):
+def test_layer_removing_only_the_address_is_caught_on_the_merged_document(
+    isolated_cwd, tmp_path
+):
     """§9.5, мина 1 через явный `null`: слой пишет `url: null` поверх базовой пары. САМ
     слой законен — он ничего не задаёт, и проверка слоя молчит правильно; половина
     рождается только в мерже, где остался свой токен базы без адреса. Ловит её точка A на
@@ -181,13 +233,19 @@ def test_layer_removing_only_the_address_is_caught_on_the_merged_document(isolat
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"models": {"gc": {"url": None}}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml", {"models": {"gc": {"url": None}}}
+    )
 
-    with pytest.raises(ValueError, match="задан свой токен, но не задан адрес"):
+    with pytest.raises(
+        ValueError, match="задан свой токен, но не задан адрес"
+    ):
         load_config_ex(str(base))
 
 
-def test_weakened_transport_notice_reaches_the_startup_notices(isolated_cwd, tmp_path):
+def test_weakened_transport_notice_reaches_the_startup_notices(
+    isolated_cwd, tmp_path
+):
     """§7: запись без своего подключения работает ОБЩИМ токеном и при этом вправе
     ослабить транспорт под собой. Это notice, а не отказ, — значит он обязан ДОЕХАТЬ:
     канал стартовых предупреждений один (`compat_notices`), и сказанное валидатором
@@ -198,13 +256,24 @@ def test_weakened_transport_notice_reaches_the_startup_notices(isolated_cwd, tmp
     _write_yaml(
         base,
         {
-            "backend": {"api_mode": "chat_completions", "completions_url": "http://127.0.0.1:8014/v1/chat/completions"},
-            "models": {"gc": {"model": "qwen/qwen3-coder", "backend": {"use_ssl": False}}},
+            "backend": {
+                "api_mode": "chat_completions",
+                "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+            },
+            "models": {
+                "gc": {
+                    "model": "qwen/qwen3-coder",
+                    "backend": {"use_ssl": False},
+                }
+            },
         },
     )
 
     config_dict, _meta = load_config_ex(str(base))
-    assert "запись gc ослабляет защиту запроса, который идёт с общим токеном" in config_dict["compat_notices"]
+    assert (
+        "запись gc ослабляет защиту запроса, который идёт с общим токеном"
+        in config_dict["compat_notices"]
+    )
 
 
 # --- ссылка ${ENV:…}, которая не подставилась, обязана называть себя ---
@@ -213,7 +282,9 @@ def test_weakened_transport_notice_reaches_the_startup_notices(isolated_cwd, tmp
 def _pair_error(entry: dict, env: dict, monkeypatch) -> str:
     """Вердикт правила пары для записи, прогнанной через резолвер, как это делает
     загрузчик: сперва подстановка, потом проверка."""
-    from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+    from gc_core.config_modules.env_interpolation import (
+        resolve_env_placeholders,
+    )
     from gc_core.config_modules.model_registry import validate_registry_pairs
 
     for name in ("PAIR_URL", "PAIR_TOKEN"):
@@ -222,17 +293,25 @@ def _pair_error(entry: dict, env: dict, monkeypatch) -> str:
         monkeypatch.setenv(name, value)
     raw = {"models": {"corp": dict(entry)}}
     try:
-        validate_registry_pairs(resolve_env_placeholders(raw), source="config.yml", raw_source=raw)
+        validate_registry_pairs(
+            resolve_env_placeholders(raw), source="config.yml", raw_source=raw
+        )
     except ValueError as exc:
         return str(exc)
     return ""
 
 
-def test_an_unresolved_reference_names_the_variable_not_the_config(monkeypatch):
+def test_an_unresolved_reference_names_the_variable_not_the_config(
+    monkeypatch,
+):
     """Запись с плейсхолдерами в обоих концах пары — ПРАВИЛЬНАЯ форма (docs §«Секреты»).
     Пока переменные не экспортированы, ссылки схлопываются в "" и пара разваливается,
     но винить конфиг за это нельзя: человек забыл export, а не ошибся в файле."""
-    error = _pair_error({"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"}, {}, monkeypatch)
+    error = _pair_error(
+        {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
+        {},
+        monkeypatch,
+    )
     assert "PAIR_URL" in error and "PAIR_TOKEN" in error, error
     assert "задан свой токен, но не задан адрес" not in error, error
 
@@ -247,7 +326,11 @@ def test_a_resolved_reference_is_judged_by_its_value(monkeypatch):
     """Контроль: переменные заданы — пара цела, отказа нет."""
     assert (
         _pair_error(
-            {"model": "m", "url": "${ENV:PAIR_URL}", "token": "${ENV:PAIR_TOKEN}"},
+            {
+                "model": "m",
+                "url": "${ENV:PAIR_URL}",
+                "token": "${ENV:PAIR_TOKEN}",
+            },
             {"PAIR_URL": "https://h/v1", "PAIR_TOKEN": "sk-1"},
             monkeypatch,
         )

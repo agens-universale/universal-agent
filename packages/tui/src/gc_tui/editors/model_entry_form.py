@@ -27,7 +27,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from gc_core import onboarding
-from gc_core.config_modules.model_registry import connection_parts, resolve_entry_address, validate_model_alias
+from gc_core.config_modules.model_registry import (
+    connection_parts,
+    resolve_entry_address,
+    validate_model_alias,
+)
 from gc_core.onboarding_fields import (
     ADDRESS_HINT as _ADDRESS_HINT,
 )
@@ -61,7 +65,10 @@ from gc_tui.editors.field_list import (
 from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT
 from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import ACCENT, DEEP_DIM, WARN
-from gc_tui.services.probe_presentation import connection_line_text, plural_models
+from gc_tui.services.probe_presentation import (
+    connection_line_text,
+    plural_models,
+)
 from gc_tui.widgets.paste_input import PasteInput
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -78,7 +85,9 @@ _SEL_MEF_URL = "#mef-url"
 # адреса, `preset_list.PRESET_HINT_NO_MATCH`): обе строки живут в одной форме, и
 # звать одно и то же состояние двумя разными словами нельзя.
 MODEL_LIST_HINT = "модели с сервера · печать — фильтр/свой id · Enter — подставить · Esc — свернуть"
-MODEL_LIST_HINT_NO_MATCH = "в списке такого нет · Enter — оставить свой id · Esc — свернуть"
+MODEL_LIST_HINT_NO_MATCH = (
+    "в списке такого нет · Enter — оставить свой id · Esc — свернуть"
+)
 
 
 def _list_outcome(models) -> str | None:
@@ -93,11 +102,15 @@ def _list_outcome(models) -> str | None:
 
 
 _ALIAS_LABEL = "Алиас"
-_ALIAS_HINT = "короткое имя записи — им пользуются слоты и привязки · пусто = имя из id"
+_ALIAS_HINT = (
+    "короткое имя записи — им пользуются слоты и привязки · пусто = имя из id"
+)
 # Имя занято записью ОСНОВНОГО конфига (§5 спеки эффективного вида): своей записи
 # с таким именем в профиле нет, и общее «уже используется» увело бы от того, что
 # на самом деле мешает, — отказ называет, ЧЕМ имя занято.
-_ALIAS_TAKEN_BY_BASE = "алиас занят записью основного конфига — выберите другое имя"
+_ALIAS_TAKEN_BY_BASE = (
+    "алиас занят записью основного конфига — выберите другое имя"
+)
 # Алиас не обязателен (ревизия владельца): пустое поле показывает ПРИЗРАКОМ то
 # конкретное имя, что реально возьмётся из id (placeholder = default_alias_for +
 # уникализация, следует за полем id), и Enter принимает его без ввода. Пока id
@@ -131,7 +144,9 @@ _PAIR_OWN = "Адрес и токен: свои"
 # — ни поля, ни клавиша «вернуть наследование» до неё не достают. Молчать об этом нельзя:
 # «свои» без уточнения обещали бы правку теми полями, которые к этой паре отношения не
 # имеют, и человеку негде было бы узнать, куда идти.
-_PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы секцией backend, правятся в файле"
+_PAIR_OWN_BACKEND = (
+    "Адрес и токен: свои — заданы секцией backend, правятся в файле"
+)
 # Поля пары — те, на которых работает «вернуть наследование» (§5). Галка в набор не входит:
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
 _PAIR_FIELDS = ("mef-url", "mef-token")
@@ -147,7 +162,9 @@ _TOKEN_NEEDED = "укажите токен для этого адреса"
 _COMMON_TOKEN_EMPTY = "общий токен не задан — запросы идут без авторизации"
 # Заслонённая запись с `token: ""` («сервер не требует авторизации», §2): тёзка
 # наследует ровно это, маскировать нечего — а `***` обещал бы секрет, которого нет.
-_BASE_TOKEN_EMPTY = "запись основного конфига без токена — запросы идут без авторизации"
+_BASE_TOKEN_EMPTY = (
+    "запись основного конфига без токена — запросы идут без авторизации"
+)
 # Отказ формы — то же правило §2, что у валидатора конфига, укороченное до одной строки
 # формы: имена ключей файла человеку здесь ни к чему, перед ним поля и галка.
 _PAIR_NEEDS_TOKEN = "задан свой адрес, но не задан токен — укажите токен или отметьте «без авторизации»"
@@ -206,8 +223,14 @@ def entry_has_own_connection(entry) -> bool:
     назвали бы один источник двумя именами. Не-словарь — запись без ничего."""
     if not isinstance(entry, dict):
         entry = {}
-    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-    headers = backend.get("chat_completion_headers") if isinstance(backend.get("chat_completion_headers"), dict) else {}
+    backend = (
+        entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    )
+    headers = (
+        backend.get("chat_completion_headers")
+        if isinstance(backend.get("chat_completion_headers"), dict)
+        else {}
+    )
     return any(
         connection_parts(
             url=entry.get("url"),
@@ -219,7 +242,9 @@ def entry_has_own_connection(entry) -> bool:
     )
 
 
-def _resolved_for_request(url: str, auth: str | None) -> tuple[str, str | None]:
+def _resolved_for_request(
+    url: str, auth: str | None
+) -> tuple[str, str | None]:
     """Раскрыть `${ENV:VAR}`/`${FILE:...}` перед отправкой — тем же резолвером, что у
     `config.load_config`: сама ссылка не адрес и не токен, и буквальный
     `Bearer ${ENV:TOK}` сервер отклоняет — проба врала «✗ токен отклонён» на исправном
@@ -229,9 +254,14 @@ def _resolved_for_request(url: str, auth: str | None) -> tuple[str, str | None]:
     — синхронное чтение с диска, и в UI-потоке оно подвешивало бы интерфейс на каждый
     переход курсора. Наружу — в поля, `peek()`, `submit()` — раскрытое не возвращается:
     в файл обязана уехать ссылка."""
-    from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+    from gc_core.config_modules.env_interpolation import (
+        resolve_env_placeholders,
+    )
 
-    return (resolve_env_placeholders(url), resolve_env_placeholders(auth) if auth else auth)
+    return (
+        resolve_env_placeholders(url),
+        resolve_env_placeholders(auth) if auth else auth,
+    )
 
 
 def _env_missing_line(*raw_values: str | None) -> str:
@@ -298,7 +328,9 @@ class ModelEntryForm(Vertical):
         # уникализироваться против ЭФФЕКТИВНОГО набора имён, а не одних своих.
         self._base_aliases = frozenset(base_aliases)
         self._own_alias = initial.get("alias") or None
-        self._other_aliases = set(existing_aliases) - ({self._own_alias} if self._own_alias else set())
+        self._other_aliases = set(existing_aliases) - (
+            {self._own_alias} if self._own_alias else set()
+        )
         self._alias0 = self._own_alias or ""
         self._model0 = initial.get("model") or ""
         self._url0 = initial.get("url") or ""
@@ -310,8 +342,12 @@ class ModelEntryForm(Vertical):
         self._backend0 = backend0 if isinstance(backend0, dict) else {}
         # Состояние пары, показанное на экране: DOM трогаем только на его смене.
         self._pair_own: bool | None = None
-        self._token_current = initial.get("token")  # только для маски placeholder
-        self._no_auth = self._token_current == ""  # явное "" в записи = галка ●
+        self._token_current = initial.get(
+            "token"
+        )  # только для маски placeholder
+        self._no_auth = (
+            self._token_current == ""
+        )  # явное "" в записи = галка ●
         # Третье состояние поля токена (идиома `ConnectionEditor`): пусто = «ключ не
         # трогаем», напечатано = «заменить», помечено = «снять свой ключ и вернуть
         # наследование». Нужно потому, что токен, в отличие от прочих полей, физически
@@ -330,7 +366,9 @@ class ModelEntryForm(Vertical):
             # `probe_auth`, а не `probe`: вердикт об авторизации идёт СТРОГО по
             # chat/completions — у публичного `/models` (OpenRouter) он получился бы
             # ложным. Тот же дефолт, что у «Подключения» (`settings.py`).
-            from gc_tui.services.settings_probe import probe_auth as default_probe
+            from gc_tui.services.settings_probe import (
+                probe_auth as default_probe,
+            )
 
             probe = default_probe
         self._fetch = fetch
@@ -341,7 +379,13 @@ class ModelEntryForm(Vertical):
         # и при правке (переименование — транзакция секции). `None` — строка-галка
         # «без авторизации», как в _positions ConnectionEditor: это не Input,
         # фокус с неё снимается явно.
-        self._positions = ("mef-url", "mef-token", None, "mef-model", "mef-alias")
+        self._positions = (
+            "mef-url",
+            "mef-token",
+            None,
+            "mef-model",
+            "mef-alias",
+        )
         self._idx = 0
         self._models: list = []
         # Чем кончилась последняя загрузка: None — не ходили или всё хорошо, иначе
@@ -383,7 +427,11 @@ class ModelEntryForm(Vertical):
             presets_items.insert(
                 0,
                 SimpleNamespace(
-                    name=(_INHERIT_PRESET_NAME_BASE if self._inherits_from_base() else _INHERIT_PRESET_NAME),
+                    name=(
+                        _INHERIT_PRESET_NAME_BASE
+                        if self._inherits_from_base()
+                        else _INHERIT_PRESET_NAME
+                    ),
                     url=inherited_url,
                     inherit=True,
                 ),
@@ -415,7 +463,9 @@ class ModelEntryForm(Vertical):
             # своего (находка M6 ревью MR #80).
             initial_index=self._model_initial_index,
             refilter_index=self._model_refilter_index,
-            hint=lambda ok: MODEL_LIST_HINT if ok else MODEL_LIST_HINT_NO_MATCH,
+            hint=lambda ok: (
+                MODEL_LIST_HINT if ok else MODEL_LIST_HINT_NO_MATCH
+            ),
             closed_hint=MODEL_RELOAD_HINT,
             # Канон 2026-08-17: САМ список раскрывается только над пустым полем —
             # поверх набранного id он увёл бы ↑/↓ себе, и Enter молча затёр бы
@@ -448,7 +498,10 @@ class ModelEntryForm(Vertical):
 
         Занятыми считаются и алиасы основного конфига (§5): предложить призраком
         имя, которое submit тут же отвергнет, значит соврать полем."""
-        return onboarding.unique_alias(onboarding.default_alias_for(model), self._other_aliases | self._base_aliases)
+        return onboarding.unique_alias(
+            onboarding.default_alias_for(model),
+            self._other_aliases | self._base_aliases,
+        )
 
     def _alias_placeholder(self, model: str) -> str:
         return self._derived_alias(model) if model else _ALIAS_PLACEHOLDER
@@ -503,7 +556,9 @@ class ModelEntryForm(Vertical):
         backend = self._base0.get("backend")
         backend = backend if isinstance(backend, dict) else {}
         headers = backend.get("chat_completion_headers")
-        return (headers if isinstance(headers, dict) else {}).get("Authorization")
+        return (headers if isinstance(headers, dict) else {}).get(
+            "Authorization"
+        )
 
     def _model_placeholder(self) -> str:
         """Пустое поле id: провайдерским id служит алиас — либо, у тёзки, `model`
@@ -532,7 +587,9 @@ class ModelEntryForm(Vertical):
         записи с адресом в `backend` не бывает — схема запрещает два написания разом.
         Унаследованный адрес — у `_inherited_url`: у тёзки это адрес заслонённой
         записи, и общий здесь тоже был бы НЕдействующим."""
-        own_url = resolve_entry_address(url=None, completions_url=self._backend0.get("completions_url"))
+        own_url = resolve_entry_address(
+            url=None, completions_url=self._backend0.get("completions_url")
+        )
         if own_url:
             return str(own_url)
         inherited = self._inherited_url()
@@ -587,9 +644,13 @@ class ModelEntryForm(Vertical):
         return connection_parts(
             url=self._as_validator_sees(self._url_value()),
             token=self._as_validator_sees(token),
-            completions_url=self._as_validator_sees(self._backend0.get("completions_url")),
+            completions_url=self._as_validator_sees(
+                self._backend0.get("completions_url")
+            ),
             proxy=self._as_validator_sees(self._backend0.get("proxy")),
-            authorization=self._as_validator_sees(headers.get("Authorization")),
+            authorization=self._as_validator_sees(
+                headers.get("Authorization")
+            ),
         )
 
     def _pair_env_missing(self) -> list[str]:
@@ -626,9 +687,13 @@ class ModelEntryForm(Vertical):
             connection_parts(
                 url="",
                 token=None,
-                completions_url=self._as_validator_sees(self._backend0.get("completions_url")),
+                completions_url=self._as_validator_sees(
+                    self._backend0.get("completions_url")
+                ),
                 proxy=self._as_validator_sees(self._backend0.get("proxy")),
-                authorization=self._as_validator_sees(headers.get("Authorization")),
+                authorization=self._as_validator_sees(
+                    headers.get("Authorization")
+                ),
             )
         )
 
@@ -686,7 +751,11 @@ class ModelEntryForm(Vertical):
         inherited = self._inherited_auth()
         if inherited:
             return _inherited(onboarding.display_secret(inherited))
-        return _BASE_TOKEN_EMPTY if self._inherits_from_base() else _COMMON_TOKEN_EMPTY
+        return (
+            _BASE_TOKEN_EMPTY
+            if self._inherits_from_base()
+            else _COMMON_TOKEN_EMPTY
+        )
 
     def _token_label(self) -> str:
         """Подпись поля токена. Клавиша обещается ровно там, где по ней можно нажать и
@@ -697,7 +766,11 @@ class ModelEntryForm(Vertical):
         курсором пропускается, и обещание в его подписи звало бы туда, куда не встать;
         выход при этом не теряется — с адреса клавиша работает, и там её называет
         футер (канон «недоступное не обещаем»)."""
-        return _TOKEN_LABEL_INHERIT if self._pair_returnable() and not self._no_auth else _TOKEN_LABEL
+        return (
+            _TOKEN_LABEL_INHERIT
+            if self._pair_returnable() and not self._no_auth
+            else _TOKEN_LABEL
+        )
 
     def _sync_token_label(self) -> None:
         for w in self.query("#mef-token-label"):
@@ -717,7 +790,11 @@ class ModelEntryForm(Vertical):
         if self.own_connection():
             hint = _NO_AUTH_TOGGLE_HINT
         else:
-            hint = _TOKEN_BASE_HINT if self._inherits_from_base() else _TOKEN_SHARED_HINT
+            hint = (
+                _TOKEN_BASE_HINT
+                if self._inherits_from_base()
+                else _TOKEN_SHARED_HINT
+            )
         t.append("   " + hint, style=DEEP_DIM)
         return t
 
@@ -731,7 +808,9 @@ class ModelEntryForm(Vertical):
         if not value:
             return 0 if items else None
         value = value.lower()
-        return next((i for i, m in enumerate(items) if m.id.lower() == value), None)
+        return next(
+            (i for i, m in enumerate(items) if m.id.lower() == value), None
+        )
 
     @staticmethod
     def _model_refilter_index(items, visible, prev) -> int | None:
@@ -771,37 +850,66 @@ class ModelEntryForm(Vertical):
         icls = "onb-dyn set-framed"
         # Строка состояния пары — НАД парой полей (§4): она про оба сразу, и пометки у
         # каждого поля разнесли бы одно состояние по двум подписям.
-        yield Static(_PAIR_SHARED, id="mef-pair", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            _PAIR_SHARED, id="mef-pair", classes=_CLS_ONB_HINT_ONB_DYN
+        )
         yield Static(_URL_LABEL, classes=_CLS_ONB_HINT_ONB_DYN)
         self._url_input = PasteInput(
-            value="", placeholder=self._url_placeholder(), id="mef-url", classes="onb-dyn group-field"
+            value="",
+            placeholder=self._url_placeholder(),
+            id="mef-url",
+            classes="onb-dyn group-field",
         )
         with Vertical(classes="field-group onb-dyn", id="mef-url-group"):
             yield self._url_input
-        yield Static(self._token_label(), id="mef-token-label", classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
+        yield Static(
+            self._token_label(),
+            id="mef-token-label",
+            classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP,
+        )
         # has-saved: placeholder говорит одно из двух (маска действующего значения /
         # подсказка-объяснение), и различать их надо не вчитываясь (спека §3.4).
         tcls = icls + (" has-saved" if self._token_is_mask() else "")
-        yield PasteInput(value="", placeholder=self._token_placeholder(), password=True, id="mef-token", classes=tcls)
-        yield Static(self._noauth_text(), id="mef-noauth", classes=self._noauth_cls())
+        yield PasteInput(
+            value="",
+            placeholder=self._token_placeholder(),
+            password=True,
+            id="mef-token",
+            classes=tcls,
+        )
+        yield Static(
+            self._noauth_text(), id="mef-noauth", classes=self._noauth_cls()
+        )
         yield Static(_MODEL_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         # Поле id — со списком моделей (автоподгрузка при входе, Alt+↓ — перечитать),
         # значит внутри рамки-группы: рамка одна на поле и его список (спека §3.1).
         with Vertical(classes="field-group onb-dyn", id="mef-model-group"):
             yield PasteInput(
-                value=self._model0, placeholder=self._model_placeholder(), id="mef-model", classes="onb-dyn group-field"
+                value=self._model0,
+                placeholder=self._model_placeholder(),
+                id="mef-model",
+                classes="onb-dyn group-field",
             )
         # Строка состояния списка (загрузка/сбой/счётчик) — пустая не занимает места
         # (`display`), как статусы `ModelEditor`.
-        status = Static("", id="mef-model-status", classes=_CLS_ONB_HINT_ONB_DYN)
+        status = Static(
+            "", id="mef-model-status", classes=_CLS_ONB_HINT_ONB_DYN
+        )
         status.display = False
         yield status
         yield Static(_ALIAS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield PasteInput(
-            value=self._alias0, placeholder=self._alias_placeholder(self._model0), id="mef-alias", classes=icls
+            value=self._alias0,
+            placeholder=self._alias_placeholder(self._model0),
+            id="mef-alias",
+            classes=icls,
         )
         yield Static(self._alias_hint(), classes=_CLS_ONB_HINT_ONB_DYN)
-        yield Static(connection_line_text(None), id="mef-probe-line", classes="set-hint set-dyn")
+        yield Static(
+            connection_line_text(None),
+            id="mef-probe-line",
+            classes="set-hint set-dyn",
+        )
         # Строка ошибки монтируется сразу и пустой (display гасит место под неё):
         # remove()+mount() с тем же id в одном такте даёт DuplicateIds, если форма
         # падает на одной ошибке два submit() подряд (урок донора).
@@ -811,7 +919,12 @@ class ModelEntryForm(Vertical):
         # `[x]` съедал имя из отказа, `[/x]` ронял `MarkupError` наружу — и валидатор
         # такие имена пропускает, а файл их квотирует, то есть падало на повторном вводе
         # СОХРАНЁННОГО имени. Тот же приём, каким чинён этот класс в `settings._singleton`.
-        error = Static("", id="mef-error", classes="onb-warn onb-dyn set-group-gap", markup=False)
+        error = Static(
+            "",
+            id="mef-error",
+            classes="onb-warn onb-dyn set-group-gap",
+            markup=False,
+        )
         error.display = False
         yield error
 
@@ -853,7 +966,11 @@ class ModelEntryForm(Vertical):
         форма не достаёт. У общей — тоже два: раздел «Подключение» либо заслонённая
         запись основного конфига, у которой тёзка берёт пару."""
         if not own:
-            return _PAIR_SHARED_BASE if self._inherits_from_base() else _PAIR_SHARED
+            return (
+                _PAIR_SHARED_BASE
+                if self._inherits_from_base()
+                else _PAIR_SHARED
+            )
         return _PAIR_OWN_BACKEND if self._pair_in_backend() else _PAIR_OWN
 
     def _sync_token_visibility(self) -> None:
@@ -1041,7 +1158,10 @@ class ModelEntryForm(Vertical):
         Отдельным предикатом, а не веткой внутри действия (эталон — `ConnectionEditor.
         on_token_field_with_saved`): по нему же гейтится обещание в футере, а спросить
         действием нельзя — оно меняет состояние."""
-        return self._pair_returnable() and self._positions[self._idx] in _PAIR_FIELDS
+        return (
+            self._pair_returnable()
+            and self._positions[self._idx] in _PAIR_FIELDS
+        )
 
     def clear_token(self) -> bool:
         """`Ctrl+U` на поле пары: вернуть записи ОБЩЕЕ подключение — снять свой адрес,
@@ -1063,7 +1183,9 @@ class ModelEntryForm(Vertical):
         результат виден ДО сохранения. Передумать можно, набрав пару заново (пометка
         снимется сама, `on_input_changed`)."""
         if not self.can_return_shared_pair:
-            return False  # возвращать нечего либо курсор не там — клавиша не наша
+            return (
+                False  # возвращать нечего либо курсор не там — клавиша не наша
+            )
         self._return_shared_pair()
         return True
 
@@ -1182,10 +1304,18 @@ class ModelEntryForm(Vertical):
                 )
         return True
 
-    def _fetch_blocking(self, url: str, auth: str | None, gen: int, refresh: bool) -> None:
+    def _fetch_blocking(
+        self, url: str, auth: str | None, gen: int, refresh: bool
+    ) -> None:
         url, auth = _resolved_for_request(url, auth)
         try:
-            models = self._fetch(url, auth, verify=self._verify, config_proxy=self._config_proxy, refresh=refresh)
+            models = self._fetch(
+                url,
+                auth,
+                verify=self._verify,
+                config_proxy=self._config_proxy,
+                refresh=refresh,
+            )
         except Exception:
             models = None
         self.app.call_from_thread(self._on_models, models, gen, refresh)
@@ -1287,7 +1417,11 @@ class ModelEntryForm(Vertical):
                 # после раскрытия по печати вернёт исходный адрес, а не набранное.
                 self._presets_ctrl.reopen_for_typing(value)
                 self._presets_ctrl.apply_filter(value)
-        elif event.input.id == "mef-token" and event.input.value and self._token_cleared:
+        elif (
+            event.input.id == "mef-token"
+            and event.input.value
+            and self._token_cleared
+        ):
             # Сняли свой токен, а потом набрали новый — пометка снимается сама.
             # Иначе submit пошёл бы по ветке «удалить ключ» и набранное молча
             # пропало бы. Подпись возвращается вместе с пометкой: Ctrl+U снова
@@ -1358,7 +1492,9 @@ class ModelEntryForm(Vertical):
         половины возможен только вместе с сырым значением, приехавшим сюда с ней."""
         if self._no_auth or not self.own_connection():
             return None
-        return self._token_value() or (self._token_current if self._own_token_active() else None)
+        return self._token_value() or (
+            self._token_current if self._own_token_active() else None
+        )
 
     def probe_connection(self) -> bool:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
@@ -1394,16 +1530,28 @@ class ModelEntryForm(Vertical):
                 )
         return True
 
-    def _probe_blocking(self, url: str, auth: str | None, model: str, gen: int) -> None:
-        from gc_tui.services.settings_probe import ProbeResult, probe_connection
+    def _probe_blocking(
+        self, url: str, auth: str | None, model: str, gen: int
+    ) -> None:
+        from gc_tui.services.settings_probe import (
+            ProbeResult,
+            probe_connection,
+        )
 
         url, auth = _resolved_for_request(url, auth)
         try:
             result = probe_connection(
-                url, auth, self._verify, model, config_proxy=self._config_proxy, probe_fn=self._probe
+                url,
+                auth,
+                self._verify,
+                model,
+                config_proxy=self._config_proxy,
+                probe_fn=self._probe,
             )
         except Exception as exc:
-            result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
+            result = ProbeResult(
+                "unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}"
+            )
         self.app.call_from_thread(self._on_probe, result, gen)
 
     def _on_probe(self, result, gen: int) -> None:
@@ -1570,7 +1718,11 @@ class ModelEntryForm(Vertical):
             # имя это условие по-прежнему отвергает.
             return self._fail(_ALIAS_TAKEN_BY_BASE)
         url = values["url"]
-        if url and not onboarding._valid_endpoint_url(url) and not onboarding.env_ref_status(url):
+        if (
+            url
+            and not onboarding._valid_endpoint_url(url)
+            and not onboarding.env_ref_status(url)
+        ):
             # Ссылка `${ENV:VAR}` — штатное СЫРОЕ значение поля: форма читает документ
             # без резолва (`models_section._read_document`), а `docs/configuration.md`
             # сам зовёт хранить адрес и токен так. Структурная проверка её бракует, и
@@ -1589,8 +1741,12 @@ class ModelEntryForm(Vertical):
                 # отправить человека искать опечатку там, где он забыл `export`, —
                 # худшее, что тут можно сказать. Тот же разбор делает валидатор
                 # загрузки (`model_registry.validate_registry_pairs`).
-                return self._fail(_PAIR_ENV_MISSING.format(names=", ".join(names)))
-            return self._fail(_PAIR_NEEDS_TOKEN if has_address else _PAIR_NEEDS_URL)
+                return self._fail(
+                    _PAIR_ENV_MISSING.format(names=", ".join(names))
+                )
+            return self._fail(
+                _PAIR_NEEDS_TOKEN if has_address else _PAIR_NEEDS_URL
+            )
         self._clear_error()
         fields: dict = {}
         if values["model"]:
@@ -1602,9 +1758,13 @@ class ModelEntryForm(Vertical):
         if url:
             fields["url"] = url
         elif self._url0:
-            fields["url"] = None  # стёрли свой адрес — вернулись к наследованию
+            fields["url"] = (
+                None  # стёрли свой адрес — вернулись к наследованию
+            )
         if self._no_auth:
-            if self._token_current != "":  # не «оставить прежнее ""», а изменение
+            if (
+                self._token_current != ""
+            ):  # не «оставить прежнее ""», а изменение
                 fields["token"] = ""
         elif values["token"]:
             fields["token"] = values["token"]

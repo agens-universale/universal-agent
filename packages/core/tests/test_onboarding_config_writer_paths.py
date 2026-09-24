@@ -61,7 +61,9 @@ TEMPLATE = (
 
 
 def test_insert_missing_key_into_existing_section():
-    user = 'backend:\n  completions_url: "http://real"\nupdate:\n  check: "off"\n'
+    user = (
+        'backend:\n  completions_url: "http://real"\nupdate:\n  check: "off"\n'
+    )
     out = w.insert_missing(user, "update.check_interval_days", TEMPLATE)
     assert "check_interval_days: 1" in out
     assert out.index("check_interval_days") > out.index('check: "off"')
@@ -77,7 +79,9 @@ def test_insert_missing_section_appended_with_comments():
 
 def test_write_values_inserts_missing_via_template(tmp_path):
     cfg = tmp_path / "config.yml"
-    cfg.write_text('backend:\n  completions_url: "http://real"\n', encoding="utf-8")
+    cfg.write_text(
+        'backend:\n  completions_url: "http://real"\n', encoding="utf-8"
+    )
     tpl = tmp_path / "config.default.yml"
     tpl.write_text(TEMPLATE, encoding="utf-8")
     missing = w.write_values(cfg, {"update.check": "off"}, template_path=tpl)
@@ -96,7 +100,9 @@ def test_write_values_validation_failure_leaves_file_untouched(tmp_path):
     import pytest
 
     with pytest.raises(ValueError):
-        w.write_values(cfg, {"backend.completions_url": "http://new"}, validate=_reject)
+        w.write_values(
+            cfg, {"backend.completions_url": "http://new"}, validate=_reject
+        )
     assert cfg.read_text(encoding="utf-8") == original
 
 
@@ -104,7 +110,9 @@ def test_validate_config_text_accepts_renamed_key(monkeypatch):
     from gc_core.config import validate_config_text
     from gc_core.config_modules import compat as compat
 
-    monkeypatch.setattr(compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"})
+    monkeypatch.setattr(
+        compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"}
+    )
     validate_config_text('backend:\n  legacy_url: "http://x"\n')  # не бросает
 
 
@@ -121,7 +129,9 @@ def test_validate_config_text_ignores_unresolvable_sections():
     проходит (её ловит только `validate_config_text_with_sections`)."""
     from gc_core.config import validate_config_text
 
-    validate_config_text('models:\n  flash:\n    url: "http://x"\n    token: "sk"\nslots:\n  default: "нет-такого"\n')
+    validate_config_text(
+        'models:\n  flash:\n    url: "http://x"\n    token: "sk"\nslots:\n  default: "нет-такого"\n'
+    )
 
 
 def test_validate_config_text_with_sections_rejects_dangling_slot():

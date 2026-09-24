@@ -30,13 +30,23 @@ def _make_complete_dev_dir(skill_dir: Path) -> Path:
     dev_dir = skill_dir / "_dev"
     dev_dir.mkdir(exist_ok=True)
     (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
-    (dev_dir / "completion_report.md").write_text("# completion\n", encoding="utf-8")
+    (dev_dir / "completion_report.md").write_text(
+        "# completion\n", encoding="utf-8"
+    )
     examples_dir = dev_dir / "examples"
     examples_dir.mkdir(exist_ok=True)
-    (examples_dir / "prompt_01.md").write_text("# prompt 1\n", encoding="utf-8")
-    (examples_dir / "prompt_01_output.md").write_text("# output 1\n", encoding="utf-8")
-    (examples_dir / "prompt_02.md").write_text("# prompt 2\n", encoding="utf-8")
-    (examples_dir / "prompt_02_output.md").write_text("# output 2\n", encoding="utf-8")
+    (examples_dir / "prompt_01.md").write_text(
+        "# prompt 1\n", encoding="utf-8"
+    )
+    (examples_dir / "prompt_01_output.md").write_text(
+        "# output 1\n", encoding="utf-8"
+    )
+    (examples_dir / "prompt_02.md").write_text(
+        "# prompt 2\n", encoding="utf-8"
+    )
+    (examples_dir / "prompt_02_output.md").write_text(
+        "# output 2\n", encoding="utf-8"
+    )
     return dev_dir
 
 
@@ -111,7 +121,12 @@ def test_quick_validate_runs_on_existing_skill():
     assert sample_dir.is_dir()
 
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.quick_validate", str(sample_dir.resolve())],
+        [
+            sys.executable,
+            "-m",
+            "scripts.quick_validate",
+            str(sample_dir.resolve()),
+        ],
         capture_output=True,
         encoding="utf-8",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
@@ -230,7 +245,9 @@ def test_package_skill_explicit_source_layer(tmp_path):
         ("assets", "skills/test-skill", "system"),
     ],
 )
-def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, expected_layer):
+def test_package_skill_auto_detects_source_layer(
+    tmp_path, base, skill_subpath, expected_layer
+):
     """Without --source-layer, README should auto-detect from path."""
     root = PROJECT_ROOT if base == "repo" else ASSETS
     skill_dir = root / skill_subpath
@@ -272,7 +289,9 @@ def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, 
 
         with zipfile.ZipFile(skill_zip) as zf:
             readme = zf.read("README.md").decode("utf-8")
-            assert f"**Слой-источник:** {expected_layer}" in readme, readme[:500]
+            assert f"**Слой-источник:** {expected_layer}" in readme, readme[
+                :500
+            ]
     finally:
         if cleanup_needed:
             import shutil
@@ -398,7 +417,9 @@ def test_package_skill_cleans_up_dev_folder_after_success(tmp_path):
     assert (skill_dir / "SKILL.md").exists()
 
 
-def test_package_skill_cleanup_permission_error_does_not_block(tmp_path, monkeypatch):
+def test_package_skill_cleanup_permission_error_does_not_block(
+    tmp_path, monkeypatch
+):
     """If _dev/ cleanup raises OSError, archive should still be created and exit 0."""
     skill_dir = tmp_path / "test-skill"
     skill_dir.mkdir()
@@ -478,7 +499,10 @@ def test_package_skill_without_dev_folder(tmp_path):
         assert not any(n.startswith("demo/") for n in names), names
         # README без секции demo
         readme = zf.read("README.md").decode("utf-8")
-        assert "demo/" not in readme or "Что в архиве" not in readme.split("demo/")[0]
+        assert (
+            "demo/" not in readme
+            or "Что в архиве" not in readme.split("demo/")[0]
+        )
         # (allow mention only in absence)
 
 
@@ -519,7 +543,9 @@ def test_package_skill_refuses_incomplete_dev(tmp_path):
     )
     combined = (result.stderr or "") + (result.stdout or "")
     assert "completion_report.md" in combined, combined
-    assert "examples/prompt_01.md" in combined or "prompt_01" in combined, combined
+    assert "examples/prompt_01.md" in combined or "prompt_01" in combined, (
+        combined
+    )
     # Архив НЕ должен быть создан
     assert not list(out_dir.glob("skill-*.zip")), "archive should NOT exist"
 
@@ -619,18 +645,25 @@ def _fake_embedding(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "foreign-repo"
     (root / ".git").mkdir(parents=True)
     (root / "packages" / "other" / "src").mkdir(parents=True)
-    (root / "packages" / "other" / "src" / "sentinel_foreign_pkg.py").write_text(
-        "VALUE = 'foreign'\n", encoding="utf-8"
-    )
+    (
+        root / "packages" / "other" / "src" / "sentinel_foreign_pkg.py"
+    ).write_text("VALUE = 'foreign'\n", encoding="utf-8")
     (root / "packages" / "core").mkdir(parents=True)
     (root / "packages" / "core" / "pyproject.toml").write_text(
         '[project]\nname = "someone-else"\nversion = "1.0"\n', encoding="utf-8"
     )
-    (root / "pyproject.toml").write_text('[project]\nname = "someone-else-meta"\n', encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "someone-else-meta"\n', encoding="utf-8"
+    )
 
     wheel_skill = (
         root / ".venv" / "lib" / f"python{sys.version_info.major}."
-        f"{sys.version_info.minor}" / "site-packages" / "gc_core" / "assets" / "skills" / "skill-creator"
+        f"{sys.version_info.minor}"
+        / "site-packages"
+        / "gc_core"
+        / "assets"
+        / "skills"
+        / "skill-creator"
     )
     wheel_skill.mkdir(parents=True)
     import shutil
@@ -681,7 +714,14 @@ def test_foreign_repo_is_not_taken_for_our_working_copy(tmp_path):
     (cwd / "some-skill").mkdir(parents=True)
 
     result = subprocess.run(
-        [sys.executable, "-c", _FOREIGN_PROBE, str(scripts), str(foreign), str(cwd / "some-skill")],
+        [
+            sys.executable,
+            "-c",
+            _FOREIGN_PROBE,
+            str(scripts),
+            str(foreign),
+            str(cwd / "some-skill"),
+        ],
         capture_output=True,
         encoding="utf-8",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},

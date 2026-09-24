@@ -39,7 +39,9 @@ def _cleanup_threads_loop(
             if stats.get("missing_dir"):
                 logger.warning("каталог тредов не найден: %s", threads_dir)
             elif stats["errors"]:
-                logger.error("чистка тредов: %s ошибок, %s", stats["errors"], stats)
+                logger.error(
+                    "чистка тредов: %s ошибок, %s", stats["errors"], stats
+                )
             elif stats.get("removed_meta"):
                 # Удаление обязано оставлять след. Прежде молчал именно успешный
                 # проход: «каталога нет» кричало предупреждением, а снос десятка

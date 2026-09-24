@@ -6,7 +6,9 @@ async def test_status_word_has_no_brackets(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         # нет активной задачи и стора → исход неизвестен → None (не выдумываем "stopped")
         assert scr._session_status_word() is None
@@ -24,7 +26,9 @@ async def test_status_word_reads_real_terminal_status(tmp_path):
         def get_task_meta(self, tid):
             return {"tui": {"status": "completed"}}
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._store = _Store()

@@ -203,13 +203,17 @@ write_guard_group.add_argument(
 write_guard_group.add_argument(
     "--no-write-guard",
     action="store_true",
-    help=("Явно отключить write_guard (эквивалент --write-guard false); имеет приоритет над config.yml"),
+    help=(
+        "Явно отключить write_guard (эквивалент --write-guard false); имеет приоритет над config.yml"
+    ),
 )
 
 parser.add_argument(
     "--command-moderation",
     choices=["allow", "ask", "deny"],
-    help=("Режим exec_command/exec_python: allow без judge, ask с подтверждением опасного, deny блокирует опасное"),
+    help=(
+        "Режим exec_command/exec_python: allow без judge, ask с подтверждением опасного, deny блокирует опасное"
+    ),
 )
 
 read_guard_group = parser.add_mutually_exclusive_group()
@@ -217,12 +221,16 @@ read_guard_group.add_argument(
     "--read-guard",
     type=_parse_bool_cli,
     choices=[True, False],
-    help=("Включить/выключить read_guard (true|false): ограничение чтения файлов по allowed_read_roots/denied_*"),
+    help=(
+        "Включить/выключить read_guard (true|false): ограничение чтения файлов по allowed_read_roots/denied_*"
+    ),
 )
 read_guard_group.add_argument(
     "--no-read-guard",
     action="store_true",
-    help=("Явно отключить read_guard (эквивалент --read-guard false); имеет приоритет над config.yml"),
+    help=(
+        "Явно отключить read_guard (эквивалент --read-guard false); имеет приоритет над config.yml"
+    ),
 )
 
 parser.add_argument(
@@ -254,7 +262,9 @@ parser.add_argument(
 parser.add_argument(
     "--agentsmd-override",
     action="store_true",
-    help=("Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив глобальный и .gc/AGENTS.md слои"),
+    help=(
+        "Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив глобальный и .gc/AGENTS.md слои"
+    ),
 )
 
 parser.add_argument(
@@ -294,25 +304,45 @@ if (
         "--check-update/--update для обновления агента)."
     )
 if parsed_args.init_config and parsed_args.query:
-    parser.error("--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит.")
+    parser.error(
+        "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит."
+    )
 if parsed_args.sync_config and parsed_args.query:
-    parser.error("--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит.")
+    parser.error(
+        "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит."
+    )
 if parsed_args.reset_config and parsed_args.query:
-    parser.error("--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит.")
+    parser.error(
+        "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит."
+    )
 if parsed_args.init_config and parsed_args.sync_config:
-    parser.error("--init-config и --sync-config нельзя вместе: используйте одно из двух.")
+    parser.error(
+        "--init-config и --sync-config нельзя вместе: используйте одно из двух."
+    )
 if parsed_args.reset_config and parsed_args.sync_config:
-    parser.error("--reset-config и --sync-config нельзя вместе: используйте одно из двух.")
+    parser.error(
+        "--reset-config и --sync-config нельзя вместе: используйте одно из двух."
+    )
 if parsed_args.reset_config and parsed_args.init_config:
-    parser.error("--reset-config и --init-config нельзя вместе: используйте одно из двух.")
+    parser.error(
+        "--reset-config и --init-config нельзя вместе: используйте одно из двух."
+    )
 if parsed_args.check_update and parsed_args.query:
-    parser.error("--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит.")
+    parser.error(
+        "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит."
+    )
 if parsed_args.update and parsed_args.query:
-    parser.error("--update и -q/--query нельзя вместе: --update только запускает обновление и выходит.")
+    parser.error(
+        "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит."
+    )
 if parsed_args.update and parsed_args.check_update:
-    parser.error("--update и --check-update нельзя вместе: используйте одно из двух.")
+    parser.error(
+        "--update и --check-update нельзя вместе: используйте одно из двух."
+    )
 if parsed_args.new and not parsed_args.thread_id:
-    parser.error("Аргумент -n/--new можно использовать только вместе с -t/--thread-id.")
+    parser.error(
+        "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."
+    )
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
 if parsed_args.level is not None:

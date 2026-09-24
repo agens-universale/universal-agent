@@ -57,7 +57,9 @@ async def test_plain_click_focuses_row_and_does_not_open():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="x", kind_class="line-agent", event_no=7)
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=7
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -77,7 +79,9 @@ async def test_ctrl_click_opens_event():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="x", kind_class="line-agent", event_no=7)
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=7
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -104,8 +108,12 @@ async def test_ctrl_click_also_focuses_row():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="a", kind_class="line-agent", event_no=6)
-            yield TraceRow(prefix="● ", content="b", kind_class="line-agent", event_no=7)
+            yield TraceRow(
+                prefix="● ", content="a", kind_class="line-agent", event_no=6
+            )
+            yield TraceRow(
+                prefix="● ", content="b", kind_class="line-agent", event_no=7
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -156,7 +164,9 @@ async def test_double_click_no_longer_opens():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="x", kind_class="line-agent", event_no=7)
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=7
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -200,9 +210,16 @@ async def test_tool_call_row_plain_click_focuses_and_does_not_open():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
+            yield ToolCallRow(
+                call_id="c42",
+                tool_name="read_file",
+                args_summary="",
+                event_no=1,
+            )
 
-        def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
+        def on_open_tool_call_detail_request(
+            self, message: OpenToolCallDetailRequest
+        ) -> None:
             received.append(message.call_id)
 
     async with _App().run_test() as pilot:
@@ -220,9 +237,16 @@ async def test_tool_call_row_ctrl_click_opens_detail():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
+            yield ToolCallRow(
+                call_id="c42",
+                tool_name="read_file",
+                args_summary="",
+                event_no=1,
+            )
 
-        def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
+        def on_open_tool_call_detail_request(
+            self, message: OpenToolCallDetailRequest
+        ) -> None:
             received.append(message.call_id)
 
     async with _App().run_test() as pilot:
@@ -245,9 +269,16 @@ async def test_tool_call_row_ctrl_click_also_focuses():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
+            yield ToolCallRow(
+                call_id="c42",
+                tool_name="read_file",
+                args_summary="",
+                event_no=1,
+            )
 
-        def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
+        def on_open_tool_call_detail_request(
+            self, message: OpenToolCallDetailRequest
+        ) -> None:
             received.append(message.call_id)
 
     async with _App().run_test() as pilot:
@@ -264,9 +295,16 @@ async def test_tool_call_row_double_click_no_longer_opens():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
+            yield ToolCallRow(
+                call_id="c42",
+                tool_name="read_file",
+                args_summary="",
+                event_no=1,
+            )
 
-        def on_open_tool_call_detail_request(self, message: OpenToolCallDetailRequest) -> None:
+        def on_open_tool_call_detail_request(
+            self, message: OpenToolCallDetailRequest
+        ) -> None:
             received.append(message.call_id)
 
     async with _App().run_test() as pilot:
@@ -283,7 +321,12 @@ async def test_tool_call_row_focus_does_not_mount_preview_widget():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
+            yield ToolCallRow(
+                call_id="c42",
+                tool_name="read_file",
+                args_summary="",
+                event_no=1,
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)

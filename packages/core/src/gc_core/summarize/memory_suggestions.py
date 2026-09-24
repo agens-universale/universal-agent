@@ -15,7 +15,9 @@ from gc_core.summarize.working_memory_gateway import (
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())
 DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
-    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md")
+    os.path.join(
+        _PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md"
+    )
 )
 
 
@@ -33,8 +35,14 @@ class MemoryPatchLlmResult:
 
 def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
-    prompt_path_raw = str(summary_params.get(config_key) or default_path).strip()
+    summary_params = (
+        cfg.get("summary_params")
+        if isinstance(cfg.get("summary_params"), dict)
+        else {}
+    )
+    prompt_path_raw = str(
+        summary_params.get(config_key) or default_path
+    ).strip()
     if not prompt_path_raw:
         raise ValueError(f"summary_params.{config_key} is empty")
     if os.path.isabs(prompt_path_raw):
@@ -97,7 +105,9 @@ async def arequest_patch_replace(
         DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
     )
     # Soft-only: subagent addendum lives in system prompt only (no user duplicate).
-    system = load_memory_patch_replace_prompt(prompt_path, subagent=_is_subagent_state(state))
+    system = load_memory_patch_replace_prompt(
+        prompt_path, subagent=_is_subagent_state(state)
+    )
     user_prompt = (
         "<dialog_history>\n"
         f"{history_text}\n"
@@ -128,7 +138,9 @@ async def arequest_memory_deltas_format_repair(
 
     Основная реализация починки формата; синхронное имя оставлено шимом.
     """
-    request_messages = build_memory_deltas_format_repair_messages(raw_output, full_replace=full_replace)
+    request_messages = build_memory_deltas_format_repair_messages(
+        raw_output, full_replace=full_replace
+    )
     return await arequest_summary_text(
         ctx=ctx,
         state=state,

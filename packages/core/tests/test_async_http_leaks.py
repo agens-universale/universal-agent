@@ -45,7 +45,9 @@ def test_run_coro_blocking_leaves_no_client_behind():
     for _ in range(5):
         run_coro_blocking(_touch_client())
 
-    assert async_http._clients == {}, f"клиенты одноразовых loop остались в реестре: {len(async_http._clients)}"
+    assert async_http._clients == {}, (
+        f"клиенты одноразовых loop остались в реестре: {len(async_http._clients)}"
+    )
 
 
 def test_the_client_is_actually_closed_not_just_forgotten():
@@ -179,7 +181,9 @@ def test_registry_hands_out_one_client_per_key():
     # `test_registry_does_not_accumulate_dead_loops`). Затёртый клиент виден
     # прямо — как совпадение объектов, — и это и есть проверяемое свойство:
     # затёртый утёк бы сокетом.
-    assert len({id(c) for c in seen}) == 6, "два потока получили одного клиента"
+    assert len({id(c) for c in seen}) == 6, (
+        "два потока получили одного клиента"
+    )
 
 
 # --- L6: реестр не копит мёртвые записи, общий пул не декорация ------------
@@ -205,7 +209,9 @@ def test_registry_does_not_accumulate_dead_loops():
     asyncio.run(_touch())
     gc.collect()
 
-    alive = [k for k, (ref, _c) in async_http._clients.items() if ref() is not None]
+    alive = [
+        k for k, (ref, _c) in async_http._clients.items() if ref() is not None
+    ]
     assert len(async_http._clients) <= len(alive) + 1, (
         f"реестр копит мёртвые записи: всего {len(async_http._clients)}, живых {len(alive)}"
     )
@@ -245,4 +251,6 @@ def test_shared_sync_client_is_actually_used():
         httpx.Client = real_client
         NO_NETRC_SESSION._transport = real_transport
 
-    assert one_shots == [], "verify=True снова поднял одноразовый клиент — общий пул декоративен"
+    assert one_shots == [], (
+        "verify=True снова поднял одноразовый клиент — общий пул декоративен"
+    )

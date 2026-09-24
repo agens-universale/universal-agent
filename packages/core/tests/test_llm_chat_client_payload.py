@@ -28,11 +28,17 @@ def _patch_policy(monkeypatch):
         "arequest_chat_completions_with_policy",
         _fake_policy,
     )
-    monkeypatch.setattr(llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {}))
+    monkeypatch.setattr(
+        llm_chat_client,
+        "acreate_call_headers",
+        as_coro(lambda _s, _c, resolved=None: {}),
+    )
     return captured
 
 
-def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypatch):
+def test_request_chat_completion_text_raw_logging_controlled_by_config(
+    monkeypatch,
+):
     logs = []
 
     class _Log:
@@ -83,7 +89,9 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
     assert '"content": "ok"' in args[1]
 
 
-def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs(monkeypatch):
+def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs(
+    monkeypatch,
+):
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
@@ -116,7 +124,9 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     assert captured["payload"]["temperature"] == 0.3
 
 
-def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypatch):
+def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(
+    monkeypatch,
+):
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(

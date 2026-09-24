@@ -16,9 +16,7 @@ from gc_core.utils.backend_errors import (
     finish_blocks_final,
 )
 
-NO_TOOL_CALL_BOUNCE_MESSAGE = (
-    "There is no tool call in your response. Choose a tool call that brings you closer to solving the task."
-)
+NO_TOOL_CALL_BOUNCE_MESSAGE = "There is no tool call in your response. Choose a tool call that brings you closer to solving the task."
 
 PROVIDER_BLOCKED_BOUNCE_MESSAGE = (
     "The provider blocked this response (content_filter/refusal/safety). "
@@ -51,8 +49,14 @@ def extract_last_assistant_text(
     if not messages:
         return ""
     for message in reversed(messages):
-        if isinstance(message, dict) and message.get("type") == "message" and message.get("role") == "assistant":
-            return project_assistant_text(message.get("content"), tags=tags, strip_think=strip_think).strip()
+        if (
+            isinstance(message, dict)
+            and message.get("type") == "message"
+            and message.get("role") == "assistant"
+        ):
+            return project_assistant_text(
+                message.get("content"), tags=tags, strip_think=strip_think
+            ).strip()
     return ""
 
 

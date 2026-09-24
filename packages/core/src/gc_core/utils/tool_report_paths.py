@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    build_execution_workspace,
+)
 
 
 def tool_report_abspath(
@@ -31,7 +34,11 @@ def tool_report_abspath(
         return path
 
     ws = workspace
-    if ws is None and backend is not None and getattr(backend, "is_sandbox", False):
+    if (
+        ws is None
+        and backend is not None
+        and getattr(backend, "is_sandbox", False)
+    ):
         ws = build_execution_workspace(backend)
 
     if ws is not None and getattr(ws.backend, "is_sandbox", False):

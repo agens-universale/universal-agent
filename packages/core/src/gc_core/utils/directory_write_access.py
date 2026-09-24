@@ -16,7 +16,11 @@ def directory_allows_probe_write(dir_path: str) -> bool:
     Raises nothing: failures map to ``False``.
     """
     try:
-        resolved = Path(os.path.abspath(os.path.expanduser(os.path.normpath(str(dir_path)))))
+        resolved = Path(
+            os.path.abspath(
+                os.path.expanduser(os.path.normpath(str(dir_path)))
+            )
+        )
         if not resolved.is_dir():
             return False
     except OSError:

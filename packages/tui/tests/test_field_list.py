@@ -220,13 +220,19 @@ async def test_reload_opens_a_collapsed_list():
         assert host.ctrl.reload() is True
         await pilot.pause()
         assert host.ctrl.is_open is True
-        assert host.ctrl.reload() is False  # раскрытому статическому списку нечего перечитывать
+        assert (
+            host.ctrl.reload() is False
+        )  # раскрытому статическому списку нечего перечитывать
 
 
 async def test_selected_row_is_scrolled_into_view(monkeypatch):
     seen = []
     original = Static.scroll_visible
-    monkeypatch.setattr(Static, "scroll_visible", lambda self, **kw: seen.append(self) or original(self, **kw))
+    monkeypatch.setattr(
+        Static,
+        "scroll_visible",
+        lambda self, **kw: seen.append(self) or original(self, **kw),
+    )
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()

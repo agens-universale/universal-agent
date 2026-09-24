@@ -41,7 +41,9 @@ def test_unsetting_a_slot_absent_from_the_file_is_a_no_op(tmp_path):
     target = _target(tmp_path, text)
 
     rw.write_slot(target, "default", None, "")
-    assert yaml.safe_load(target.read_text(encoding="utf-8"))["slots"] == {"light": "gc"}
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["slots"] == {
+        "light": "gc"
+    }
 
 
 def test_unsetting_a_slot_written_as_a_line_still_works(tmp_path):
@@ -49,7 +51,9 @@ def test_unsetting_a_slot_written_as_a_line_still_works(tmp_path):
     target = _target(tmp_path, text)
 
     rw.write_slot(target, "default", None, "")
-    assert (yaml.safe_load(target.read_text(encoding="utf-8")).get("slots") or {}) == {}
+    assert (
+        yaml.safe_load(target.read_text(encoding="utf-8")).get("slots") or {}
+    ) == {}
 
 
 def test_unsetting_an_assign_quoted_differently_still_finds_it(tmp_path):
@@ -60,7 +64,12 @@ def test_unsetting_an_assign_quoted_differently_still_finds_it(tmp_path):
     target = _target(tmp_path, text)
 
     rw.write_assign(target, "*", None, "")
-    assert (yaml.safe_load(target.read_text(encoding="utf-8"))["assign"].get("subagents") or {}) == {}
+    assert (
+        yaml.safe_load(target.read_text(encoding="utf-8"))["assign"].get(
+            "subagents"
+        )
+        or {}
+    ) == {}
 
 
 def test_unsetting_an_assign_in_an_inline_mapping_is_refused(tmp_path):
@@ -79,13 +88,17 @@ def test_unsetting_an_assign_absent_from_the_file_is_a_no_op(tmp_path):
     target = _target(tmp_path, text)
 
     rw.write_assign(target, "summary", None, "")
-    assert yaml.safe_load(target.read_text(encoding="utf-8"))["assign"] == {"finish_gate": "gc"}
+    assert yaml.safe_load(target.read_text(encoding="utf-8"))["assign"] == {
+        "finish_gate": "gc"
+    }
 
 
 # --- Многострочные значения соседних полей переживают точечную правку ---
 
 
-def test_editing_one_field_keeps_a_multiline_value_of_a_sibling_field_intact(tmp_path):
+def test_editing_one_field_keeps_a_multiline_value_of_a_sibling_field_intact(
+    tmp_path,
+):
     """`yaml.safe_dump` кодирует перенос строки внутри скаляра пустой строкой-
     продолжением (`'\\n\\n'` → две пустые строки блока) — построчный фильтр
     «непустых» строк принимал их за мусор и склеивал соседние переносы:
@@ -106,7 +119,12 @@ def test_unsetting_a_nested_assign_written_as_a_line_still_works(tmp_path):
     target = _target(tmp_path, text)
 
     rw.write_assign(target, "*", None, "")
-    assert (yaml.safe_load(target.read_text(encoding="utf-8"))["assign"].get("subagents") or {}) == {}
+    assert (
+        yaml.safe_load(target.read_text(encoding="utf-8"))["assign"].get(
+            "subagents"
+        )
+        or {}
+    ) == {}
 
 
 # --- Секция не-словарь: отказ, который UI уже умеет показать, вместо AttributeError ---
@@ -167,29 +185,45 @@ def stack(tmp_path, monkeypatch):
     return tmp_path / "config.yml", profiles
 
 
-def test_removing_a_model_the_active_profile_points_at_is_refused(tmp_path, stack):
+def test_removing_a_model_the_active_profile_points_at_is_refused(
+    tmp_path, stack
+):
     """Секция «Модели» на основном файле не видит слотов профиля — но следующий
     старт видит: без стекового гейта запись уходила бы с зелёным «✓», а старт
     падал бы `ValueError` на фазе 2 загрузки."""
     base, profiles = stack
     text = 'profile: "work"\nmodels:\n  gc:\n    model: "x"\n'
     base.write_text(text, encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "gc"\n', encoding="utf-8"
+    )
 
     with pytest.raises(RegistryWriteError, match=r"gc"):
         rw.remove_model(base, "gc", force=True)
     assert base.read_text(encoding="utf-8") == text
 
 
-def test_a_base_resolvable_only_through_the_profile_still_accepts_writes(tmp_path, stack):
+def test_a_base_resolvable_only_through_the_profile_still_accepts_writes(
+    tmp_path, stack
+):
     """Обратная сторона: сам по себе основной файл нерезолвим (2 модели, ни одного
     слота), а стек валиден — правка записи обязана проходить."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
+        encoding="utf-8",
+    )
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "a"\n', encoding="utf-8"
+    )
 
     rw.upsert_model(base, "a", {"model": "x2"}, "")
-    assert yaml.safe_load(base.read_text(encoding="utf-8"))["models"]["a"]["model"] == "x2"
+    assert (
+        yaml.safe_load(base.read_text(encoding="utf-8"))["models"]["a"][
+            "model"
+        ]
+        == "x2"
+    )
 
 
 def test_an_active_profile_write_is_judged_on_the_stack(tmp_path, stack):
@@ -197,17 +231,24 @@ def test_an_active_profile_write_is_judged_on_the_stack(tmp_path, stack):
     нерезолвимым — отказ. Без `stack_base` (неактивный профиль) — фаза 1, запись
     проходит."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
+        encoding="utf-8",
+    )
     target = profiles / "work.yml"
     text = 'slots:\n  default: "a"\n'
     target.write_text(text, encoding="utf-8")
 
     with pytest.raises(RegistryWriteError, match="slots.default"):
-        rw.write_slot(target, "default", None, "", is_profile=True, stack_base=base)
+        rw.write_slot(
+            target, "default", None, "", is_profile=True, stack_base=base
+        )
     assert target.read_text(encoding="utf-8") == text
 
     rw.write_slot(target, "default", None, "", is_profile=True)
-    assert (yaml.safe_load(target.read_text(encoding="utf-8")).get("slots") or {}) == {}
+    assert (
+        yaml.safe_load(target.read_text(encoding="utf-8")).get("slots") or {}
+    ) == {}
 
 
 # --- Справка «оставит ли транзакция реестр без слота» ---
@@ -219,31 +260,62 @@ def test_needs_default_slot_sees_the_active_profile_from_the_base(stack):
     обязан быть задан, иначе гейт отвергнет запись, а предложить слот будет негде."""
     base, profiles = stack
     base.write_text('profile: "work"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('models:\n  p1:\n    model: "x"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'models:\n  p1:\n    model: "x"\n', encoding="utf-8"
+    )
 
-    assert rw.needs_default_slot(base, [("upsert_model", "gc", {"model": "y"})], "") is True
+    assert (
+        rw.needs_default_slot(
+            base, [("upsert_model", "gc", {"model": "y"})], ""
+        )
+        is True
+    )
     # и ответ на него разрешает запись одной транзакцией — тупика нет
-    rw.apply_registry_ops(base, [("upsert_model", "gc", {"model": "y"}), ("write_slot", "default", "gc")], "")
+    rw.apply_registry_ops(
+        base,
+        [
+            ("upsert_model", "gc", {"model": "y"}),
+            ("write_slot", "default", "gc"),
+        ],
+        "",
+    )
 
 
 def test_needs_default_slot_is_quiet_when_the_profile_sets_the_slot(stack):
     """Обратная сторона: слот задан в профиле — merged однозначен, лишнего вопроса
     быть не должно."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "a"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8"
+    )
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "a"\n', encoding="utf-8"
+    )
 
-    assert rw.needs_default_slot(base, [("upsert_model", "gc", {"model": "y"})], "") is False
+    assert (
+        rw.needs_default_slot(
+            base, [("upsert_model", "gc", {"model": "y"})], ""
+        )
+        is False
+    )
 
 
 def test_needs_default_slot_for_a_profile_counts_the_base_under_it(stack):
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n', encoding="utf-8"
+    )
     target = profiles / "work.yml"
     target.write_text("models: {}\n", encoding="utf-8")
 
     assert (
-        rw.needs_default_slot(target, [("upsert_model", "b", {"model": "y"})], "", is_profile=True, stack_base=base)
+        rw.needs_default_slot(
+            target,
+            [("upsert_model", "b", {"model": "y"})],
+            "",
+            is_profile=True,
+            stack_base=base,
+        )
         is True
     )
 
@@ -252,9 +324,16 @@ def test_needs_default_slot_does_not_raise_on_ops_that_cannot_apply(stack):
     """Справка не имеет права ронять форму: не наложилось — вопроса нет, а
     невозможность записи всё равно поймает гейт своим отказом."""
     base, _profiles = stack
-    base.write_text('models: {a: {model: "x"}}\n', encoding="utf-8")  # инлайновый мэппинг
+    base.write_text(
+        'models: {a: {model: "x"}}\n', encoding="utf-8"
+    )  # инлайновый мэппинг
 
-    assert rw.needs_default_slot(base, [("upsert_model", "b", {"model": "y"})], "") is False
+    assert (
+        rw.needs_default_slot(
+            base, [("upsert_model", "b", {"model": "y"})], ""
+        )
+        is False
+    )
 
 
 # --- Ссылки из ДРУГИХ файлов стека ---
@@ -264,17 +343,26 @@ def test_broken_references_name_the_file_and_the_coordinate(stack):
     """Отказ удаления обязан назвать файл и координату: без этого человеку некуда
     идти — свой файл он видит, чужой нет."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8"
+    )
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "gc"\n', encoding="utf-8"
+    )
 
-    assert rw.references_broken_by_removal(base, "gc") == [("work.yml", "slots.default")]
+    assert rw.references_broken_by_removal(base, "gc") == [
+        ("work.yml", "slots.default")
+    ]
 
 
 def test_broken_references_ignore_the_targets_own_file(stack):
     """Свой файл сюда не попадает — его по-прежнему отдаёт `references_to`, и
     удалению своей ссылки каскадом ничего не мешает."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\nslots:\n  default: "gc"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "x"\nslots:\n  default: "gc"\n',
+        encoding="utf-8",
+    )
     (profiles / "work.yml").write_text("slots: {}\n", encoding="utf-8")
 
     assert rw.references_broken_by_removal(base, "gc") == []
@@ -282,11 +370,15 @@ def test_broken_references_ignore_the_targets_own_file(stack):
 
 def test_broken_references_of_a_profile_see_the_base(stack):
     base, profiles = stack
-    base.write_text('profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8"
+    )
     target = profiles / "work.yml"
     target.write_text('models:\n  p1:\n    model: "x"\n', encoding="utf-8")
 
-    assert rw.references_broken_by_removal(target, "p1", stack_base=base) == [("config.yml", "slots.default")]
+    assert rw.references_broken_by_removal(target, "p1", stack_base=base) == [
+        ("config.yml", "slots.default")
+    ]
 
 
 def test_a_shadowed_alias_survives_its_own_removal_and_breaks_nothing(stack):
@@ -295,9 +387,14 @@ def test_a_shadowed_alias_survives_its_own_removal_and_breaks_nothing(stack):
     профильную можно, запись базы остаётся на её месте, и слот базы резолвится.
     Отказать здесь значило бы запретить возможное."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "base-x"\nslots:\n  default: "gc"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\nslots:\n  default: "gc"\n',
+        encoding="utf-8",
+    )
     target = profiles / "work.yml"
-    target.write_text('models:\n  gc:\n    model: "profile-y"\n', encoding="utf-8")
+    target.write_text(
+        'models:\n  gc:\n    model: "profile-y"\n', encoding="utf-8"
+    )
 
     assert rw.references_broken_by_removal(target, "gc", stack_base=base) == []
     rw.remove_model(target, "gc", force=True, is_profile=True, stack_base=base)
@@ -321,12 +418,18 @@ def test_broken_references_see_a_profile_pointed_from_the_project_layer(stack):
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
     (gc_dir / "config.yml").write_text('profile: "work"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "gc"\n', encoding="utf-8"
+    )
 
-    assert rw.references_broken_by_removal(base, "gc") == [("work.yml", "slots.default")]
+    assert rw.references_broken_by_removal(base, "gc") == [
+        ("work.yml", "slots.default")
+    ]
 
 
-def test_an_alias_surviving_via_a_project_pointed_profile_is_not_refused(stack):
+def test_an_alias_surviving_via_a_project_pointed_profile_is_not_refused(
+    stack,
+):
     """Обратная сторона: алиас переживает удаление через профиль, назначенный
     ПРОЕКТНЫМ указателем, а видимая (проектная) ссылка на него — та же. Не
     зная о профиле, справка решила бы, что ссылка повиснет, и заблокировала бы
@@ -335,25 +438,38 @@ def test_an_alias_surviving_via_a_project_pointed_profile_is_not_refused(stack):
     base.write_text('models:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text('profile: "work"\nslots:\n  default: "gc"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('models:\n  gc:\n    model: "profile-y"\n', encoding="utf-8")
+    (gc_dir / "config.yml").write_text(
+        'profile: "work"\nslots:\n  default: "gc"\n', encoding="utf-8"
+    )
+    (profiles / "work.yml").write_text(
+        'models:\n  gc:\n    model: "profile-y"\n', encoding="utf-8"
+    )
 
     assert rw.references_broken_by_removal(base, "gc") == []
     rw.remove_model(base, "gc", force=True)
 
 
-def test_a_pointer_conflict_between_base_and_project_is_resolved_like_the_loader(stack):
+def test_a_pointer_conflict_between_base_and_project_is_resolved_like_the_loader(
+    stack,
+):
     """Указатель есть в ОБОИХ слоях и они расходятся: `_merge_layers` мержит
     managed, ПОТОМ project — последний побеждает при конфликте одноимённых ключей.
     `resolve_profile_pointer` (общий резолв `stack_documents`) обязан называть ТО ЖЕ
     победившее имя, а не то, что лежит в самой базе."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n',
+        encoding="utf-8",
+    )
     gc_dir = Path.cwd() / ".gc"
     gc_dir.mkdir()
     (gc_dir / "config.yml").write_text('profile: "corp"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('models:\n  ghost:\n    model: "z"\n', encoding="utf-8")
-    (profiles / "corp.yml").write_text('models:\n  gc:\n    model: "corp-y"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'models:\n  ghost:\n    model: "z"\n', encoding="utf-8"
+    )
+    (profiles / "corp.yml").write_text(
+        'models:\n  gc:\n    model: "corp-y"\n', encoding="utf-8"
+    )
 
     # "gc" переживёт удаление ТОЛЬКО если резолвится "corp" (он её объявляет);
     # "work" её не знает вовсе.
@@ -361,7 +477,9 @@ def test_a_pointer_conflict_between_base_and_project_is_resolved_like_the_loader
     assert rw.references_broken_by_removal(base, "gc") == []
 
 
-def test_resolve_profile_pointer_interpolates_env_placeholders(stack, monkeypatch):
+def test_resolve_profile_pointer_interpolates_env_placeholders(
+    stack, monkeypatch
+):
     """Указатель `profile: "${ENV:…}"` (ревью MR #80, M4): загрузчик интерполирует
     ДО чтения указателя, а общий резолв отдавал сырую строку — слой профиля
     пропадал у ВСЕХ потребителей резолва разом (stack_documents → справки
@@ -370,18 +488,31 @@ def test_resolve_profile_pointer_interpolates_env_placeholders(stack, monkeypatc
     ИТОГ мержа — ${ENV:…}-only резолвером (`resolve_env_only`), не тем же
     `resolve_env_placeholders`, что у загрузчика: указатель зовётся на каждый
     кадр UI, и файловый резолв/warning там неуместны (ревью MR #80, #12)."""
-    from gc_core.config_modules.layers import resolve_profile_pointer, stack_documents
+    from gc_core.config_modules.layers import (
+        resolve_profile_pointer,
+        stack_documents,
+    )
 
     base, profiles = stack
     monkeypatch.setenv("GC_TEST_PROFILE_PTR", "work")
-    base.write_text('profile: "${ENV:GC_TEST_PROFILE_PTR}"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "${ENV:GC_TEST_PROFILE_PTR}"\nmodels:\n  gc:\n    model: "x"\n',
+        encoding="utf-8",
+    )
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "gc"\n', encoding="utf-8"
+    )
 
     assert resolve_profile_pointer(base) == "work"
-    assert any(Path(p).resolve() == (profiles / "work.yml").resolve() for p, _doc in stack_documents(base))
+    assert any(
+        Path(p).resolve() == (profiles / "work.yml").resolve()
+        for p, _doc in stack_documents(base)
+    )
 
 
-def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog):
+def test_a_broken_file_marker_logs_once_not_every_frame(
+    stack, tmp_path, caplog
+):
     """[ревью N7, находка 4] Указатель ${FILE:битый-путь}: полный резолвер зовётся
     на КАЖДОЕ разрешение указателя (за кадр, с UI-потока) — без кэша нечитаемый
     файл заливал лог предупреждением на каждый вызов. Кэш по (значение, mtime):
@@ -391,7 +522,10 @@ def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog)
 
     base, _profiles = stack
     marker = tmp_path / "no-such-pointer.txt"  # файла нет
-    base.write_text('profile: "${{FILE:{}}}"\n'.format(str(marker).replace("\\", "/")), encoding="utf-8")
+    base.write_text(
+        'profile: "${{FILE:{}}}"\n'.format(str(marker).replace("\\", "/")),
+        encoding="utf-8",
+    )
 
     with caplog.at_level("WARNING"):
         resolve_profile_pointer(base)
@@ -406,7 +540,9 @@ def test_a_broken_file_marker_logs_once_not_every_frame(stack, tmp_path, caplog)
     assert resolve_profile_pointer(base) == "work"  # кэш не залип на пустоте
 
 
-def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(stack, tmp_path):
+def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(
+    stack, tmp_path
+):
     """[ревью волны F, находки 2-3] Указатель `profile: "${FILE:…}"`: загрузчик
     разворачивает весь документ полным резолвером и активирует названный
     профиль, а env-only резолв возвращал ЛИТЕРАЛ — все потребители резолва
@@ -419,15 +555,21 @@ def test_resolve_profile_pointer_follows_a_file_marker_like_the_loader(stack, tm
     marker = tmp_path / "pointer.txt"
     marker.write_text("work", encoding="utf-8")
     base.write_text(
-        'profile: "${{FILE:{}}}"\nmodels:\n  gc:\n    model: "x"\n'.format(str(marker).replace("\\", "/")),
+        'profile: "${{FILE:{}}}"\nmodels:\n  gc:\n    model: "x"\n'.format(
+            str(marker).replace("\\", "/")
+        ),
         encoding="utf-8",
     )
-    (profiles / "work.yml").write_text('slots:\n  default: "gc"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'slots:\n  default: "gc"\n', encoding="utf-8"
+    )
 
     assert resolve_profile_pointer(base) == "work"
 
 
-def test_resolve_profile_pointer_does_not_warn_on_an_unset_env_var(stack, caplog, monkeypatch):
+def test_resolve_profile_pointer_does_not_warn_on_an_unset_env_var(
+    stack, caplog, monkeypatch
+):
     """[ревью #12] `resolve_profile_pointer` — best-effort и зовётся на КАЖДОЕ
     разрешение указателя (витрина происхождения, ключ кэша вердикта, guard
     ссылок — с UI-потока, за кадр). Полный `resolve_env_placeholders` пишет
@@ -439,7 +581,9 @@ def test_resolve_profile_pointer_does_not_warn_on_an_unset_env_var(stack, caplog
 
     monkeypatch.delenv("GC_TEST_PROFILE_PTR_UNSET", raising=False)
     base, _profiles = stack
-    base.write_text('profile: "${ENV:GC_TEST_PROFILE_PTR_UNSET}"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "${ENV:GC_TEST_PROFILE_PTR_UNSET}"\n', encoding="utf-8"
+    )
 
     with caplog.at_level("WARNING"):
         assert resolve_profile_pointer(base) == ""
@@ -476,24 +620,34 @@ def test_resolve_profile_pointer_is_lenient_to_a_broken_base(stack):
 
 
 @pytest.mark.parametrize("section", ["slots", "assign"])
-def test_a_broken_section_in_another_stack_file_yields_no_references(stack, section):
+def test_a_broken_section_in_another_stack_file_yields_no_references(
+    stack, section
+):
     """`slots: [x]` в профиле роняло `references_broken_by_removal` `AttributeError`
     мимо `(RegistryWriteError, OSError)`, который ловит секция, — то есть Del на
     строке модели убивал приложение. Достижимо и без чужих правок: указатель
     профиля берётся из БАЗЫ, так что сюда попадает и файл, который старт не
     грузил и схемой не проверял."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8"
+    )
     (profiles / "work.yml").write_text(f"{section}: [x]\n", encoding="utf-8")
 
     assert rw.references_broken_by_removal(base, "gc") == []
 
 
-def test_broken_nested_subagents_in_another_stack_file_yield_no_references(stack):
+def test_broken_nested_subagents_in_another_stack_file_yield_no_references(
+    stack,
+):
     """Третья форма того же: `assign.subagents` не словарь — `.items()` на списке."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text("assign:\n  subagents: [x]\n", encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8"
+    )
+    (profiles / "work.yml").write_text(
+        "assign:\n  subagents: [x]\n", encoding="utf-8"
+    )
 
     assert rw.references_broken_by_removal(base, "gc") == []
 
@@ -503,13 +657,21 @@ def test_a_broken_section_does_not_hide_the_sound_one_beside_it(stack):
     прятала бы живую ссылку из assign — и удаление уходило бы с зелёным «✓»,
     оставив привязку висеть."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8")
-    (profiles / "work.yml").write_text('slots: [x]\nassign:\n  summarizer: "gc"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "x"\n', encoding="utf-8"
+    )
+    (profiles / "work.yml").write_text(
+        'slots: [x]\nassign:\n  summarizer: "gc"\n', encoding="utf-8"
+    )
 
-    assert rw.references_broken_by_removal(base, "gc") == [("work.yml", "assign.summarizer")]
+    assert rw.references_broken_by_removal(base, "gc") == [
+        ("work.yml", "assign.summarizer")
+    ]
 
 
-def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
+def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(
+    stack,
+):
     """Каскад снимает ТОЛЬКО те ссылки, что повиснут. Перекрывшая запись профиля
     снимается свободно: запись базы остаётся на месте, и слот, который на неё
     смотрит, продолжает резолвиться.
@@ -520,16 +682,24 @@ def test_cascade_keeps_a_reference_to_an_alias_that_survives_the_removal(stack):
     Соседний страж ставит ту же конфигурацию, но кладёт слот в базу и проходит
     мимо дефекта: снести каскадом можно лишь то, что лежит в правимом файле."""
     base, profiles = stack
-    base.write_text('profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  gc:\n    model: "base-x"\n',
+        encoding="utf-8",
+    )
     target = profiles / "work.yml"
-    target.write_text('models:\n  gc:\n    model: "profile-y"\nslots:\n  default: "gc"\n', encoding="utf-8")
+    target.write_text(
+        'models:\n  gc:\n    model: "profile-y"\nslots:\n  default: "gc"\n',
+        encoding="utf-8",
+    )
 
     assert rw.references_broken_by_removal(target, "gc", stack_base=base) == []
     rw.remove_model(target, "gc", force=True, is_profile=True, stack_base=base)
 
     doc = yaml.safe_load(target.read_text(encoding="utf-8"))
     assert (doc.get("models") or {}) == {}
-    assert (doc.get("slots") or {}) == {"default": "gc"}  # ссылка осталась валидной
+    assert (doc.get("slots") or {}) == {
+        "default": "gc"
+    }  # ссылка осталась валидной
 
 
 # --- Удаление из НЕАКТИВНОГО профиля судится стеком «база + этот профиль» ---
@@ -547,13 +717,20 @@ def _two_profiles(stack, *, active: str = "a"):
     у `b` на неё смотрит `slots.default`. Отдаёт (база, файл b)."""
     base, profiles = stack
     base.write_text(f'profile: "{active}"\n', encoding="utf-8")
-    (profiles / "a.yml").write_text('models:\n  x:\n    model: "a-x"\n', encoding="utf-8")
+    (profiles / "a.yml").write_text(
+        'models:\n  x:\n    model: "a-x"\n', encoding="utf-8"
+    )
     other = profiles / "b.yml"
-    other.write_text('models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
+    other.write_text(
+        'models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n',
+        encoding="utf-8",
+    )
     return base, other
 
 
-def test_an_alias_declared_only_by_the_active_profile_does_not_survive_removal_from_another(stack):
+def test_an_alias_declared_only_by_the_active_profile_does_not_survive_removal_from_another(
+    stack,
+):
     """Из стека открытого профиля B активный A не виден: снятая в B запись `x`
     в стеке «база + B» не останется, что бы ни объявлял A."""
     base, other = _two_profiles(stack)
@@ -561,7 +738,9 @@ def test_an_alias_declared_only_by_the_active_profile_does_not_survive_removal_f
     assert rw.alias_survives_removal(other, "x", stack_base=base) is False
 
 
-def test_removal_from_an_inactive_profile_cascades_its_own_dangling_slot(stack):
+def test_removal_from_an_inactive_profile_cascades_its_own_dangling_slot(
+    stack,
+):
     """Каскад в B обязан снять `slots.default: x` вместе с записью: иначе файл
     остаётся с висячей ссылкой, о которой не скажет никто до самой активации."""
     base, other = _two_profiles(stack)
@@ -573,18 +752,24 @@ def test_removal_from_an_inactive_profile_cascades_its_own_dangling_slot(stack):
     assert (doc.get("slots") or {}) == {}
 
 
-def test_removal_from_an_inactive_profile_protects_a_base_reference_it_alone_resolves(stack):
+def test_removal_from_an_inactive_profile_protects_a_base_reference_it_alone_resolves(
+    stack,
+):
     """Тот же стек и у отказа по чужим ссылкам: слот БАЗЫ смотрит на `p`, которую
     объявляют только профили. Снять `p` из неактивного B — значит сделать стек
     «база + B» нерезолвимым: по указателю (база + A) справка отвечала «ничего не
     повиснет» и отказ молчал."""
     base, profiles = stack
     base.write_text('profile: "a"\nslots:\n  default: "p"\n', encoding="utf-8")
-    (profiles / "a.yml").write_text('models:\n  p:\n    model: "a-p"\n', encoding="utf-8")
+    (profiles / "a.yml").write_text(
+        'models:\n  p:\n    model: "a-p"\n', encoding="utf-8"
+    )
     other = profiles / "b.yml"
     other.write_text('models:\n  p:\n    model: "b-p"\n', encoding="utf-8")
 
-    assert rw.references_broken_by_removal(other, "p", stack_base=base) == [("config.yml", "slots.default")]
+    assert rw.references_broken_by_removal(other, "p", stack_base=base) == [
+        ("config.yml", "slots.default")
+    ]
 
 
 def test_a_base_namesake_survives_removal_from_an_inactive_profile(stack):
@@ -592,10 +777,15 @@ def test_a_base_namesake_survives_removal_from_an_inactive_profile(stack):
     любого профиля — активного или нет, — и своя ссылка B остаётся на месте:
     она продолжит резолвиться записью базы."""
     base, profiles = stack
-    base.write_text('profile: "a"\nmodels:\n  x:\n    model: "base-x"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "a"\nmodels:\n  x:\n    model: "base-x"\n', encoding="utf-8"
+    )
     (profiles / "a.yml").write_text("slots: {}\n", encoding="utf-8")
     other = profiles / "b.yml"
-    other.write_text('models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n', encoding="utf-8")
+    other.write_text(
+        'models:\n  x:\n    model: "b-x"\nslots:\n  default: "x"\n',
+        encoding="utf-8",
+    )
 
     assert rw.alias_survives_removal(other, "x", stack_base=base) is True
     assert rw.references_broken_by_removal(other, "x", stack_base=base) == []
@@ -604,21 +794,37 @@ def test_a_base_namesake_survives_removal_from_an_inactive_profile(stack):
     assert (doc.get("slots") or {}) == {"default": "x"}
 
 
-def test_needs_default_slot_for_an_inactive_profile_counts_its_own_cascade(stack):
+def test_needs_default_slot_for_an_inactive_profile_counts_its_own_cascade(
+    stack,
+):
     """Справка о слоте и без того считала «база + этот файл», но каскад внутри неё
     шёл по указателю: в B две записи, `default` смотрит на `x`, которую объявляет
     ещё и активный A. Удаление `x` из B каскадом снимает единственный слот — при
     оставшихся двух моделях (`y` в B и `x` базы) стек «база + B» без `default`
     нерезолвим, и справка обязана ответить «да»."""
     base, profiles = stack
-    base.write_text('profile: "a"\nmodels:\n  z:\n    model: "base-z"\n', encoding="utf-8")
-    (profiles / "a.yml").write_text('models:\n  x:\n    model: "a-x"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "a"\nmodels:\n  z:\n    model: "base-z"\n', encoding="utf-8"
+    )
+    (profiles / "a.yml").write_text(
+        'models:\n  x:\n    model: "a-x"\n', encoding="utf-8"
+    )
     other = profiles / "b.yml"
     other.write_text(
-        'models:\n  x:\n    model: "b-x"\n  y:\n    model: "b-y"\nslots:\n  default: "x"\n', encoding="utf-8"
+        'models:\n  x:\n    model: "b-x"\n  y:\n    model: "b-y"\nslots:\n  default: "x"\n',
+        encoding="utf-8",
     )
 
-    assert rw.needs_default_slot(other, [("remove_model", "x", True)], "", is_profile=True, stack_base=base) is True
+    assert (
+        rw.needs_default_slot(
+            other,
+            [("remove_model", "x", True)],
+            "",
+            is_profile=True,
+            stack_base=base,
+        )
+        is True
+    )
 
 
 # --- Отказ валидации называет файл, где лежит ключ ---
@@ -655,7 +861,9 @@ def test_a_refusal_caused_by_the_profile_names_the_profile_and_its_file(stack):
         rw.apply_registry_ops(base, [("remove_model", "strong", True)], "")
 
     message = str(exc.value)
-    assert message.startswith('slots.max: алиас "strong" не найден в merged-реестре models')
+    assert message.startswith(
+        'slots.max: алиас "strong" не найден в merged-реестре models'
+    )
     assert f'поправьте slots.max в профиле "work": {profile}' in message
     assert base.read_text(encoding="utf-8") == text
 
@@ -667,13 +875,17 @@ def test_a_refusal_caused_by_the_base_names_the_base_file(stack):
     профильная модель, которую резолвит только слот базы (прежний стенд с уже
     висячим слотом базы с починки L19 до отказа не доходит)."""
     base, profiles = stack
-    base.write_text('profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nslots:\n  default: "p1"\n', encoding="utf-8"
+    )
     profile = profiles / "work.yml"
     text = 'models:\n  p1:\n    model: "x"\n'
     profile.write_text(text, encoding="utf-8")
 
     with pytest.raises(RegistryWriteError) as exc:
-        rw.remove_model(profile, "p1", force=True, is_profile=True, stack_base=base)
+        rw.remove_model(
+            profile, "p1", force=True, is_profile=True, stack_base=base
+        )
 
     message = str(exc.value)
     assert message.startswith('slots.default: алиас "p1" не найден')
@@ -698,7 +910,9 @@ def test_a_validation_refusal_carries_no_operation_names(stack):
         'slots:\n  default: "fast"\n',
         encoding="utf-8",
     )
-    (profiles / "work.yml").write_text('slots:\n  max: "strong"\n', encoding="utf-8")
+    (profiles / "work.yml").write_text(
+        'slots:\n  max: "strong"\n', encoding="utf-8"
+    )
 
     with pytest.raises(RegistryWriteError) as exc:
         rw.apply_registry_ops(base, [("remove_model", "strong", True)], "")
@@ -709,7 +923,9 @@ def test_a_validation_refusal_carries_no_operation_names(stack):
         assert op_name not in message
 
 
-def test_the_culprit_is_judged_on_the_stack_the_validator_saw_not_on_the_disk(stack):
+def test_the_culprit_is_judged_on_the_stack_the_validator_saw_not_on_the_disk(
+    stack,
+):
     """Каскад снимает ссылку в правимом файле, а тёзка-ссылка профиля остаётся
     висеть. По ДИСКУ значение slots.default «не менялось» от базы к профилю, и
     виновником вышел бы основной конфиг — файл, из которого ссылка как раз
@@ -748,7 +964,9 @@ def test_an_unreadable_target_is_a_write_error(tmp_path):
     assert str(target) in str(exc.value)
 
 
-def test_the_default_slot_question_does_not_crash_on_an_unreadable_target(tmp_path):
+def test_the_default_slot_question_does_not_crash_on_an_unreadable_target(
+    tmp_path,
+):
     """Тот же отказ на пути СПРАВКИ. `needs_default_slot` секция спрашивает до
     записи и без перехвата — голая ошибка чтения оттуда бросать ей нельзя — экран
     упал бы раньше, чем человек увидел отказ. Справка best-effort: свой перехват
@@ -758,7 +976,15 @@ def test_the_default_slot_question_does_not_crash_on_an_unreadable_target(tmp_pa
     target = tmp_path / "profile.yml"
     target.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-16")
 
-    assert rw.needs_default_slot(target, [("upsert_model", "b", {"model": "y"})], "", is_profile=True) is False
+    assert (
+        rw.needs_default_slot(
+            target,
+            [("upsert_model", "b", {"model": "y"})],
+            "",
+            is_profile=True,
+        )
+        is False
+    )
 
 
 def test_a_readable_target_still_writes(tmp_path):
@@ -784,20 +1010,28 @@ def test_a_readable_target_still_writes(tmp_path):
 
 
 @pytest.mark.parametrize("alias", [4.1, True], ids=["float", "bool"])
-def test_a_non_string_slot_alias_is_a_write_error_not_a_traceback(tmp_path, alias):
+def test_a_non_string_slot_alias_is_a_write_error_not_a_traceback(
+    tmp_path, alias
+):
     text = 'models:\n  gc:\n    model: "x"\nslots:\n  default: "gc"\n'
     target = _target(tmp_path, text)
 
-    with pytest.raises(RegistryWriteError, match=f'slots\\.default: алиас "{alias}" не найден'):
+    with pytest.raises(
+        RegistryWriteError, match=f'slots\\.default: алиас "{alias}" не найден'
+    ):
         rw.write_slot(target, "default", alias, "")
     assert target.read_text(encoding="utf-8") == text
 
 
 @pytest.mark.parametrize("value", [4.1, True], ids=["float", "bool"])
-def test_a_non_string_assign_value_is_a_write_error_not_a_traceback(tmp_path, value):
+def test_a_non_string_assign_value_is_a_write_error_not_a_traceback(
+    tmp_path, value
+):
     text = 'models:\n  gc:\n    model: "x"\nassign:\n  finish_gate: "gc"\n'
     target = _target(tmp_path, text)
 
-    with pytest.raises(RegistryWriteError, match=f'assign\\.finish_gate: значение "{value}"'):
+    with pytest.raises(
+        RegistryWriteError, match=f'assign\\.finish_gate: значение "{value}"'
+    ):
         rw.write_assign(target, "finish_gate", value, "")
     assert target.read_text(encoding="utf-8") == text

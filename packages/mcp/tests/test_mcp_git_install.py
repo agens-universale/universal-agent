@@ -28,11 +28,19 @@ from recommended_mcp import install as inst
 
 def test_repo_subdir_builds_path_from_name():
     # Параметра root у _repo_subdir больше нет: тело его не читало.
-    assert inst._repo_subdir("office-mcp") == "packages/mcp/external/vendor/office-mcp"
-    assert inst._repo_subdir("science-mcp") == "packages/mcp/external/vendor/science-mcp"
+    assert (
+        inst._repo_subdir("office-mcp")
+        == "packages/mcp/external/vendor/office-mcp"
+    )
+    assert (
+        inst._repo_subdir("science-mcp")
+        == "packages/mcp/external/vendor/science-mcp"
+    )
 
 
-@pytest.mark.parametrize("legacy", ["../external/office-mcp", "external/office-mcp"])
+@pytest.mark.parametrize(
+    "legacy", ["../external/office-mcp", "external/office-mcp"]
+)
 def test_repo_subdir_tolerates_legacy_path(legacy, monkeypatch, capsys):
     """Дореформенный путь читается как имя последнего сегмента, а не падает.
 
@@ -42,17 +50,31 @@ def test_repo_subdir_tolerates_legacy_path(legacy, monkeypatch, capsys):
     он побеждает бандловый манифест.
     """
     monkeypatch.setattr(inst, "_LEGACY_SOURCE_WARNED", set())
-    assert inst._repo_subdir(legacy) == "packages/mcp/external/vendor/office-mcp"
+    assert (
+        inst._repo_subdir(legacy) == "packages/mcp/external/vendor/office-mcp"
+    )
     out = capsys.readouterr().out
     assert "[warn]" in out and "устаревший формат" in out
 
 
 @pytest.mark.parametrize(
     "outside",
-    ["../../sibling/pkg", "/abs/path/office-mcp", "../vendor/pkg", "a/b/c/pkg"],
-    ids=["выход за репозиторий", "абсолютный", "мимо external", "произвольный путь"],
+    [
+        "../../sibling/pkg",
+        "/abs/path/office-mcp",
+        "../vendor/pkg",
+        "a/b/c/pkg",
+    ],
+    ids=[
+        "выход за репозиторий",
+        "абсолютный",
+        "мимо external",
+        "произвольный путь",
+    ],
 )
-def test_repo_subdir_rejects_paths_outside_the_vendor_dir(outside, monkeypatch):
+def test_repo_subdir_rejects_paths_outside_the_vendor_dir(
+    outside, monkeypatch
+):
     """Путь, ведущий не в каталог вендоров, — ошибка конфигурации, а не «старый формат».
 
     Тест возвращён с develop, где `_repo_subdir(Path("../../sibling/pkg"), root)`
@@ -95,39 +117,71 @@ def test_local_sources_preferred_over_git(tmp_path, monkeypatch):
     recipes.mkdir()
     src = recipes / "external" / "vendor" / "office-mcp"
     src.mkdir(parents=True)
-    (src / "pyproject.toml").write_text("[project]\nname='office-mcp'\n", encoding="utf-8")
+    (src / "pyproject.toml").write_text(
+        "[project]\nname='office-mcp'\n", encoding="utf-8"
+    )
 
     calls = []
     monkeypatch.setattr(inst, "active_pip_python", lambda: "PY")
-    monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
 
-    inst._install_source("office", "office-mcp", recipes, editable=False, repo_url="https://x/repo")
+    inst._install_source(
+        "office",
+        "office-mcp",
+        recipes,
+        editable=False,
+        repo_url="https://x/repo",
+    )
 
     assert calls, "установка не запускалась"
     assert str(src) in calls[0]
-    assert not any("git+" in a for a in calls[0]), "ушли в git при живых локальных исходниках"
+    assert not any("git+" in a for a in calls[0]), (
+        "ушли в git при живых локальных исходниках"
+    )
 
 
 def test_git_fallback_when_no_local_sources(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(inst, "pip_argv", lambda *a: ["PY", "-m", "pip", *a])
-    monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
 
     inst._install_source(
-        "office", "office-mcp", tmp_path / "nope", editable=False, repo_url="https://x/repo", repo_ref="main"
+        "office",
+        "office-mcp",
+        tmp_path / "nope",
+        editable=False,
+        repo_url="https://x/repo",
+        repo_ref="main",
     )
 
     joined = " ".join(calls[0])
-    assert "git+https://x/repo@main#subdirectory=packages/mcp/external/vendor/office-mcp" in joined
+    assert (
+        "git+https://x/repo@main#subdirectory=packages/mcp/external/vendor/office-mcp"
+        in joined
+    )
 
 
 def test_no_local_no_repo_url_errors(tmp_path):
     with pytest.raises(inst.InstallError) as e:
-        inst._install_source("office", "office-mcp", tmp_path / "nope", editable=False, repo_url=None)
-    assert "просмотрено" in str(e.value), "в ошибке должны быть перечислены пути поиска"
+        inst._install_source(
+            "office",
+            "office-mcp",
+            tmp_path / "nope",
+            editable=False,
+            repo_url=None,
+        )
+    assert "просмотрено" in str(e.value), (
+        "в ошибке должны быть перечислены пути поиска"
+    )
 
 
-def test_legacy_source_installs_instead_of_being_skipped(tmp_path, monkeypatch, capsys):
+def test_legacy_source_installs_instead_of_being_skipped(
+    tmp_path, monkeypatch, capsys
+):
     """Сквозной путь B2: дореформенный манифест СТАВИТСЯ, а не пропускается.
 
     Изолированной проверки _repo_subdir мало: заявленная поломка была не в нём,
@@ -140,17 +194,23 @@ def test_legacy_source_installs_instead_of_being_skipped(tmp_path, monkeypatch, 
     recipes.mkdir()
     src = recipes / "external" / "vendor" / "office-mcp"
     src.mkdir(parents=True)
-    (src / "pyproject.toml").write_text("[project]\nname='office-mcp'\n", encoding="utf-8")
+    (src / "pyproject.toml").write_text(
+        "[project]\nname='office-mcp'\n", encoding="utf-8"
+    )
 
     calls = []
     monkeypatch.setattr(inst, "_LEGACY_SOURCE_WARNED", set())
     monkeypatch.setattr(inst, "active_pip_python", lambda: "PY")
-    monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
 
     entry = MCPEntry(
         name="office",
         path=Path("."),
-        install=InstallSpec(type="source", source=Path("../external/office-mcp")),
+        install=InstallSpec(
+            type="source", source=Path("../external/office-mcp")
+        ),
     )
     results = inst.run_install_entries([entry], recipes, None, editable=True)
 

@@ -1,7 +1,9 @@
 import json
 
 import pytest
-from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+from gc_core.config_modules.intent_scope import (
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+)
 from gc_core.intent_log import (
     ACTION_TOOL_AGGREGATED,
     ACTION_TOOL_RAW,
@@ -196,7 +198,9 @@ def test_read_page_returns_valid_jsonl_for_every_page():
 
 def test_read_info_reports_totals():
     records = [_user_ask("hello")]
-    info = read_info(records, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT)
+    info = read_info(
+        records, default_limit=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+    )
 
     assert info["total_records"] == 1
     assert info["total_chars"] == len(serialize(records))

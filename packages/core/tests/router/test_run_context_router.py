@@ -46,27 +46,39 @@ def _make_state(model: str = "unused-legacy-default") -> State:
 # --- create_run_context: model_router + level_provider ---------------------------
 
 
-async def test_create_run_context_without_level_provider_reads_config_level(minimal_config_dict):
+async def test_create_run_context_without_level_provider_reads_config_level(
+    minimal_config_dict,
+):
     ctx = await rc.acreate_run_context(minimal_config_dict)
     assert isinstance(ctx.model_router, ModelRouter)
     assert ctx.model_router.active_level() == "max"
 
 
-async def test_create_run_context_with_level_provider_uses_callable(minimal_config_dict):
+async def test_create_run_context_with_level_provider_uses_callable(
+    minimal_config_dict,
+):
     level = {"value": "light"}
-    ctx = await rc.acreate_run_context(minimal_config_dict, level_provider=lambda: level["value"])
+    ctx = await rc.acreate_run_context(
+        minimal_config_dict, level_provider=lambda: level["value"]
+    )
     assert ctx.model_router.active_level() == "light"
     level["value"] = "default"
-    assert ctx.model_router.active_level() == "default"  # провайдер живой, не закэширован
+    assert (
+        ctx.model_router.active_level() == "default"
+    )  # провайдер живой, не закэширован
 
 
-async def test_create_run_context_model_router_resolves_legacy_main(minimal_config_dict):
+async def test_create_run_context_model_router_resolves_legacy_main(
+    minimal_config_dict,
+):
     ctx = await rc.acreate_run_context(minimal_config_dict)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
 
 
-async def test_create_run_context_force_legacy_propagates_to_router(minimal_config_dict):
+async def test_create_run_context_force_legacy_propagates_to_router(
+    minimal_config_dict,
+):
     """Task 10: `--model` при непустом реестре -> `force_legacy=True` доезжает от
     CLI до ModelRouter через create_run_context (спека §2)."""
     ctx = await rc.acreate_run_context(minimal_config_dict, force_legacy=True)
@@ -75,7 +87,9 @@ async def test_create_run_context_force_legacy_propagates_to_router(minimal_conf
     assert resolved.source == "легаси-форс --model"
 
 
-async def test_create_run_context_default_force_legacy_is_false(minimal_config_dict):
+async def test_create_run_context_default_force_legacy_is_false(
+    minimal_config_dict,
+):
     ctx = await rc.acreate_run_context(minimal_config_dict)
     resolved = ctx.model_router.resolve("main")
     assert resolved.source == "легаси"
@@ -84,7 +98,9 @@ async def test_create_run_context_default_force_legacy_is_false(minimal_config_d
 # --- begin_turn: юнит + фиксация на ход -------------------------------------------
 
 
-def test_begin_turn_sets_default_model_from_router_resolve_main(minimal_config_dict):
+def test_begin_turn_sets_default_model_from_router_resolve_main(
+    minimal_config_dict,
+):
     router = ModelRouter(minimal_config_dict, level_provider=lambda: "max")
     ctx = SimpleNamespace(model_router=router)
     state = _make_state()
@@ -218,5 +234,7 @@ def test_pinned_main_resolve_keeps_subagent_override():
     begin_turn(state, SimpleNamespace(model_router=parent))
     assert state.turn_level == "light"
 
-    resolved = pr._resolve_main_for_turn(state, SimpleNamespace(model_router=child))
+    resolved = pr._resolve_main_for_turn(
+        state, SimpleNamespace(model_router=child)
+    )
     assert resolved.alias == "smart"

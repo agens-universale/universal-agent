@@ -4,10 +4,18 @@ import pytest
 
 
 def test_compaction_label_with_chars():
-    comp = {"messages_in_segment": 8, "chars_before": 12300, "chars_after": 3100, "synthesis": "x"}
+    comp = {
+        "messages_in_segment": 8,
+        "chars_before": 12300,
+        "chars_after": 3100,
+        "synthesis": "x",
+    }
     from gc_tui.services.trace_render import build_compaction_label
 
-    assert build_compaction_label(1, comp) == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
+    assert (
+        build_compaction_label(1, comp)
+        == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
+    )
 
 
 def test_compaction_label_legacy_no_chars():
@@ -65,7 +73,14 @@ def test_build_agent_widgets_code_and_prose_order_and_focus():
 
 
 def _env(payload, ts="2026-05-30T10:00:00Z"):
-    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1, "ts": ts, "payload": payload}
+    return {
+        "type": "message",
+        "thread_id": "t",
+        "system": "cli",
+        "seq": 1,
+        "ts": ts,
+        "payload": payload,
+    }
 
 
 @pytest.mark.asyncio
@@ -85,7 +100,13 @@ async def test_render_thread_readonly_kinds():
                 "type": "message",
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": "ответ агента", "annotations": []}],
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "ответ агента",
+                        "annotations": [],
+                    }
+                ],
             }
         ),
         _env(
@@ -99,7 +120,12 @@ async def test_render_thread_readonly_kinds():
             }
         ),
         _env(
-            {"id": "fco1", "type": "function_call_output", "call_id": "c1", "output": '{"ok": true, "total_lines": 10}'}
+            {
+                "id": "fco1",
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": '{"ok": true, "total_lines": 10}',
+            }
         ),
     ]
 
@@ -108,7 +134,9 @@ async def test_render_thread_readonly_kinds():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_thread_readonly(self.query_one("#t", VerticalScroll), records)
+            render_thread_readonly(
+                self.query_one("#t", VerticalScroll), records
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -120,8 +148,16 @@ async def test_render_thread_readonly_kinds():
 
 
 def _seg(payloads, synthesis=None, n=0, index=0):
-    comp = None if synthesis is None else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
-    return {"index": index, "messages": [_env(p) for p in payloads], "compacted_by": comp}
+    comp = (
+        None
+        if synthesis is None
+        else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
+    )
+    return {
+        "index": index,
+        "messages": [_env(p) for p in payloads],
+        "compacted_by": comp,
+    }
 
 
 @pytest.mark.asyncio
@@ -145,7 +181,11 @@ async def test_render_segments_readonly_parity():
                     "name": "intermediate_reply",
                     "arguments": '{"answer": "промежуточный"}',
                 },
-                {"role": "user", "id": "mp", "content": '<technical type="technical">служебное</technical>'},
+                {
+                    "role": "user",
+                    "id": "mp",
+                    "content": '<technical type="technical">служебное</technical>',
+                },
             ],
             synthesis="СИНТЕЗ-X",
             n=3,
@@ -158,9 +198,19 @@ async def test_render_segments_readonly_parity():
                     "type": "message",
                     "role": "assistant",
                     "status": "completed",
-                    "content": [{"type": "output_text", "text": "финал", "annotations": []}],
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "финал",
+                            "annotations": [],
+                        }
+                    ],
                 },
-                {"role": "user", "id": "me", "content": '<technical type="error_message">ошибка бэка</technical>'},
+                {
+                    "role": "user",
+                    "id": "me",
+                    "content": '<technical type="error_message">ошибка бэка</technical>',
+                },
             ],
             index=1,
         ),
@@ -171,7 +221,9 @@ async def test_render_segments_readonly_parity():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(self.query_one("#t", VerticalScroll), segments)
+            render_segments_readonly(
+                self.query_one("#t", VerticalScroll), segments
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -180,16 +232,30 @@ async def test_render_segments_readonly_parity():
         assert "служебное" not in body
         assert "[policy]" not in body
         # маркер сжатия #1 + синтез виден
-        markers = [w for w in scr.query(TraceRow) if w.has_class("summary-marker")]
+        markers = [
+            w for w in scr.query(TraceRow) if w.has_class("summary-marker")
+        ]
         assert len(markers) == 1
         assert "контекст сжат #1" in body
         assert "СИНТЕЗ-X" in body
         # intermediate_reply — отдельная line-intermediate (·), не обычная реплика
         assert "промежуточный" in body
-        assert len([w for w in scr.query(TraceRow) if w.has_class("line-intermediate")]) == 1
+        assert (
+            len(
+                [
+                    w
+                    for w in scr.query(TraceRow)
+                    if w.has_class("line-intermediate")
+                ]
+            )
+            == 1
+        )
         # error_message — красная строка
         assert "ошибка бэка" in body
-        assert len([w for w in scr.query(TraceRow) if w.has_class("line-error")]) == 1
+        assert (
+            len([w for w in scr.query(TraceRow) if w.has_class("line-error")])
+            == 1
+        )
         assert "финал" in body
 
 
@@ -241,7 +307,9 @@ def test_build_block_widgets_table_widget():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
 
-    ws = build_block_widgets("| A | B |\n|---|---|\n| 1 | 2 |", prose_bullet=True, event_no=1)
+    ws = build_block_widgets(
+        "| A | B |\n|---|---|\n| 1 | 2 |", prose_bullet=True, event_no=1
+    )
     assert len(ws) == 1
     assert ws[0].has_class("table-block")
 
@@ -257,7 +325,9 @@ def test_build_block_widgets_table_indent_only_with_bullet():
     banner = build_block_widgets(md, prose_bullet=False, event_no=1)
     assert trace[0].has_class("table-indent")
     assert not banner[0].has_class("table-indent")
-    assert trace[0].has_class("table-block") and banner[0].has_class("table-block")
+    assert trace[0].has_class("table-block") and banner[0].has_class(
+        "table-block"
+    )
 
 
 def test_build_block_widgets_code_indent_only_with_bullet():
@@ -271,7 +341,9 @@ def test_build_block_widgets_code_indent_only_with_bullet():
     banner = build_block_widgets(md, prose_bullet=False, event_no=1)
     assert trace[0].has_class("code-indent")
     assert not banner[0].has_class("code-indent")
-    assert trace[0].has_class("code-block-panel") and banner[0].has_class("code-block-panel")
+    assert trace[0].has_class("code-block-panel") and banner[0].has_class(
+        "code-block-panel"
+    )
 
 
 @pytest.mark.asyncio
@@ -296,7 +368,9 @@ async def test_readonly_submit_note_label():
                         "id": "fc",
                         "call_id": "c",
                         "name": "submit_solution",
-                        "arguments": _json.dumps({"task_report": "готово", "comment": "проверь X"}),
+                        "arguments": _json.dumps(
+                            {"task_report": "готово", "comment": "проверь X"}
+                        ),
                     }
                 )
             ],
@@ -308,10 +382,16 @@ async def test_readonly_submit_note_label():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(self.query_one("#t", VerticalScroll), segments)
+            render_segments_readonly(
+                self.query_one("#t", VerticalScroll), segments
+            )
 
     async with _A().run_test() as pilot:
-        notes = [w for w in pilot.app.screen.query(TraceRow) if w.has_class("line-note")]
+        notes = [
+            w
+            for w in pilot.app.screen.query(TraceRow)
+            if w.has_class("line-note")
+        ]
         assert len(notes) == 1
         assert notes[0]._content.plain == "заметка: проверь X"
 
@@ -321,7 +401,9 @@ def test_code_block_builds_block_panel():
     from gc_tui.services.trace_render import build_block_widgets
     from gc_tui.widgets.block_panel import BlockPanel
 
-    widgets = build_block_widgets("текст\n\n```python\nx = 1\n```", prose_bullet=True, event_no=5)
+    widgets = build_block_widgets(
+        "текст\n\n```python\nx = 1\n```", prose_bullet=True, event_no=5
+    )
     panels = [w for w in widgets if isinstance(w, BlockPanel)]
     assert len(panels) == 1
     assert panels[0].has_class("code-block-panel")
@@ -334,7 +416,11 @@ def test_table_builds_block_panel():
     from gc_tui.widgets.block_panel import BlockPanel
 
     text = "до\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
-    panels = [w for w in build_block_widgets(text, prose_bullet=True, event_no=6) if isinstance(w, BlockPanel)]
+    panels = [
+        w
+        for w in build_block_widgets(text, prose_bullet=True, event_no=6)
+        if isinstance(w, BlockPanel)
+    ]
     assert len(panels) == 1
     assert panels[0].has_class("table-block")
 
@@ -344,7 +430,9 @@ def test_banner_blocks_have_no_indent():
     from gc_tui.services.trace_render import build_block_widgets
     from gc_tui.widgets.block_panel import BlockPanel
 
-    widgets = build_block_widgets("```python\nx = 1\n```", prose_bullet=False, event_no=1)
+    widgets = build_block_widgets(
+        "```python\nx = 1\n```", prose_bullet=False, event_no=1
+    )
     panel = next(w for w in widgets if isinstance(w, BlockPanel))
     assert not panel.has_class("code-indent")
 
@@ -353,7 +441,11 @@ def test_first_widget_is_the_only_tab_stop():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
 
-    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```\n\nещё проза", prose_bullet=True, event_no=5)
+    widgets = build_block_widgets(
+        "проза\n\n```python\nx = 1\n```\n\nещё проза",
+        prose_bullet=True,
+        event_no=5,
+    )
     assert [w.can_focus for w in widgets] == [True, False, False]
 
 
@@ -361,7 +453,9 @@ def test_event_no_bound_to_every_widget():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_block_widgets
 
-    widgets = build_block_widgets("проза\n\n```python\nx = 1\n```", prose_bullet=True, event_no=9)
+    widgets = build_block_widgets(
+        "проза\n\n```python\nx = 1\n```", prose_bullet=True, event_no=9
+    )
     assert all(w._event_no == 9 for w in widgets)
 
 
@@ -374,10 +468,16 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        row = TraceRow(prefix="· ", content="промежуточный ответ", kind_class="line-intermediate")
+        row = TraceRow(
+            prefix="· ",
+            content="промежуточный ответ",
+            kind_class="line-intermediate",
+        )
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()
         assert row.styles.margin.top == 1
@@ -445,8 +545,15 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     from gc_tui.services.trace_render import _dispatch_readonly
     from rich.text import Text as RichText
 
-    todos = [{"content": "Шаг раз", "status": "completed"}, {"content": "Шаг два", "status": "in_progress"}]
-    payload = {"type": "function_call", "name": "session_todo", "arguments": {"todos": todos}}
+    todos = [
+        {"content": "Шаг раз", "status": "completed"},
+        {"content": "Шаг два", "status": "in_progress"},
+    ]
+    payload = {
+        "type": "function_call",
+        "name": "session_todo",
+        "arguments": {"todos": todos},
+    }
     ev = TraceEvent(
         no=1,
         event_ts_utc_iso="",

@@ -23,9 +23,16 @@ async def test_osc_uses_display_name_not_resumed_prompt(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._store = None  # чтобы get_task_meta шёл через реальный стор ниже
@@ -50,14 +57,28 @@ async def test_osc_title_priority_over_last_actual(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._resumed_prompt = "старый промпт"
         monkeypatch.setattr(scr, "_session_status_word", lambda: "running")
-        store = _FakeStore({"tui": {"title": "parser bugfix", "last_actual": "реализуй спеку"}})
+        store = _FakeStore(
+            {
+                "tui": {
+                    "title": "parser bugfix",
+                    "last_actual": "реализуй спеку",
+                }
+            }
+        )
         monkeypatch.setattr(scr, "_store", store)
 
         scr._update_terminal_title()
@@ -72,9 +93,16 @@ async def test_osc_empty_meta_fallback_unnamed(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._resumed_prompt = "что-то"
@@ -94,9 +122,16 @@ async def test_osc_no_active_task_ignores_meta(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = None
         scr._update_terminal_title()
@@ -115,9 +150,13 @@ async def test_seed_first_send_short_writes_last_actual(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "set_terminal_title", lambda text, **k: None, raising=False
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({})
@@ -137,9 +176,13 @@ async def test_seed_multiline_collapsed(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "set_terminal_title", lambda text, **k: None, raising=False
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({})
@@ -147,7 +190,9 @@ async def test_seed_multiline_collapsed(tmp_path, monkeypatch):
 
         scr._on_user_text_submitted("реализуй   спеку\n  по  шагам   ")
 
-        assert store.patches == [{"last_actual": "реализуй спеку по шагам"}], store.patches
+        assert store.patches == [{"last_actual": "реализуй спеку по шагам"}], (
+            store.patches
+        )
         assert len(store.patches[0]["last_actual"]) <= 200
 
 
@@ -158,17 +203,25 @@ async def test_update_long_send_when_last_actual_set(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "set_terminal_title", lambda text, **k: None, raising=False
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "ты тут?"}})
         monkeypatch.setattr(scr, "_store", store)
 
-        scr._on_user_text_submitted("реализуй спеку переименования сессии полностью")
+        scr._on_user_text_submitted(
+            "реализуй спеку переименования сессии полностью"
+        )
 
-        assert store.patches == [{"last_actual": "реализуй спеку переименования сессии полностью"}], store.patches
+        assert store.patches == [
+            {"last_actual": "реализуй спеку переименования сессии полностью"}
+        ], store.patches
 
 
 @pytest.mark.asyncio
@@ -178,18 +231,26 @@ async def test_short_send_does_not_update_when_set(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "set_terminal_title", lambda text, **k: None, raising=False
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        store = _FakeStore({"tui": {"last_actual": "реализуй спеку переименования"}})
+        store = _FakeStore(
+            {"tui": {"last_actual": "реализуй спеку переименования"}}
+        )
         monkeypatch.setattr(scr, "_store", store)
 
         scr._on_user_text_submitted("ок")
 
         assert store.patches == [], store.patches  # не писали
-        assert store.base["tui"]["last_actual"] == "реализуй спеку переименования"
+        assert (
+            store.base["tui"]["last_actual"] == "реализуй спеку переименования"
+        )
 
 
 @pytest.mark.asyncio
@@ -199,9 +260,13 @@ async def test_whitespace_only_send_skips(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "set_terminal_title", lambda text, **k: None, raising=False
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "старое"}})
@@ -219,18 +284,27 @@ async def test_no_active_task_skips_last_actual(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens import main as main_mod
 
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: None, raising=False)
+    monkeypatch.setattr(
+        main_mod, "set_terminal_title", lambda text, **k: None, raising=False
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = None
         store = _FakeStore({})
         monkeypatch.setattr(scr, "_store", store)
 
-        scr._on_user_text_submitted("реализуй спеку переименования сессии полностью")
+        scr._on_user_text_submitted(
+            "реализуй спеку переименования сессии полностью"
+        )
 
         assert store.patches == [], store.patches
-        assert scr._resumed_prompt == "реализуй спеку переименования сессии полностью"
+        assert (
+            scr._resumed_prompt
+            == "реализуй спеку переименования сессии полностью"
+        )
 
 
 @pytest.mark.asyncio
@@ -241,9 +315,16 @@ async def test_meta_written_before_osc(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     osc_calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: osc_calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: osc_calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({})
@@ -262,10 +343,16 @@ async def test_meta_written_before_osc(tmp_path, monkeypatch):
             order.append(("osc", text))
             osc_calls.append(text)
 
-        monkeypatch.setattr(store, "update_tui_meta", track_update, raising=False)
-        monkeypatch.setattr(main_mod, "set_terminal_title", track_osc, raising=False)
+        monkeypatch.setattr(
+            store, "update_tui_meta", track_update, raising=False
+        )
+        monkeypatch.setattr(
+            main_mod, "set_terminal_title", track_osc, raising=False
+        )
 
-        scr._on_user_text_submitted("реализуй спеку переименования сессии полностью")
+        scr._on_user_text_submitted(
+            "реализуй спеку переименования сессии полностью"
+        )
 
         # первая запись — meta, вторая — OSC
         assert order[0][0] == "meta", order
@@ -299,13 +386,17 @@ class _FakeStore:
 
 
 @pytest.mark.asyncio
-async def test_rename_active_session_opens_with_display_name(tmp_path, monkeypatch):
+async def test_rename_active_session_opens_with_display_name(
+    tmp_path, monkeypatch
+):
     """R2: Ctrl+R → RenameScreen(current=display_name(meta.tui)) + _on_rename_result."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.rename import RenameScreen
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
@@ -322,7 +413,9 @@ async def test_rename_active_session_opens_with_display_name(tmp_path, monkeypat
         scr._rename_active_session()
 
         assert isinstance(pushed["screen"], RenameScreen), pushed
-        assert pushed["screen"]._current == "реализуй спеку", pushed["screen"]._current
+        assert pushed["screen"]._current == "реализуй спеку", pushed[
+            "screen"
+        ]._current
         assert pushed["cb"] is not None
 
 
@@ -332,10 +425,19 @@ async def test_rename_active_session_title_priority(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        store = _FakeStore({"tui": {"title": "parser bugfix", "last_actual": "реализуй спеку"}})
+        store = _FakeStore(
+            {
+                "tui": {
+                    "title": "parser bugfix",
+                    "last_actual": "реализуй спеку",
+                }
+            }
+        )
         monkeypatch.setattr(scr, "_store", store)
 
         pushed = {}
@@ -347,23 +449,34 @@ async def test_rename_active_session_title_priority(tmp_path, monkeypatch):
 
         scr._rename_active_session()
 
-        assert pushed["screen"]._current == "parser bugfix", pushed["screen"]._current
+        assert pushed["screen"]._current == "parser bugfix", pushed[
+            "screen"
+        ]._current
 
 
 @pytest.mark.asyncio
-async def test_rename_active_session_no_active_task_noop(tmp_path, monkeypatch):
+async def test_rename_active_session_no_active_task_noop(
+    tmp_path, monkeypatch
+):
     """R2: без активной задачи → push_screen не вызван."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = None
         store = _FakeStore({})
         monkeypatch.setattr(scr, "_store", store)
 
         pushed = []
-        monkeypatch.setattr(scr.app, "push_screen", lambda *a, **k: pushed.append(k), raising=False)
+        monkeypatch.setattr(
+            scr.app,
+            "push_screen",
+            lambda *a, **k: pushed.append(k),
+            raising=False,
+        )
 
         scr._rename_active_session()
 
@@ -376,13 +489,20 @@ async def test_rename_active_session_no_store_noop(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._store = None
 
         pushed = []
-        monkeypatch.setattr(scr.app, "push_screen", lambda *a, **k: pushed.append(k), raising=False)
+        monkeypatch.setattr(
+            scr.app,
+            "push_screen",
+            lambda *a, **k: pushed.append(k),
+            raising=False,
+        )
 
         scr._rename_active_session()
 
@@ -397,9 +517,16 @@ async def test_rename_result_writes_title(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     osc_calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: osc_calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: osc_calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
@@ -421,12 +548,21 @@ async def test_rename_result_empty_resets_title(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     osc_calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: osc_calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: osc_calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        store = _FakeStore({"tui": {"title": "старое имя", "last_actual": "реализуй спеку"}})
+        store = _FakeStore(
+            {"tui": {"title": "старое имя", "last_actual": "реализуй спеку"}}
+        )
         monkeypatch.setattr(scr, "_store", store)
         monkeypatch.setattr(scr, "_session_status_word", lambda: "running")
 
@@ -446,9 +582,16 @@ async def test_rename_result_none_noop(tmp_path, monkeypatch):
     from gc_tui.screens import main as main_mod
 
     osc_calls = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: osc_calls.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: osc_calls.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
@@ -488,13 +631,21 @@ async def test_r1_ctrl_r_renames_active_session(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        monkeypatch.setattr(scr, "_store", _FakeStore({"tui": {"last_actual": "реализуй спеку"}}))
+        monkeypatch.setattr(
+            scr,
+            "_store",
+            _FakeStore({"tui": {"last_actual": "реализуй спеку"}}),
+        )
 
         called = []
-        monkeypatch.setattr(scr, "_rename_active_session", lambda: called.append(1))
+        monkeypatch.setattr(
+            scr, "_rename_active_session", lambda: called.append(1)
+        )
 
         ev = _FakeKey("ctrl+r")
         scr.on_key(ev)
@@ -510,12 +661,18 @@ async def test_r1_ctrl_capital_r_renames_active_session(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        monkeypatch.setattr(scr, "_store", _FakeStore({"tui": {"last_actual": "x"}}))
+        monkeypatch.setattr(
+            scr, "_store", _FakeStore({"tui": {"last_actual": "x"}})
+        )
         called = []
-        monkeypatch.setattr(scr, "_rename_active_session", lambda: called.append(1))
+        monkeypatch.setattr(
+            scr, "_rename_active_session", lambda: called.append(1)
+        )
         ev = _FakeKey("ctrl+R")
         scr.on_key(ev)
         assert called == [1], called
@@ -528,12 +685,18 @@ async def test_r1_ctrl_cyrillic_k_lower_renames(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        monkeypatch.setattr(scr, "_store", _FakeStore({"tui": {"last_actual": "x"}}))
+        monkeypatch.setattr(
+            scr, "_store", _FakeStore({"tui": {"last_actual": "x"}})
+        )
         called = []
-        monkeypatch.setattr(scr, "_rename_active_session", lambda: called.append(1))
+        monkeypatch.setattr(
+            scr, "_rename_active_session", lambda: called.append(1)
+        )
         ev = _FakeKey("ctrl+к")
         scr.on_key(ev)
         assert called == [1], called
@@ -546,12 +709,18 @@ async def test_r1_ctrl_cyrillic_k_upper_renames(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        monkeypatch.setattr(scr, "_store", _FakeStore({"tui": {"last_actual": "x"}}))
+        monkeypatch.setattr(
+            scr, "_store", _FakeStore({"tui": {"last_actual": "x"}})
+        )
         called = []
-        monkeypatch.setattr(scr, "_rename_active_session", lambda: called.append(1))
+        monkeypatch.setattr(
+            scr, "_rename_active_session", lambda: called.append(1)
+        )
         ev = _FakeKey("ctrl+К")
         scr.on_key(ev)
         assert called == [1], called
@@ -564,12 +733,16 @@ async def test_r1_ctrl_r_no_active_task_noop(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = None
         monkeypatch.setattr(scr, "_store", _FakeStore({"tui": {}}))
         called = []
-        monkeypatch.setattr(scr, "_rename_active_session", lambda: called.append(1))
+        monkeypatch.setattr(
+            scr, "_rename_active_session", lambda: called.append(1)
+        )
         ev = _FakeKey("ctrl+r")
         scr.on_key(ev)
         assert called == [], called
@@ -582,12 +755,16 @@ async def test_r1_ctrl_r_no_store_noop(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         monkeypatch.setattr(scr, "_store", None)
         called = []
-        monkeypatch.setattr(scr, "_rename_active_session", lambda: called.append(1))
+        monkeypatch.setattr(
+            scr, "_rename_active_session", lambda: called.append(1)
+        )
         ev = _FakeKey("ctrl+r")
         scr.on_key(ev)
         assert called == [], called
@@ -595,7 +772,9 @@ async def test_r1_ctrl_r_no_store_noop(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_seed_task_from_submit_writes_tui_meta_and_osc(tmp_path, monkeypatch):
+async def test_seed_task_from_submit_writes_tui_meta_and_osc(
+    tmp_path, monkeypatch
+):
     """turn_finish.task → meta.tui.task + OSC обновлён."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
@@ -603,9 +782,16 @@ async def test_seed_task_from_submit_writes_tui_meta_and_osc(tmp_path, monkeypat
     from gc_tui.screens import main as main_mod
 
     titles = []
-    monkeypatch.setattr(main_mod, "set_terminal_title", lambda text, **k: titles.append(text), raising=False)
+    monkeypatch.setattr(
+        main_mod,
+        "set_terminal_title",
+        lambda text, **k: titles.append(text),
+        raising=False,
+    )
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
@@ -636,13 +822,17 @@ async def test_seed_task_from_submit_writes_tui_meta_and_osc(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_submit_task_is_saved_when_report_is_visual_duplicate(tmp_path, monkeypatch):
+async def test_submit_task_is_saved_when_report_is_visual_duplicate(
+    tmp_path, monkeypatch
+):
     """Метаданные turn_finish не теряются при дедупе одинакового task_report."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "реализуй спеку"}})
@@ -686,7 +876,12 @@ def _submit_event(task: str, no: int = 1):
         kind="agent",
         title="",
         summary=f"report {no}",
-        full_payload={"arguments": json.dumps({"task": task, "task_report": f"report {no}"}, ensure_ascii=False)},
+        full_payload={
+            "arguments": json.dumps(
+                {"task": task, "task_report": f"report {no}"},
+                ensure_ascii=False,
+            )
+        },
         call_id=f"c{no}",
         tool_name="submit_solution",
     )
@@ -708,12 +903,16 @@ def _call_event(no: int = 1):
 
 
 @pytest.mark.asyncio
-async def test_idle_turn_does_not_overwrite_existing_task(tmp_path, monkeypatch):
+async def test_idle_turn_does_not_overwrite_existing_task(
+    tmp_path, monkeypatch
+):
     """«Спасибо/пока»: ход без вызовов тулов не переименовывает сессию."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"task": "починить парсер"}})
@@ -733,7 +932,9 @@ async def test_working_turn_overwrites_existing_task(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"task": "починить парсер"}})
@@ -753,7 +954,9 @@ async def test_replay_does_not_rewrite_existing_task(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"task": "починить парсер"}})
@@ -773,7 +976,9 @@ async def test_replay_seeds_once_when_no_task_yet(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {}})
@@ -793,7 +998,9 @@ async def test_redraw_after_live_calls_seeds_finalizer(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"task": "починить парсер"}})
@@ -813,7 +1020,9 @@ async def test_cognitive_tool_is_not_work(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"task": "починить парсер"}})
@@ -832,7 +1041,9 @@ async def test_cognitive_tool_is_not_work(tmp_path, monkeypatch):
         )
         scr._render_event(think, live=True)
         assert scr._live_turn_tool_calls == 0
-        scr._render_event(_submit_event("Ответить на благодарность", no=2), live=True)
+        scr._render_event(
+            _submit_event("Ответить на благодарность", no=2), live=True
+        )
 
         assert store.patches == [], store.patches
 
@@ -843,7 +1054,9 @@ async def test_first_seed_works_for_idle_turn(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"last_actual": "привет"}})
@@ -878,7 +1091,9 @@ async def test_counter_resets_on_live_user_event_only(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         store = _FakeStore({"tui": {"task": "починить парсер"}})
@@ -889,7 +1104,9 @@ async def test_counter_resets_on_live_user_event_only(tmp_path, monkeypatch):
         assert scr._live_turn_tool_calls == 1
         scr._on_user_text_submitted("да, делай второй вариант")
         assert scr._live_turn_tool_calls == 1
-        scr._render_event(_user_event("старая реплика из истории", no=2), live=False)
+        scr._render_event(
+            _user_event("старая реплика из истории", no=2), live=False
+        )
         assert scr._live_turn_tool_calls == 1
         scr._render_event(_user_event("спасибо", no=3), live=True)
         assert scr._live_turn_tool_calls == 0
@@ -901,7 +1118,9 @@ async def test_task_switch_resets_counter(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._live_turn_tool_calls = 3
         assert scr.attach_active_task("t2") is True

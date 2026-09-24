@@ -34,19 +34,33 @@ def _wire_runner(monkeypatch, runner, child):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
     monkeypatch.setattr(
-        runner, "_build_child_ctx", as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr"))
+        runner, "_build_child_state", as_coro(lambda role: child)
+    )
+    monkeypatch.setattr(
+        runner,
+        "_build_child_ctx",
+        as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr")),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
 
-    monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
-    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: "")
-    monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
+    monkeypatch.setattr(
+        runner_mod, "init_subagent_open_turn", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "get_thread_memory_registers_from_shared",
+        lambda shared: {},
+    )
+    monkeypatch.setattr(
+        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
+    )
+    monkeypatch.setattr(
+        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+    )
 
     async def _create(*a, **k):
         return _Inst()
@@ -62,7 +76,9 @@ def _runner_with_orchestrator():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
+    ctx = SimpleNamespace(
+        logger=None, run_id="r", auth_connector=None, is_tui=False
+    )
     return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
 
 
@@ -87,7 +103,9 @@ async def test_live_delta_then_finally_no_double_count(monkeypatch):
         assert orch.usage.by_category["subagent"]["output"] == 22
         return "done"
 
-    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    out = await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
     payload = json.loads(out)
     assert payload["ok"] is True
     # finally не удваивает уже запушенные дельты
@@ -106,7 +124,9 @@ async def test_finally_pushes_residual_if_no_mid_run_persist(monkeypatch):
         child_state.usage.add(CATEGORY_MAIN, 50, 5)
         return "done"
 
-    await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
     assert orch.usage.by_category["subagent"]["input"] == 50
     assert orch.usage.by_category["subagent"]["output"] == 5
 
@@ -126,5 +146,7 @@ async def test_parent_messages_untouched_by_usage_push(monkeypatch):
             persist([{"role": "assistant", "content": "x"}])
         return "done"
 
-    await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
     assert orch.messages == [{"role": "user", "content": "parent only"}]

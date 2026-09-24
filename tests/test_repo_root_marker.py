@@ -45,7 +45,9 @@ def _fake_monorepo(root, core_name: str):
     (root / "packages" / "core" / "pyproject.toml").write_text(
         f'[project]\nname = "{core_name}"\nversion = "1.0"\n', encoding="utf-8"
     )
-    (root / "pyproject.toml").write_text('[project]\nname = "someone-else-meta"\n', encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "someone-else-meta"\n', encoding="utf-8"
+    )
     return root / "packages" / "core" / "src" / "foo" / "mod.py"
 
 

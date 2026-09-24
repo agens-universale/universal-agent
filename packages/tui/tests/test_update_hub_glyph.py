@@ -11,7 +11,10 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_core.updater.check import CheckResult
-from gc_testkit.tui_support import open_settings_section, settings_section_index
+from gc_testkit.tui_support import (
+    open_settings_section,
+    settings_section_index,
+)
 
 
 def _screen(tmp_path):
@@ -19,7 +22,12 @@ def _screen(tmp_path):
 
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    return SettingsScreen(config={}, config_path=str(cfg_file), on_apply=lambda: None, probe_fn=lambda *a, **k: None)
+    return SettingsScreen(
+        config={},
+        config_path=str(cfg_file),
+        on_apply=lambda: None,
+        probe_fn=lambda *a, **k: None,
+    )
 
 
 @pytest.mark.asyncio
@@ -29,7 +37,9 @@ async def test_hub_glyph_current_from_startup_check(tmp_path):
 
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        app._update_check_result = CheckResult("current", "abc", "установлена последняя версия")
+        app._update_check_result = CheckResult(
+            "current", "abc", "установлена последняя версия"
+        )
         app._update_checking = False
         scr = _screen(tmp_path)
         app.push_screen(scr)
@@ -57,18 +67,26 @@ async def test_hub_glyph_wave_while_startup_check_in_flight(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_section_reuses_startup_verdict_without_network(tmp_path, monkeypatch):
+async def test_section_reuses_startup_verdict_without_network(
+    tmp_path, monkeypatch
+):
     """Вход в секцию при готовом стартовом вердикте не делает второй сетевой запрос."""
     from gc_core.updater import check as check_mod
     from gc_tui import app as app_mod
 
     calls = []
     monkeypatch.setattr(
-        check_mod, "check_for_update", lambda source, **k: calls.append(source) or CheckResult("current", "abc", "ок")
+        check_mod,
+        "check_for_update",
+        lambda source, **k: (
+            calls.append(source) or CheckResult("current", "abc", "ок")
+        ),
     )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
-        app._update_check_result = CheckResult("current", "abc", "установлена последняя версия")
+        app._update_check_result = CheckResult(
+            "current", "abc", "установлена последняя версия"
+        )
         scr = _screen(tmp_path)
         app.push_screen(scr)
         await pilot.pause()
@@ -89,6 +107,8 @@ async def test_manual_check_publishes_verdict_to_app(tmp_path):
         scr = _screen(tmp_path)
         app.push_screen(scr)
         await pilot.pause()
-        scr._apply_check_result(CheckResult("update", "new", "доступна новая версия"))
+        scr._apply_check_result(
+            CheckResult("update", "new", "доступна новая версия")
+        )
         await pilot.pause()
         assert app._update_check_result.status == "update"

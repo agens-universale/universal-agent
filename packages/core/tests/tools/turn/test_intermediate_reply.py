@@ -28,7 +28,9 @@ def test_intermediate_reply_errors():
 
 
 def test_intermediate_reply_empty_artifact_path_treated_as_omitted():
-    out = json.loads(CallableTool(IntermediateReply())(answer="ok", artifact_path=""))
+    out = json.loads(
+        CallableTool(IntermediateReply())(answer="ok", artifact_path="")
+    )
     assert out["ok"] is True
     assert out["answer"] == "ok"
     assert "artifact_path" not in out
@@ -36,7 +38,10 @@ def test_intermediate_reply_empty_artifact_path_treated_as_omitted():
 
 def test_intermediate_reply_with_artifact_path(capsys):
     out = json.loads(
-        CallableTool(IntermediateReply())(answer="Короткий ответ. Подробности в артефакте.", artifact_path="report.md")
+        CallableTool(IntermediateReply())(
+            answer="Короткий ответ. Подробности в артефакте.",
+            artifact_path="report.md",
+        )
     )
     assert out["ok"] is True
     assert out["artifact_path"] == "report.md"

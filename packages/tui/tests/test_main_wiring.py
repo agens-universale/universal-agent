@@ -28,18 +28,28 @@ def test_main_assembles_stack_dry_run(monkeypatch, tmp_path):
         def __init__(self, **kw):
             called.update(kw)
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
+        lambda cfg, **kw: None,
+    )
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
+        lambda: None,
+    )
 
     from gc_tui import main
 
@@ -79,10 +89,14 @@ def test_main_auto_mcp_default_starts_and_stops_daemons(monkeypatch, tmp_path):
         def __init__(self, **kw):
             pass
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
@@ -121,10 +135,14 @@ def test_main_no_auto_mcp_skips_daemons(monkeypatch, tmp_path):
         def __init__(self, **kw):
             pass
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
@@ -160,10 +178,14 @@ def test_main_auto_mcp_flag_still_works(monkeypatch, tmp_path):
         def __init__(self, **kw):
             pass
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
@@ -207,28 +229,44 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
 
     class _FakeApp:
         def __init__(self, **kw):
-            self._voice_autostart_pending = False  # как у настоящего TuiApp.__init__
+            self._voice_autostart_pending = (
+                False  # как у настоящего TuiApp.__init__
+            )
             created.append(self)
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
+        lambda cfg, **kw: None,
+    )
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
+        lambda: None,
+    )
 
-    state = VoiceState(version="v1", root="/data/voice/speaches", port=8735, model="m")
+    state = VoiceState(
+        version="v1", root="/data/voice/speaches", port=8735, model="m"
+    )
     monkeypatch.setattr(voice_state, "load_state", lambda: state)
     monkeypatch.setattr(autostart, "url_is_ours", lambda cfg, port: True)
 
     def _must_not_be_called(*a, **kw):
-        raise AssertionError("main() не должен звать ensure_voice_service синхронно")
+        raise AssertionError(
+            "main() не должен звать ensure_voice_service синхронно"
+        )
 
     monkeypatch.setattr(autostart, "ensure_voice_service", _must_not_be_called)
 
@@ -238,7 +276,9 @@ def test_main_voice_autostart_does_not_block_startup(monkeypatch, tmp_path):
     rc = main(argv=["--config", str(cfg_path)])
     assert rc == 0
     assert len(created) == 1
-    assert created[0]._voice_autostart_pending is True  # гейт прошёл — вердикт ждёт TuiApp
+    assert (
+        created[0]._voice_autostart_pending is True
+    )  # гейт прошёл — вердикт ждёт TuiApp
 
 
 def test_main_hands_the_profile_flag_to_the_app(monkeypatch, tmp_path):
@@ -257,31 +297,45 @@ def test_main_hands_the_profile_flag_to_the_app(monkeypatch, tmp_path):
         def __init__(self, **kw):
             called.update(kw)
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
             return None
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
+        lambda cfg, **kw: None,
+    )
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
+        lambda: None,
+    )
 
     from gc_tui import main
 
     cfg_path = _cfg_for_main(tmp_path)
     (tmp_path / "profiles").mkdir()
-    (tmp_path / "profiles" / "work.yml").write_text("slots: {}\n", encoding="utf-8")
+    (tmp_path / "profiles" / "work.yml").write_text(
+        "slots: {}\n", encoding="utf-8"
+    )
     rc = main(argv=["--config", str(cfg_path), "--profile", "work"])
     assert rc == 0
     assert called.get("profile_override") == "work"
 
 
 @pytest.mark.parametrize("run_fails", [False, True])
-def test_main_kills_file_index_processes_on_exit(monkeypatch, tmp_path, run_fails):
+def test_main_kills_file_index_processes_on_exit(
+    monkeypatch, tmp_path, run_fails
+):
     """Выход из TUI гасит процессы индекса путей (git ls-files) — и когда app.run()
     упал: поток сборки — демон, а сам git пережил бы программу."""
     pytest.importorskip("textual")
@@ -293,10 +347,14 @@ def test_main_kills_file_index_processes_on_exit(monkeypatch, tmp_path, run_fail
         def __init__(self, **kw):
             pass
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *a, **k):  # cold-start notice §3.5 — no-op
+        def _maybe_notice_profile_activation(
+            self, *a, **k
+        ):  # cold-start notice §3.5 — no-op
             pass
 
         def run(self):
@@ -304,10 +362,18 @@ def test_main_kills_file_index_processes_on_exit(monkeypatch, tmp_path, run_fail
                 raise RuntimeError("boom")
 
     monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons", lambda cfg, **kw: None)
-    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons", lambda: None)
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
+        lambda cfg, **kw: None,
+    )
+    monkeypatch.setattr(
+        "recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
+        lambda: None,
+    )
     killed = []
-    monkeypatch.setattr(file_index, "kill_running_processes", lambda: killed.append(True))
+    monkeypatch.setattr(
+        file_index, "kill_running_processes", lambda: killed.append(True)
+    )
 
     from gc_tui import main
 

@@ -100,7 +100,9 @@ def parse_find_in_files_config(
         if isinstance(fs_raw, dict):
             fif_raw = fs_raw.get("find_in_files", {}) or {}
     try:
-        return FsFindInFilesConfig.model_validate(fif_raw if isinstance(fif_raw, dict) else {})
+        return FsFindInFilesConfig.model_validate(
+            fif_raw if isinstance(fif_raw, dict) else {}
+        )
     except Exception:
         return FsFindInFilesConfig()
 
@@ -151,7 +153,9 @@ def parse_find_files_by_name_config(
         if isinstance(fs_raw, dict):
             ffbn_raw = fs_raw.get("find_files_by_name", {}) or {}
     try:
-        return FsFindFilesByNameConfig.model_validate(ffbn_raw if isinstance(ffbn_raw, dict) else {})
+        return FsFindFilesByNameConfig.model_validate(
+            ffbn_raw if isinstance(ffbn_raw, dict) else {}
+        )
     except Exception:
         return FsFindFilesByNameConfig()
 

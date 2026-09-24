@@ -1,6 +1,8 @@
 """Тесты разметки тела сообщения после суммаризации."""
 
-from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+from gc_core.config_modules.intent_scope import (
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+)
 from gc_core.intent_log import IntentRecord, read_page, serialize, tail_preview
 from gc_core.intent_log.operations import utc_now_ts
 from gc_core.intent_log.record import ACTION_USER_ASK
@@ -34,7 +36,9 @@ def test_format_summary_block_keeps_existing_summary_root():
 
 def test_xml_summary_not_double_wrapped_in_dialog_body():
     xml = valid_summary_xml_for_tests()
-    body = build_dialog_summary_content(summary_text=xml, last_dialog_steps="tail")
+    body = build_dialog_summary_content(
+        summary_text=xml, last_dialog_steps="tail"
+    )
     assert body.count("<summary>") == 1
     assert body.count("</summary>") == 1
     assert any(f"<{tag}>" in body for tag in hint_section_tags())
@@ -66,11 +70,17 @@ def test_empty_session_memory_block_skips_section_and_hint():
     assert "<last_dialog_steps>" in body
     assert "tail" in body
     assert "Treat memory and summaries as context" in body
-    assert "do not rerun completed experiments unless the user asks or evidence is stale" in body
+    assert (
+        "do not rerun completed experiments unless the user asks or evidence is stale"
+        in body
+    )
 
 
 def test_user_intent_log_tail_attrs_and_jsonl_current():
-    closed = [_user_ask("closed turn one"), _user_ask("closed turn two", turn=2)]
+    closed = [
+        _user_ask("closed turn one"),
+        _user_ask("closed turn two", turn=2),
+    ]
     open_turn = [_user_ask("open turn detail")]
     preview = tail_preview(closed, max_chars=10_000)
     current_jsonl = serialize(open_turn)
@@ -118,7 +128,9 @@ def test_empty_current_skips_current_section():
 def test_build_intent_blocks_prefix_matches_dialog_summary_wire_format():
     closed = [_user_ask("closed turn"), _user_ask("older", turn=1)]
     open_turn = [_user_ask("open turn")]
-    prefix = build_intent_blocks_prefix(closed, open_turn, intent_log_preview_chars=10_000)
+    prefix = build_intent_blocks_prefix(
+        closed, open_turn, intent_log_preview_chars=10_000
+    )
     assert "<user_intent_log " in prefix
     assert '"action": "user_ask"' in prefix
     assert "closed turn" in prefix

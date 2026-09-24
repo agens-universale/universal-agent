@@ -52,7 +52,9 @@ async def test_submit_solution_note_renders_via_trace_row():
         )
         scr._render_event(ev)
         await pilot.pause()
-        note_rows = [r for r in scr.query(TraceRow) if r.has_class("line-note")]
+        note_rows = [
+            r for r in scr.query(TraceRow) if r.has_class("line-note")
+        ]
         assert len(note_rows) == 1
         assert note_rows[0]._prefix == "* "
         content = note_rows[0]._content
@@ -90,7 +92,9 @@ async def test_agent_prose_first_block_has_bullet_prefix():
         # блоком (пустые строки сохранены внутри) — сплит только на code/table (0ff36ad8).
         assert len(agent_rows) == 1
         assert agent_rows[0]._prefix == "● "
-        assert not agent_rows[0].has_class("line-agent-cont")  # cont — только за code/table
+        assert not agent_rows[0].has_class(
+            "line-agent-cont"
+        )  # cont — только за code/table
 
 
 @pytest.mark.asyncio
@@ -102,7 +106,9 @@ async def test_tool_call_row_has_two_column_layout():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='x'")
+            yield ToolCallRow(
+                call_id="c1", tool_name="read_file", args_summary="path='x'"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -111,7 +117,9 @@ async def test_tool_call_row_has_two_column_layout():
         assert "|-" not in str(prefix.render())  # лесенки больше нет
         assert "▸" in str(prefix.render())  # статус-глиф running в prefix
         assert "read_file" in str(content.render())
-        assert "|- " not in str(content.render())  # prefix НЕ дублируется в content
+        assert "|- " not in str(
+            content.render()
+        )  # prefix НЕ дублируется в content
 
 
 @pytest.mark.asyncio
@@ -128,7 +136,11 @@ async def test_long_tool_args_wrap_inside_content_column():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="execute_command", args_summary=long_args)
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="execute_command",
+                args_summary=long_args,
+            )
 
     async with _App().run_test(size=(80, 24)) as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -155,9 +167,13 @@ async def test_meta_lines_have_top_margin_class():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         # Триггерим экспорт-сообщение через прямой вызов фабрики
-        scr._mount_trace_row(prefix="[exported] ", content="/tmp/x.md", kind_class="line-meta")
+        scr._mount_trace_row(
+            prefix="[exported] ", content="/tmp/x.md", kind_class="line-meta"
+        )
         await pilot.pause()
-        meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
+        meta_rows = [
+            r for r in scr.query(TraceRow) if r.has_class("line-meta")
+        ]
         assert len(meta_rows) >= 1
 
 

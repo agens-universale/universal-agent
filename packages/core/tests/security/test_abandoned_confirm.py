@@ -58,4 +58,6 @@ async def test_an_abandoned_confirm_records_nothing(monkeypatch):
     for thread in [t for t in threading.enumerate() if t.name == _THREAD]:
         thread.join(5)
 
-    assert store.decision_for("write:/etc/SECRET") is None, "брошенное подтверждение записало решение по чужому нажатию"
+    assert store.decision_for("write:/etc/SECRET") is None, (
+        "брошенное подтверждение записало решение по чужому нажатию"
+    )

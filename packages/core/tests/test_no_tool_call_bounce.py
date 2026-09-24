@@ -21,7 +21,9 @@ def test_extract_handles_string_content():
 
 
 def test_extract_strips_outer_whitespace():
-    messages = [{"type": "message", "role": "assistant", "content": "  hello  "}]
+    messages = [
+        {"type": "message", "role": "assistant", "content": "  hello  "}
+    ]
     assert extract_last_assistant_text(messages) == "hello"
 
 
@@ -35,7 +37,10 @@ def test_extract_handles_list_content():
         {
             "type": "message",
             "role": "assistant",
-            "content": [{"type": "output_text", "text": "first"}, {"text": "second"}],
+            "content": [
+                {"type": "output_text", "text": "first"},
+                {"text": "second"},
+            ],
         }
     ]
     assert extract_last_assistant_text(messages) == "first\n\nsecond"
@@ -59,7 +64,12 @@ def test_extract_returns_empty_for_non_assistant():
 
 def test_extract_returns_empty_for_function_call_only():
     messages = [
-        {"type": "function_call", "name": "x", "call_id": "c", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "x",
+            "call_id": "c",
+            "arguments": "{}",
+        },
     ]
     assert extract_last_assistant_text(messages) == ""
 
@@ -68,7 +78,12 @@ def test_extract_finds_last_assistant_when_mixed():
     messages = [
         {"type": "message", "role": "user", "content": "Hi"},
         {"type": "message", "role": "assistant", "content": "First"},
-        {"type": "function_call", "name": "x", "call_id": "c", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "x",
+            "call_id": "c",
+            "arguments": "{}",
+        },
         {"type": "message", "role": "assistant", "content": "Second"},
     ]
     assert extract_last_assistant_text(messages) == "Second"
@@ -94,7 +109,9 @@ def test_format_does_not_inline_assistant_prose():
 
 
 def test_format_uses_content_filter_nudge():
-    msg = format_no_tool_call_bounce("blocked prose", finish_reason="content_filter")
+    msg = format_no_tool_call_bounce(
+        "blocked prose", finish_reason="content_filter"
+    )
     assert msg == CONTENT_FILTER_BOUNCE_MESSAGE
     assert msg == PROVIDER_BLOCKED_BOUNCE_MESSAGE
     assert "blocked prose" not in msg
@@ -103,8 +120,17 @@ def test_format_uses_content_filter_nudge():
 
 
 def test_format_blocked_reasons_share_nudge():
-    for fr in ("content_filter", "refusal", "safety", "Content_Filter", "REFUSAL"):
-        assert format_no_tool_call_bounce(finish_reason=fr) == PROVIDER_BLOCKED_BOUNCE_MESSAGE
+    for fr in (
+        "content_filter",
+        "refusal",
+        "safety",
+        "Content_Filter",
+        "REFUSAL",
+    ):
+        assert (
+            format_no_tool_call_bounce(finish_reason=fr)
+            == PROVIDER_BLOCKED_BOUNCE_MESSAGE
+        )
 
 
 def test_format_uses_length_nudge():
@@ -116,7 +142,10 @@ def test_format_uses_length_nudge():
 
 
 def test_format_content_filter_is_case_insensitive():
-    assert format_no_tool_call_bounce(finish_reason="Content_Filter") == CONTENT_FILTER_BOUNCE_MESSAGE
+    assert (
+        format_no_tool_call_bounce(finish_reason="Content_Filter")
+        == CONTENT_FILTER_BOUNCE_MESSAGE
+    )
     assert is_content_filter_finish("CONTENT_FILTER")
     assert is_content_filter_finish("refusal")
     assert is_content_filter_finish("safety")

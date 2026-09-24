@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from gc_tui.diff_tui.visual import build_unified_diff, build_visual_diff, truncate_diff
+from gc_tui.diff_tui.visual import (
+    build_unified_diff,
+    build_visual_diff,
+    truncate_diff,
+)
 
 
 def test_truncate_diff_respects_max_chars():
@@ -62,7 +66,10 @@ def test_build_created_file_diff_empty_file_not_blank():
 
 
 def test_preview_change_lines_skips_headers_for_created():
-    from gc_tui.diff_tui.visual import build_created_file_diff, preview_change_lines
+    from gc_tui.diff_tui.visual import (
+        build_created_file_diff,
+        preview_change_lines,
+    )
 
     body = build_created_file_diff("a\nb\nc\n", tofile="f.py")
     head, remaining = preview_change_lines(body, limit=3)
@@ -144,7 +151,10 @@ def test_build_visual_diff_adaptive_boundary_equal_full_file_max_lines():
 def test_build_visual_diff_adaptive_boundary_one_more_uses_preview():
     n_lines = 6  # full_file_max_lines=5 → preview
     old = "\n".join(f"o{i}" for i in range(n_lines)) + "\n"
-    new = "\n".join(["o0", "CHANGED"] + [f"o{i}" for i in range(2, n_lines)]) + "\n"
+    new = (
+        "\n".join(["o0", "CHANGED"] + [f"o{i}" for i in range(2, n_lines)])
+        + "\n"
+    )
     out = build_visual_diff(
         old,
         new,
@@ -211,7 +221,9 @@ def test_build_visual_diff_adaptive_close_edits_merge_into_one_hunk():
         max_diff_chars=500_000,
     )
     n_hunks = out.count("\n@@")
-    assert n_hunks == 1, f"близкие edit должны склеиться в 1 hunk, got {n_hunks}"
+    assert n_hunks == 1, (
+        f"близкие edit должны склеиться в 1 hunk, got {n_hunks}"
+    )
     assert "+EDIT-A" in out
     assert "+EDIT-B" in out
 

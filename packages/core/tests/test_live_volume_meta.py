@@ -29,7 +29,9 @@ def _live_tui(tmp_path, tid="t1"):
     return load_thread_meta(str(tmp_path), "cli", tid).get("runtime") or {}
 
 
-async def test_persist_batch_sets_live_volume_matching_full_recompute(tmp_path):
+async def test_persist_batch_sets_live_volume_matching_full_recompute(
+    tmp_path,
+):
     msgs = [
         {"role": "user", "content": "привет", "id": "m1"},
         {"role": "assistant", "content": "ответ длиннее", "id": "m2"},
@@ -72,7 +74,9 @@ async def test_compact_resets_live_volume_to_new_live(tmp_path):
     before = _live_tui(tmp_path)["live_history_chars"]
     assert before > 0
 
-    await ts.aarchive_and_compact_summary_payload({"summary_message_content": "кратко", "dialog_steps_offset": 0})
+    await ts.aarchive_and_compact_summary_payload(
+        {"summary_message_content": "кратко", "dialog_steps_offset": 0}
+    )
 
     tui = _live_tui(tmp_path)
     live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
@@ -91,7 +95,9 @@ async def test_discard_keeps_live_volume_consistent(tmp_path):
         ],
         previous_response_id=None,
     )
-    assert discard_message_by_id(str(tmp_path), "cli", "t1", "m_orphan") is True
+    assert (
+        discard_message_by_id(str(tmp_path), "cli", "t1", "m_orphan") is True
+    )
 
     tui = _live_tui(tmp_path)
     live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
@@ -110,11 +116,18 @@ async def test_discard_uses_projection_for_live_volume(tmp_path):
         ],
         previous_response_id=None,
     )
-    assert discard_message_by_id(str(tmp_path), "cli", "t1", "m_orphan", strip_think=False) is True
+    assert (
+        discard_message_by_id(
+            str(tmp_path), "cli", "t1", "m_orphan", strip_think=False
+        )
+        is True
+    )
     tui = _live_tui(tmp_path)
     live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
     assert [m["id"] for m in live] == ["m_keep"]
-    assert tui["live_history_chars"] == calc_history_chars_for_trigger(live, strip_think=False)
+    assert tui["live_history_chars"] == calc_history_chars_for_trigger(
+        live, strip_think=False
+    )
     assert tui["live_history_chars"] > calc_history_chars_for_trigger(live)
 
 
@@ -138,7 +151,9 @@ async def test_append_uses_projection_for_live_volume(tmp_path):
     )
     tui = _live_tui(tmp_path)
     live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")
-    assert tui["live_history_chars"] == calc_history_chars_for_trigger(live, strip_think=False)
+    assert tui["live_history_chars"] == calc_history_chars_for_trigger(
+        live, strip_think=False
+    )
     default_chars = calc_history_chars_for_trigger(live)
     assert tui["live_history_chars"] > default_chars
 
@@ -181,7 +196,9 @@ async def test_compact_preserves_tui_owned_keys(tmp_path):
     ts.meta = dict(ts.meta)
     ts.meta.pop("tui", None)
 
-    await ts.aarchive_and_compact_summary_payload({"summary_message_content": "кратко", "dialog_steps_offset": 0})
+    await ts.aarchive_and_compact_summary_payload(
+        {"summary_message_content": "кратко", "dialog_steps_offset": 0}
+    )
 
     meta = load_thread_meta(str(tmp_path), "cli", "t1")
     tui = meta.get("tui") or {}

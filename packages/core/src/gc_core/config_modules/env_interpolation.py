@@ -69,9 +69,13 @@ def _read_secret_file(path_raw: str, cache: dict[str, str]) -> str:
     return value
 
 
-def _resolve(obj: Any, missing_env: set[str], file_cache: dict[str, str]) -> Any:
+def _resolve(
+    obj: Any, missing_env: set[str], file_cache: dict[str, str]
+) -> Any:
     if isinstance(obj, dict):
-        return {k: _resolve(v, missing_env, file_cache) for k, v in obj.items()}
+        return {
+            k: _resolve(v, missing_env, file_cache) for k, v in obj.items()
+        }
     if isinstance(obj, list):
         return [_resolve(v, missing_env, file_cache) for v in obj]
     if isinstance(obj, str):

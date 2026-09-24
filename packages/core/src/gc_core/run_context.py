@@ -5,9 +5,17 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
-from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, auxiliary_llm_from_config_dict
-from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
-from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
+from gc_core.config_modules.chat_completions import (
+    ChatCompletionsLlmConfig,
+    auxiliary_llm_from_config_dict,
+)
+from gc_core.config_modules.env_vars import (
+    project_gc_dir as _resolve_project_gc_dir,
+)
+from gc_core.config_modules.intent_scope import (
+    IntentScopeConfig,
+    intent_scope_from_config_dict,
+)
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
@@ -73,7 +81,9 @@ class RunContext:
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = (
+        None
+    )
     # Активный скоуп ввода субагента ЭТОГО прогона: сюда уходит сообщение
     # пользователя, пришедшее посреди работы ребёнка. Живёт здесь, а не в
     # глобали модуля, потому что процесс ведёт МНОГО прогонов сразу (сервер) —
@@ -95,7 +105,7 @@ class RunContext:
     mcp_session_owner: str = ""
 
 
-async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
     *,
     auth_connector: Optional[AuthConnector] = None,
@@ -105,7 +115,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. docs/c
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    on_messages_evicted: Optional[
+        Callable[[List[Dict[str, Any]]], None]
+    ] = None,
     is_tui: bool = False,
     tools_cache: Any = None,
     log_handlers: Any = None,
@@ -271,7 +283,9 @@ async def _aclose_owned_mcp_sessions(owner: str) -> None:
     файла: закрывался реестр другой копии модуля. К тому же сборка контекста
     лежит ниже исполнителя, и тянуть его наверх ради отказа незачем.
     """
-    from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+    from gc_core.tools.connect_mcp.persistent_stdio import (
+        PersistentStdioRegistry,
+    )
 
     with use_owner(owner):
         await PersistentStdioRegistry.instance().aclose_all()
@@ -350,7 +364,7 @@ def _prepare_run_context(
     )
 
 
-def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
     prep: "_RunContextPrep",
     tools: tuple,
@@ -427,7 +441,9 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. docs/code-qu
     auxiliary_llm = auxiliary_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
-    effective_level_provider = level_provider or (lambda: config_dict.get("level") or "default")
+    effective_level_provider = level_provider or (
+        lambda: config_dict.get("level") or "default"
+    )
     model_router = ModelRouter(
         config_dict,
         level_provider=effective_level_provider,

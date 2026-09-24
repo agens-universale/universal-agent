@@ -51,7 +51,9 @@ _ASSIGN_SCALAR_FIELDS = (
 )
 
 
-def _check_assign_value(models: dict, coordinate: str, value: str, prefix: str, errors: list[str]) -> None:
+def _check_assign_value(
+    models: dict, coordinate: str, value: str, prefix: str, errors: list[str]
+) -> None:
     if value == "auto":
         errors.append(
             f'{prefix}{coordinate}: значение "auto" недопустимо для привязки — '
@@ -74,7 +76,12 @@ def default_slot_required(models, slots) -> bool:
     Написанное дважды от руки, это правило уже разъезжалось: одна копия считала по
     слитому стеку, другая по одному файлу, и вопрос «какая модель по умолчанию» не
     задавался там, где запись потом отвергал гейт."""
-    return len(models) >= 2 and slots.light is None and slots.default is None and slots.max is None
+    return (
+        len(models) >= 2
+        and slots.light is None
+        and slots.default is None
+        and slots.max is None
+    )
 
 
 def _slot_errors(cfg: AppConfig, prefix: str) -> list[str]:
@@ -83,7 +90,9 @@ def _slot_errors(cfg: AppConfig, prefix: str) -> list[str]:
     for slot_name in ("light", "default", "max"):
         alias = getattr(cfg.slots, slot_name)
         if alias is not None and alias not in models:
-            errors.append(f'{prefix}slots.{slot_name}: алиас "{alias}" не найден в merged-реестре models')
+            errors.append(
+                f'{prefix}slots.{slot_name}: алиас "{alias}" не найден в merged-реестре models'
+            )
     if default_slot_required(models, cfg.slots):
         errors.append(
             f"{prefix}slots.default: моделей в реестре ≥2 — укажите slots.default "
@@ -101,7 +110,9 @@ def _assign_errors(cfg: AppConfig, prefix: str) -> tuple[list[str], bool]:
         value = getattr(cfg.assign, field)
         if value is not None:
             assign_touched = True
-            _check_assign_value(models, f"assign.{field}", value, prefix, errors)
+            _check_assign_value(
+                models, f"assign.{field}", value, prefix, errors
+            )
     for subagent_name, value in cfg.assign.subagents.items():
         assign_touched = True
         if subagent_name != "*" and subagent_name not in _SUBAGENT_NAMES:
@@ -109,11 +120,15 @@ def _assign_errors(cfg: AppConfig, prefix: str) -> tuple[list[str], bool]:
                 f"{prefix}assign.subagents.{subagent_name}: неизвестный субагент — "
                 f'канонический реестр: {", ".join(sorted(_SUBAGENT_NAMES))}, или "*"'
             )
-        _check_assign_value(models, f"assign.subagents.{subagent_name}", value, prefix, errors)
+        _check_assign_value(
+            models, f"assign.subagents.{subagent_name}", value, prefix, errors
+        )
     return errors, assign_touched
 
 
-def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[str]:
+def validate_model_sections(
+    cfg: AppConfig, *, source_hint: str = ""
+) -> list[str]:
     """Ссылочная целостность models/slots/assign на итоговом merged-конфиге.
 
     Кидает `ValueError` с координатой(ами) ключа при первой обнаруженной ошибке
@@ -145,5 +160,7 @@ def validate_model_sections(cfg: AppConfig, *, source_hint: str = "") -> list[st
         if entry.weakens_shared_transport()
     ]
     if not models and assign_touched:
-        notices.append(f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)")
+        notices.append(
+            f"{prefix}assign: привязки без реестра моделей не действуют (models пуст)"
+        )
     return notices

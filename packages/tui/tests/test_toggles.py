@@ -26,7 +26,12 @@ def test_explicit_global_off_wins_over_default_tui():
 
 
 def test_explicit_tui_beats_explicit_global_off():
-    assert effective_finish_gate_mode(_cfg(mode="on", explicit=True, strict_false=True)) == "on"
+    assert (
+        effective_finish_gate_mode(
+            _cfg(mode="on", explicit=True, strict_false=True)
+        )
+        == "on"
+    )
 
 
 def test_explicit_tui_off():
@@ -59,7 +64,9 @@ def test_tui_wiring_projects_off_into_strict_flag():
     from gc_tui.toggles import apply_finish_gate_mode
 
     cfg = _cfg(mode="off", explicit=True)
-    cfg["strict_turn_finish_validation"] = True  # из flatten (глобальный дефолт)
+    cfg["strict_turn_finish_validation"] = (
+        True  # из flatten (глобальный дефолт)
+    )
     apply_finish_gate_mode(cfg)
     assert cfg["strict_turn_finish_validation"] is False
 
@@ -67,7 +74,9 @@ def test_tui_wiring_projects_off_into_strict_flag():
 def test_tui_wiring_on_keeps_strict_true():
     from gc_tui.toggles import apply_finish_gate_mode
 
-    cfg = _cfg(mode="on", explicit=True, strict_false=True)  # явный tui on поверх глобального off
+    cfg = _cfg(
+        mode="on", explicit=True, strict_false=True
+    )  # явный tui on поверх глобального off
     cfg["strict_turn_finish_validation"] = False
     apply_finish_gate_mode(cfg)
     assert cfg["strict_turn_finish_validation"] is True
@@ -76,7 +85,10 @@ def test_tui_wiring_on_keeps_strict_true():
 def test_apply_finish_gate_mode_smart_sets_both_runtime_keys():
     from gc_tui.toggles import apply_finish_gate_mode
 
-    cfg = {"tui_finish_gate_mode": "smart", "tui_finish_gate_mode_explicit": True}
+    cfg = {
+        "tui_finish_gate_mode": "smart",
+        "tui_finish_gate_mode_explicit": True,
+    }
     apply_finish_gate_mode(cfg)
     assert cfg["strict_turn_finish_validation"] is True
     assert cfg["finish_gate_smart"] is True
@@ -142,10 +154,14 @@ def test_toggle_specs_carry_label_and_summary():
     from gc_tui.toggles import TOGGLES
 
     assert TOGGLES["gate"].label == "самопроверка выполнения задачи"
-    assert TOGGLES["gate"].summary == "закрыт ли запрос"  # ревизия 4: короче, стабильность колонок
+    assert (
+        TOGGLES["gate"].summary == "закрыт ли запрос"
+    )  # ревизия 4: короче, стабильность колонок
     assert TOGGLES["answers"].label == "формат ответа"
     assert TOGGLES["answers"].summary == "допустим ли текст как финал хода"
-    assert "самопроверку" in TOGGLES["answers"].values[1].hint  # judge обновлён
+    assert (
+        "самопроверку" in TOGGLES["answers"].values[1].hint
+    )  # judge обновлён
 
 
 def test_render_track_canonical():
@@ -162,7 +178,11 @@ def test_gate_gains_smart_value():
     from gc_tui.toggles import TOGGLES
 
     gate = TOGGLES["gate"]
-    assert gate.names == ("off", "smart", "on")  # off·smart·on (мягкое→строгое, §3)
+    assert gate.names == (
+        "off",
+        "smart",
+        "on",
+    )  # off·smart·on (мягкое→строгое, §3)
     smart = gate.values[1]
     assert smart.value == "smart" and smart.color == pal.RUN_COLOR
     assert "работал инструментами" in smart.hint
@@ -219,7 +239,9 @@ def test_render_track_extra_reserved_and_lit():
     from gc_tui.toggles import TOGGLES, render_track
 
     reserved = render_track(TOGGLES["rigor"], "low", extra_lit=False)
-    assert reserved.plain == "● ○ ○   "  # база + двойной пробел + 1 пустая ячейка
+    assert (
+        reserved.plain == "● ○ ○   "
+    )  # база + двойной пробел + 1 пустая ячейка
     assert "○" not in reserved.plain[len("● ○ ○") :]
     custom = render_track(TOGGLES["rigor"], "custom", extra_lit=True)
     assert custom.plain == "○ ○ ○  ●"
@@ -250,8 +272,14 @@ def test_padded_track_no_padding_needed_matches_render_track():
     совпадает с `render_track` бит-в-бит."""
     from gc_tui.toggles import TOGGLES, padded_track, render_track
 
-    t = padded_track(TOGGLES["gate"], "on", extra_lit=None, base_w=5, extra_w=0)
-    assert t.plain == render_track(TOGGLES["gate"], "on", extra_lit=None).plain == "○ ○ ●"
+    t = padded_track(
+        TOGGLES["gate"], "on", extra_lit=None, base_w=5, extra_w=0
+    )
+    assert (
+        t.plain
+        == render_track(TOGGLES["gate"], "on", extra_lit=None).plain
+        == "○ ○ ●"
+    )
 
 
 def test_padded_track_pads_narrower_base_to_common_field_on_the_right():
@@ -268,7 +296,9 @@ def test_padded_track_pads_narrower_base_to_common_field_on_the_right():
         summary="",
     )
     t = padded_track(two, "a", extra_lit=None, base_w=5, extra_w=0)
-    assert t.plain == "● ○" + "  "  # собственная база(3) + 2 пробела до base_w=5
+    assert (
+        t.plain == "● ○" + "  "
+    )  # собственная база(3) + 2 пробела до base_w=5
     assert t.plain.index("●") == 0  # глиф остался у левого края
 
 
@@ -279,7 +309,9 @@ def test_padded_track_reserves_blank_extra_zone_for_row_without_own_extra():
     целиком пуста (никакого намёка на глиф)."""
     from gc_tui.toggles import TOGGLES, padded_track
 
-    t = padded_track(TOGGLES["gate"], "on", extra_lit=None, base_w=5, extra_w=3)
+    t = padded_track(
+        TOGGLES["gate"], "on", extra_lit=None, base_w=5, extra_w=3
+    )
     assert t.plain == "○ ○ ●" + "   "
     assert "●" not in t.plain[5:] and "○" not in t.plain[5:]
 
@@ -291,9 +323,15 @@ def test_padded_track_extra_lit_true_still_bold_brand_after_padding():
     from gc_tui import palette as p
     from gc_tui.toggles import TOGGLES, padded_track
 
-    t = padded_track(TOGGLES["rigor"], "custom", extra_lit=True, base_w=5, extra_w=3)
+    t = padded_track(
+        TOGGLES["rigor"], "custom", extra_lit=True, base_w=5, extra_w=3
+    )
     assert t.plain == "○ ○ ○  ●"
-    assert any("bold" in str(s.style).lower() and p.BRAND.lower() in str(s.style).lower() for s in t.spans)
+    assert any(
+        "bold" in str(s.style).lower()
+        and p.BRAND.lower() in str(s.style).lower()
+        for s in t.spans
+    )
 
 
 def test_next_toggle_value_displayed_custom_falls_back_to_idx_zero():
@@ -340,4 +378,6 @@ def test_answers_track_synchronized_with_gate_axis():
     for pair in PRESETS.values():
         gate_value = pair["tui.finish_gate_mode"]
         answers_value = pair["tui.text_answer_mode"]
-        assert gate.names.index(gate_value) == answers.names.index(answers_value)
+        assert gate.names.index(gate_value) == answers.names.index(
+            answers_value
+        )

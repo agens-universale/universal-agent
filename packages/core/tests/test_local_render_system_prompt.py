@@ -9,19 +9,35 @@ def _base(slot: str = "<special_instructions></special_instructions>") -> str:
 
 def test_special_instructions_injected_into_slot():
     out = render_system_prompt(
-        _base(), tools_spec=[], project_info={}, specific_role=None, special_instructions="RULES-X"
+        _base(),
+        tools_spec=[],
+        project_info={},
+        specific_role=None,
+        special_instructions="RULES-X",
     )
     assert "<special_instructions>RULES-X</special_instructions>" in out
 
 
 def test_special_instructions_none_leaves_slot_empty():
-    out = render_system_prompt(_base(), tools_spec=[], project_info={}, specific_role=None, special_instructions=None)
+    out = render_system_prompt(
+        _base(),
+        tools_spec=[],
+        project_info={},
+        specific_role=None,
+        special_instructions=None,
+    )
     assert "<special_instructions></special_instructions>" in out
 
 
 def test_special_instructions_no_tag_is_noop():
     tmpl = "Header\n## Clarifications\nFooter"
-    out = render_system_prompt(tmpl, tools_spec=[], project_info={}, specific_role=None, special_instructions="RULES-X")
+    out = render_system_prompt(
+        tmpl,
+        tools_spec=[],
+        project_info={},
+        specific_role=None,
+        special_instructions="RULES-X",
+    )
     assert out == tmpl
 
 

@@ -39,8 +39,12 @@ def test_demo_profile_validates_against_profile_schema(demo_profile_raw):
     assert "profile" not in demo_profile_raw
 
 
-def test_demo_profile_subagents_match_registry_and_validator_frozenset(demo_profile_raw):
-    demo_subagents = {name for name in demo_profile_raw["assign"]["subagents"] if name != "*"}
+def test_demo_profile_subagents_match_registry_and_validator_frozenset(
+    demo_profile_raw,
+):
+    demo_subagents = {
+        name for name in demo_profile_raw["assign"]["subagents"] if name != "*"
+    }
     registry_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
 
     assert demo_subagents == registry_names, (
@@ -59,7 +63,11 @@ def test_demo_profile_subagents_match_registry_and_validator_frozenset(demo_prof
         f"субагент не заведён в валидаторе: реестр={sorted(registry_names)}, "
         f"валидатор={sorted(_SUBAGENT_NAMES)}"
     )
-    assert demo_profile_raw["assign"]["subagents"]["*"] in ("light", "default", "max")
+    assert demo_profile_raw["assign"]["subagents"]["*"] in (
+        "light",
+        "default",
+        "max",
+    )
 
 
 def test_demo_profile_wildcard_and_pin_present(demo_profile_raw):
@@ -69,7 +77,9 @@ def test_demo_profile_wildcard_and_pin_present(demo_profile_raw):
     # механику "точный id сильнее wildcard"
     aliases = set(demo_profile_raw["models"])
     pinned = [name for name, value in subagents.items() if value in aliases]
-    assert pinned, "ожидался хотя бы один субагент, пришпиленный алиасом (не уровнем)"
+    assert pinned, (
+        "ожидался хотя бы один субагент, пришпиленный алиасом (не уровнем)"
+    )
 
 
 def test_demo_profile_covers_all_service_consumers(demo_profile_raw):
@@ -83,16 +93,22 @@ def test_demo_profile_covers_all_service_consumers(demo_profile_raw):
         "memory_compaction",
         "auto_judge",
     ):
-        assert consumer in assign, f"demo_profile.yml не привязывает потребителя {consumer}"
+        assert consumer in assign, (
+            f"demo_profile.yml не привязывает потребителя {consumer}"
+        )
 
 
-def test_demo_profile_models_demonstrate_both_token_semantics(demo_profile_raw):
+def test_demo_profile_models_demonstrate_both_token_semantics(
+    demo_profile_raw,
+):
     """Обе семантики СВОЕГО токена: значение (свой ключ провайдера) и `token: ""`
     («сервер не требует авторизации»). Третьей — «ключа token нет» — у записи со
     своим адресом больше не существует: адрес и токен задаются парой (§2), и
     справочник обязан показывать именно ту форму, которую примет валидатор."""
     models = demo_profile_raw["models"]
-    assert any(entry.get("token") for entry in models.values()), "нет примера модели со своим token"
+    assert any(entry.get("token") for entry in models.values()), (
+        "нет примера модели со своим token"
+    )
     assert any(entry.get("token") == "" for entry in models.values()), (
         'нет примера модели с token: "" (адрес без авторизации)'
     )
@@ -116,7 +132,12 @@ def test_demo_profile_has_slots_and_overlay_example(demo_profile_raw):
     # Оверлей-пример: гварды + суммаризация поверх обычных секций
     assert "security" in demo_profile_raw
     security = demo_profile_raw["security"]
-    for guard in ("command_moderation", "write_guard", "read_guard", "url_policy"):
+    for guard in (
+        "command_moderation",
+        "write_guard",
+        "read_guard",
+        "url_policy",
+    ):
         assert guard in security
     assert "summary" in demo_profile_raw
 

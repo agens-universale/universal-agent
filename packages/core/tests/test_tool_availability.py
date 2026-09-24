@@ -9,8 +9,13 @@
 from types import SimpleNamespace
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
-from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
-from gc_core.message_policy.tool_usage_notice.apply import apply_tool_usage_notice_before_llm
+from gc_core.message_policy.tool_availability import (
+    available_tool_names,
+    tool_is_available,
+)
+from gc_core.message_policy.tool_usage_notice.apply import (
+    apply_tool_usage_notice_before_llm,
+)
 from gc_core.states import SharedStateData, State
 
 
@@ -45,16 +50,22 @@ def _notice_cfg(**extra):
 
 class TestResolver:
     def test_tools_data_keys_win(self):
-        ctx = SimpleNamespace(tools_data={"fs_read_file": {}, "turn_finish": {}})
+        ctx = SimpleNamespace(
+            tools_data={"fs_read_file": {}, "turn_finish": {}}
+        )
         assert available_tool_names(ctx) == {"fs_read_file", "turn_finish"}
 
     def test_falls_back_to_tools_spec(self):
-        ctx = SimpleNamespace(tools_spec=[{"name": "fs_read_file"}, {"name": "x"}])
+        ctx = SimpleNamespace(
+            tools_spec=[{"name": "fs_read_file"}, {"name": "x"}]
+        )
         assert available_tool_names(ctx) == {"fs_read_file", "x"}
 
     def test_reads_state_tools(self):
         # State.tools — тот же список схем; нужен раннеру, где ctx ребёнка ещё нет.
-        assert available_tool_names(_state([{"name": "session_memory"}])) == {"session_memory"}
+        assert available_tool_names(_state([{"name": "session_memory"}])) == {
+            "session_memory"
+        }
 
     def test_first_knowing_source_wins(self):
         ctx = SimpleNamespace(tools_data={"a": {}})
@@ -62,8 +73,13 @@ class TestResolver:
 
     def test_unknown_sources_give_none(self):
         # Контракт: «не смогли узнать» ≠ «тулов нет».
-        assert available_tool_names(None, SimpleNamespace(config_dict={})) is None
-        assert available_tool_names(SimpleNamespace(tools_data={}, tools_spec=[])) is None
+        assert (
+            available_tool_names(None, SimpleNamespace(config_dict={})) is None
+        )
+        assert (
+            available_tool_names(SimpleNamespace(tools_data={}, tools_spec=[]))
+            is None
+        )
 
     def test_none_never_suppresses(self):
         assert tool_is_available(None, "что_угодно") is True
@@ -103,7 +119,9 @@ class TestToolUsageNoticeGate:
 
     def test_unknown_tool_set_keeps_old_behaviour(self):
         # ctx без тулов (синтетический/тестовый) — гейт не применяется.
-        assert len(self._apply(SimpleNamespace(config_dict=_notice_cfg()))) == 2
+        assert (
+            len(self._apply(SimpleNamespace(config_dict=_notice_cfg()))) == 2
+        )
 
 
 class TestProjectMemoryGate:
@@ -116,12 +134,21 @@ class TestProjectMemoryGate:
             "project_memory_params": {"check_interval_messages": 1},
             "stop_tools": [],
         }
-        absent = SimpleNamespace(config_dict=cfg, tools_data={"fs_read_file": {}})
-        present = SimpleNamespace(config_dict=cfg, tools_data={"fs_read_file": {}, "project_memory": {}})
+        absent = SimpleNamespace(
+            config_dict=cfg, tools_data={"fs_read_file": {}}
+        )
+        present = SimpleNamespace(
+            config_dict=cfg,
+            tools_data={"fs_read_file": {}, "project_memory": {}},
+        )
         base = [{"role": "user", "content": "hi", "id": "u1"}]
 
-        out_absent = apply_tool_usage_notice_before_llm(base, _state(), absent, {}, step_messages=[])
-        out_present = apply_tool_usage_notice_before_llm(base, _state(), present, {}, step_messages=[])
+        out_absent = apply_tool_usage_notice_before_llm(
+            base, _state(), absent, {}, step_messages=[]
+        )
+        out_present = apply_tool_usage_notice_before_llm(
+            base, _state(), present, {}, step_messages=[]
+        )
         assert len(out_absent) == 1
         assert len(out_present) == 2
         assert "project memory" in out_present[1]["content"].lower()

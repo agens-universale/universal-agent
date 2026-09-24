@@ -15,7 +15,15 @@ async def test_help_screen_lists_commands_from_registry():
         await pilot.pause()
         rows = pilot.app.screen.query(".help-row-cmd")
         names = "\n".join(str(r.render()) for r in rows)
-        for n in ["/sessions", "/stop", "/skills", "/quit", "/notices", "/diff", "/view"]:
+        for n in [
+            "/sessions",
+            "/stop",
+            "/skills",
+            "/quit",
+            "/notices",
+            "/diff",
+            "/view",
+        ]:
             assert n in names
 
 
@@ -45,7 +53,9 @@ async def test_viewer_header_shows_full_title_no_version():
     from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
-        pilot.app.push_screen(ViewerScreen(title="skill · x · системный · /p/x", content="тело"))
+        pilot.app.push_screen(
+            ViewerScreen(title="skill · x · системный · /p/x", content="тело")
+        )
         await pilot.pause()
         left = str(pilot.app.screen.query_one("#header-left", Static).render())
         assert "skill · x · системный · /p/x" in left

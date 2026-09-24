@@ -33,7 +33,11 @@ def _sse(*payloads):
 
 _STREAM_BODY = _sse(
     {"id": "x", "choices": [{"index": 0, "delta": {"content": "hi"}}]},
-    {"id": "x", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"completion_tokens": 1}},
+    {
+        "id": "x",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        "usage": {"completion_tokens": 1},
+    },
 )
 
 
@@ -44,7 +48,11 @@ def test_streaming_path_used_when_on_delta_given(monkeypatch):
         payload = json.loads(request.content)
         captured["stream"] = payload.get("stream")
         captured["stream_options"] = payload.get("stream_options")
-        return httpx.Response(200, text=_STREAM_BODY, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200,
+            text=_STREAM_BODY,
+            headers={"content-type": "text/event-stream"},
+        )
 
     _install(monkeypatch, handler)
     deltas = []
@@ -72,7 +80,9 @@ def test_blocking_path_when_no_on_delta(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert json.loads(request.content).get("stream") is None
-        return httpx.Response(200, json={"choices": [{"message": {"content": "blk"}}]})
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "blk"}}]}
+        )
 
     _install(monkeypatch, handler)
     res = run_coro(
@@ -90,7 +100,11 @@ def test_streaming_emits_reset_before_content(monkeypatch):
     """on_delta("reset", "") — самый первый вызов, до любой дельты контента."""
     _install(
         monkeypatch,
-        lambda request: httpx.Response(200, text=_STREAM_BODY, headers={"content-type": "text/event-stream"}),
+        lambda request: httpx.Response(
+            200,
+            text=_STREAM_BODY,
+            headers={"content-type": "text/event-stream"},
+        ),
     )
 
     deltas = []
@@ -103,7 +117,9 @@ def test_streaming_emits_reset_before_content(monkeypatch):
             on_delta=lambda k, t: deltas.append((k, t)),
         )
     )
-    assert deltas[0] == ("reset", ""), f"Expected reset first, got: {deltas[0]}"
+    assert deltas[0] == ("reset", ""), (
+        f"Expected reset first, got: {deltas[0]}"
+    )
     assert ("answer", "hi") in deltas
 
 
@@ -113,7 +129,10 @@ def test_streaming_http_error_reraises(monkeypatch):
     Тело ошибки у стримового ответа недоступно до aread() — на этом легко
     получить вместо HTTP-ошибки невразумительное StreamConsumed.
     """
-    _install(monkeypatch, lambda request: httpx.Response(500, text="Internal Server Error"))
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(500, text="Internal Server Error"),
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(
@@ -130,7 +149,10 @@ def test_streaming_http_error_reraises(monkeypatch):
 
 def test_non_stream_http_error_reraises_with_body(monkeypatch, capsys):
     """Не-стримовый 422: причина валидации обязана попасть в вывод."""
-    _install(monkeypatch, lambda request: httpx.Response(422, text="messages[0].content"))
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(422, text="messages[0].content"),
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(
@@ -145,7 +167,9 @@ def test_non_stream_http_error_reraises_with_body(monkeypatch, capsys):
     assert "messages[0].content" in capsys.readouterr().out
 
 
-def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypatch):
+def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(
+    monkeypatch,
+):
     """Кодировка тела SSE — всегда UTF-8, что бы ни объявил провайдер.
 
     Регрессия переезда: ``httpx.aiter_lines()`` декодирует по charset из
@@ -153,7 +177,14 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypat
     Провайдер, объявивший windows-1251 (или ISO-8859-1) при UTF-8 теле, портил
     ответ агента — без единого покрасневшего теста.
     """
-    chunk = {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "Привет, мир"}}]}
+    chunk = {
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": "Привет, мир"},
+            }
+        ]
+    }
     done = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
     body = (
         f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
@@ -165,7 +196,9 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypat
         return httpx.Response(
             200,
             content=body,
-            headers={"content-type": "text/event-stream; charset=windows-1251"},
+            headers={
+                "content-type": "text/event-stream; charset=windows-1251"
+            },
         )
 
     _install(monkeypatch, handler)
@@ -182,7 +215,9 @@ def test_stream_body_is_decoded_as_utf8_regardless_of_declared_charset(monkeypat
     assert res["choices"][0]["message"]["content"] == "Привет, мир"
 
 
-async def test_stream_stops_at_done_even_if_the_server_holds_the_body_open(monkeypatch):
+async def test_stream_stops_at_done_even_if_the_server_holds_the_body_open(
+    monkeypatch,
+):
     """После `[DONE]` читать больше нечего — ждать чужого закрытия нельзя.
 
     Сборщик на этом маркере поднимает флаг «стрим кончился», но цикл дочитывал
@@ -197,13 +232,18 @@ async def test_stream_stops_at_done_even_if_the_server_holds_the_body_open(monke
     holding = asyncio.Event()  # «сервер» ответил и не закрывает поток
 
     async def body():
-        yield (b'data: {"id": "x", "choices": [{"index": 0, "delta": {"content": "hi"}}]}\n\n')
+        yield (
+            b'data: {"id": "x", "choices": [{"index": 0, "delta": {"content": "hi"}}]}\n\n'
+        )
         yield b"data: [DONE]\n\n"
         await holding.wait()  # дальше тишина, но тело не закрыто
         yield b""
 
     _install(
-        monkeypatch, lambda request: httpx.Response(200, content=body(), headers={"content-type": "text/event-stream"})
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, content=body(), headers={"content-type": "text/event-stream"}
+        ),
     )
 
     deltas = []

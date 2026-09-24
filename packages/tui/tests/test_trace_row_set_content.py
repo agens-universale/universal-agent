@@ -8,7 +8,9 @@ from textual.widgets import Static
 async def test_set_content_updates_content_static():
     class _App(App):
         def compose(self):
-            yield TraceRow(prefix="● ", content="старый", kind_class="line-agent")
+            yield TraceRow(
+                prefix="● ", content="старый", kind_class="line-agent"
+            )
 
     app = _App()
     async with app.run_test():

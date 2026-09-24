@@ -23,11 +23,17 @@ def test_apply_rigor_preset_writes_pair_to_session(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.toggles import apply_toggle, toggle_state
 
-    app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
+    app, cfg_file = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+    )
     got = apply_toggle(app, "rigor", "low")
     assert got == "low"
     eff = app.effective_config()
-    assert eff["tui_finish_gate_mode"] == "off" and eff["tui_text_answer_mode"] == "allow"
+    assert (
+        eff["tui_finish_gate_mode"] == "off"
+        and eff["tui_text_answer_mode"] == "allow"
+    )
     assert toggle_state(app, "rigor") == "low"
     # config.yml не тронут (сессия)
     assert 'finish_gate_mode: "on"' in cfg_file.read_text(encoding="utf-8")
@@ -40,7 +46,10 @@ def test_apply_toggle_rejects_custom(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.toggles import apply_toggle
 
-    app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
+    app, cfg_file = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+    )
     original = cfg_file.read_text(encoding="utf-8")
 
     with pytest.raises(ValueError):
@@ -56,19 +65,33 @@ def test_nonstandard_pair_shows_custom_step_onto_preset_replaces_it(tmp_path):
     попасть на custom (она не позиция трека, ревизия 4) — цикл идёт от idx 0
     (эффективное вне spec.names) и заменяет пару целиком."""
     pytest.importorskip("textual")
-    from gc_tui.toggles import apply_toggle, next_toggle_value, preset_track_extra, toggle_state
+    from gc_tui.toggles import (
+        apply_toggle,
+        next_toggle_value,
+        preset_track_extra,
+        toggle_state,
+    )
 
     # глобал СТАНДАРТНЫЙ (medium), сессия накручена в дикую пару on+allow через детальные
-    app, _ = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
-    app.apply_session_overrides({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"})
+    app, _ = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
+    app.apply_session_overrides(
+        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+    )
     assert toggle_state(app, "rigor") == "custom"
-    assert preset_track_extra(app, "rigor") is True  # пара нестандартна — 4-я горит
+    assert (
+        preset_track_extra(app, "rigor") is True
+    )  # пара нестандартна — 4-я горит
     # шаг стрелкой на пресет: "custom" вне spec.names -> idx 0, +1 -> idx 1 -> medium
     nxt = next_toggle_value(app, "rigor", 1)
     assert nxt == "medium"
     apply_toggle(app, "rigor", nxt)
     assert toggle_state(app, "rigor") == nxt
-    assert preset_track_extra(app, "rigor") is False  # пара снова стандартна — 4-я не горит
+    assert (
+        preset_track_extra(app, "rigor") is False
+    )  # пара снова стандартна — 4-я не горит
 
 
 @pytest.mark.asyncio
@@ -76,7 +99,10 @@ async def test_rigor_palette_cycles_three_values(tmp_path):
     """Живой прогон: /rigor в палитре, ←/→ ходит low/medium/high, сессия меняется,
     config.yml не тронут, палитра открыта."""
     pytest.importorskip("textual")
-    app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
+    app, cfg_file = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
     original = cfg_file.read_text(encoding="utf-8")
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -107,7 +133,9 @@ def _toggle_row_text(palette, name):
 
 
 @pytest.mark.asyncio
-async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clears_it(tmp_path):
+async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clears_it(
+    tmp_path,
+):
     """Гвоздь ревизии 4, обновлён под ревизию 7 (спека §2, §4.1, §8): состав
     подвала статичен (дети /gate,/answers видны ВСЕГДА под /rigor, независимо
     от выделения — видимость-по-выделению ревизий 5/6 снесена). Крутка
@@ -120,7 +148,10 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
     pytest.importorskip("textual")
     from gc_tui.toggles import toggle_state
 
-    app, cfg_file = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
+    app, cfg_file = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
     original = cfg_file.read_text(encoding="utf-8")
     async with app.run_test() as pilot:
         await pilot.press("/")
@@ -129,7 +160,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
 
         # Ревизия 7: подвал уже показывает все строки, до всякой навигации.
         # level/profiles — группа «чем работаем» перед rigor (спека §12.1).
-        rows_outside = [row.render().plain for row in palette.query(".palette-toggle-row")]
+        rows_outside = [
+            row.render().plain for row in palette.query(".palette-toggle-row")
+        ]
         assert [r.split()[0] for r in rows_outside] == [
             "/level",
             "/profiles",
@@ -140,12 +173,16 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
 
         # Спускаемся до /gate (level, profiles, rigor — впереди, +2 шага).
         regular_count = len(palette._visible_rows())
-        for _ in range(regular_count + 3):  # /level -> /profiles -> /rigor -> /gate
+        for _ in range(
+            regular_count + 3
+        ):  # /level -> /profiles -> /rigor -> /gate
             await pilot.press("down")
         await pilot.pause(0.05)
         assert palette.selected_command().name == "gate"
 
-        rows_before = [row.render().plain for row in palette.query(".palette-toggle-row")]
+        rows_before = [
+            row.render().plain for row in palette.query(".palette-toggle-row")
+        ]
         assert [r.split()[0] for r in rows_before] == [
             "/level",
             "/profiles",
@@ -155,13 +192,19 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         ]
         columns_before = palette._toggle_columns()
 
-        await pilot.press("right")  # gate: smart -> on (single-key цикл на месте)
+        await pilot.press(
+            "right"
+        )  # gate: smart -> on (single-key цикл на месте)
         await pilot.pause(0.05)
 
         # (a) сессионная пара изменилась ТОЛЬКО по этому ключу.
         assert app.effective_config()["tui_finish_gate_mode"] == "on"
-        assert app.effective_config()["tui_text_answer_mode"] == "judge"  # answers не тронут
-        assert cfg_file.read_text(encoding="utf-8") == original  # всё ещё сессия, не файл
+        assert (
+            app.effective_config()["tui_text_answer_mode"] == "judge"
+        )  # answers не тронут
+        assert (
+            cfg_file.read_text(encoding="utf-8") == original
+        )  # всё ещё сессия, не файл
 
         # (b) /rigor сам резолвится в custom: база тусклая, 4-я — применённая
         # ● BRAND в зарезервированном месте.
@@ -172,7 +215,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
 
         # (c) состав и геометрия подвала не изменились — состав статичен,
         # не зависит от выделения (ревизия 7).
-        rows_after = [row.render().plain for row in palette.query(".palette-toggle-row")]
+        rows_after = [
+            row.render().plain for row in palette.query(".palette-toggle-row")
+        ]
         assert [r.split()[0] for r in rows_after] == [
             "/level",
             "/profiles",
@@ -197,7 +242,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         assert toggle_state(app, "rigor") == "medium"
 
         # Состав по-прежнему статичен — дети видны, как и всегда.
-        rows_final = [row.render().plain for row in palette.query(".palette-toggle-row")]
+        rows_final = [
+            row.render().plain for row in palette.query(".palette-toggle-row")
+        ]
         assert [r.split()[0] for r in rows_final] == [
             "/level",
             "/profiles",
@@ -222,15 +269,25 @@ def test_filtered_gate_row_is_dimmed_child_flat():
 
     reg = build_default_registry()
     state = {"rigor": "high", "gate": "on", "answers": "deny"}
-    pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: state[n])
+    pal = CommandPalette(
+        reg, initial_filter="", toggle_state=lambda n: state[n]
+    )
 
-    pal.set_filter("gate")  # /rigor фильтру «gate» не матчит -> родитель не в базе
+    pal.set_filter(
+        "gate"
+    )  # /rigor фильтру «gate» не матчит -> родитель не в базе
     assert [c.name for c in pal._visible_toggle_rows()] == ["gate"]
     gate_row = pal._format_toggle_row(reg.lookup("gate"))
-    assert gate_row.plain.startswith(" /gate") and not gate_row.plain.startswith("  /gate")  # flat
-    assert any(p.DIM.lower() in str(s.style).lower() for s in gate_row.spans)  # но серый (ревизия 7)
+    assert gate_row.plain.startswith(
+        " /gate"
+    ) and not gate_row.plain.startswith("  /gate")  # flat
+    assert any(
+        p.DIM.lower() in str(s.style).lower() for s in gate_row.spans
+    )  # но серый (ревизия 7)
 
-    pal.set_filter("")  # фильтр очищен -> /rigor снова в базе, дети видны всегда
+    pal.set_filter(
+        ""
+    )  # фильтр очищен -> /rigor снова в базе, дети видны всегда
     assert [c.name for c in pal._visible_toggle_rows()] == [
         "level",
         "profiles",
@@ -239,8 +296,12 @@ def test_filtered_gate_row_is_dimmed_child_flat():
         "answers",
     ]
     gate_row_expanded = pal._format_toggle_row(reg.lookup("gate"))
-    assert gate_row_expanded.plain.startswith(" /gate") and not gate_row_expanded.plain.startswith("  /gate")
-    assert any(p.DIM.lower() in str(s.style).lower() for s in gate_row_expanded.spans)
+    assert gate_row_expanded.plain.startswith(
+        " /gate"
+    ) and not gate_row_expanded.plain.startswith("  /gate")
+    assert any(
+        p.DIM.lower() in str(s.style).lower() for s in gate_row_expanded.spans
+    )
 
 
 def test_filter_matching_parent_shows_children_flat():
@@ -255,12 +316,20 @@ def test_filter_matching_parent_shows_children_flat():
 
     reg = build_default_registry()
     state = {"rigor": "medium", "gate": "smart", "answers": "judge"}
-    pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: state[n])
+    pal = CommandPalette(
+        reg, initial_filter="", toggle_state=lambda n: state[n]
+    )
 
     pal.set_filter("ri")  # startswith -> матчит только /rigor
-    assert [c.name for c in pal._visible_toggle_rows()] == ["rigor", "gate", "answers"]
+    assert [c.name for c in pal._visible_toggle_rows()] == [
+        "rigor",
+        "gate",
+        "answers",
+    ]
     gate_row = pal._format_toggle_row(reg.lookup("gate"))
-    assert gate_row.plain.startswith(" /gate") and not gate_row.plain.startswith("  /gate")  # flat, но ребёнок
+    assert gate_row.plain.startswith(
+        " /gate"
+    ) and not gate_row.plain.startswith("  /gate")  # flat, но ребёнок
 
 
 def test_preset_custom_hint_two_states(tmp_path):
@@ -273,13 +342,23 @@ def test_preset_custom_hint_two_states(tmp_path):
     from gc_tui.toggles import preset_custom_hint
 
     # 1) пара нестандартна ИЗ-ЗА самого глобала (оверрайдов пары нет).
-    app1, _ = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')
-    assert preset_custom_hint(app1, "rigor") == ("ваш дефолт: самопроверка on, формат allow · менять в /settings")
+    app1, _ = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+    )
+    assert preset_custom_hint(app1, "rigor") == (
+        "ваш дефолт: самопроверка on, формат allow · менять в /settings"
+    )
 
     # 2) пара нестандартна ИЗ-ЗА сессионных оверрайдов (хотя бы один ключ пары
     # в оверрайдах) — глобал при этом стандартный.
-    app2, _ = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
-    app2.apply_session_overrides({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"})
+    app2, _ = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
+    app2.apply_session_overrides(
+        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+    )
     assert preset_custom_hint(app2, "rigor") == (
         "своя пара этой сессии: самопроверка on, формат allow · шаг на пресет заменит пару · закрепить — в /settings"
     )

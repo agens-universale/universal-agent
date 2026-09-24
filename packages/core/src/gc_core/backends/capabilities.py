@@ -62,7 +62,9 @@ async def _aexec(
     # `set -e` в rc подменяет код возврата. У develop так же.
     from gc_core.backends.async_protocol import arun_backend_exec_raw
 
-    return await arun_backend_exec_raw(backend, command, timeout=timeout, env=env)
+    return await arun_backend_exec_raw(
+        backend, command, timeout=timeout, env=env
+    )
 
 
 async def _arun_argv(
@@ -77,14 +79,18 @@ async def _arun_argv(
     merged = dict(_GREP_CLEAN_ENV)
     if env:
         merged.update(env)
-    return await _port(backend).aexec_argv(list(argv), stdin=stdin, cwd=cwd, timeout=timeout, env=merged)
+    return await _port(backend).aexec_argv(
+        list(argv), stdin=stdin, cwd=cwd, timeout=timeout, env=merged
+    )
 
 
 async def _awhich_bin(backend: FsBackend, name: str) -> Optional[str]:
     """Resolve binary via backend exec (no shell alias). Fail → None."""
     # Prefer `command -v` (POSIX); fall back to plain name.
     try:
-        res = await _aexec(backend, f"command -v {shlex.quote(name)}", timeout=10)
+        res = await _aexec(
+            backend, f"command -v {shlex.quote(name)}", timeout=10
+        )
         if res.return_code == 0:
             path = (res.stdout or "").strip().splitlines()
             if path and path[0]:
@@ -142,10 +148,14 @@ async def aprobe_has_find(backend: FsBackend) -> bool:
     return await aprobe_find_xargs_grep(backend)
 
 
-async def _acleanup_probe(backend: FsBackend, tmp_remote: Optional[str], host_tmp: Optional[str]) -> None:
+async def _acleanup_probe(
+    backend: FsBackend, tmp_remote: Optional[str], host_tmp: Optional[str]
+) -> None:
     try:
         if tmp_remote:
-            await _aexec(backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10)
+            await _aexec(
+                backend, f"rm -rf {shlex.quote(tmp_remote)}", timeout=10
+            )
     except Exception:
         pass
     if host_tmp:
@@ -162,7 +172,9 @@ async def _amake_sandbox_tmp(backend: FsBackend) -> Optional[str]:
     res = await _aexec(backend, "mktemp -d -t gc_probe_XXXXXX", timeout=10)
     if res.return_code != 0 or not (res.stdout or "").strip():
         tmp_remote = f"/tmp/{_probe_tmp_name()}"
-        mk = await _aexec(backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10)
+        mk = await _aexec(
+            backend, f"mkdir -p {shlex.quote(tmp_remote)}", timeout=10
+        )
         return tmp_remote if mk.return_code == 0 else None
     return (res.stdout or "").strip().splitlines()[0].strip()
 
@@ -192,7 +204,11 @@ async def _amake_beta_file(backend: FsBackend) -> tuple:
         if tmp_remote is None:
             return None, None, None, None
         fpath = f"{tmp_remote.rstrip('/')}/beta.txt"
-        w = await _aexec(backend, f"printf 'alpha\\nbeta\\n' > {shlex.quote(fpath)}", timeout=10)
+        w = await _aexec(
+            backend,
+            f"printf 'alpha\\nbeta\\n' > {shlex.quote(fpath)}",
+            timeout=10,
+        )
         if w.return_code != 0:
             return None, None, tmp_remote, None
         return tmp_remote, fpath, tmp_remote, None
@@ -203,18 +219,28 @@ async def _amake_beta_file(backend: FsBackend) -> tuple:
     return host_tmp, fpath, None, host_tmp
 
 
-async def _aprobe_tree_and_file(backend: FsBackend, grep_bin: str, root: str, fpath: str) -> bool:
+async def _aprobe_tree_and_file(
+    backend: FsBackend, grep_bin: str, root: str, fpath: str
+) -> bool:
     res = await _arun_argv(
         backend,
-        build_grep_argv_flags(grep_bin=grep_bin, recursive=True) + ["--", "b[ae]ta", root],
+        build_grep_argv_flags(grep_bin=grep_bin, recursive=True)
+        + ["--", "b[ae]ta", root],
         timeout=15,
     )
     text = res.stdout or ""
-    if res.return_code not in (0, 1) or "beta" not in text or not _has_line_numbers(text):
+    if (
+        res.return_code not in (0, 1)
+        or "beta" not in text
+        or not _has_line_numbers(text)
+    ):
         return False
     res = await _arun_argv(
         backend,
-        build_grep_argv_flags(grep_bin=grep_bin, fixed=True, case_insensitive=True) + ["--", "BETA", fpath],
+        build_grep_argv_flags(
+            grep_bin=grep_bin, fixed=True, case_insensitive=True
+        )
+        + ["--", "BETA", fpath],
         timeout=15,
     )
     if res.return_code != 0:
@@ -278,7 +304,11 @@ def _lists_skip_dir(text: str) -> bool:
         return False
     for line in text.splitlines():
         norm = line.replace("\\", "/")
-        if "/skip/" in norm or norm.startswith("skip/") or re.search(r"(^|/)skip/", norm):
+        if (
+            "/skip/" in norm
+            or norm.startswith("skip/")
+            or re.search(r"(^|/)skip/", norm)
+        ):
             return True
     return False
 
@@ -293,7 +323,8 @@ async def aprobe_grep_exclude_dir(backend: FsBackend) -> bool:
             return False
         res = await _arun_argv(
             backend,
-            build_grep_argv_flags(grep_bin=grep_bin, recursive=True) + ["--exclude-dir=skip", "--", "secret", root],
+            build_grep_argv_flags(grep_bin=grep_bin, recursive=True)
+            + ["--exclude-dir=skip", "--", "secret", root],
             timeout=15,
         )
         text = res.stdout or ""
@@ -318,7 +349,10 @@ async def aprobe_grep_include(backend: FsBackend) -> bool:
             return False
         res = await _arun_argv(
             backend,
-            build_grep_argv_flags(grep_bin=grep_bin, recursive=True, include="*.py") + ["--", "secret", root],
+            build_grep_argv_flags(
+                grep_bin=grep_bin, recursive=True, include="*.py"
+            )
+            + ["--", "secret", root],
             timeout=15,
         )
         text = res.stdout or ""

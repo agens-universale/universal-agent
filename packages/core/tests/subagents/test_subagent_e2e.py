@@ -9,7 +9,9 @@ from gc_core.tools.subagents import runner as runner_module
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
-def _make_orchestrator_state(system_prompt="System\n<specific_role>x</specific_role>"):
+def _make_orchestrator_state(
+    system_prompt="System\n<specific_role>x</specific_role>",
+):
     state = State(
         verbose=False,
         model="test-model",
@@ -64,8 +66,14 @@ class TestSubagentRunnerRun:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = await runner.arun("subagent_worker", {"task": "do X", "reason": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker",
+                {"task": "do X", "reason": "test"},
+                run_agent_func,
+            )
 
         run_agent_func.assert_called_once()
         args = run_agent_func.call_args
@@ -90,8 +98,12 @@ class TestSubagentRunnerRun:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = await runner.arun("subagent_worker", {"task": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, run_agent_func
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is True
@@ -106,8 +118,12 @@ class TestSubagentRunnerRun:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = await runner.arun("subagent_worker", {"task": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, run_agent_func
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -129,8 +145,12 @@ class TestSubagentRunnerRun:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            await runner.arun("subagent_worker", {"task": "modify memory"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "modify memory"}, fake_run_agent
+            )
 
         assert orch.shared.working_memory["state"] == "updated by subagent"
         assert orch.shared.working_memory["knowledge"] == "created"
@@ -148,8 +168,12 @@ class TestSubagentRunnerRun:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         assert captured_child["state"].parent_state_id == orch.state_id
 
@@ -166,8 +190,12 @@ class TestSubagentRunnerRun:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         child = captured_child["state"]
         assert isinstance(child, State)
@@ -181,7 +209,9 @@ class TestSubagentRunnerRun:
         run_agent_func = AsyncMock()
 
         runner = SubagentRunner(ctx, orch, cfg)
-        result = await runner.arun("nonexistent_agent", {"task": "test"}, run_agent_func)
+        result = await runner.arun(
+            "nonexistent_agent", {"task": "test"}, run_agent_func
+        )
 
         run_agent_func.assert_not_called()
         payload = json.loads(result)
@@ -199,16 +229,25 @@ class TestSubagentRunnerRun:
 
         with (
             patch.object(runner_module, "get_subagent_class") as mock_get_cls,
-            patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()),
+            patch.object(
+                runner, "_build_child_ctx", return_value=SimpleNamespace()
+            ),
         ):
             mock_instance = MagicMock()
-            mock_instance.get_initial_data.return_value = ("role text", "task text")
+            mock_instance.get_initial_data.return_value = (
+                "role text",
+                "task text",
+            )
 
             mock_cls = MagicMock()
             mock_cls.create_instance = AsyncMock(return_value=mock_instance)
             mock_get_cls.return_value = mock_cls
 
-            await runner.arun("subagent_worker", {"task": "build feature", "reason": "r"}, run_agent_func)
+            await runner.arun(
+                "subagent_worker",
+                {"task": "build feature", "reason": "r"},
+                run_agent_func,
+            )
 
         mock_cls.create_instance.assert_awaited_once()
         call_kwargs = mock_cls.create_instance.call_args

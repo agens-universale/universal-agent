@@ -28,13 +28,19 @@ async def test_two_commands_run_concurrently():
     port = aexec_port(LocalFsBackend())
     started = time.monotonic()
     a, b = await asyncio.gather(
-        port.aexec(f"{sys.executable} -c \"import time; time.sleep(0.3); print('a')\""),
-        port.aexec(f"{sys.executable} -c \"import time; time.sleep(0.3); print('b')\""),
+        port.aexec(
+            f"{sys.executable} -c \"import time; time.sleep(0.3); print('a')\""
+        ),
+        port.aexec(
+            f"{sys.executable} -c \"import time; time.sleep(0.3); print('b')\""
+        ),
     )
     elapsed = time.monotonic() - started
 
     assert a.stdout.strip() == "a" and b.stdout.strip() == "b"
-    assert elapsed < 0.55, f"похоже, команды шли последовательно: {elapsed:.2f}с"
+    assert elapsed < 0.55, (
+        f"похоже, команды шли последовательно: {elapsed:.2f}с"
+    )
 
 
 async def test_no_helper_threads_per_call():
@@ -47,14 +53,18 @@ async def test_no_helper_threads_per_call():
 
 async def test_timeout_kills_process():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec(f'{sys.executable} -c "import time; time.sleep(5)"', timeout=1)
+    res = await port.aexec(
+        f'{sys.executable} -c "import time; time.sleep(5)"', timeout=1
+    )
     assert res.timed_out is True
     assert res.return_code is None
 
 
 async def test_stderr_captured_separately():
     port = aexec_port(LocalFsBackend())
-    res = await port.aexec(f"{sys.executable} -c \"import sys; sys.stderr.write('беда')\"")
+    res = await port.aexec(
+        f"{sys.executable} -c \"import sys; sys.stderr.write('беда')\""
+    )
     assert "беда" in res.stderr
     assert res.stdout == ""
 
@@ -124,7 +134,15 @@ async def test_native_and_adapted_paths_agree():
         def __init__(self) -> None:
             self._inner = LocalFsBackend()
 
-        def exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        def exec(
+            self,
+            command,
+            *,
+            cwd=None,
+            timeout=None,
+            env=None,
+            capture_max_chars=None,
+        ):
             # Адаптер зовёт это в БРОШЕННОМ потоке, где своего loop нет.
             return asyncio.run(
                 self._inner.aexec(
@@ -165,18 +183,26 @@ async def test_captured_survives_drain_timeout():
     нельзя было понять, чем команда кончилась.
     """
     backend = LocalFsBackend(exec_output_capture_max_chars=1000)
-    res = await backend.aexec(f"{sys.executable} -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10)
+    res = await backend.aexec(
+        f"{sys.executable} -c \"print('A'*200000)\"; (sleep 20 &)", timeout=10
+    )
 
     assert res.stdout_hit_capture_cap is True
-    assert len(res.stdout) == 1000, "захваченное потеряно вместе с отменой дренажа"
-    assert set(res.stdout) <= {"A", "\n"}, f"в снимок попало лишнее: {res.stdout[:80]!r}"
+    assert len(res.stdout) == 1000, (
+        "захваченное потеряно вместе с отменой дренажа"
+    )
+    assert set(res.stdout) <= {"A", "\n"}, (
+        f"в снимок попало лишнее: {res.stdout[:80]!r}"
+    )
     stream = res.stdout_stream
     assert stream.truncated is True
     assert stream.head == "A" * 500, "начало потока потеряно"
     assert stream.tail.endswith("\n"), (
         "хвост не настоящий: у `print` в конце перевод строки, и он обязан доехать — ради этого голова+хвост и делались"
     )
-    assert stream.total_chars > 200000, f"счётчик считает только снимок, а не весь поток: {stream.total_chars}"
+    assert stream.total_chars > 200000, (
+        f"счётчик считает только снимок, а не весь поток: {stream.total_chars}"
+    )
 
 
 async def test_background_child_is_not_a_timeout():
@@ -203,11 +229,15 @@ async def test_cancel_kills_the_child():
     code = f"import time; _={mark!r}; time.sleep(30)"
 
     def alive() -> list:
-        out = subprocess.run(["pgrep", "-f", mark], capture_output=True, text=True).stdout
+        out = subprocess.run(
+            ["pgrep", "-f", mark], capture_output=True, text=True
+        ).stdout
         return [p for p in out.split() if p and int(p) != os.getpid()]
 
     backend = LocalFsBackend()
-    task = asyncio.create_task(backend.aexec_argv([sys.executable, "-c", code]))
+    task = asyncio.create_task(
+        backend.aexec_argv([sys.executable, "-c", code])
+    )
     await asyncio.sleep(0.8)
     assert len(alive()) == 1, "процесс не стартовал — тест ничего не проверяет"
 

@@ -69,8 +69,14 @@ class TestTraceIdFromConfig:
 class TestTraceHeaderName:
     def test_default_when_absent(self):
         assert trace_header_name({}, "x_trace_id") == "x_trace_id"
-        assert trace_header_name({"trace_id_header_name": None}, "trace_id") == "trace_id"
-        assert trace_header_name({"trace_id_header_name": "  "}, "trace_id") == "trace_id"
+        assert (
+            trace_header_name({"trace_id_header_name": None}, "trace_id")
+            == "trace_id"
+        )
+        assert (
+            trace_header_name({"trace_id_header_name": "  "}, "trace_id")
+            == "trace_id"
+        )
 
     def test_override(self):
         cfg = {"trace_id_header_name": "X-Trace-Id"}

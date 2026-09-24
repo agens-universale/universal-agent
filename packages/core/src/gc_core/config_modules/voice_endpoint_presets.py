@@ -7,9 +7,15 @@ from __future__ import annotations
 from gc_core.config_modules.endpoint_presets import EndpointPreset
 
 DEFAULT_VOICE_ENDPOINT_PRESETS: tuple[EndpointPreset, ...] = (
-    EndpointPreset(name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"),
-    EndpointPreset(name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"),
-    EndpointPreset(name="Mistral", url="https://api.mistral.ai/v1/audio/transcriptions"),
+    EndpointPreset(
+        name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"
+    ),
+    EndpointPreset(
+        name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"
+    ),
+    EndpointPreset(
+        name="Mistral", url="https://api.mistral.ai/v1/audio/transcriptions"
+    ),
 )
 
 

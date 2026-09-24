@@ -58,7 +58,9 @@ def test_set_waiting_noop_after_result():
 
 
 def test_set_live_status_on_running_row():
-    row = ToolCallRow(call_id="c1", tool_name="subagent_worker", args_summary="r")
+    row = ToolCallRow(
+        call_id="c1", tool_name="subagent_worker", args_summary="r"
+    )
     row.set_live_status("step 4/100 · last=fs_read_file")
     content = str(row._render_content())
     assert "step 4/100" in content
@@ -73,8 +75,12 @@ def test_reconcile_batch_phases_first_active_rest_waiting():
     c = ToolCallRow(call_id="c", tool_name="t3", args_summary="", waiting=True)
     reconcile_batch_phases([a, b, c])
     assert "▸" in str(a._render_prefix())
-    assert "·" in str(b._render_prefix()) and "прервано" not in str(b._render_content())
-    assert "·" in str(c._render_prefix()) and "прервано" not in str(c._render_content())
+    assert "·" in str(b._render_prefix()) and "прервано" not in str(
+        b._render_content()
+    )
+    assert "·" in str(c._render_prefix()) and "прервано" not in str(
+        c._render_content()
+    )
 
 
 def test_reconcile_after_first_done_promotes_second():

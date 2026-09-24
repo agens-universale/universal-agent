@@ -41,7 +41,9 @@ def test_local_project_overlay_uses_helper(monkeypatch, tmp_path):
     # No file → returns None
     assert project_local_config_path() is None
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "config.yml").write_text("foo: bar\n", encoding="utf-8")
+    (tmp_path / ".gc" / "config.yml").write_text(
+        "foo: bar\n", encoding="utf-8"
+    )
     overlay = project_local_config_path()
     assert overlay == str((tmp_path / ".gc" / "config.yml").resolve())
 

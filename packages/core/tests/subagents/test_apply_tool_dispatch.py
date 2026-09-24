@@ -63,7 +63,9 @@ class TestSubagentDispatch:
         state = _make_state()
         run_agent_func = MagicMock(return_value="subagent result")
 
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             instance = MockRunner.return_value
 
             # `arun` корутинный: обычный return_value отдал бы MagicMock, и
@@ -75,7 +77,9 @@ class TestSubagentDispatch:
 
             result = await aapply_tool(
                 tool_name="subagent_worker",
-                arguments=json.dumps({"task": "do something", "reason": "test"}),
+                arguments=json.dumps(
+                    {"task": "do something", "reason": "test"}
+                ),
                 ctx=ctx,
                 state=state,
                 run_agent_func=run_agent_func,
@@ -97,7 +101,9 @@ class TestSubagentDispatch:
         state = _make_state()
         run_agent_func = MagicMock()
 
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             instance = MockRunner.return_value
 
             async def _arun(*_a, **_kw):
@@ -249,7 +255,9 @@ class TestSubagentDispatch:
         run_agent_func = MagicMock()
 
         # Для subagent_worker обязательны reason и task.
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             with pytest.raises(WrongFunctionArgumentsException):
                 await aapply_tool(
                     tool_name="subagent_worker",

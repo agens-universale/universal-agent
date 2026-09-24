@@ -37,7 +37,9 @@ async def acompact_thread(
     Синхронный двойник — ``compact_thread`` ниже.
     """
     config_dict = ctx.config_dict
-    backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    backend_api_mode = (
+        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    )
     if backend_api_mode != "chat_completions" or not thread_id:
         return False
     system_id = system or "cli"
@@ -63,7 +65,9 @@ async def acompact_thread(
         skills_list=[],
         max_steps=int(config_dict.get("max_steps", 30) or 30),
         system_prompt_id=config_dict.get("system_prompt_id", ""),
-        use_server_subagents=bool(config_dict.get("use_server_subagents", False)),
+        use_server_subagents=bool(
+            config_dict.get("use_server_subagents", False)
+        ),
         thread_id=thread_id,
         shared=thread_shared,
         workspace_config=config_dict,
@@ -75,7 +79,11 @@ async def acompact_thread(
     state.init_current_user_intent(meta.get("current_user_intent"))
     state.init_user_turn_seq(meta.get("user_turn_seq"))
     state.infer_user_turn_seq_if_missing()
-    state.messages = [_shallow_copy_msg(m) for m in thread_session.history_messages if isinstance(m, dict)]
+    state.messages = [
+        _shallow_copy_msg(m)
+        for m in thread_session.history_messages
+        if isinstance(m, dict)
+    ]
 
     coord = RunSummaryCoordinator(
         ctx=ctx,
@@ -105,7 +113,11 @@ async def acompact_thread(
     # Обновляем live-state (что читает TUI-футер) только когда он передан и это тот
     # же тред — под замком executor'а. Для программного/standalone вызова (_lock или
     # self_state = None) шаг пропускается.
-    if _lock is not None and self_state is not None and getattr(self_state, "thread_id", None) == thread_id:
+    if (
+        _lock is not None
+        and self_state is not None
+        and getattr(self_state, "thread_id", None) == thread_id
+    ):
         with _lock:
             self_state.usage = UsageAccount.from_meta(state.usage.to_meta())
     return True

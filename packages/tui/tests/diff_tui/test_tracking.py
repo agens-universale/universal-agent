@@ -106,7 +106,9 @@ def test_t1_write_existing_creates_orig(launch_root):
 
     res = json.loads(tool(path=str(target), content="changed\n"))
     assert res["ok"] is True
-    assert _orig(root, "src/foo.py").read_text(encoding="utf-8") == "baseline\n"
+    assert (
+        _orig(root, "src/foo.py").read_text(encoding="utf-8") == "baseline\n"
+    )
     index = DiffStore(str(root)).load_index()
     assert index["src/foo.py"]["status"] == "modified"
     assert "src/foo.py" in TouchedJournal(str(threads), "tui", "t1").paths()
@@ -153,7 +155,9 @@ def test_search_and_replace_snapshots_orig(launch_root):
     target.write_text("foo = 1\n", encoding="utf-8")
     tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
-    res = json.loads(tool(path=str(target), search="foo = 1", replace="foo = 2"))
+    res = json.loads(
+        tool(path=str(target), search="foo = 1", replace="foo = 2")
+    )
     assert res["ok"] is True
     assert _orig(root, "src/b.py").read_text(encoding="utf-8") == "foo = 1\n"
 
@@ -164,7 +168,11 @@ def test_search_and_replace_dry_run_does_not_track(launch_root):
     target.write_text("foo = 1\n", encoding="utf-8")
     tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
-    res = json.loads(tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True))
+    res = json.loads(
+        tool(
+            path=str(target), search="foo = 1", replace="foo = 2", dry_run=True
+        )
+    )
     assert res["ok"] is True
     assert DiffStore(str(root)).load_index() == {}
     assert TouchedJournal(str(threads), "tui", "t1").paths() == set()
@@ -287,7 +295,12 @@ def test_tools_do_not_import_diff_tui():
 # Синхронные входы порта для ЧУЖИХ реализаций: обёртка их не проксирует, но
 # корутинную форму каждого (`a<имя>`) — обязана, это проверяет цикл ниже.
 # `exec_raw` приехал с develop вместе со вторым каналом запуска.
-TRACKING_NOT_FORWARDED: set[str] = {"exec", "exec_raw", "exec_argv", "run_python"}
+TRACKING_NOT_FORWARDED: set[str] = {
+    "exec",
+    "exec_raw",
+    "exec_argv",
+    "run_python",
+}
 
 
 def _fsbackend_public_members() -> set[str]:
@@ -306,7 +319,9 @@ def test_tracking_fs_backend_mirrors_fsbackend_public_surface():
     # Class dict covers methods/properties; instance dict covers attrs copied
     # in __init__ (is_sandbox, default_exec_timeout). Neither reads a property.
     exposed = set(dir(type(wrapper))) | set(vars(wrapper))
-    missing = sorted(_fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED)
+    missing = sorted(
+        _fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED
+    )
     assert missing == []
 
     # Исключение из списка выше не должно означать «форму потеряли»: у каждой

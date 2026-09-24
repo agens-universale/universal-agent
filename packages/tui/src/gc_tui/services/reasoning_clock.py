@@ -46,7 +46,9 @@ class ReasoningClock:
         self._active: set[str] = set()
         self._interval_start: float | None = None
         self._episode: float = 0.0  # накоплено в текущем эпизоде
-        self._last_episode: float = 0.0  # длительность последнего завершённого эпизода
+        self._last_episode: float = (
+            0.0  # длительность последнего завершённого эпизода
+        )
         self._last_active_at: float | None = None
 
     def start(self, source_id: str) -> None:

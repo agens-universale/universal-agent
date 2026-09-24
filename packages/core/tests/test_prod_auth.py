@@ -23,7 +23,9 @@ def _make_connector(**kwargs):
 def test_get_token_caches_within_ttl(monkeypatch):
     c = _make_connector()
     tokens = iter(["tok1", "tok2"])
-    monkeypatch.setattr(c, "get_auth_url", lambda url, verify, config_proxy=None: "http://auth")
+    monkeypatch.setattr(
+        c, "get_auth_url", lambda url, verify, config_proxy=None: "http://auth"
+    )
     monkeypatch.setattr(
         c,
         "create_token",
@@ -31,13 +33,17 @@ def test_get_token_caches_within_ttl(monkeypatch):
     )
 
     assert c.get_token() == "tok1"
-    assert c.get_token() == "tok1"  # из кэша (TTL не истёк), повторного выпуска нет
+    assert (
+        c.get_token() == "tok1"
+    )  # из кэша (TTL не истёк), повторного выпуска нет
 
 
 def test_get_token_force_bypasses_cache(monkeypatch):
     c = _make_connector()
     tokens = iter(["tok1", "tok2"])
-    monkeypatch.setattr(c, "get_auth_url", lambda url, verify, config_proxy=None: "http://auth")
+    monkeypatch.setattr(
+        c, "get_auth_url", lambda url, verify, config_proxy=None: "http://auth"
+    )
     monkeypatch.setattr(
         c,
         "create_token",
@@ -45,7 +51,9 @@ def test_get_token_force_bypasses_cache(monkeypatch):
     )
 
     assert c.get_token() == "tok1"
-    assert c.get_token(force=True) == "tok2"  # форс-рефреш в обход валидного TTL
+    assert (
+        c.get_token(force=True) == "tok2"
+    )  # форс-рефреш в обход валидного TTL
 
 
 def test_get_token_passes_config_proxy(monkeypatch):
@@ -81,7 +89,9 @@ def test_get_auth_url_uses_resolved_proxies(monkeypatch):
     fake = MagicMock()
     fake.status_code = 401
     fake.headers = {"X-Authorization-Url": "https://auth.example/token"}
-    with patch("gc_core.utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake) as get:
+    with patch(
+        "gc_core.utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake
+    ) as get:
         url = AuthConnector.get_auth_url(
             "https://gigacode.example/api/v2/config",
             verify=True,
@@ -102,7 +112,9 @@ def test_create_token_uses_resolved_proxies(monkeypatch):
 
     fake = MagicMock()
     fake.json.return_value = {"access_token": "t", "expires_in": 60}
-    with patch("gc_core.utils.prod_auth._NO_NETRC_SESSION.post", return_value=fake) as post:
+    with patch(
+        "gc_core.utils.prod_auth._NO_NETRC_SESSION.post", return_value=fake
+    ) as post:
         AuthConnector.create_token(
             "https://auth.example/token",
             "e",
@@ -134,7 +146,9 @@ def test_get_auth_url_direct_when_no_proxy(monkeypatch):
     fake = MagicMock()
     fake.status_code = 401
     fake.headers = {"X-Authorization-Url": "https://auth.example/token"}
-    with patch("gc_core.utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake) as get:
+    with patch(
+        "gc_core.utils.prod_auth._NO_NETRC_SESSION.get", return_value=fake
+    ) as get:
         AuthConnector.get_auth_url("https://gigacode.example/api", verify=True)
     assert get.call_args.kwargs["proxies"] is None
 

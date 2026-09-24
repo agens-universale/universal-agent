@@ -43,7 +43,10 @@ def _transcribe_openai(pcm: bytes, cfg: Dict[str, Any]) -> str:
             cfg.get("url", ""),
             headers={"Authorization": f"Bearer {cfg.get('token', '')}"},
             files={"file": ("audio.wav", _pcm_to_wav(pcm), "audio/wav")},
-            data={"model": cfg.get("model", "whisper-1"), "language": cfg.get("language", "ru")},
+            data={
+                "model": cfg.get("model", "whisper-1"),
+                "language": cfg.get("language", "ru"),
+            },
             timeout=cfg.get("timeout_seconds", 60),
             verify=cfg.get("verify_ssl", True),
             config_proxy=cfg.get("proxy"),

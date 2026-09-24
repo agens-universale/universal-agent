@@ -31,7 +31,9 @@ def deep_merge(base: Any, overlay: Any) -> Any:
 def _merge_dicts(base: dict, overlay: dict) -> dict:
     result = dict(base)
     for key, value in overlay.items():
-        result[key] = deep_merge(result[key], value) if key in result else value
+        result[key] = (
+            deep_merge(result[key], value) if key in result else value
+        )
     return result
 
 

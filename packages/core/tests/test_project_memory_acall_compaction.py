@@ -43,7 +43,9 @@ def fake_compaction(monkeypatch):
 
     async def _acompact(text, ctx, state=None):
         seen["called"] = "async"
-        return compaction.CompactionResult(ok=True, text="ужато", error_type=None, error_message=None)
+        return compaction.CompactionResult(
+            ok=True, text="ужато", error_type=None, error_message=None
+        )
 
     monkeypatch.setattr(compaction, "acompact_text", _acompact)
     return seen
@@ -51,13 +53,19 @@ def fake_compaction(monkeypatch):
 
 async def test_acall_awaits_compaction_natively(memory_tool, fake_compaction):
     """Главная проверка: инлайн-вход ждёт корутинную компакцию."""
-    out = json.loads(await memory_tool.acall(action="append", content="ещё один длинный кусок текста"))
+    out = json.loads(
+        await memory_tool.acall(
+            action="append", content="ещё один длинный кусок текста"
+        )
+    )
 
     assert out["ok"] is True, out
     assert fake_compaction["called"] == "async"
 
 
-async def test_acall_compaction_does_not_start_a_nested_loop(memory_tool, monkeypatch):
+async def test_acall_compaction_does_not_start_a_nested_loop(
+    memory_tool, monkeypatch
+):
     """Компакция не поднимает свой event loop поверх живого.
 
     Именно так дефект выглядит у пользователя: не «выбран не тот двойник», а
@@ -72,20 +80,30 @@ async def test_acall_compaction_does_not_start_a_nested_loop(memory_tool, monkey
     monkeypatch.setattr(asyncio, "run", _forbidden)
 
     async def _acompact(text, ctx, state=None):
-        return compaction.CompactionResult(ok=True, text="ужато", error_type=None, error_message=None)
+        return compaction.CompactionResult(
+            ok=True, text="ужато", error_type=None, error_message=None
+        )
 
     monkeypatch.setattr(compaction, "acompact_text", _acompact)
 
-    out = json.loads(await memory_tool.acall(action="append", content="ещё один длинный кусок текста"))
+    out = json.loads(
+        await memory_tool.acall(
+            action="append", content="ещё один длинный кусок текста"
+        )
+    )
     assert out["ok"] is True, out
 
 
 def test_tool_has_no_sync_entry(memory_tool):
     """Синхронного входа нет: форма одна, звать компакцию мимо ``await`` нечем."""
-    assert not callable(memory_tool), "у project_memory вернулся синхронный вход"
+    assert not callable(memory_tool), (
+        "у project_memory вернулся синхронный вход"
+    )
 
 
-async def test_acall_read_path_needs_no_compaction(memory_tool, fake_compaction):
+async def test_acall_read_path_needs_no_compaction(
+    memory_tool, fake_compaction
+):
     """Чтение компакцию не трогает — обычная файловая операция инлайн."""
     out = json.loads(await memory_tool.acall(action="read", content=""))
 

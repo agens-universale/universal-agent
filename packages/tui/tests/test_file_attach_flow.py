@@ -13,7 +13,9 @@ async def test_at_opens_file_picker(tmp_path):
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -37,7 +39,9 @@ async def test_complete_dir_keeps_picker_and_file_closes(tmp_path):
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -85,7 +89,9 @@ async def test_submit_with_attachment_sends_pair(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -111,7 +117,9 @@ async def test_arrows_navigate_picker_not_history(tmp_path):
     (tmp_path / "beta.py").write_text("x", encoding="utf-8")
     (tmp_path / "gamma.py").write_text("x", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -144,7 +152,9 @@ async def test_esc_closes_picker_not_clear_hint(tmp_path):
 
     (tmp_path / "alpha.py").write_text("x", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -184,7 +194,9 @@ async def test_submit_without_attachment_single_message(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -214,11 +226,15 @@ async def test_fuzzy_search_runs_off_ui_thread(tmp_path, monkeypatch):
 
     def spy(self, query, **kw):
         thread = threading.current_thread()
-        seen.append((thread is threading.main_thread(), thread.name, thread.daemon))
+        seen.append(
+            (thread is threading.main_thread(), thread.name, thread.daemon)
+        )
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", spy)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -234,13 +250,17 @@ async def test_fuzzy_search_runs_off_ui_thread(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_index_is_reused_between_keystrokes_and_dropped_on_close(tmp_path):
+async def test_index_is_reused_between_keystrokes_and_dropped_on_close(
+    tmp_path,
+):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -261,7 +281,9 @@ async def test_index_is_reused_between_keystrokes_and_dropped_on_close(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_late_search_result_does_not_reopen_picker(tmp_path, monkeypatch):
+async def test_late_search_result_does_not_reopen_picker(
+    tmp_path, monkeypatch
+):
     """Поиск ещё в полёте (пикер не открыт), а @-сегмент уже закончился:
     опоздавший результат пикер не открывает."""
     pytest.importorskip("textual")
@@ -280,7 +302,9 @@ async def test_late_search_result_does_not_reopen_picker(tmp_path, monkeypatch):
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -314,7 +338,9 @@ async def test_truncated_index_shows_note_in_picker(tmp_path, monkeypatch):
         return out
 
     monkeypatch.setattr(file_index.PathIndex, "search", truncating)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -347,7 +373,9 @@ async def test_result_of_another_picker_session_is_dropped(tmp_path):
 
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -358,13 +386,17 @@ async def test_result_of_another_picker_session_is_dropped(tmp_path):
         await settled(scr._file_search)
         await pilot.pause()
         before = list(scr._file_picker._entries)
-        scr._on_file_search_done(PathIndex(str(tmp_path / "other")), "age", ["zzz.py"], False)
+        scr._on_file_search_done(
+            PathIndex(str(tmp_path / "other")), "age", ["zzz.py"], False
+        )
         await pilot.pause()
         assert scr._file_picker._entries == before
 
 
 @pytest.mark.asyncio
-async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch, caplog):
+async def test_failed_search_is_logged_and_does_not_crash(
+    tmp_path, monkeypatch, caplog
+):
     """Сбой поиска не роняет TUI и не молчит: в лог уходит warning с корнем и
     запросом, пикер просто не открывается."""
     pytest.importorskip("textual")
@@ -377,8 +409,12 @@ async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch,
         raise RuntimeError("index exploded")
 
     monkeypatch.setattr(file_index.PathIndex, "search", boom)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
-    with caplog.at_level(logging.WARNING, logger="gc_tui.services.file_search"):
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
+    with caplog.at_level(
+        logging.WARNING, logger="gc_tui.services.file_search"
+    ):
         async with app.run_test() as pilot:
             scr = pilot.app.screen
             scr._project_root = lambda: str(tmp_path)
@@ -390,11 +426,16 @@ async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch,
             await pilot.pause()
             assert scr._file_picker is None
             assert pilot.app.is_running
-    assert any("file search failed" in r.getMessage() and "'age'" in r.getMessage() for r in caplog.records)
+    assert any(
+        "file search failed" in r.getMessage() and "'age'" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio
-async def test_tab_on_stale_list_does_not_complete_wrong_path(tmp_path, monkeypatch):
+async def test_tab_on_stale_list_does_not_complete_wrong_path(
+    tmp_path, monkeypatch
+):
     """Поиск в полёте, на экране ещё листинг прежнего запроса: Tab не должен
     достраивать путь из него — иначе «@main» молча превращается в «@aaa/»."""
     pytest.importorskip("textual")
@@ -413,7 +454,9 @@ async def test_tab_on_stale_list_does_not_complete_wrong_path(tmp_path, monkeypa
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -437,7 +480,9 @@ async def test_tab_on_stale_list_does_not_complete_wrong_path(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_late_result_does_not_overwrite_directory_listing(tmp_path, monkeypatch):
+async def test_late_result_does_not_overwrite_directory_listing(
+    tmp_path, monkeypatch
+):
     """«@agents» ищется в фоне, человек дописал «/» — показан живой листинг
     папки; опоздавший результат поиска его не перетирает."""
     pytest.importorskip("textual")
@@ -457,7 +502,9 @@ async def test_late_result_does_not_overwrite_directory_listing(tmp_path, monkey
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -476,7 +523,9 @@ async def test_late_result_does_not_overwrite_directory_listing(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_truncated_index_with_no_matches_keeps_picker_with_note(tmp_path, monkeypatch):
+async def test_truncated_index_with_no_matches_keeps_picker_with_note(
+    tmp_path, monkeypatch
+):
     """Главный сценарий подсказки: файла нет в обрезанном индексе, совпадений 0 —
     пикер не молчит, а показывает «нет совпадений» и строку про путь. Без
     обрезания пустая выдача по-прежнему прячет пикер."""
@@ -494,7 +543,9 @@ async def test_truncated_index_with_no_matches_keeps_picker_with_note(tmp_path, 
         return out
 
     monkeypatch.setattr(file_index.PathIndex, "search", truncating)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -515,7 +566,9 @@ async def test_truncated_index_with_no_matches_keeps_picker_with_note(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monkeypatch):
+async def test_git_timeout_is_remembered_for_next_picker_session(
+    tmp_path, monkeypatch
+):
     """Первый «@» дождался таймаута git — следующий сеанс пикера для того же
     корня git уже не зовёт (иначе в огромном репозитории каждый «@» ждёт заново)."""
     pytest.importorskip("textual")
@@ -533,7 +586,9 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
         raise subprocess.TimeoutExpired(cmd="git", timeout=5)
 
     monkeypatch.setattr(file_index, "_git_ls_files", fake_git_ls_files)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -556,7 +611,9 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_slow_search_shows_searching_row_then_results(tmp_path, monkeypatch):
+async def test_slow_search_shows_searching_row_then_results(
+    tmp_path, monkeypatch
+):
     """Поиск дольше порога: вместо прежнего списка — строка «ищу по проекту…»;
     пришёл результат — она сменяется списком."""
     pytest.importorskip("textual")
@@ -575,7 +632,9 @@ async def test_slow_search_shows_searching_row_then_results(tmp_path, monkeypatc
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -605,7 +664,9 @@ async def test_fast_search_never_shows_searching_row(tmp_path):
 
     (tmp_path / "qqtarget.py").write_text("x", encoding="utf-8")
     seen = []
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -613,7 +674,9 @@ async def test_fast_search_never_shows_searching_row(tmp_path):
 
         def spy(entries, *, truncated, searching=False):
             seen.append(searching)
-            return real_pending(entries, truncated=truncated, searching=searching)
+            return real_pending(
+                entries, truncated=truncated, searching=searching
+            )
 
         scr._apply_file_entries = spy
         inp = pilot.app.query_one("#cmdinput")
@@ -627,7 +690,9 @@ async def test_fast_search_never_shows_searching_row(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, monkeypatch):
+async def test_escape_cancels_search_in_flight_before_picker_is_shown(
+    tmp_path, monkeypatch
+):
     """Esc, пока поиск в полёте и пикер ещё не показан, отменяет сеанс:
     опоздавший результат пикер не открывает; текст остаётся в поле."""
     pytest.importorskip("textual")
@@ -645,7 +710,9 @@ async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, 
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -666,7 +733,9 @@ async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path, monkeypatch):
+async def test_escape_closes_open_overlay_before_cancelling_file_search(
+    tmp_path, monkeypatch
+):
     """Поиск файлов в полёте, а поверх открыт другой оверлей (ввод одним событием
     сменился с «@…» на «/skill …»): Esc принадлежит открытому оверлею — отмена
     поиска не должна его перехватывать."""
@@ -685,7 +754,9 @@ async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -706,7 +777,9 @@ async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_truncated_note_stays_for_slash_query_without_such_dir(tmp_path, monkeypatch):
+async def test_truncated_note_stays_for_slash_query_without_such_dir(
+    tmp_path, monkeypatch
+):
     """«nodir/ag»: в запросе есть '/', но папки nodir под корнем нет — это поиск
     по обрезанному индексу, подсказка о неполном поиске обязана остаться."""
     pytest.importorskip("textual")
@@ -723,7 +796,9 @@ async def test_truncated_note_stays_for_slash_query_without_such_dir(tmp_path, m
         return out
 
     monkeypatch.setattr(file_index.PathIndex, "search", truncating)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -768,7 +843,9 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -777,10 +854,14 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
         inp.focus()
         inp.insert("@qqtar")
         await pilot.pause()
-        assert scr._file_picker is None  # пикера ещё нет: порог «ищу…» не прошёл
+        assert (
+            scr._file_picker is None
+        )  # пикера ещё нет: порог «ищу…» не прошёл
         await pilot.press("enter")  # пикера ещё нет
         await pilot.pause(0.5)
-        assert scr._file_picker._searching is True  # показана «ищу по проекту…»
+        assert (
+            scr._file_picker._searching is True
+        )  # показана «ищу по проекту…»
         await pilot.press("enter")
         await pilot.pause()
         assert sent == []
@@ -824,7 +905,9 @@ async def test_escape_then_enter_sends_text_as_is(tmp_path, monkeypatch):
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -845,7 +928,9 @@ async def test_escape_then_enter_sends_text_as_is(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypatch):
+async def test_stale_search_skips_filtering_after_index_build(
+    tmp_path, monkeypatch
+):
     """Пока собирается индекс, накопились поиски по промежуточному вводу: после
     сборки фильтруется только актуальный запрос, устаревшие выходят без фильтра."""
     pytest.importorskip("textual")
@@ -870,7 +955,9 @@ async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypa
 
     monkeypatch.setattr(file_index.PathIndex, "build", slow_build)
     monkeypatch.setattr(file_index.PathIndex, "search", spy_search)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -890,7 +977,9 @@ async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, monkeypatch):
+async def test_git_timeout_is_remembered_even_if_search_was_cancelled(
+    tmp_path, monkeypatch
+):
     """Esc во время первой сборки: сеанс закрыт, поиск устарел и не фильтрует, но
     сборка доходит до конца и модуль индекса запоминает таймаут git — следующий
     «@» не ждёт его заново. Интеграционный сторож: память пишет поток сборки,
@@ -911,7 +1000,9 @@ async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, 
         raise subprocess.TimeoutExpired(cmd="git", timeout=5)
 
     monkeypatch.setattr(file_index, "_git_ls_files", fake_git_ls_files)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -930,7 +1021,9 @@ async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_escape_during_index_build_does_not_start_second_build(tmp_path, monkeypatch):
+async def test_escape_during_index_build_does_not_start_second_build(
+    tmp_path, monkeypatch
+):
     """Esc во время первой сборки и новый ввод: сборка одна — новый сеанс
     подхватывает идущую, а не запускает вторую параллельно."""
     pytest.importorskip("textual")
@@ -951,7 +1044,9 @@ async def test_escape_during_index_build_does_not_start_second_build(tmp_path, m
         return real(root, max_paths, **kw)
 
     monkeypatch.setattr(file_index, "_all_paths", slow)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -973,7 +1068,9 @@ async def test_escape_during_index_build_does_not_start_second_build(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_index_finished_after_close_is_not_reused_by_next_session(tmp_path, monkeypatch):
+async def test_index_finished_after_close_is_not_reused_by_next_session(
+    tmp_path, monkeypatch
+):
     """Индекс, оставленный строиться при закрытии, достроился, а сеанса так и не
     было: следующий сеанс собирает свежий индекс, а не берёт залежавшийся."""
     pytest.importorskip("textual")
@@ -992,7 +1089,9 @@ async def test_index_finished_after_close_is_not_reused_by_next_session(tmp_path
         return real(root, max_paths, **kw)
 
     monkeypatch.setattr(file_index, "_all_paths", slow)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -1017,7 +1116,9 @@ async def test_index_finished_after_close_is_not_reused_by_next_session(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_switching_to_skill_input_ends_file_search_session(tmp_path, monkeypatch):
+async def test_switching_to_skill_input_ends_file_search_session(
+    tmp_path, monkeypatch
+):
     """Поиск файлов в полёте, ввод одним событием сменился на «/skill …» (история,
     вставка): опоздавший результат не должен открыть файловый пикер поверх команды."""
     pytest.importorskip("textual")
@@ -1035,7 +1136,9 @@ async def test_switching_to_skill_input_ends_file_search_session(tmp_path, monke
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -1054,7 +1157,9 @@ async def test_switching_to_skill_input_ends_file_search_session(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_switching_to_arg_picker_input_ends_file_search_session(tmp_path, monkeypatch):
+async def test_switching_to_arg_picker_input_ends_file_search_session(
+    tmp_path, monkeypatch
+):
     """То же для команды с вариантами аргумента: пикер аргументов и файловый
     не должны оказаться открыты одновременно."""
     pytest.importorskip("textual")
@@ -1072,7 +1177,9 @@ async def test_switching_to_arg_picker_input_ends_file_search_session(tmp_path, 
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", blocked)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -1101,7 +1208,9 @@ async def test_big_directory_listing_is_capped_with_note(tmp_path):
     (tmp_path / "many").mkdir()
     for i in range(150):
         (tmp_path / "many" / f"f{i:03d}.txt").write_text("x", encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -1111,7 +1220,9 @@ async def test_big_directory_listing_is_capped_with_note(tmp_path):
         await pilot.pause()
         picker = scr._file_picker
         assert len(picker._entries) == 100
-        assert picker._note_text() == "показано 100 из 150 · допишите часть имени"
+        assert (
+            picker._note_text() == "показано 100 из 150 · допишите часть имени"
+        )
         assert len(picker.query(".palette-keys")) == 2
         inp.insert("f149")
         await pilot.pause()
@@ -1122,7 +1233,9 @@ async def test_big_directory_listing_is_capped_with_note(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatch):
+async def test_slow_git_memo_expires_and_git_is_tried_again(
+    tmp_path, monkeypatch
+):
     """Память о медленном git не вечная: после срока следующий сеанс пикера снова
     пробует git."""
     pytest.importorskip("textual")
@@ -1140,7 +1253,9 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
         raise subprocess.TimeoutExpired(cmd="git", timeout=5)
 
     monkeypatch.setattr(file_index, "_git_ls_files", timed_out)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -1153,7 +1268,9 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
         assert len(git_calls) == 1
         await pilot.press("escape")
         await pilot.pause()
-        monkeypatch.setattr(file_index, "_SLOW_GIT_RETRY_AFTER", 0.0)  # срок вышел
+        monkeypatch.setattr(
+            file_index, "_SLOW_GIT_RETRY_AFTER", 0.0
+        )  # срок вышел
         inp.insert("n")  # новый сеанс
         await pilot.pause()
         await settled(scr._file_search)
@@ -1162,7 +1279,9 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_typing_during_index_build_starts_no_new_threads(tmp_path, monkeypatch):
+async def test_typing_during_index_build_starts_no_new_threads(
+    tmp_path, monkeypatch
+):
     """Пока собирается индекс, быстрый набор букв не плодит потоки: их считает один
     поток сеанса, после сборки фильтруется только последний запрос."""
     pytest.importorskip("textual")
@@ -1190,7 +1309,9 @@ async def test_typing_during_index_build_starts_no_new_threads(tmp_path, monkeyp
 
     monkeypatch.setattr(file_index.PathIndex, "build", slow_build)
     monkeypatch.setattr(file_index.PathIndex, "search", spy_search)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -1224,7 +1345,9 @@ async def test_app_exit_ends_file_search_thread(tmp_path):
     from gc_tui.app import TuiApp
 
     (tmp_path / "qqtarget.py").write_text("x", encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     before = set(threading.enumerate())
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -1234,7 +1357,11 @@ async def test_app_exit_ends_file_search_thread(tmp_path):
         inp.insert("@qqtar")
         await pilot.pause()
         await settled(scr._file_search)
-        started = [t for t in set(threading.enumerate()) - before if t.name == "file-search"]
+        started = [
+            t
+            for t in set(threading.enumerate()) - before
+            if t.name == "file-search"
+        ]
         assert len(started) == 1
     started[0].join(5)
     assert not started[0].is_alive()

@@ -18,14 +18,22 @@ def _reset():
 
 def test_passthrough_without_error(monkeypatch):
     calls = {"inject": 0}
-    monkeypatch.setattr(net, "_inject", lambda: calls.__setitem__("inject", calls["inject"] + 1))
+    monkeypatch.setattr(
+        net,
+        "_inject",
+        lambda: calls.__setitem__("inject", calls["inject"] + 1),
+    )
     assert net.with_system_trust_retry(lambda: 42) == 42
     assert calls["inject"] == 0  # без ошибки траст не трогаем
 
 
 def test_ssl_error_injects_once_and_retries(monkeypatch):
     calls = {"inject": 0, "fn": 0}
-    monkeypatch.setattr(net, "_inject", lambda: calls.__setitem__("inject", calls["inject"] + 1))
+    monkeypatch.setattr(
+        net,
+        "_inject",
+        lambda: calls.__setitem__("inject", calls["inject"] + 1),
+    )
 
     def fn():
         calls["fn"] += 1
@@ -43,7 +51,11 @@ def test_second_call_does_not_reinject_and_does_not_retry(monkeypatch):
     беду с сертификатом, и второй заход только отправил бы весь WAV по сети ещё раз
     и вдвое отложил «STT недоступен»."""
     calls = {"inject": 0}
-    monkeypatch.setattr(net, "_inject", lambda: calls.__setitem__("inject", calls["inject"] + 1))
+    monkeypatch.setattr(
+        net,
+        "_inject",
+        lambda: calls.__setitem__("inject", calls["inject"] + 1),
+    )
     flaky = {"n": 0}
 
     def fn():
@@ -66,7 +78,9 @@ def test_second_call_does_not_reinject_and_does_not_retry(monkeypatch):
 def test_non_tls_error_propagates(monkeypatch):
     monkeypatch.setattr(net, "_inject", lambda: None)
     with pytest.raises(ValueError):
-        net.with_system_trust_retry(lambda: (_ for _ in ()).throw(ValueError("x")))
+        net.with_system_trust_retry(
+            lambda: (_ for _ in ()).throw(ValueError("x"))
+        )
 
 
 # --- post(): чем и куда ходит голос -----------------------------------------
@@ -95,22 +109,34 @@ def session(monkeypatch):
 def test_post_goes_through_no_netrc_session(session, monkeypatch):
     """~/.netrc не должен перетирать наш Bearer — значит сессия только эта."""
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    assert net.post("https://api.groq.com/openai/v1/audio/transcriptions") == "resp"
+    assert (
+        net.post("https://api.groq.com/openai/v1/audio/transcriptions")
+        == "resp"
+    )
     assert len(session.calls) == 1
 
 
 def test_post_uses_config_proxy_for_cloud(session, monkeypatch):
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    net.post("https://api.groq.com/openai/v1/audio/transcriptions", config_proxy="http://corp:3128")
+    net.post(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        config_proxy="http://corp:3128",
+    )
     _, kwargs = session.calls[0]
-    assert kwargs["proxies"] == {"http": "http://corp:3128", "https": "http://corp:3128"}
+    assert kwargs["proxies"] == {
+        "http": "http://corp:3128",
+        "https": "http://corp:3128",
+    }
 
 
 def test_post_falls_back_to_env_proxy(session, monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://env:8080")
     net.post("https://api.groq.com/openai/v1/audio/transcriptions")
     _, kwargs = session.calls[0]
-    assert kwargs["proxies"] == {"http": "http://env:8080", "https": "http://env:8080"}
+    assert kwargs["proxies"] == {
+        "http": "http://env:8080",
+        "https": "http://env:8080",
+    }
 
 
 @pytest.mark.parametrize(

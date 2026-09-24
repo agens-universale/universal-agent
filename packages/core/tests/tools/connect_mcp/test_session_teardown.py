@@ -45,7 +45,11 @@ async def test_ainvalidate_closes_the_stack_in_the_calling_task():
     """Стек закрывается СРАЗУ и в ТОЙ ЖЕ задаче, где сессию открывали."""
     closed: list = []
     manager = sc._PersistentSessionManager()
-    manager.set_session("srv", object(), (_Stack(closed, "transport"), _Stack(closed, "session")))
+    manager.set_session(
+        "srv",
+        object(),
+        (_Stack(closed, "transport"), _Stack(closed, "session")),
+    )
 
     here = asyncio.current_task().get_name()
     await manager.ainvalidate("srv")
@@ -53,7 +57,9 @@ async def test_ainvalidate_closes_the_stack_in_the_calling_task():
     assert [name for name, _ in closed] == ["session", "transport"], (
         f"стек закрыт не в обратном порядке или не закрыт вовсе: {closed}"
     )
-    assert all(task == here for _, task in closed), f"закрытие ушло в чужую задачу: {closed} (мы в {here})"
+    assert all(task == here for _, task in closed), (
+        f"закрытие ушло в чужую задачу: {closed} (мы в {here})"
+    )
 
 
 async def test_ainvalidate_forgets_the_session_too():
@@ -127,7 +133,9 @@ async def test_aclose_does_not_wait_for_a_held_lock():
         released.set()
         holder.join(5)
 
-    assert spent < 1.0, f"закрытие ждало лок {spent:.2f}с — на живом loop это заморозка до request_timeout_sec"
+    assert spent < 1.0, (
+        f"закрытие ждало лок {spent:.2f}с — на живом loop это заморозка до request_timeout_sec"
+    )
 
 
 async def test_aclose_still_takes_the_process_when_the_lock_is_free():
@@ -186,7 +194,9 @@ async def test_teardown_finishes_even_when_the_caller_is_cancelled():
     # бюджета. Оставить их в реестре «до следующего сноса» нельзя: снос
     # фильтрует по владельцу, а следующий прогон приходит с новым.
     assert sorted(closed) == ["a", "b", "c"], closed
-    assert not [k for k in registry._sessions if k[0] == owner], f"остаток не закрыт: {registry._sessions}"
+    assert not [k for k in registry._sessions if k[0] == owner], (
+        f"остаток не закрыт: {registry._sessions}"
+    )
 
 
 async def test_teardown_closes_everything_when_not_cancelled():
@@ -236,7 +246,9 @@ async def test_closing_from_a_foreign_task_warns(caplog):
     with caplog.at_level(logging.WARNING):
         await manager.ainvalidate("srv")  # закрываем в ДРУГОЙ
 
-    assert any("не в той задаче" in r.getMessage() for r in caplog.records), [r.getMessage() for r in caplog.records]
+    assert any("не в той задаче" in r.getMessage() for r in caplog.records), [
+        r.getMessage() for r in caplog.records
+    ]
 
 
 async def test_closing_in_the_same_task_is_silent():

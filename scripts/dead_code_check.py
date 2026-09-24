@@ -102,13 +102,19 @@ IGNORE_DECORATORS = [
 
 
 def _is_private(name: str) -> bool:
-    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+    return name.startswith("_") and not (
+        name.startswith("__") and name.endswith("__")
+    )
 
 
 def _reported(item) -> bool:
     if item.confidence >= STRICT_CONFIDENCE:
         return True
-    return item.confidence >= PRIVATE_CONFIDENCE and item.typ in _PRIVATE_KINDS and _is_private(item.name)
+    return (
+        item.confidence >= PRIVATE_CONFIDENCE
+        and item.typ in _PRIVATE_KINDS
+        and _is_private(item.name)
+    )
 
 
 def _in_prod(path: Path) -> bool:
@@ -117,8 +123,14 @@ def _in_prod(path: Path) -> bool:
 
 
 def find_dead_code() -> list:
-    vulture = Vulture(ignore_names=IGNORE_NAMES, ignore_decorators=IGNORE_DECORATORS)
-    paths = [str(ROOT / p) for p in PROD_PATHS + USAGE_PATHS + [WHITELIST] if (ROOT / p).exists()]
+    vulture = Vulture(
+        ignore_names=IGNORE_NAMES, ignore_decorators=IGNORE_DECORATORS
+    )
+    paths = [
+        str(ROOT / p)
+        for p in PROD_PATHS + USAGE_PATHS + [WHITELIST]
+        if (ROOT / p).exists()
+    ]
     vulture.scavenge(paths, exclude=EXCLUDE)
     if vulture.exit_code:
         raise RuntimeError("vulture could not analyze all input files")
@@ -137,7 +149,9 @@ def main() -> int:
         return 2
     for item in dead:
         rel = Path(item.filename).resolve().relative_to(ROOT).as_posix()
-        print(f"{rel}:{item.first_lineno}: {item.message} ({item.confidence}% confidence)")
+        print(
+            f"{rel}:{item.first_lineno}: {item.message} ({item.confidence}% confidence)"
+        )
     print(f"{len(dead)} finding(s)")
     if dead:
         print(

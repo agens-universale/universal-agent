@@ -18,7 +18,9 @@ from gc_testkit import as_coro, run_coro
 
 def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:
     """Ошибка ровно того типа, который летит из ядра: оно ходит через httpx."""
-    request = httpx.Request("POST", "http://backend.invalid/v1/chat/completions")
+    request = httpx.Request(
+        "POST", "http://backend.invalid/v1/chat/completions"
+    )
     resp = httpx.Response(status, json=body, request=request)
     return httpx.HTTPStatusError("http error", request=request, response=resp)
 
@@ -52,7 +54,9 @@ def test_notice_from_embedded_choice_error_shows_http_status():
         status_code=504,
         raw_code=504,
     )
-    n = notice_from_llm_failure(exc, request_label="main_agent", url="http://x/v1/chat/completions")
+    n = notice_from_llm_failure(
+        exc, request_label="main_agent", url="http://x/v1/chat/completions"
+    )
     assert n.code == "llm_error_504"
     assert "HTTP 504" in n.message
 
@@ -70,7 +74,9 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(400, {"message": "bad request"})
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", as_coro(boom)
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(
@@ -99,7 +105,9 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(500, {"message": "fail"})
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", as_coro(boom)
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(

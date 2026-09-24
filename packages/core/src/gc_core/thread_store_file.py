@@ -58,11 +58,15 @@ class FileThreadStore(ThreadStoreBase):
 
     # --- чтение ------------------------------------------------------------
 
-    def load_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    def load_messages(
+        self, system_id: str, thread_id: str
+    ) -> List[Dict[str, Any]]:
         # Модульная функция отдаёт тройку (сообщения, ключи, счётчик записанных).
         # Наружу контракт обещает только сообщения: ключи — деталь дедупликации,
         # и держать её должен сам store, а не каждый вызывающий.
-        messages, _keys, _count = load_thread_messages(self._dir, system_id, thread_id)
+        messages, _keys, _count = load_thread_messages(
+            self._dir, system_id, thread_id
+        )
         return messages or []
 
     def load_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
@@ -72,7 +76,9 @@ class FileThreadStore(ThreadStoreBase):
         ``discard_message`` номер проседает и переиспользуется. Это и есть
         контрактное поведение: держат НЕУБЫВАНИЕ, а не уникальность.
         """
-        messages, keys, max_seq = load_thread_messages(self._dir, system_id, thread_id)
+        messages, keys, max_seq = load_thread_messages(
+            self._dir, system_id, thread_id
+        )
         return ThreadState(
             messages=(messages or []),
             known_keys=(keys or set()),
@@ -80,7 +86,9 @@ class FileThreadStore(ThreadStoreBase):
         )
 
     def _known_keys(self, system_id: str, thread_id: str) -> Set[MessageKey]:
-        _messages, keys, _count = load_thread_messages(self._dir, system_id, thread_id)
+        _messages, keys, _count = load_thread_messages(
+            self._dir, system_id, thread_id
+        )
         return keys or set()
 
     def load_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
@@ -104,7 +112,11 @@ class FileThreadStore(ThreadStoreBase):
         # НЕ копируем: append_new_thread_messages дописывает в этот же набор,
         # и вызывающий (ThreadSession.known_message_keys) рассчитывает увидеть
         # обновление у себя. Копия молча сломала бы дедупликацию на след. батче.
-        keys = known_keys if known_keys is not None else self._known_keys(system_id, thread_id)
+        keys = (
+            known_keys
+            if known_keys is not None
+            else self._known_keys(system_id, thread_id)
+        )
         return append_new_thread_messages(
             self._dir,
             system_id,
@@ -114,7 +126,9 @@ class FileThreadStore(ThreadStoreBase):
             start_seq=start_seq,
         )
 
-    def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+    def save_meta(
+        self, system_id: str, thread_id: str, meta: Dict[str, Any]
+    ) -> None:
         save_thread_meta(self._dir, system_id, thread_id, meta)
 
     def patch_runtime_flag(
@@ -135,11 +149,17 @@ class FileThreadStore(ThreadStoreBase):
             session_meta=session_meta,
         )
 
-    def update_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
+    def update_runtime_meta(
+        self, system_id: str, thread_id: str, patch: Dict[str, Any]
+    ) -> None:
         update_runtime_meta(self._dir, system_id, thread_id, patch)
 
-    def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
-        return bool(discard_message_by_id(self._dir, system_id, thread_id, message_id))
+    def discard_message(
+        self, system_id: str, thread_id: str, message_id: str
+    ) -> bool:
+        return bool(
+            discard_message_by_id(self._dir, system_id, thread_id, message_id)
+        )
 
     def reset(self, system_id: str, thread_id: str) -> List[str]:
         return reset_thread_files(self._dir, system_id, thread_id)
@@ -159,7 +179,9 @@ class FileThreadStore(ThreadStoreBase):
         """
         from gc_core.thread_store import restore_subagent_trace_records
 
-        restore_subagent_trace_records(self._dir, system_id, thread_id, list(records))
+        restore_subagent_trace_records(
+            self._dir, system_id, thread_id, list(records)
+        )
 
     def append_subagent_trace(
         self,
@@ -181,12 +203,16 @@ class FileThreadStore(ThreadStoreBase):
             payload=payload,
         )
 
-    def read_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
+    def read_subagent_trace(
+        self, system_id: str, thread_id: str
+    ) -> List[SubagentTraceRecord]:
         return read_subagent_trace(self._dir, system_id, thread_id) or []
 
     # --- необязательная способность: архив перед компакцией ------------------
 
-    def archive_and_replace(self, system_id: str, thread_id: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def archive_and_replace(
+        self, system_id: str, thread_id: str, messages: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """Отложить историю в архив и заменить её на ``messages``.
 
         НЕ входит в одиннадцать методов контракта — это необязательная
@@ -204,7 +230,9 @@ class FileThreadStore(ThreadStoreBase):
         Возвращает ``{"archive_suffix", "archive_data_path", "archive_meta_path"}``;
         пути — ``None``, если архивировать было нечего.
         """
-        return archive_and_replace_thread_files(self._dir, system_id, thread_id, messages)
+        return archive_and_replace_thread_files(
+            self._dir, system_id, thread_id, messages
+        )
 
 
 __all__ = ["FileThreadStore"]

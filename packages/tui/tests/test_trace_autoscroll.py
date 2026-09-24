@@ -11,10 +11,14 @@ async def test_at_bottom_true_when_no_overflow(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        assert scr._trace_is_at_bottom() is True  # пустой трейс — тривиально внизу
+        assert (
+            scr._trace_is_at_bottom() is True
+        )  # пустой трейс — тривиально внизу
 
 
 @pytest.mark.asyncio
@@ -23,14 +27,18 @@ async def test_autoscroll_skipped_when_scrolled_up(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)  # spy
         scr._stick_bottom = False  # юзер отскроллил вверх
-        scr._mount_trace_row(prefix="x ", content="новое", kind_class="line-meta")
+        scr._mount_trace_row(
+            prefix="x ", content="новое", kind_class="line-meta"
+        )
         await pilot.pause(0.1)
         assert calls == []  # вид не дёрнулся вниз
 
@@ -41,14 +49,18 @@ async def test_autoscroll_follows_when_at_bottom(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._trace_is_at_bottom = lambda: True
-        scr._mount_trace_row(prefix="x ", content="новое", kind_class="line-meta")
+        scr._mount_trace_row(
+            prefix="x ", content="новое", kind_class="line-meta"
+        )
         await pilot.pause(0.1)  # скролл отложен (call_after_refresh)
         assert calls  # прилипли к низу
 
@@ -59,14 +71,18 @@ async def test_user_send_pending_forces_scroll(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._trace_is_at_bottom = lambda: False  # даже если отскроллен вверх
-        scr._mount_user_reply("привет", state="pending")  # отправка своего → форс
+        scr._mount_user_reply(
+            "привет", state="pending"
+        )  # отправка своего → форс
         await pilot.pause(0.1)  # скролл отложен (call_after_refresh)
         assert calls  # отправка форсит скролл вниз
 
@@ -79,17 +95,23 @@ async def test_thinking_indicator_unhide_does_not_scroll_trace(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._show_thinking_indicator(state="thinking")  # смонтирован в #indicator-bar
+        scr._show_thinking_indicator(
+            state="thinking"
+        )  # смонтирован в #indicator-bar
         scr._hide_thinking_indicator()  # .hidden (height 0)
         await pilot.pause()
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._trace_is_at_bottom = lambda: True
-        scr._show_thinking_indicator(state="validating")  # unhide — вне скролла трейса
+        scr._show_thinking_indicator(
+            state="validating"
+        )  # unhide — вне скролла трейса
         await pilot.pause()
         assert calls == []  # #trace не дёргается
 
@@ -101,7 +123,9 @@ async def test_thinking_indicator_unhide_skipped_when_scrolled_up(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._show_thinking_indicator(state="thinking")
@@ -124,7 +148,9 @@ async def test_thinking_indicator_reshow_visible_does_not_scroll(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._show_thinking_indicator(state="thinking")  # видим, не скрыт
@@ -133,7 +159,9 @@ async def test_thinking_indicator_reshow_visible_does_not_scroll(tmp_path):
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._trace_is_at_bottom = lambda: True
-        scr._show_thinking_indicator(state="thinking")  # уже видим → без скролла
+        scr._show_thinking_indicator(
+            state="thinking"
+        )  # уже видим → без скролла
         await pilot.pause()
         assert calls == []
 
@@ -146,14 +174,18 @@ async def test_command_output_forces_scroll(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
         scr._stick_bottom = False  # отскроллен вверх читать
-        await scr._handle_command("такой-команды-нет")  # пишет error-строку в трейс
+        await scr._handle_command(
+            "такой-команды-нет"
+        )  # пишет error-строку в трейс
         await pilot.pause(0.1)  # скролл отложен (call_after_refresh)
         assert calls  # результат команды (force) форсит скролл вниз
 
@@ -166,7 +198,9 @@ async def test_command_opening_screen_does_not_scroll(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
@@ -188,20 +222,30 @@ async def test_user_send_force_scrolls_to_very_bottom(tmp_path):
     from gc_tui.app import TuiApp
     from textual.containers import VerticalScroll
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         for i in range(40):  # заполнить трейс (скроллится)
-            scr._mount_trace_row(prefix="x ", content=f"строка {i}", kind_class="line-meta")
+            scr._mount_trace_row(
+                prefix="x ", content=f"строка {i}", kind_class="line-meta"
+            )
         await pilot.pause(0.4)
         trace = scr.query_one("#trace", VerticalScroll)
         assert trace.max_scroll_y > 0  # трейс реально скроллится
         trace.scroll_to(y=0, animate=False)  # юзер отскроллил вверх
         await pilot.pause()
-        scr._mount_user_reply("мой свежий запрос", state="pending")  # отправка → force
+        scr._mount_user_reply(
+            "мой свежий запрос", state="pending"
+        )  # отправка → force
         await pilot.pause(0.4)
-        assert trace.scroll_offset.y >= trace.max_scroll_y - 1  # (1) доехали до низа
+        assert (
+            trace.scroll_offset.y >= trace.max_scroll_y - 1
+        )  # (1) доехали до низа
         # старт прогона: индикатор появляется → _sync_trace_max_height меняет потолок
         scr._show_thinking_indicator(state="thinking")
         await pilot.pause(0.5)  # poll → пересчёт потолка
-        assert trace.scroll_offset.y >= trace.max_scroll_y - 1  # (2) остались у низа
+        assert (
+            trace.scroll_offset.y >= trace.max_scroll_y - 1
+        )  # (2) остались у низа

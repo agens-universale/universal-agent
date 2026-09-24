@@ -78,7 +78,9 @@ def _source_text() -> str:
     chunks: list[str] = []
     for path in (REPO / "packages").glob("*/src/**/*.py"):
         text = str(path)
-        if "gc_core/config_modules/" in text or text.endswith("gc_core/config.py"):
+        if "gc_core/config_modules/" in text or text.endswith(
+            "gc_core/config.py"
+        ):
             continue
         try:
             chunks.append(path.read_text(encoding="utf-8"))
@@ -105,7 +107,12 @@ def _unread_leaves() -> list[str]:
     return [
         leaf
         for leaf in _schema_leaves(AppConfig)
-        if not re.search(r"\b" + re.escape(leaf.rsplit(".", 1)[-1]) + r"(_from_ctx|_from_config_dict)?\b", source)
+        if not re.search(
+            r"\b"
+            + re.escape(leaf.rsplit(".", 1)[-1])
+            + r"(_from_ctx|_from_config_dict)?\b",
+            source,
+        )
     ]
 
 

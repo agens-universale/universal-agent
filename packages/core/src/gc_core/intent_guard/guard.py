@@ -11,7 +11,9 @@ from gc_core.intent_guard.agent_logging import (
     log_finish_gate_validate_start,
 )
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
-from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import (
+    avalidate_final_report_vs_user_intent,
+)
 from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
@@ -28,7 +30,10 @@ def judge_available(cfg: dict) -> bool:
     ручек (``strict_turn_finish_validation`` — ручка finish-gate, сюда не входит)."""
     if not isinstance(cfg, dict):
         return False
-    return str(cfg.get("backend_api_mode") or "").strip().lower() == "chat_completions"
+    return (
+        str(cfg.get("backend_api_mode") or "").strip().lower()
+        == "chat_completions"
+    )
 
 
 def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
@@ -36,8 +41,14 @@ def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
     if not isinstance(cfg, dict):
         cfg = {}
     is_main = getattr(state, "parent_state_id", None) is None
-    key = "finish_gate_max_iterations" if is_main else "subagent_finish_gate_max_iterations"
-    default = _DEFAULT_FINISH_GATE_MAIN if is_main else _DEFAULT_FINISH_GATE_SUB
+    key = (
+        "finish_gate_max_iterations"
+        if is_main
+        else "subagent_finish_gate_max_iterations"
+    )
+    default = (
+        _DEFAULT_FINISH_GATE_MAIN if is_main else _DEFAULT_FINISH_GATE_SUB
+    )
     raw = cfg.get(key, default)
     try:
         value = int(raw)
@@ -148,7 +159,9 @@ class FinishGateGuard:
             return decision
 
         max_r = resolve_finish_gate_max_rejections(cfg, self._state)
-        count_before = int(getattr(self._state, "finish_gate_rejection_count", 0) or 0)
+        count_before = int(
+            getattr(self._state, "finish_gate_rejection_count", 0) or 0
+        )
 
         if count_before >= max_r:
             self._logger.warning(
@@ -170,9 +183,13 @@ class FinishGateGuard:
             return decision
 
         current_user_intent = records_to_jsonl_lines(
-            deserialize_list(getattr(self._state, "current_user_intent", []) or [])
+            deserialize_list(
+                getattr(self._state, "current_user_intent", []) or []
+            )
         )
-        user_intent_log = records_to_jsonl_lines(deserialize_list(getattr(self._state, "user_intent_log", []) or []))
+        user_intent_log = records_to_jsonl_lines(
+            deserialize_list(getattr(self._state, "user_intent_log", []) or [])
+        )
 
         digest_chars = _finish_gate_digest_chars(self._state, cfg)
 
@@ -218,7 +235,9 @@ class FinishGateGuard:
         )
 
         if validation.ok:
-            decision = FinishGateDecision(outcome="accept", validation=validation)
+            decision = FinishGateDecision(
+                outcome="accept", validation=validation
+            )
             log_finish_gate_decision(
                 self._logger,
                 outcome=decision.outcome,

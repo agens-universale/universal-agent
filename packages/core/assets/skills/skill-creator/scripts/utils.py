@@ -10,7 +10,9 @@ def _frontmatter_end(lines: list[str]) -> int | None:
     return None
 
 
-def _parse_description(frontmatter_lines: list[str], i: int) -> tuple[str, int]:
+def _parse_description(
+    frontmatter_lines: list[str], i: int
+) -> tuple[str, int]:
     """Значение description (в т.ч. YAML-многострочное) и индекс следующей строки для разбора."""
     value = frontmatter_lines[i][len("description:") :].strip()
     # Handle YAML multiline indicators (>, |, >-, |-)
@@ -19,7 +21,8 @@ def _parse_description(frontmatter_lines: list[str], i: int) -> tuple[str, int]:
     continuation_lines: list[str] = []
     i += 1
     while i < len(frontmatter_lines) and (
-        frontmatter_lines[i].startswith("  ") or frontmatter_lines[i].startswith("\t")
+        frontmatter_lines[i].startswith("  ")
+        or frontmatter_lines[i].startswith("\t")
     ):
         continuation_lines.append(frontmatter_lines[i].strip())
         i += 1

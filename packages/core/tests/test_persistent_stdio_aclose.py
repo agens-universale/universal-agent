@@ -28,9 +28,7 @@ from gc_core.tools.connect_mcp import persistent_stdio as ps
 
 #: Скрипт-двойник MCP-сервера, который ИГНОРИРУЕТ SIGTERM. Так проверяется
 #: дорогой путь: graceful-таймаут вышел, дожимаем SIGKILL.
-_STUBBORN = (
-    "import signal, sys, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nsys.stderr.close()\ntime.sleep(60)\n"
-)
+_STUBBORN = "import signal, sys, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nsys.stderr.close()\ntime.sleep(60)\n"
 
 #: Послушный: умирает по SIGTERM сразу.
 _OBEDIENT = "import time\ntime.sleep(60)\n"

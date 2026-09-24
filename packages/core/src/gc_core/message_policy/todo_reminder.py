@@ -15,7 +15,10 @@ from gc_core.config_modules.todo import todo_reminder_steps_from_config
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.message_policy.todo_context import format_todo_snapshot
 from gc_core.message_policy.tool_availability import tool_is_available
-from gc_core.message_policy.tool_usage_notice.policy import batch_used_tool, wrap_thread_memory_technical_user_message
+from gc_core.message_policy.tool_usage_notice.policy import (
+    batch_used_tool,
+    wrap_thread_memory_technical_user_message,
+)
 
 _OPEN_STATUSES = ("pending", "in_progress")
 
@@ -26,7 +29,10 @@ def _todo_items(state: Any) -> list[dict]:
 
 
 def has_open_todos(items: list) -> bool:
-    return any(isinstance(item, dict) and item.get("status") in _OPEN_STATUSES for item in items)
+    return any(
+        isinstance(item, dict) and item.get("status") in _OPEN_STATUSES
+        for item in items
+    )
 
 
 def build_todo_create_nudge_text() -> str:
@@ -56,10 +62,16 @@ def build_todo_reminder_text(items: list) -> str:
 
 
 def _stopped(config_dict: Any) -> bool:
-    stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
+    stop = (
+        config_dict.get("stop_tools")
+        if isinstance(config_dict, dict)
+        else None
+    )
     if not isinstance(stop, list):
         return False
-    return SESSION_TODO_TOOL_NAME in {str(item).strip() for item in stop if isinstance(item, str)}
+    return SESSION_TODO_TOOL_NAME in {
+        str(item).strip() for item in stop if isinstance(item, str)
+    }
 
 
 def apply_todo_reminder(
@@ -78,7 +90,9 @@ def apply_todo_reminder(
     видит только глобальный ``stop_tools``, а набор сужается ещё и файлом
     сабагента / harbor / неподнявшимся MCP.
     """
-    steps_limit = todo_reminder_steps_from_config(config_dict if isinstance(config_dict, dict) else None)
+    steps_limit = todo_reminder_steps_from_config(
+        config_dict if isinstance(config_dict, dict) else None
+    )
     if steps_limit <= 0 or _stopped(config_dict):
         return messages
     if not tool_is_available(available_tools, SESSION_TODO_TOOL_NAME):
@@ -89,7 +103,9 @@ def apply_todo_reminder(
         state.todo_reminder_cnt = 0
         return messages
 
-    state.todo_reminder_cnt = int(getattr(state, "todo_reminder_cnt", 0) or 0) + 1
+    state.todo_reminder_cnt = (
+        int(getattr(state, "todo_reminder_cnt", 0) or 0) + 1
+    )
     if state.todo_reminder_cnt < steps_limit:
         return messages
 

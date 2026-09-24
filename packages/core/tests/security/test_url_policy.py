@@ -44,10 +44,22 @@ def test_validate_url_policy_blocks_blacklist_rules():
 
 
 def test_match_url_blacklist_supports_exact_and_glob_rules():
-    assert match_url_blacklist("localhost", "https://localhost", ["localhost"]) == "localhost"
-    assert match_url_blacklist("api.example.com", "https://api.example.com", ["*.example.com"]) == "*.example.com"
     assert (
-        match_url_blacklist("example.com", "https://example.com/private/a", ["*://example.com/private/*"])
+        match_url_blacklist("localhost", "https://localhost", ["localhost"])
+        == "localhost"
+    )
+    assert (
+        match_url_blacklist(
+            "api.example.com", "https://api.example.com", ["*.example.com"]
+        )
+        == "*.example.com"
+    )
+    assert (
+        match_url_blacklist(
+            "example.com",
+            "https://example.com/private/a",
+            ["*://example.com/private/*"],
+        )
         == "*://example.com/private/*"
     )
 
@@ -65,7 +77,9 @@ def test_enforce_url_policy_returns_structured_error(tmp_path):
     def fetch(url: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(fetch("https://blocked.example", config_dict=config_dict))
+    result = json.loads(
+        fetch("https://blocked.example", config_dict=config_dict)
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "url_blocked_by_policy"
@@ -120,7 +134,9 @@ def test_enforce_url_policy_mode_allow_passes_with_audit():
     assert result["ok"] is True
     assert result["fetched"] == "data"
     assert '"decision": "executed"' in logger.messages[-1]
-    assert '"reason_code": "policy_allow_out_of_perimeter"' in logger.messages[-1]
+    assert (
+        '"reason_code": "policy_allow_out_of_perimeter"' in logger.messages[-1]
+    )
     assert '"risk_flags": ["out_of_perimeter"]' in logger.messages[-1]
 
 

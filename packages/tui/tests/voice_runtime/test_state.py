@@ -32,9 +32,17 @@ def test_available_update_names_the_pin_only_when_behind():
 
 def test_state_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "state.json",
+    )
     assert load_state() is None
-    st = VoiceState(version="v0.8.3", root=str(tmp_path / "speaches"), port=8735, model=DEFAULT_MODEL)
+    st = VoiceState(
+        version="v0.8.3",
+        root=str(tmp_path / "speaches"),
+        port=8735,
+        model=DEFAULT_MODEL,
+    )
     save_state(st)
     assert load_state() == st
     clear_state()
@@ -43,19 +51,34 @@ def test_state_roundtrip(tmp_path, monkeypatch):
 
 def test_broken_state_returns_none(tmp_path, monkeypatch):
     p = tmp_path / "state.json"
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: p)
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path", lambda: p
+    )
     p.write_text("{broken", encoding="utf-8")
     assert load_state() is None
 
 
 def test_current_model_short_default_when_not_installed(tmp_path, monkeypatch):
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "state.json",
+    )
     assert current_model_short() == "faster-whisper-small"
 
 
 def test_current_model_short_uses_installed_state_model(tmp_path, monkeypatch):
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
-    save_state(VoiceState(version="v0.8.3", root=str(tmp_path / "speaches"), port=8735, model="Org/custom-model"))
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "state.json",
+    )
+    save_state(
+        VoiceState(
+            version="v0.8.3",
+            root=str(tmp_path / "speaches"),
+            port=8735,
+            model="Org/custom-model",
+        )
+    )
     assert current_model_short() == "custom-model"
 
 

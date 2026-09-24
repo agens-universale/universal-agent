@@ -26,7 +26,9 @@ def test_indent_difference_still_suggests():
 
 def test_typo_in_token_suggests_nearest_line():
     content = "alpha beta gamma\nunrelated line\n"
-    suggestions, total = build_edit_miss_suggestions("alpha betta gamma", content)
+    suggestions, total = build_edit_miss_suggestions(
+        "alpha betta gamma", content
+    )
     assert total >= 1
     assert suggestions[0]["line"] == 1
     assert suggestions[0]["score"] > 0.2
@@ -34,7 +36,9 @@ def test_typo_in_token_suggests_nearest_line():
 
 def test_multiline_near_miss():
     content = "foo bar\nbaz qux\nzap zot\n"
-    suggestions, total = build_edit_miss_suggestions("foo baar\nbaz qxx", content)
+    suggestions, total = build_edit_miss_suggestions(
+        "foo baar\nbaz qxx", content
+    )
     assert total >= 1
     assert suggestions[0]["line"] == 1
     assert suggestions[0]["end_line"] == 2
@@ -55,7 +59,9 @@ def test_score_threshold_and_top_three():
 
 def test_below_min_score_excluded():
     content = "zzzzzzzz\nyyyyyyyy\n"
-    suggestions, total = build_edit_miss_suggestions("completely different", content, min_score=0.9)
+    suggestions, total = build_edit_miss_suggestions(
+        "completely different", content, min_score=0.9
+    )
     assert suggestions == []
     assert total == 0
 
@@ -63,7 +69,9 @@ def test_below_min_score_excluded():
 def test_truncate_long_suggestion_text():
     long_line = "x" * 250
     content = long_line + "\n"
-    suggestions, total = build_edit_miss_suggestions("x" * 40, content, max_text_chars=200)
+    suggestions, total = build_edit_miss_suggestions(
+        "x" * 40, content, max_text_chars=200
+    )
     assert total >= 1
     assert suggestions[0]["text"] == ("x" * 200) + "…"
     assert len(suggestions[0]["text"]) == 201

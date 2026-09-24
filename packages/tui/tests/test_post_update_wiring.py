@@ -36,7 +36,9 @@ def _stub_post_update_deps(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upgrade_info_set_pushes_post_update_screen(tmp_path, monkeypatch):
+async def test_upgrade_info_set_pushes_post_update_screen(
+    tmp_path, monkeypatch
+):
     _stub_post_update_deps(monkeypatch)
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
@@ -48,7 +50,9 @@ async def test_upgrade_info_set_pushes_post_update_screen(tmp_path, monkeypatch)
     }
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     app._config_path = str(tmp_path / "config.yml")
-    app._upgrade_info = upgrade_gate.UpgradeInfo(old_version="0.3.0", new_version="0.4.0")
+    app._upgrade_info = upgrade_gate.UpgradeInfo(
+        old_version="0.3.0", new_version="0.4.0"
+    )
 
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -82,7 +86,9 @@ async def test_no_upgrade_info_no_post_update_screen(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         assert not isinstance(app.screen, PostUpdateScreen)
-        assert not any(isinstance(s, PostUpdateScreen) for s in app.screen_stack)
+        assert not any(
+            isinstance(s, PostUpdateScreen) for s in app.screen_stack
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -109,10 +115,15 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cfg_mod,
         "load_config_ex",
-        lambda p=None, **kw: (dict(configured), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+        lambda p=None, **kw: (
+            dict(configured),
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
-    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t"))
+    monkeypatch.setattr(
+        ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
+    )
 
     unconf = {
         "completions_url": "http://your-backend:PORT/v1/chat/completions",
@@ -123,13 +134,17 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
     app._onboarding_mode = "auto"
     app._onboarding_config_path = str(tmp_path / "config.yml")
     app._config_path = str(tmp_path / "config.yml")
-    app._upgrade_info = upgrade_gate.UpgradeInfo(old_version="0.3.0", new_version="0.4.0")
+    app._upgrade_info = upgrade_gate.UpgradeInfo(
+        old_version="0.3.0", new_version="0.4.0"
+    )
 
     async with app.run_test() as pilot:
         await pilot.pause()
         # Onboarding first — post-update must NOT be up yet.
         assert isinstance(app.screen, OnboardingScreen)
-        assert not any(isinstance(s, PostUpdateScreen) for s in app.screen_stack)
+        assert not any(
+            isinstance(s, PostUpdateScreen) for s in app.screen_stack
+        )
 
         app._finish_onboarding()
         await pilot.pause()
@@ -156,14 +171,18 @@ async def test_show_post_update_is_idempotent(tmp_path, monkeypatch):
     }
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
     app._config_path = str(tmp_path / "config.yml")
-    app._upgrade_info = upgrade_gate.UpgradeInfo(old_version="0.3.0", new_version="0.4.0")
+    app._upgrade_info = upgrade_gate.UpgradeInfo(
+        old_version="0.3.0", new_version="0.4.0"
+    )
 
     async with app.run_test() as pilot:
         await pilot.pause()
         app._show_post_update_if_needed()
         app._show_post_update_if_needed()
         await pilot.pause()
-        count = sum(1 for s in app.screen_stack if isinstance(s, PostUpdateScreen))
+        count = sum(
+            1 for s in app.screen_stack if isinstance(s, PostUpdateScreen)
+        )
         assert count == 1
 
 
@@ -180,9 +199,13 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
 
     from gc_core import config as cfg_mod
 
-    monkeypatch.setattr(cfg_mod, "load_config", lambda path=None: dict(config_dict))
+    monkeypatch.setattr(
+        cfg_mod, "load_config", lambda path=None: dict(config_dict)
+    )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
-    monkeypatch.setattr(cfg_mod, "user_config_path", lambda: tmp_path / "config.yml")
+    monkeypatch.setattr(
+        cfg_mod, "user_config_path", lambda: tmp_path / "config.yml"
+    )
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)
 
     from gc_core import onboarding as ob_mod
@@ -191,12 +214,18 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
 
     from gc_core import thread_store as ts_mod
 
-    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
+    monkeypatch.setattr(
+        ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads")
+    )
 
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
 
-    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
-    monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
+    monkeypatch.setattr(
+        mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False
+    )
 
 
 def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
@@ -209,9 +238,15 @@ def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
     }
     _patch_entry_prereqs(monkeypatch, tmp_path, configured)
 
-    monkeypatch.setattr(upgrade_gate, "detect_upgrade", lambda *a, **k: upgrade_gate.UpgradeInfo("0.3.0", "0.4.0"))
+    monkeypatch.setattr(
+        upgrade_gate,
+        "detect_upgrade",
+        lambda *a, **k: upgrade_gate.UpgradeInfo("0.3.0", "0.4.0"),
+    )
     mark_calls = []
-    monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: mark_calls.append(1))
+    monkeypatch.setattr(
+        upgrade_gate, "mark_current_run", lambda *a, **k: mark_calls.append(1)
+    )
 
     from gc_tui import app as app_mod
 
@@ -233,8 +268,12 @@ def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
 
     assert result == 0
     assert captured.get("ran") is True
-    assert captured["app"]._upgrade_info == upgrade_gate.UpgradeInfo("0.3.0", "0.4.0")
-    assert mark_calls == [], "mark_current_run must NOT run at startup during an upgrade run"
+    assert captured["app"]._upgrade_info == upgrade_gate.UpgradeInfo(
+        "0.3.0", "0.4.0"
+    )
+    assert mark_calls == [], (
+        "mark_current_run must NOT run at startup during an upgrade run"
+    )
 
 
 def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
@@ -251,7 +290,9 @@ def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
 
     monkeypatch.setattr(upgrade_gate, "detect_upgrade", lambda *a, **k: None)
     mark_calls = []
-    monkeypatch.setattr(upgrade_gate, "mark_current_run", lambda *a, **k: mark_calls.append(1))
+    monkeypatch.setattr(
+        upgrade_gate, "mark_current_run", lambda *a, **k: mark_calls.append(1)
+    )
 
     from gc_tui import app as app_mod
 
@@ -273,4 +314,6 @@ def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
 
     assert result == 0
     assert captured["app"]._upgrade_info is None
-    assert mark_calls == [1], "no upgrade this run → startup stamp still happens"
+    assert mark_calls == [1], (
+        "no upgrade this run → startup stamp still happens"
+    )

@@ -1,6 +1,10 @@
 """skill_view — RU-метки типа, title/body вьювера."""
 
-from gc_tui.services.skill_view import build_skill_viewer, source_label, truncate_path_left
+from gc_tui.services.skill_view import (
+    build_skill_viewer,
+    source_label,
+    truncate_path_left,
+)
 
 
 def test_source_label_ru():
@@ -20,7 +24,10 @@ def test_build_skill_viewer_title_and_body():
         "instructions": "do things",
     }
     title, body = build_skill_viewer(detail)
-    assert title == "skill · topic-research · системный · /abs/skills/topic-research"
+    assert (
+        title
+        == "skill · topic-research · системный · /abs/skills/topic-research"
+    )
     assert "# Topic Research (topic-research)" in body
     assert "desc" in body
     assert "do things" in body

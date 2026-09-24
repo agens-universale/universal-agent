@@ -147,7 +147,10 @@ def _simple_gitignore_dirs(root: str) -> tuple[frozenset[str], frozenset[str]]:
     except OSError:
         return frozenset(), frozenset()
     if len(data) > _GITIGNORE_MAX_BYTES:
-        return frozenset(), frozenset()  # обрезанная строка стала бы другим именем
+        return (
+            frozenset(),
+            frozenset(),
+        )  # обрезанная строка стала бы другим именем
     text = data.decode("utf-8", errors="replace")
     anywhere: set[str] = set()
     root_only: set[str] = set()
@@ -158,7 +161,9 @@ def _simple_gitignore_dirs(root: str) -> tuple[frozenset[str], frozenset[str]]:
             # Отрицание разбираем щедро: лишнее безвредно, пропущенное прячет код.
             # `[^…]` и экранирование fnmatch не понимает — такое отрицание снимает игнор целиком.
             segment = raw.strip()[1:].strip("/").rsplit("/", 1)[-1].lower()
-            negated.append("*" if "[" in segment or "\\" in segment else segment)
+            negated.append(
+                "*" if "[" in segment or "\\" in segment else segment
+            )
             continue
         # git снимает один \r и хвостовые пробелы; второй \r — уже часть шаблона
         line = (raw[:-1] if raw.endswith("\r") else raw).rstrip(" ")
@@ -176,9 +181,14 @@ def _simple_gitignore_dirs(root: str) -> tuple[frozenset[str], frozenset[str]]:
             target.add(name)
 
     def kept(name: str) -> bool:
-        return not any(fnmatch.fnmatchcase(name.lower(), pattern) for pattern in negated)
+        return not any(
+            fnmatch.fnmatchcase(name.lower(), pattern) for pattern in negated
+        )
 
-    return (frozenset(n for n in anywhere if kept(n)), frozenset(n for n in root_only if kept(n)))
+    return (
+        frozenset(n for n in anywhere if kept(n)),
+        frozenset(n for n in root_only if kept(n)),
+    )
 
 
 # Предохранитель индекса, не размер выдачи (в пикере по-прежнему до 50 строк).
@@ -206,7 +216,9 @@ def _path_match(query: str, path: str) -> bool:
     return query in path
 
 
-def rank(query: str, paths: list[str], *, limit: Optional[int] = None) -> list[str]:
+def rank(
+    query: str, paths: list[str], *, limit: Optional[int] = None
+) -> list[str]:
     """prefix-of-basename выше; затем по глубине; затем по алфавиту.
     Папки (с хвостовым '/') ранжируются по имени папки.
 
@@ -258,7 +270,9 @@ def _walk_paths(
             return out, True
         rel_dir = queue.popleft()
         try:
-            with os.scandir(os.path.join(root, rel_dir) if rel_dir else root) as it:
+            with os.scandir(
+                os.path.join(root, rel_dir) if rel_dir else root
+            ) as it:
                 for entry in it:
                     is_dir = _entry_is_dir(entry)
                     if is_dir and (
@@ -331,7 +345,11 @@ class _ShallowestPaths:
     def result(self) -> list[str]:
         if self._flat is not None:
             return self._flat
-        return [p for depth in sorted(self._by_depth) for p in self._by_depth[depth]]
+        return [
+            p
+            for depth in sorted(self._by_depth)
+            for p in self._by_depth[depth]
+        ]
 
 
 _GIT_TIMEOUT = 5.0
@@ -349,8 +367,16 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         if os.name == "nt":
             # Полный путь: по одному имени Windows ищет exe сначала рядом с
             # приложением и в текущем каталоге — а это может быть открытый проект.
-            taskkill = os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
-            subprocess.run([taskkill, "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=5)
+            taskkill = os.path.join(
+                os.environ.get("SYSTEMROOT", r"C:\Windows"),
+                "System32",
+                "taskkill.exe",
+            )
+            subprocess.run(
+                [taskkill, "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+            )
         else:
             os.killpg(proc.pid, signal.SIGKILL)
     except (OSError, subprocess.SubprocessError):
@@ -376,7 +402,9 @@ def _reap(proc: subprocess.Popen) -> None:
 # бы уже достаться другому.
 _running: set[subprocess.Popen] = set()
 _running_lock = threading.Lock()
-_exiting = False  # выход начался — новых команд не запускаем, обход диска прерываем
+_exiting = (
+    False  # выход начался — новых команд не запускаем, обход диска прерываем
+)
 
 
 def kill_running_processes() -> None:
@@ -393,7 +421,9 @@ def kill_running_processes() -> None:
             _kill_process_tree(proc)
 
 
-def _stream_bounded(cmd: list[str], cwd: str, timeout: float, on_chunk: Callable[[bytes], None]) -> bool:
+def _stream_bounded(
+    cmd: list[str], cwd: str, timeout: float, on_chunk: Callable[[bytes], None]
+) -> bool:
     """Запустить команду и отдавать её stdout кусками в on_chunk. True — код
     возврата 0; False — ненулевой код, команда не запустилась, или вывод
     кончился, но процесс пришлось гасить принудительно; не уложилась в
@@ -416,12 +446,20 @@ def _stream_bounded(cmd: list[str], cwd: str, timeout: float, on_chunk: Callable
     запускается вовсе — False."""
     kwargs: dict = {}
     if os.name != "nt":
-        kwargs["start_new_session"] = True  # своя группа — чтобы гасить её целиком
+        kwargs["start_new_session"] = (
+            True  # своя группа — чтобы гасить её целиком
+        )
     with _running_lock:
         if _exiting:
             return False
         try:
-            proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **kwargs)
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                **kwargs,
+            )
         except OSError:
             return False
         _running.add(proc)
@@ -432,7 +470,9 @@ def _stream_bounded(cmd: list[str], cwd: str, timeout: float, on_chunk: Callable
             _running.discard(proc)
 
 
-def _read_process_chunks(proc, stop: threading.Event, on_chunk, failure: list[BaseException]) -> None:
+def _read_process_chunks(
+    proc, stop: threading.Event, on_chunk, failure: list[BaseException]
+) -> None:
     """Читать stdout в служебном потоке; ошибку передать ожидающему потоку."""
     try:
         while True:
@@ -444,21 +484,31 @@ def _read_process_chunks(proc, stop: threading.Event, on_chunk, failure: list[Ba
         failure.append(exc)
 
 
-def _pump_bounded(proc: subprocess.Popen, cmd: list[str], timeout: float, on_chunk: Callable[[bytes], None]) -> bool:
+def _pump_bounded(
+    proc: subprocess.Popen,
+    cmd: list[str],
+    timeout: float,
+    on_chunk: Callable[[bytes], None],
+) -> bool:
     """Тело `_stream_bounded` после запуска процесса: чтение служебным потоком с
     дедлайном, гашение и подбор (контракт — там)."""
     failure: list[BaseException] = []
     stop = threading.Event()  # после таймаута вывод никому не нужен
 
     reader = threading.Thread(
-        target=_read_process_chunks, args=(proc, stop, on_chunk, failure), name="file-index-reader", daemon=True
+        target=_read_process_chunks,
+        args=(proc, stop, on_chunk, failure),
+        name="file-index-reader",
+        daemon=True,
     )
     reader.start()
     reader.join(timeout)
     if reader.is_alive():
         stop.set()
         _kill_process_tree(proc)
-        reader.join(2)  # пайп закрылся — поток дочитает и выйдет; не вышел — бросаем его (daemon)
+        reader.join(
+            2
+        )  # пайп закрылся — поток дочитает и выйдет; не вышел — бросаем его (daemon)
         _reap(proc)
         if not reader.is_alive():
             # Закрывать можно только без читателя: он держит лок буфера, close завис бы.
@@ -485,7 +535,9 @@ def _pump_bounded(proc: subprocess.Popen, cmd: list[str], timeout: float, on_chu
     return proc.returncode == 0
 
 
-def _git_ls_files(root: str, max_paths: int) -> Optional[tuple[list[str], bool]]:
+def _git_ls_files(
+    root: str, max_paths: int
+) -> Optional[tuple[list[str], bool]]:
     """Файлы git (tracked + untracked, с учётом .gitignore): (пути, обрезан ли
     список) — не больше max_paths самых неглубоких; None, если git их не дал (не
     репозиторий, git не установлен, ненулевой код); subprocess.TimeoutExpired —
@@ -509,7 +561,17 @@ def _git_ls_files(root: str, max_paths: int) -> Optional[tuple[list[str], bool]]
                 picked.add(part.decode("utf-8", errors="replace"))
 
     ok = _stream_bounded(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], root, _GIT_TIMEOUT, on_chunk
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
+        root,
+        _GIT_TIMEOUT,
+        on_chunk,
     )
     if not ok:
         return None
@@ -518,7 +580,9 @@ def _git_ls_files(root: str, max_paths: int) -> Optional[tuple[list[str], bool]]
     return picked.result(), picked.truncated
 
 
-_SLOW_GIT_RETRY_AFTER = 600.0  # сек: через столько снова пробуем git для «медленного» корня
+_SLOW_GIT_RETRY_AFTER = (
+    600.0  # сек: через столько снова пробуем git для «медленного» корня
+)
 # Корни, где `git ls-files` не уложился в таймаут → момент таймаута (time.monotonic()).
 # Пока срок не вышел, новый индекс того же корня git не зовёт: иначе в огромном
 # репозитории каждый новый «@» ждал бы таймаут заново. Не навсегда: разовый
@@ -531,7 +595,9 @@ def _git_recently_slow(root: str) -> bool:
     return at is not None and time.monotonic() - at < _SLOW_GIT_RETRY_AFTER
 
 
-def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *, use_git: bool = True) -> tuple[list[str], bool]:
+def _all_paths(
+    root: str, max_paths: int = MAX_INDEX_PATHS, *, use_git: bool = True
+) -> tuple[list[str], bool]:
     """tracked + untracked файлы git (учтён .gitignore) + их папки-префиксы;
     не git-репо → walk + хардкод-игнор. Возвращает (пути, обрезан ли список).
 
@@ -556,7 +622,9 @@ def _all_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *, use_git: bool = T
 
     def walk() -> tuple[list[str], bool]:
         anywhere, root_only = _simple_gitignore_dirs(root)
-        return _walk_paths(root, max_paths, ignore_anywhere=anywhere, ignore_root=root_only)
+        return _walk_paths(
+            root, max_paths, ignore_anywhere=anywhere, ignore_root=root_only
+        )
 
     if use_git and not _git_recently_slow(root):
         try:
@@ -587,7 +655,13 @@ class PathIndex:
     тот ждёт на локе, а не запускает второй обход диска. `truncated` осмыслен после
     сборки — первого `build` или `search`."""
 
-    def __init__(self, root: str, *, max_paths: int = MAX_INDEX_PATHS, use_git: bool = True) -> None:
+    def __init__(
+        self,
+        root: str,
+        *,
+        max_paths: int = MAX_INDEX_PATHS,
+        use_git: bool = True,
+    ) -> None:
         self.root = root
         self.truncated = False
         self._max_paths = max_paths
@@ -599,7 +673,9 @@ class PathIndex:
     def _ensure_paths(self) -> list[str]:
         with self._lock:
             if self._paths is None:
-                paths, truncated = _all_paths(self.root, self._max_paths, use_git=self._use_git)
+                paths, truncated = _all_paths(
+                    self.root, self._max_paths, use_git=self._use_git
+                )
                 lower = [p.lower() for p in paths]
                 self._lower = lower
                 self.truncated = truncated
@@ -630,14 +706,18 @@ class PathIndex:
             return []
         q = query.lower().replace("\\", "/")
         paths = self._ensure_paths()
-        matched = [p for p, low in zip(paths, self._lower) if _path_match(q, low)]
+        matched = [
+            p for p, low in zip(paths, self._lower) if _path_match(q, low)
+        ]
         if "/" in q:
             dirpart, _, tail = query.replace("\\", "/").rpartition("/")
             tail_l = tail.lower()
             seen = set(matched)
             for p in list_dir(root, dirpart):
                 base = p.rstrip("/").rsplit("/", 1)[-1].lower()
-                if (base.startswith(tail_l) or tail_l in base) and p not in seen:
+                if (
+                    base.startswith(tail_l) or tail_l in base
+                ) and p not in seen:
                     matched.append(p)
         return rank(query, matched, limit=limit)
 

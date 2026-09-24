@@ -77,7 +77,9 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
     monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_process_tool_calls)
-    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
 
     # Избегаем дёрганья LLM-summarizer для intent-log при финальном ответе.
     # Заглушка корутинная: цикл ждёт хук нативно, синхронное имя ушло вместе
@@ -85,7 +87,9 @@ def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):
     async def _no_final_answer_intent(**_kw):
         return None
 
-    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", _no_final_answer_intent)
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", _no_final_answer_intent
+    )
 
     state = _state()
     state.last_finish_reason = finish_reason
@@ -120,6 +124,8 @@ def test_no_truncation_hint_when_finish_reason_none(monkeypatch):
 
 
 def test_truncation_hint_keeps_the_tool_hint(monkeypatch):
-    fb = _run_with_finish_reason(monkeypatch, "length", extra_hint="TOOL HINT: path must be absolute")
+    fb = _run_with_finish_reason(
+        monkeypatch, "length", extra_hint="TOOL HINT: path must be absolute"
+    )
     assert "TOOL HINT: path must be absolute" in fb["content"]
     assert "truncated" in fb["content"]

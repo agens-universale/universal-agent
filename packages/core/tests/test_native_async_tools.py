@@ -90,7 +90,10 @@ async def test_sleep_does_not_occupy_a_pool_thread():
     """
     tool = Sleep(ctx=None)
 
-    hogs = [asyncio.create_task(asyncio.to_thread(time.sleep, 1.0)) for _ in range(24)]
+    hogs = [
+        asyncio.create_task(asyncio.to_thread(time.sleep, 1.0))
+        for _ in range(24)
+    ]
     await asyncio.sleep(0.05)  # даём им занять все места
 
     started = time.perf_counter()
@@ -102,7 +105,9 @@ async def test_sleep_does_not_occupy_a_pool_thread():
     await asyncio.gather(*hogs, return_exceptions=True)
 
     assert out["ok"] is True, out
-    assert spent < 0.5, f"сон ждал освобождения пула {spent:.2f}с — он всё ещё ходит в поток"
+    assert spent < 0.5, (
+        f"сон ждал освобождения пула {spent:.2f}с — он всё ещё ходит в поток"
+    )
 
 
 async def test_sleep_actually_waits():
@@ -159,7 +164,9 @@ async def test_ask_human_awaits_an_async_port_on_the_calling_loop():
 
     out = await tool.acall(question="как дела?")
 
-    assert seen["loop"] is asyncio.get_running_loop(), "порт встраивающего исполнился на чужом loop"
+    assert seen["loop"] is asyncio.get_running_loop(), (
+        "порт встраивающего исполнился на чужом loop"
+    )
     assert "ответ человека" in str(out)
 
 
@@ -223,7 +230,9 @@ async def test_find_in_files_runs_grep_through_the_async_backend(tmp_path):
     backend.aexec, backend.aexec_argv = _aexec, _aexec_argv
     backend.exec, backend.exec_argv = _sync_trap, _sync_trap
     try:
-        out = await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+        out = await tool.acall(
+            path=str(tmp_path), pattern="TOKEN", query_mode="text"
+        )
     finally:
         for name in ("aexec", "aexec_argv", "exec", "exec_argv"):
             try:

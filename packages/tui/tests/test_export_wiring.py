@@ -16,7 +16,13 @@ def _attach(scr, threads_dir, tid):
 async def test_export_default_txt(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    append_new_thread_messages(str(tmp_path), "cli", "tid1", [{"role": "user", "content": "вопрос", "id": "m1"}], set())
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        "tid1",
+        [{"role": "user", "content": "вопрос", "id": "m1"}],
+        set(),
+    )
     from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
@@ -35,7 +41,13 @@ async def test_export_default_txt(tmp_path, monkeypatch):
 async def test_export_json(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    append_new_thread_messages(str(tmp_path), "cli", "tid1", [{"role": "user", "content": "вопрос", "id": "m1"}], set())
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        "tid1",
+        [{"role": "user", "content": "вопрос", "id": "m1"}],
+        set(),
+    )
     from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:
@@ -54,7 +66,13 @@ async def test_export_json(tmp_path, monkeypatch):
 async def test_export_unknown_fmt_shows_error(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    append_new_thread_messages(str(tmp_path), "cli", "tid1", [{"role": "user", "content": "вопрос", "id": "m1"}], set())
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        "tid1",
+        [{"role": "user", "content": "вопрос", "id": "m1"}],
+        set(),
+    )
     from gc_tui.app import TuiApp
 
     async with TuiApp().run_test() as pilot:

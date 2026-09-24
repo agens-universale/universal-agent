@@ -25,7 +25,12 @@ class SkillsScreen(Screen):
 
     DEFAULT_CSS = ""
 
-    def __init__(self, *, skills: Optional[list[dict]] = None, config: Optional[dict] = None) -> None:
+    def __init__(
+        self,
+        *,
+        skills: Optional[list[dict]] = None,
+        config: Optional[dict] = None,
+    ) -> None:
         super().__init__()
         self._all_skills = skills or []
         self._config = config or {}
@@ -53,7 +58,9 @@ class SkillsScreen(Screen):
         self._render_list()
 
     def _refresh_header(self) -> None:
-        self.query_one("#header-left", Static).update(f"доступные навыки · {len(self._skills)}")
+        self.query_one("#header-left", Static).update(
+            f"доступные навыки · {len(self._skills)}"
+        )
 
     def _reload(self) -> None:
         f = self._filter.lower()
@@ -107,14 +114,20 @@ class SkillsScreen(Screen):
         listview = self.query_one("#skills-list", VerticalScroll)
         listview.remove_children()
         if not self._skills:
-            listview.mount(Static("(скиллы недоступны)", classes="line-meta", markup=False))
+            listview.mount(
+                Static(
+                    "(скиллы недоступны)", classes="line-meta", markup=False
+                )
+            )
             return
         maxlen = self._path_maxlen()
         selected_card: Optional[Static] = None
         for idx, s in enumerate(self._skills):
             suffix = " selected" if idx == self._selected_idx else ""
             card = Static(
-                self._card_text(s, selected=bool(suffix), maxlen=maxlen), classes="card" + suffix, markup=False
+                self._card_text(s, selected=bool(suffix), maxlen=maxlen),
+                classes="card" + suffix,
+                markup=False,
             )
             if suffix:
                 selected_card = card
@@ -123,7 +136,9 @@ class SkillsScreen(Screen):
             # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
             # обе стороны кругового перехода (как карточка MCP), без конфликта двух
             # независимых прокруток заголовка и меты.
-            self.call_after_refresh(selected_card.scroll_visible, animate=False)
+            self.call_after_refresh(
+                selected_card.scroll_visible, animate=False
+            )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "skills-filter":
@@ -133,17 +148,23 @@ class SkillsScreen(Screen):
     async def on_key(self, event: events.Key) -> None:
         if event.key == "up":
             if self._skills:  # круговой: с первой строки ↑ → на последнюю
-                self._selected_idx = (self._selected_idx - 1) % len(self._skills)
+                self._selected_idx = (self._selected_idx - 1) % len(
+                    self._skills
+                )
                 self._render_list()
             event.stop()
         elif event.key == "down":
             if self._skills:  # круговой: с последней ↓ → на первую
-                self._selected_idx = (self._selected_idx + 1) % len(self._skills)
+                self._selected_idx = (self._selected_idx + 1) % len(
+                    self._skills
+                )
                 self._render_list()
             event.stop()
         elif event.key in ("home", "end"):
             if self._skills:
-                self._selected_idx = 0 if event.key == "home" else len(self._skills) - 1
+                self._selected_idx = (
+                    0 if event.key == "home" else len(self._skills) - 1
+                )
                 self._render_list()
             event.stop()
         elif event.key == "enter":

@@ -28,7 +28,9 @@ from contextlib import contextmanager
 from typing import Iterator, Optional
 
 _tls = threading.local()
-_original_stdin: Optional[object] = None  # реальный stdin, захваченный при установке прокси
+_original_stdin: Optional[object] = (
+    None  # реальный stdin, захваченный при установке прокси
+)
 
 
 class QueueStdin(io.TextIOBase):

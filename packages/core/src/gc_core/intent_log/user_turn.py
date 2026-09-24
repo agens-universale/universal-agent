@@ -6,14 +6,20 @@ from typing import Any
 
 from gc_core.intent_log.operations import append_user_ask
 from gc_core.intent_log.record import ACTION_USER_ASK
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 
 
 def current_has_user_ask(current: list[Any], text: str) -> bool:
     line = str(text or "").strip()
     if not line:
         return False
-    return any(record.action == ACTION_USER_ASK and str(record.content).strip() == line for record in current)
+    return any(
+        record.action == ACTION_USER_ASK
+        and str(record.content).strip() == line
+        for record in current
+    )
 
 
 def append_user_ask_deduped(
@@ -40,7 +46,9 @@ def append_user_asks_from_messages(
             continue
         text = extract_real_user_message_text(message)
         if text:
-            out = append_user_ask_deduped(out, text, user_turn_seq=user_turn_seq)
+            out = append_user_ask_deduped(
+                out, text, user_turn_seq=user_turn_seq
+            )
     return out
 
 
@@ -60,4 +68,6 @@ def init_subagent_open_turn(state: Any, assignment_text: str) -> None:
     init_notice = getattr(state, "init_subagent_tool_usage_notice", None)
     if callable(init_notice):
         init_notice()
-    state.current_user_intent = seed_subagent_current_user_intent(assignment_text)
+    state.current_user_intent = seed_subagent_current_user_intent(
+        assignment_text
+    )

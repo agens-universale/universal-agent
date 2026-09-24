@@ -32,7 +32,9 @@ async def test_aclose_closes_sessions_owned_by_this_agent(monkeypatch):
     agent = AsyncAgent(SimpleNamespace(_ctx=ctx), set())
     await agent.aclose()
 
-    assert seen.get("owner") == "agent-7", "сессии закрывались не под токеном агента"
+    assert seen.get("owner") == "agent-7", (
+        "сессии закрывались не под токеном агента"
+    )
     assert released == [True], "пул не отпущен"
     assert current_owner() != "agent-7", "владение не снято после закрытия"
 

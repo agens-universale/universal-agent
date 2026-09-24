@@ -21,7 +21,11 @@ import yaml
 
 from gc_core.config import _default_config_path, validate_config_text
 from gc_core.config_modules import compat
-from gc_core.onboarding_config_writer import find_anchor, insert_missing, section_end
+from gc_core.onboarding_config_writer import (
+    find_anchor,
+    insert_missing,
+    section_end,
+)
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text
 
@@ -75,7 +79,9 @@ def _transfer(dst_text: str, src_text: str, src_key: str, dst_key: str) -> str:
 def _rename_legacy_keys_in_text(text: str) -> tuple[str, int]:
     """Переименовать оставшиеся RENAMES-якоря в тексте (verbatim-секции вне шаблона)."""
     count = 0
-    for old, new in sorted(compat.RENAMES.items(), key=lambda kv: -kv[0].count(".")):
+    for old, new in sorted(
+        compat.RENAMES.items(), key=lambda kv: -kv[0].count(".")
+    ):
         try:
             start, _end, _indent, _ = find_anchor(text, old)
         except KeyError:
@@ -88,7 +94,11 @@ def _rename_legacy_keys_in_text(text: str) -> tuple[str, int]:
         new_leaf = new.split(".")[-1]
         if f"{old_leaf}:" not in line:
             continue
-        text = text[:start] + line.replace(f"{old_leaf}:", f"{new_leaf}:", 1) + text[line_end:]
+        text = (
+            text[:start]
+            + line.replace(f"{old_leaf}:", f"{new_leaf}:", 1)
+            + text[line_end:]
+        )
         count += 1
     return text, count
 
@@ -104,7 +114,13 @@ def _remap_paths_after_rename(user_paths: set, old: str, new: str) -> set:
     return out
 
 
-def _restore_template_keys(result: str, template_text: str, template_raw: Any, user_paths: set, ancestor: str) -> str:
+def _restore_template_keys(
+    result: str,
+    template_text: str,
+    template_raw: Any,
+    user_paths: set,
+    ancestor: str,
+) -> str:
     """Вернуть в перенесённую секцию ключи шаблона, которых у юзера нет.
 
     Collapse-перенос предка (см. sync_config) кладёт блок юзера ПОВЕРХ блока шаблона:
@@ -140,13 +156,21 @@ def needs_sync(user_text: str, template_text: str) -> bool:
     tmpl_paths = set(_user_paths(tmpl_raw))
     # Шаблонный путь «новый», только если юзер не покрывает его сам или
     # его потомком (chat_completion_kwargs: {} vs {temperature: 0.2}).
-    new_in_tmpl = {tp for tp in tmpl_paths if not any(up == tp or up.startswith(tp + ".") for up in user_paths)}
+    new_in_tmpl = {
+        tp
+        for tp in tmpl_paths
+        if not any(up == tp or up.startswith(tp + ".") for up in user_paths)
+    }
     if new_in_tmpl:
         return True
     legacy = set(compat.RENAMES) | set(compat.REMOVED)
     # RENAMES/REMOVED часто указывают на секцию (не лист); _user_paths отдаёт
     # листья вроде chat_completions.llm.max_tokens — нужен prefix-match.
-    return any(up == leg or up.startswith(leg + ".") for leg in legacy for up in user_paths)
+    return any(
+        up == leg or up.startswith(leg + ".")
+        for leg in legacy
+        for up in user_paths
+    )
 
 
 def _validate_subtree(top_key: str, subtree: Any) -> bool:
@@ -193,7 +217,9 @@ def prune_backups(backup_dir: Path, name: str, *, keep: int = 10) -> None:
             pass
 
 
-def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -> ResetReport:
+def reset_config(
+    path, template_path=None, *, timestamp: Optional[str] = None
+) -> ResetReport:
     """«Сбросить к умолчанию» (спека §11): подменить `path` актуальным пакетным
     `config.default.yml` целиком (не line-copy, как `sync_config`) — старый файл
     уходит в бэкап той же конвенцией (`backups/<name>.bak-<ts>`, prune keep=10).
@@ -226,7 +252,9 @@ def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -
 
 
 class _SyncContext:
-    def __init__(self, user_text, user_raw, template_text, template_raw, all_user_paths):
+    def __init__(
+        self, user_text, user_raw, template_text, template_raw, all_user_paths
+    ):
         self.user_text = user_text
         self.user_raw = user_raw
         self.template_text = template_text
@@ -271,7 +299,9 @@ def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
         st.transferred += 1
         if target != dotted:
             st.renamed += 1
-        st.done.append(dotted)  # исходный путь: дети старого ключа считаются покрытыми
+        st.done.append(
+            dotted
+        )  # исходный путь: дети старого ключа считаются покрытыми
         return
     # Нет прямого якоря в шаблоне. Поднимаемся по предкам (multi-level walk):
     # ищем ближайшего предка с якорем в шаблоне.
@@ -281,7 +311,12 @@ def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
         parts,
         st.covered,
         st.done,
-        ctx=(ctx.user_text, ctx.template_text, ctx.template_raw, ctx.all_user_paths),
+        ctx=(
+            ctx.user_text,
+            ctx.template_text,
+            ctx.template_raw,
+            ctx.all_user_paths,
+        ),
     )
     if ancestor_status in ("transferred", "renamed"):
         st.transferred += 1
@@ -304,7 +339,9 @@ def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
     st.unknown.append(dotted)
 
 
-def _transfer_via_ancestor(result: str, parts: List[str], covered, done: List[str], *, ctx) -> tuple:
+def _transfer_via_ancestor(
+    result: str, parts: List[str], covered, done: List[str], *, ctx
+) -> tuple:
     """Перенос блока ближайшего предка с якорем в шаблоне.
 
     → (result, статус): "transferred" — блок перенесён; "renamed" — блок предка из
@@ -317,7 +354,9 @@ def _transfer_via_ancestor(result: str, parts: List[str], covered, done: List[st
         if covered(ancestor):
             return result, "covered"
         if ancestor in compat.RENAMES:
-            renamed_result = _transfer_renamed_ancestor(result, ancestor, ctx=ctx)
+            renamed_result = _transfer_renamed_ancestor(
+                result, ancestor, ctx=ctx
+            )
             if renamed_result is None:
                 # Нового якоря нет в шаблоне — не глотаем секцию, идём к
                 # другим предкам / verbatim (финальный rename-pass допишет имя).
@@ -331,12 +370,16 @@ def _transfer_via_ancestor(result: str, parts: List[str], covered, done: List[st
         done.append(ancestor)
         # Блок юзера лёг ПОВЕРХ блока шаблона — вернём ключи шаблона,
         # которых у юзера нет (иначе они молча теряются, см. _restore_template_keys).
-        result = _restore_template_keys(result, template_text, template_raw, all_user_paths, ancestor)
+        result = _restore_template_keys(
+            result, template_text, template_raw, all_user_paths, ancestor
+        )
         return result, "transferred"
     return result, None
 
 
-def _transfer_renamed_ancestor(result: str, ancestor: str, *, ctx) -> Optional[str]:
+def _transfer_renamed_ancestor(
+    result: str, ancestor: str, *, ctx
+) -> Optional[str]:
     """Перенести блок предка из compat.RENAMES под новым именем секции.
 
     Ключи шаблона, которых у юзера нет, возвращаются в секцию уже по новому
@@ -350,10 +393,14 @@ def _transfer_renamed_ancestor(result: str, ancestor: str, *, ctx) -> Optional[s
     except KeyError:
         return None
     remapped = _remap_paths_after_rename(all_user_paths, ancestor, target)
-    return _restore_template_keys(result, template_text, template_raw, remapped, target)
+    return _restore_template_keys(
+        result, template_text, template_raw, remapped, target
+    )
 
 
-def _verbatim_top_block(user_text: str, user_raw: dict, top_key: str) -> Optional[str]:
+def _verbatim_top_block(
+    user_text: str, user_raw: dict, top_key: str
+) -> Optional[str]:
     """Verbatim-блок top-level секции юзера вне шаблона, если схема её принимает."""
     if not _validate_subtree(top_key, user_raw.get(top_key)):
         return None
@@ -371,7 +418,9 @@ def _append_extra_blocks(result: str, extra_blocks: List[str]) -> str:
     return result
 
 
-def _write_with_backup(path: Path, result: str, timestamp: Optional[str]) -> Path:
+def _write_with_backup(
+    path: Path, result: str, timestamp: Optional[str]
+) -> Path:
     ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
     backup_dir = path.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -388,7 +437,9 @@ def _write_with_backup(path: Path, result: str, timestamp: Optional[str]) -> Pat
     return backup
 
 
-def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) -> SyncReport:
+def sync_config(
+    path, template_path=None, *, timestamp: Optional[str] = None
+) -> SyncReport:
     path = Path(path)
     template_path = Path(template_path or _default_config_path())
     # Оба чтения — под общим переводом в `ValueError`: вызывающий (`gc-cli
@@ -407,7 +458,13 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
         raise ValueError("config.yml должен быть YAML-объектом")
 
     st = _SyncState(template_text)
-    ctx = _SyncContext(user_text, user_raw, template_text, template_raw, set(_user_paths(user_raw)))
+    ctx = _SyncContext(
+        user_text,
+        user_raw,
+        template_text,
+        template_raw,
+        set(_user_paths(user_raw)),
+    )
     for dotted in _user_paths(user_raw):
         _sync_path(st, dotted, ctx)
 
@@ -419,4 +476,11 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
     validate_config_text(result)
 
     backup = _write_with_backup(path, result, timestamp)
-    return SyncReport(st.transferred, st.renamed, st.removed, st.unknown, st.reenter, str(backup))
+    return SyncReport(
+        st.transferred,
+        st.renamed,
+        st.removed,
+        st.unknown,
+        st.reenter,
+        str(backup),
+    )

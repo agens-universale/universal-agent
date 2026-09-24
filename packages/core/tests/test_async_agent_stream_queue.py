@@ -90,8 +90,12 @@ async def test_two_streams_do_not_starve_each_other():
 
     first, second = await asyncio.gather(collect(), collect())
 
-    assert first and second, f"один из stream() остался пустым — очередь делится, а не размножается: {first} / {second}"
-    assert first == second, f"подписчики увидели разное — веер работает не на всех: {first} / {second}"
+    assert first and second, (
+        f"один из stream() остался пустым — очередь делится, а не размножается: {first} / {second}"
+    )
+    assert first == second, (
+        f"подписчики увидели разное — веер работает не на всех: {first} / {second}"
+    )
     assert set(first) == {"a", "b"}, f"потерялись дельты: {first}"
 
 

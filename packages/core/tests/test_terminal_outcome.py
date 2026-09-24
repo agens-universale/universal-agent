@@ -42,7 +42,9 @@ def teardown_module(_module) -> None:
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
 
 
 processing_module = None
@@ -78,7 +80,9 @@ def _stub_tools_modules() -> None:
         return False
 
     tools_pkg.aapply_tool = _apply_tool
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     tools_pkg.is_unknown_tool_output = _is_unknown_tool_output
     tools_dir = module_dir("tools")
     # `processing_responses` импортирует эти имена на уровне модуля. Без них
@@ -117,7 +121,9 @@ def _make_ctx(**overrides):
 
 def _text_response_from_backend():
     """Стаб-ответ бэкенда: текстовый, без tool-call → бесконечный цикл до step_limit."""
-    return [{"role": "assistant", "type": "message", "content": "Обрабатываю..."}]
+    return [
+        {"role": "assistant", "type": "message", "content": "Обрабатываю..."}
+    ]
 
 
 def test_step_limit_sets_terminal_outcome(monkeypatch):
@@ -128,7 +134,9 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
         call_count["n"] += 1
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
     state = _make_state(max_steps=1)
     result = run_coro(
@@ -142,7 +150,9 @@ def test_step_limit_sets_terminal_outcome(monkeypatch):
     _env = json.loads(result)
     assert _env["ok"] is False
     assert _env["status"] == "step_limit"
-    assert "step" in _env["message"].lower() or "limit" in _env["message"].lower()
+    assert (
+        "step" in _env["message"].lower() or "limit" in _env["message"].lower()
+    )
     assert "raw_trace_summary" in _env
     assert state.terminal_outcome == "step_limit"
 
@@ -167,7 +177,9 @@ def test_step_limit_still_executes_pending_function_calls(monkeypatch):
         )
 
     monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
-    monkeypatch.setattr(processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs)
+    monkeypatch.setattr(
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
+    )
 
     state = _make_state(max_steps=1)
     # Budget уже исчерпан; pending FC всё равно должны исполниться.
@@ -177,7 +189,9 @@ def test_step_limit_still_executes_pending_function_calls(monkeypatch):
         {
             "type": "function_call",
             "name": "session_think",
-            "arguments": json.dumps({"thought": "must-run-despite-step-limit"}),
+            "arguments": json.dumps(
+                {"thought": "must-run-despite-step-limit"}
+            ),
             "call_id": "call_pending_1",
             "id": "fc_pending_1",
             "status": "completed",
@@ -206,7 +220,9 @@ def test_step_limit_still_executes_pending_function_calls(monkeypatch):
     assert state.steps >= 1
 
     # Outputs попали в state — trace парный, ничего не потеряно.
-    outputs = [m for m in state.messages if m.get("type") == "function_call_output"]
+    outputs = [
+        m for m in state.messages if m.get("type") == "function_call_output"
+    ]
     assert {m.get("call_id") for m in outputs} >= {
         "call_pending_1",
         "call_pending_2",
@@ -235,8 +251,12 @@ def test_step_counts_completed_model_turn_not_half_turn(monkeypatch):
         applied.append(tool_name)
         return json.dumps({"ok": True, "tool": tool_name})
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
-    monkeypatch.setattr(processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
+    monkeypatch.setattr(
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
+    )
     monkeypatch.setattr(processing_module, "aapply_tool", _apply_tool)
 
     state = _make_state(max_steps=2)
@@ -276,7 +296,9 @@ def test_tool_call_limit_sets_terminal_outcome(monkeypatch):
     async def _fake_process_user_ask(_messages, _state, _ctx):
         return _function_call_batch(2, 1), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
     async def _apply_tool(**_kw):
         return "ok"
@@ -311,8 +333,12 @@ def test_tool_calls_counter_counts_batch_none_limit(monkeypatch):
     async def _fake_process_tool_outputs(_messages, _state, _ctx):
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
-    monkeypatch.setattr(processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
+    monkeypatch.setattr(
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
+    )
 
     async def _apply_tool(**_kw):
         return "ok"
@@ -338,7 +364,9 @@ def test_token_limit_sets_terminal_outcome_aux_category(monkeypatch):
         state.usage.add("summary", input_tokens=100, output_tokens=5)
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
     state = _make_state(max_steps=5)
     result = run_coro(
@@ -362,11 +390,17 @@ def test_token_limit_ignores_thread_cumulative(monkeypatch):
     async def _fake_process_user_ask(_messages, _state, _ctx):
         return _text_response_from_backend(), "resp_stub"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
     state = _make_state(max_steps=1)
-    state.usage.add("main", input_tokens=900, output_tokens=100)  # «прошлые» раны треда
-    state.run_start_usage_meta = state.usage.to_meta()  # как делает agent_executor
+    state.usage.add(
+        "main", input_tokens=900, output_tokens=100
+    )  # «прошлые» раны треда
+    state.run_start_usage_meta = (
+        state.usage.to_meta()
+    )  # как делает agent_executor
     result = run_coro(
         arun_agent(
             [{"role": "user", "content": "привет", "id": "m1"}],

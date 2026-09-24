@@ -44,6 +44,14 @@ def digest_limits_from_params(params: dict | None) -> dict[str, int]:
     if not isinstance(params, dict):
         params = {}
     return {
-        "max_dialogue_chars": int(params.get("max_dialogue_chars", DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS)),
-        "max_message_chars": int(params.get("max_message_chars", DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS)),
+        "max_dialogue_chars": int(
+            params.get(
+                "max_dialogue_chars", DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS
+            )
+        ),
+        "max_message_chars": int(
+            params.get(
+                "max_message_chars", DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
+            )
+        ),
     }

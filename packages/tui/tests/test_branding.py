@@ -38,7 +38,11 @@ def test_version_under_logo_is_centered_like_the_tagline(monkeypatch):
     тэглайн: рамка карточки шире бренда, и CSS-выравнивание увело бы строку по ней."""
     from gc_core import app_version
 
-    monkeypatch.setattr(app_version, "install_source", lambda: app_version.InstallSource("u", "master", "c", False))
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda: app_version.InstallSource("u", "master", "c", False),
+    )
     monkeypatch.setattr(app_version, "agent_version", lambda: "1.2.3")
     line = branding.version_under_logo()
     assert line.strip() == "v1.2.3"
@@ -54,10 +58,18 @@ def test_version_shows_dev_when_running_from_sources(monkeypatch):
     """Из исходников метаданные пакета отстают от кода — номер соврал бы, поэтому dev."""
     from gc_core import app_version
 
-    monkeypatch.setattr(app_version, "install_source", lambda: app_version.InstallSource("u", None, None, True))
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda: app_version.InstallSource("u", None, None, True),
+    )
     assert branding.version_under_logo().strip() == app_version.DEV_LABEL
-    assert "из исходников" in app_version.DEV_LABEL  # не голое «dev»: сухо и неясно
-    monkeypatch.setattr(app_version, "install_source", lambda: None)  # нет метаданных
+    assert (
+        "из исходников" in app_version.DEV_LABEL
+    )  # не голое «dev»: сухо и неясно
+    monkeypatch.setattr(
+        app_version, "install_source", lambda: None
+    )  # нет метаданных
     assert branding.version_under_logo().strip() == app_version.DEV_LABEL
 
 
@@ -67,11 +79,19 @@ def test_version_forms_follow_one_rule(monkeypatch):
     он остался от установки пакета и коду уже не соответствует."""
     from gc_core import app_version
 
-    monkeypatch.setattr(app_version, "install_source", lambda: app_version.InstallSource("u", None, None, True))
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda: app_version.InstallSource("u", None, None, True),
+    )
     assert app_version.display_version() == "dev"
     assert app_version.display_version(long=True) == app_version.DEV_LABEL
 
-    monkeypatch.setattr(app_version, "install_source", lambda: app_version.InstallSource("u", "master", "c", False))
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda: app_version.InstallSource("u", "master", "c", False),
+    )
     monkeypatch.setattr(app_version, "agent_version", lambda: "1.2.3")
     # установлено штатно — обе формы одинаковы, пояснять нечего
     assert app_version.display_version() == "v1.2.3"

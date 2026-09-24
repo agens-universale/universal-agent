@@ -22,4 +22,6 @@ def test_final_multiparagraph_is_single_trace_row():
     ws = build_agent_widgets("абзац1\n\nабзац2", event_no=1)
     rows = [w for w in ws if isinstance(w, TraceRow)]
     assert len(rows) == 1  # один прогон → один ряд (не по-строчно)
-    assert rows[0]._content.plain == "абзац1\n\nабзац2"  # пустая строка сохранена
+    assert (
+        rows[0]._content.plain == "абзац1\n\nабзац2"
+    )  # пустая строка сохранена

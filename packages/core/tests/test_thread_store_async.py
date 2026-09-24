@@ -158,10 +158,17 @@ async def test_session_reads_and_writes_through_the_async_store():
     )
     assert session.port is store, "порт завернул нативное хранилище в адаптер"
 
-    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
-    await session.apersist_batch([_msg("m2", "два")], previous_response_id="r1")
+    await session.apersist_batch(
+        [_msg("m1", "раз")], previous_response_id=None
+    )
+    await session.apersist_batch(
+        [_msg("m2", "два")], previous_response_id="r1"
+    )
 
-    assert [m["content"] for m in store._inner.load_messages(SYS, TID)] == ["раз", "два"]
+    assert [m["content"] for m in store._inner.load_messages(SYS, TID)] == [
+        "раз",
+        "два",
+    ]
     assert store._inner.load_meta(SYS, TID)["messages_count"] == 2
     assert store.awaited > 0, "ни одна корутина не была дождана"
 
@@ -187,7 +194,12 @@ async def test_adapter_and_native_port_agree(tmp_path):
         "user_intent_log": ["хочу"],
     }
     messages = [_msg(f"m{i}", f"сообщение {i}") for i in range(1, 5)]
-    volatile = {"created_at", "updated_at", "last_summarized_at", "last_summary_archive_suffix"}
+    volatile = {
+        "created_at",
+        "updated_at",
+        "last_summarized_at",
+        "last_summary_archive_suffix",
+    }
 
     async def _run(store):
         session = await ThreadSession.afrom_config(
@@ -205,17 +217,32 @@ async def test_adapter_and_native_port_agree(tmp_path):
     sync_result = await _run(sync_store)
     native_result = await _run(native_store)
 
-    assert native_store.awaited > 0, "проверка пустая: асинхронное хранилище ни разу не позвали нативно"
-    assert sync_result["new_messages_count"] == native_result["new_messages_count"]
+    assert native_store.awaited > 0, (
+        "проверка пустая: асинхронное хранилище ни разу не позвали нативно"
+    )
+    assert (
+        sync_result["new_messages_count"]
+        == native_result["new_messages_count"]
+    )
     assert [m["content"] for m in sync_store.load_messages(SYS, TID)] == [
         m["content"] for m in native_store._inner.load_messages(SYS, TID)
     ]
-    sync_meta = {k: v for k, v in sync_store.load_meta(SYS, TID).items() if k not in volatile}
-    native_meta = {k: v for k, v in native_store._inner.load_meta(SYS, TID).items() if k not in volatile}
+    sync_meta = {
+        k: v
+        for k, v in sync_store.load_meta(SYS, TID).items()
+        if k not in volatile
+    }
+    native_meta = {
+        k: v
+        for k, v in native_store._inner.load_meta(SYS, TID).items()
+        if k not in volatile
+    }
     assert sync_meta == native_meta
 
 
-async def test_compaction_without_files_does_not_write_to_disk(tmp_path, monkeypatch):
+async def test_compaction_without_files_does_not_write_to_disk(
+    tmp_path, monkeypatch
+):
     """Компакция на хранилище без файлов НИЧЕГО не пишет на диск.
 
     Раньше метод ходил в файлы напрямую: ``_thread_paths(self.threads_dir, …)``
@@ -231,12 +258,18 @@ async def test_compaction_without_files_does_not_write_to_disk(tmp_path, monkeyp
         thread_id=TID,
         store=store,
     )
-    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
-    await session.aarchive_and_compact_summary_payload({"summary_message_content": "сводка"})
+    await session.apersist_batch(
+        [_msg("m1", "раз")], previous_response_id=None
+    )
+    await session.aarchive_and_compact_summary_payload(
+        {"summary_message_content": "сводка"}
+    )
 
     created = [p for p in tmp_path.rglob("*") if p.is_file()]
     assert created == [], f"компакция создала файлы мимо хранилища: {created}"
-    assert len(store.load_messages(SYS, TID)) == 1, "история не заместилась сводкой"
+    assert len(store.load_messages(SYS, TID)) == 1, (
+        "история не заместилась сводкой"
+    )
 
 
 async def test_file_store_still_archives(tmp_path):
@@ -249,8 +282,12 @@ async def test_file_store_still_archives(tmp_path):
         thread_id=TID,
         store=store,
     )
-    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
-    result = await session.aarchive_and_compact_summary_payload({"summary_message_content": "сводка"})
+    await session.apersist_batch(
+        [_msg("m1", "раз")], previous_response_id=None
+    )
+    result = await session.aarchive_and_compact_summary_payload(
+        {"summary_message_content": "сводка"}
+    )
     assert result["archive_data_path"], "архив не создан"
     assert "__pre_summary__" in result["archive_data_path"]
 
@@ -282,16 +319,25 @@ async def test_runtime_flags_reach_the_async_store():
 
     seen = {}
     async with _asummarizing_flag(session):
-        seen["during"] = store._inner.load_meta(SYS, TID).get("runtime", {}).get("summarizing")
+        seen["during"] = (
+            store._inner.load_meta(SYS, TID)
+            .get("runtime", {})
+            .get("summarizing")
+        )
     assert seen["during"] is True, "флаг не взведён в асинхронном хранилище"
-    assert "runtime" not in store._inner.load_meta(SYS, TID), "секция runtime не убрана"
+    assert "runtime" not in store._inner.load_meta(SYS, TID), (
+        "секция runtime не убрана"
+    )
 
     await aset_tui_finalizing(session, True)
     assert store._inner.load_meta(SYS, TID)["runtime"]["finalizing"] is True
     await aset_tui_finalizing(session, False)
 
     await aset_tui_finish_gate_checking(session, True)
-    assert store._inner.load_meta(SYS, TID)["runtime"]["finish_gate_checking"] is True
+    assert (
+        store._inner.load_meta(SYS, TID)["runtime"]["finish_gate_checking"]
+        is True
+    )
 
 
 async def test_trace_ids_reach_the_async_store():
@@ -306,10 +352,14 @@ async def test_trace_ids_reach_the_async_store():
         store=store,
     )
     await _aappend_trace_id_to_meta(session, "trace-abc", None)
-    assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == ["trace-abc"]
+    assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == [
+        "trace-abc"
+    ]
 
     await _aappend_trace_id_to_meta(session, "trace-abc", None)
-    assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == ["trace-abc"], "повтор задвоил trace_id"
+    assert store._inner.load_meta(SYS, TID)["runtime"]["trace_ids"] == [
+        "trace-abc"
+    ], "повтор задвоил trace_id"
 
 
 async def test_subagent_trace_reaches_the_async_store(tmp_path):
@@ -331,12 +381,16 @@ async def test_subagent_trace_reaches_the_async_store(tmp_path):
         run_id="run-1",
         thread_store=store,
     )
-    record = await apersist_subagent_trace(ctx, kind="call", payload={"name": "fs_read"})
+    record = await apersist_subagent_trace(
+        ctx, kind="call", payload={"name": "fs_read"}
+    )
     assert record is not None and record["kind"] == "call"
     assert len(store._inner.read_subagent_trace(SYS, TID)) == 1
 
 
-async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(caplog):
+async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(
+    caplog,
+):
     """Хранилище без `replace_messages` не теряет трассу субагентов при компакции.
 
     `replace_messages` в контракт НЕ входит: он объявлен умолчанием базы, а
@@ -349,14 +403,18 @@ async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(ca
     import logging
 
     store = RedisLikeStore()
-    assert not hasattr(store, "areplace_messages"), "двойник перестал быть утиным"
+    assert not hasattr(store, "areplace_messages"), (
+        "двойник перестал быть утиным"
+    )
     session = await ThreadSession.afrom_config(
         config_dict={},
         system_id=SYS,
         thread_id=TID,
         store=store,
     )
-    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
+    await session.apersist_batch(
+        [_msg("m1", "раз")], previous_response_id=None
+    )
     await store.aappend_subagent_trace(
         SYS,
         TID,
@@ -367,9 +425,15 @@ async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(ca
     )
 
     with caplog.at_level(logging.WARNING):
-        await session.aarchive_and_compact_summary_payload({"summary_message_content": "сводка"})
+        await session.aarchive_and_compact_summary_payload(
+            {"summary_message_content": "сводка"}
+        )
 
     trace = await store.aread_subagent_trace(SYS, TID)
-    assert [r["child_run_id"] for r in trace] == ["r1"], f"трасса потеряна: {trace}"
+    assert [r["child_run_id"] for r in trace] == ["r1"], (
+        f"трасса потеряна: {trace}"
+    )
     assert [r["payload"] for r in trace] == [{"task": "проверить"}]
-    assert "areplace_messages" in caplog.text, "потеря штампов трассы прошла молча — хранилищу не сказали, что делать"
+    assert "areplace_messages" in caplog.text, (
+        "потеря штампов трассы прошла молча — хранилищу не сказали, что делать"
+    )

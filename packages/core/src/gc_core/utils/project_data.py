@@ -2,7 +2,10 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from gc_core.execution_workspace import build_execution_workspace, host_os_label
+from gc_core.execution_workspace import (
+    build_execution_workspace,
+    host_os_label,
+)
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
 cut_first = 100
@@ -133,9 +136,13 @@ async def _build_listing(
     """
     raw_entries = await listdir_fn(dir_path)
 
-    filtered: list[tuple[str, bool]] = [(n, d) for n, d in raw_entries if n not in stop_folders]
+    filtered: list[tuple[str, bool]] = [
+        (n, d) for n, d in raw_entries if n not in stop_folders
+    ]
 
-    shown, root_trunc, root_shown, root_total = _slice_level(filtered, cut_first)
+    shown, root_trunc, root_shown, root_total = _slice_level(
+        filtered, cut_first
+    )
     any_trunc = root_trunc
 
     res: List[tuple[str, List[str]]] = []
@@ -143,14 +150,17 @@ async def _build_listing(
         if not is_dir:
             res.append((name, []))
             continue
-        sub_items, sub_trunc = await _sub_level_items(listdir_fn, join_fn(dir_path, name))
+        sub_items, sub_trunc = await _sub_level_items(
+            listdir_fn, join_fn(dir_path, name)
+        )
         any_trunc = any_trunc or sub_trunc
         res.append((name + "/", sub_items))
 
     if root_trunc:
         res.append(
             (
-                "..." + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
+                "..."
+                + _TRUNCATE_MARKER.format(shown=root_shown, total=root_total),
                 [],
             )
         )
@@ -158,13 +168,21 @@ async def _build_listing(
     return _render_listing(res, any_trunc)
 
 
-async def _sub_level_items(listdir_fn, sub_path: str) -> tuple[List[str], bool]:
+async def _sub_level_items(
+    listdir_fn, sub_path: str
+) -> tuple[List[str], bool]:
     """Имена второго уровня (с маркером усечения) и флаг усечения."""
-    filtered_sub: list[tuple[str, bool]] = [(n, d) for n, d in await listdir_fn(sub_path) if n not in stop_folders]
-    shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(filtered_sub, cut_second)
+    filtered_sub: list[tuple[str, bool]] = [
+        (n, d) for n, d in await listdir_fn(sub_path) if n not in stop_folders
+    ]
+    shown_sub, sub_trunc, sub_shown, sub_total = _slice_level(
+        filtered_sub, cut_second
+    )
     sub_items = [n + "/" if d else n for n, d in shown_sub]
     if sub_trunc:
-        sub_items.append("..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total))
+        sub_items.append(
+            "..." + _TRUNCATE_MARKER.format(shown=sub_shown, total=sub_total)
+        )
     return sub_items, sub_trunc
 
 
@@ -187,7 +205,9 @@ def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
     seen: set[str] = set()
     out: List[str] = []
     for raw in paths:
-        candidate = os.path.abspath(os.path.expanduser(os.path.normpath(str(raw))))
+        candidate = os.path.abspath(
+            os.path.expanduser(os.path.normpath(str(raw)))
+        )
         if candidate not in seen:
             seen.add(candidate)
             out.append(candidate)
@@ -262,7 +282,9 @@ async def get_project_data(
     project_dir = ws.root
     be = ws.backend
     current_date = datetime.now().strftime("%Y-%m-%d")
-    is_git_project = "true" if await be.exists(be.join(project_dir, ".git")) else "false"
+    is_git_project = (
+        "true" if await be.exists(be.join(project_dir, ".git")) else "false"
+    )
     try:
         project_dir_listing = await get_listing_from_backend(be, project_dir)
     except OSError:
@@ -285,13 +307,19 @@ async def get_project_data(
     if not os.path.isdir(project_dir):
         project_dir = os.path.abspath(os.getcwd())
         root_writable = "true" if _dir_writable_probe(project_dir) else "false"
-        is_git_project = "true" if os.path.exists(os.path.join(project_dir, ".git")) else "false"
+        is_git_project = (
+            "true"
+            if os.path.exists(os.path.join(project_dir, ".git"))
+            else "false"
+        )
         try:
             project_dir_listing = await get_listing(project_dir)
         except OSError:
             project_dir_listing = ""
 
-    allowed_roots = _dedupe_ordered_abs_paths([project_dir, *_extra_write_roots(workspace_config)])
+    allowed_roots = _dedupe_ordered_abs_paths(
+        [project_dir, *_extra_write_roots(workspace_config)]
+    )
     writable_roots = [p for p in allowed_roots if _dir_writable_probe(p)]
     return {
         "OS": ws.os_name,

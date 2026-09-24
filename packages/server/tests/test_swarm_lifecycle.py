@@ -59,32 +59,44 @@ def test_is_pid_alive_permission_error_returns_true(monkeypatch):
 
 
 def test_determine_status_exit_zero_no_error_completed():
-    r = lc._determine_status_from_completion({"exit_code": 0, "error_type": ""})
+    r = lc._determine_status_from_completion(
+        {"exit_code": 0, "error_type": ""}
+    )
     assert r == "completed"
 
 
 def test_determine_status_exit_nonzero_no_error_failed():
-    r = lc._determine_status_from_completion({"exit_code": 1, "error_type": ""})
+    r = lc._determine_status_from_completion(
+        {"exit_code": 1, "error_type": ""}
+    )
     assert r == "failed"
 
 
 def test_determine_status_error_type_timeout():
-    r = lc._determine_status_from_completion({"exit_code": 124, "error_type": "timeout"})
+    r = lc._determine_status_from_completion(
+        {"exit_code": 124, "error_type": "timeout"}
+    )
     assert r == "timeout"
 
 
 def test_determine_status_error_type_cli_error_failed():
-    r = lc._determine_status_from_completion({"exit_code": 1, "error_type": "cli_error"})
+    r = lc._determine_status_from_completion(
+        {"exit_code": 1, "error_type": "cli_error"}
+    )
     assert r == "failed"
 
 
 def test_determine_status_error_type_signal_term_failed():
-    r = lc._determine_status_from_completion({"exit_code": 143, "error_type": "signal_term"})
+    r = lc._determine_status_from_completion(
+        {"exit_code": 143, "error_type": "signal_term"}
+    )
     assert r == "failed"
 
 
 def test_determine_status_error_type_disk_limit_failed():
-    r = lc._determine_status_from_completion({"exit_code": 137, "error_type": "disk_limit"})
+    r = lc._determine_status_from_completion(
+        {"exit_code": 137, "error_type": "disk_limit"}
+    )
     assert r == "failed"
 
 
@@ -94,7 +106,9 @@ def test_determine_status_missing_exit_code_failed():
 
 
 def test_determine_status_non_int_exit_code_failed():
-    r = lc._determine_status_from_completion({"exit_code": "0", "error_type": ""})
+    r = lc._determine_status_from_completion(
+        {"exit_code": "0", "error_type": ""}
+    )
     assert r == "failed"
 
 
@@ -104,7 +118,10 @@ def test_determine_status_non_int_exit_code_failed():
 
 
 def test_final_statuses_contains_expected():
-    assert frozenset({"completed", "failed", "timeout", "unknown_failed"}) == lc.FINAL_STATUSES
+    assert (
+        frozenset({"completed", "failed", "timeout", "unknown_failed"})
+        == lc.FINAL_STATUSES
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +370,9 @@ def test_check_and_finalize_timeout_kills_process(dirs, monkeypatch):
 
     # Мокаем killpg + alive check (PID живой).
     killed = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(
+        "os.killpg", lambda pid, sig: killed.append((pid, sig))
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)  # alive
     # Сократить grace.
     monkeypatch.setattr(lc, "_KILL_GRACE_SECONDS", 0.01)
@@ -367,7 +386,9 @@ def test_check_and_finalize_timeout_kills_process(dirs, monkeypatch):
     assert killed, "ожидали хотя бы один os.killpg вызов"
 
 
-def test_check_and_finalize_no_timeout_when_deadline_in_future(dirs, monkeypatch):
+def test_check_and_finalize_no_timeout_when_deadline_in_future(
+    dirs, monkeypatch
+):
     """deadline_at в будущем → процесс не убиваем."""
     threads, sandbox = dirs
     future = "2099-01-01T00:00:00+00:00"
@@ -375,14 +396,18 @@ def test_check_and_finalize_no_timeout_when_deadline_in_future(dirs, monkeypatch
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     killed = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(
+        "os.killpg", lambda pid, sig: killed.append((pid, sig))
+    )
 
     r = lc.check_and_finalize(threads, sandbox, "g_tf")
     assert r["swarm_meta"]["status"] == "running"
     assert killed == []
 
 
-def test_check_and_finalize_deadline_passed_but_process_already_dead(dirs, monkeypatch):
+def test_check_and_finalize_deadline_passed_but_process_already_dead(
+    dirs, monkeypatch
+):
     """deadline_at прошёл, но процесс уже сам завершился → fallthrough.
 
     Если есть completion.json — финализируется по нему.
@@ -408,7 +433,9 @@ def test_check_and_finalize_deadline_passed_but_process_already_dead(dirs, monke
 
     monkeypatch.setattr("os.kill", kill_dead)
     killed = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(
+        "os.killpg", lambda pid, sig: killed.append((pid, sig))
+    )
 
     r = lc.check_and_finalize(threads, sandbox, "g_tdead")
     # Прошли через completion.json ветку, не через timeout.
@@ -416,10 +443,14 @@ def test_check_and_finalize_deadline_passed_but_process_already_dead(dirs, monke
     assert killed == []
 
 
-def test_check_and_finalize_invalid_deadline_skips_timeout_logic(dirs, monkeypatch):
+def test_check_and_finalize_invalid_deadline_skips_timeout_logic(
+    dirs, monkeypatch
+):
     """Невалидный deadline_at — игнорируем timeout-чек, идём к completion/PID."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_tinv", "running", pid=99999, deadline_at="not a date")
+    _seed_meta(
+        threads, "g_tinv", "running", pid=99999, deadline_at="not a date"
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     r = lc.check_and_finalize(threads, sandbox, "g_tinv")
@@ -459,7 +490,11 @@ def test_disk_limit_kills_process_when_exceeded(dirs, monkeypatch):
     # Создаём sandbox path с большим файлом.
     sb_path = os.path.join(sandbox, "g_d1")
     os.makedirs(sb_path)
-    (open(os.path.join(sb_path, "big.bin"), "wb").write(b"x" * (3 * 1024 * 1024)))
+    (
+        open(os.path.join(sb_path, "big.bin"), "wb").write(
+            b"x" * (3 * 1024 * 1024)
+        )
+    )
     _seed_meta(
         threads,
         "g_d1",
@@ -470,7 +505,9 @@ def test_disk_limit_kills_process_when_exceeded(dirs, monkeypatch):
     )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     killed = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(
+        "os.killpg", lambda pid, sig: killed.append((pid, sig))
+    )
     monkeypatch.setattr(lc, "_KILL_GRACE_SECONDS", 0.01)
 
     r = lc.check_and_finalize(threads, sandbox, "g_d1", heavy_checks=True)
@@ -487,8 +524,17 @@ def test_disk_limit_not_enforced_without_heavy_checks(dirs, monkeypatch):
     threads, sandbox = dirs
     sb_path = os.path.join(sandbox, "g_d2")
     os.makedirs(sb_path)
-    open(os.path.join(sb_path, "big.bin"), "wb").write(b"x" * (3 * 1024 * 1024))
-    _seed_meta(threads, "g_d2", "running", pid=12345, sandbox_path=sb_path, limits={"disk_mb": 1})
+    open(os.path.join(sb_path, "big.bin"), "wb").write(
+        b"x" * (3 * 1024 * 1024)
+    )
+    _seed_meta(
+        threads,
+        "g_d2",
+        "running",
+        pid=12345,
+        sandbox_path=sb_path,
+        limits={"disk_mb": 1},
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     # heavy_checks=False по умолчанию.
@@ -500,8 +546,17 @@ def test_disk_limit_skipped_when_below_threshold(dirs, monkeypatch):
     threads, sandbox = dirs
     sb_path = os.path.join(sandbox, "g_d3")
     os.makedirs(sb_path)
-    open(os.path.join(sb_path, "small.bin"), "wb").write(b"x" * 100)  # 100 байт
-    _seed_meta(threads, "g_d3", "running", pid=12345, sandbox_path=sb_path, limits={"disk_mb": 100})
+    open(os.path.join(sb_path, "small.bin"), "wb").write(
+        b"x" * 100
+    )  # 100 байт
+    _seed_meta(
+        threads,
+        "g_d3",
+        "running",
+        pid=12345,
+        sandbox_path=sb_path,
+        limits={"disk_mb": 100},
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     r = lc.check_and_finalize(threads, sandbox, "g_d3", heavy_checks=True)
@@ -510,7 +565,9 @@ def test_disk_limit_skipped_when_below_threshold(dirs, monkeypatch):
 
 def test_disk_limit_skipped_when_no_sandbox_path(dirs, monkeypatch):
     threads, sandbox = dirs
-    _seed_meta(threads, "g_d4", "running", pid=12345, limits={"disk_mb": 1})  # без sandbox_path
+    _seed_meta(
+        threads, "g_d4", "running", pid=12345, limits={"disk_mb": 1}
+    )  # без sandbox_path
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     r = lc.check_and_finalize(threads, sandbox, "g_d4", heavy_checks=True)
@@ -525,10 +582,14 @@ def test_disk_limit_skipped_when_no_sandbox_path(dirs, monkeypatch):
 def test_memory_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
     """psutil показывает RSS > memory_mb → kill + failed."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_m1", "running", pid=12345, limits={"memory_mb": 100})  # 100 MB
+    _seed_meta(
+        threads, "g_m1", "running", pid=12345, limits={"memory_mb": 100}
+    )  # 100 MB
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     killed = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(
+        "os.killpg", lambda pid, sig: killed.append((pid, sig))
+    )
     monkeypatch.setattr(lc, "_KILL_GRACE_SECONDS", 0.01)
 
     # Мок psutil.Process.memory_info().rss = 200 MB.
@@ -557,7 +618,9 @@ def test_memory_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
 def test_memory_limit_skipped_without_psutil(dirs, monkeypatch):
     """Без psutil — memory check просто пропускается, нет ошибки."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_m2", "running", pid=12345, limits={"memory_mb": 1})  # entry: 1 MB very low
+    _seed_meta(
+        threads, "g_m2", "running", pid=12345, limits={"memory_mb": 1}
+    )  # entry: 1 MB very low
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     monkeypatch.setattr(lc, "_PSUTIL_AVAILABLE", False)
 
@@ -568,7 +631,9 @@ def test_memory_limit_skipped_without_psutil(dirs, monkeypatch):
 def test_memory_limit_handles_psutil_no_such_process(dirs, monkeypatch):
     """psutil.NoSuchProcess → не падаем, идём дальше."""
     threads, sandbox = dirs
-    _seed_meta(threads, "g_m3", "running", pid=12345, limits={"memory_mb": 100})
+    _seed_meta(
+        threads, "g_m3", "running", pid=12345, limits={"memory_mb": 100}
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
     if not lc._PSUTIL_AVAILABLE:
@@ -590,10 +655,14 @@ def test_memory_limit_handles_psutil_no_such_process(dirs, monkeypatch):
 
 def test_cpu_limit_kills_when_psutil_reports_excess(dirs, monkeypatch):
     threads, sandbox = dirs
-    _seed_meta(threads, "g_c1", "running", pid=12345, limits={"cpu_percent": 50})
+    _seed_meta(
+        threads, "g_c1", "running", pid=12345, limits={"cpu_percent": 50}
+    )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
     killed = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(
+        "os.killpg", lambda pid, sig: killed.append((pid, sig))
+    )
     monkeypatch.setattr(lc, "_KILL_GRACE_SECONDS", 0.01)
 
     if not lc._PSUTIL_AVAILABLE:
@@ -626,7 +695,9 @@ def test_resource_limits_not_checked_when_heavy_false(dirs, monkeypatch):
     threads, sandbox = dirs
     sb_path = os.path.join(sandbox, "g_h1")
     os.makedirs(sb_path)
-    open(os.path.join(sb_path, "big.bin"), "wb").write(b"x" * (5 * 1024 * 1024))
+    open(os.path.join(sb_path, "big.bin"), "wb").write(
+        b"x" * (5 * 1024 * 1024)
+    )
     _seed_meta(
         threads,
         "g_h1",
@@ -637,7 +708,9 @@ def test_resource_limits_not_checked_when_heavy_false(dirs, monkeypatch):
     )
     monkeypatch.setattr("os.kill", lambda pid, sig: None)
 
-    r = lc.check_and_finalize(threads, sandbox, "g_h1")  # heavy_checks=False default
+    r = lc.check_and_finalize(
+        threads, sandbox, "g_h1"
+    )  # heavy_checks=False default
     assert r["swarm_meta"]["status"] == "running"
 
 
@@ -652,7 +725,9 @@ def _make_fake_sandbox(tmp_path, swarm_id):
     (sb / ".gc" / "logs").mkdir(parents=True)
     (sb / ".gc" / "threads" / swarm_id).mkdir(parents=True)
     (sb / ".gc" / "logs" / "agent_main.log").write_text("LOGMARK")
-    (sb / ".gc" / "threads" / swarm_id / "messages.jsonl").write_text("MSGMARK")
+    (sb / ".gc" / "threads" / swarm_id / "messages.jsonl").write_text(
+        "MSGMARK"
+    )
     return sb
 
 
@@ -664,7 +739,9 @@ def test_persist_agent_artifacts_default_under_threads_dir(tmp_path):
     sb = _make_fake_sandbox(tmp_path, swarm_id)
     threads_dir = str(tmp_path / "threads")
     _persist_agent_artifacts(threads_dir, swarm_id, str(sb))
-    assert (tmp_path / "threads" / swarm_id / "agent_logs" / "agent_main.log").read_text() == "LOGMARK"
+    assert (
+        tmp_path / "threads" / swarm_id / "agent_logs" / "agent_main.log"
+    ).read_text() == "LOGMARK"
 
 
 def test_persist_agent_artifacts_configured_dir(tmp_path):
@@ -675,8 +752,12 @@ def test_persist_agent_artifacts_configured_dir(tmp_path):
     sb = _make_fake_sandbox(tmp_path, swarm_id)
     threads_dir = str(tmp_path / "threads")
     logs_dir = str(tmp_path / "custom_logs")
-    _persist_agent_artifacts(threads_dir, swarm_id, str(sb), swarm_logs_dir=logs_dir)
-    assert (tmp_path / "custom_logs" / swarm_id / "agent_main.log").read_text() == "LOGMARK"
+    _persist_agent_artifacts(
+        threads_dir, swarm_id, str(sb), swarm_logs_dir=logs_dir
+    )
+    assert (
+        tmp_path / "custom_logs" / swarm_id / "agent_main.log"
+    ).read_text() == "LOGMARK"
     # В дефолтный threads_dir НЕ должно попасть.
     assert not (tmp_path / "threads" / swarm_id / "agent_logs").exists()
 

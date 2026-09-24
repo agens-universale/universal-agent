@@ -33,7 +33,9 @@ async def test_help_header_and_hotkeys():
         assert "Ctrl+C" in cmds and "Esc" in descs
         assert "Ctrl+A" in cmds
         assert "Ctrl+N" in keys and "Ctrl+S" in keys
-        assert "Ctrl+T" in keys and "Ctrl+T" in cmds  # голос: и у команды, и в хоткеях
+        assert (
+            "Ctrl+T" in keys and "Ctrl+T" in cmds
+        )  # голос: и у команды, и в хоткеях
         assert "Ctrl+D" in keys and "Ctrl+O" in keys and "Ctrl+G" in keys
         assert "Ctrl+/" in keys
         assert "Ctrl+E" not in body.split()
@@ -51,7 +53,9 @@ async def test_help_header_and_hotkeys():
         assert body.index("как работать") < body.index("команды")
         assert "/notices" in cmds and "/diff" in cmds and "/compact" in cmds
         # порядок по частоте: help раньше sessions раньше diff
-        assert cmds.index("/help") < cmds.index("/sessions") < cmds.index("/diff")
+        assert (
+            cmds.index("/help") < cmds.index("/sessions") < cmds.index("/diff")
+        )
         # якоря мини-туториала (секция «как работать»)
         assert "URL, токен, модель" in descs
         assert "/view <path>" in cmds
@@ -100,7 +104,11 @@ async def test_help_rows_zebra_striping():
             self.push_screen(HelpScreen())
 
     async with _A().run_test() as pilot:
-        rows = [w for w in pilot.app.screen.query(Horizontal) if w.has_class("help-row")]
+        rows = [
+            w
+            for w in pilot.app.screen.query(Horizontal)
+            if w.has_class("help-row")
+        ]
         assert len(rows) >= 4
         assert not rows[0].has_class("help-row-alt")
         assert rows[1].has_class("help-row-alt")
@@ -139,7 +147,11 @@ async def test_help_columns_cmd_then_desc():
             self.push_screen(HelpScreen())
 
     async with _A().run_test() as pilot:
-        rows = [w for w in pilot.app.screen.query(Horizontal) if w.has_class("help-row")]
+        rows = [
+            w
+            for w in pilot.app.screen.query(Horizontal)
+            if w.has_class("help-row")
+        ]
         assert rows
         for row in rows[:6]:
             children = list(row.children)
@@ -150,7 +162,13 @@ async def test_help_columns_cmd_then_desc():
         # хоткей slash-команды — своей колонкой справа: в хвосте описаний разной
         # длины он вставал лесенкой, и глазами его было не собрать
         help_row = next(
-            r for r in rows if any("/help" in str(c.render()) for c in r.query(Static) if c.has_class("help-row-cmd"))
+            r
+            for r in rows
+            if any(
+                "/help" in str(c.render())
+                for c in r.query(Static)
+                if c.has_class("help-row-cmd")
+            )
         )
         desc = str(help_row.query_one(".help-row-desc", Static).render())
         key = str(help_row.query_one(".help-row-key", Static).render())
@@ -172,7 +190,10 @@ async def test_hotkey_column_does_not_drift_with_the_window_width():
         async with app.run_test(size=(width, 60)) as pilot:
             await app.push_screen(HelpScreen())
             await pilot.pause()
-            rows = ["".join(seg.text for seg in strip) for strip in app.screen._compositor.render_strips()]
+            rows = [
+                "".join(seg.text for seg in strip)
+                for strip in app.screen._compositor.render_strips()
+            ]
 
             # именно строки команд: имя стоит в ПЕРВОЙ колонке. Проверять начало
             # строки нельзя — на узком окне описания переносятся, и продолжение
@@ -201,12 +222,22 @@ async def test_long_description_without_hotkey_does_not_break_in_two():
 
     names = {"/" + c.name for c in build_default_registry().list_commands()}
     app = TuiApp(config={"model": "M"})
-    async with app.run_test(size=(130, 60)) as pilot:  # ширины хватает, потолок не при чём
+    async with app.run_test(
+        size=(130, 60)
+    ) as pilot:  # ширины хватает, потолок не при чём
         await app.push_screen(HelpScreen())
         await pilot.pause()
-        rows = [r for r in app.screen.query(".help-row") if str(list(r.children)[0].render()).strip() in names]
+        rows = [
+            r
+            for r in app.screen.query(".help-row")
+            if str(list(r.children)[0].render()).strip() in names
+        ]
         assert rows, "строк команд не нашлось"
-        tall = [str(list(r.children)[0].render()).strip() for r in rows if r.size.height > 1]
+        tall = [
+            str(list(r.children)[0].render()).strip()
+            for r in rows
+            if r.size.height > 1
+        ]
         assert tall == [], f"описания ломаются пополам: {tall}"
 
 
@@ -236,11 +267,16 @@ async def test_quickstart_mentions_voice_input():
     async with app.run_test(size=(170, 60)) as pilot:
         await app.push_screen(HelpScreen())
         await pilot.pause()
-        rows = ["".join(seg.text for seg in strip).rstrip() for strip in app.screen._compositor.render_strips()]
+        rows = [
+            "".join(seg.text for seg in strip).rstrip()
+            for strip in app.screen._compositor.render_strips()
+        ]
         top = next(i for i, r in enumerate(rows) if "как работать" in r)
         block = rows[top : top + 6]
         voice = next(r for r in block if r[:20].strip() == "Ctrl+T")
         assert "надиктуйте сообщение вместо набора" in voice
         assert "/settings" in voice  # без сервиса клавиша молчит
-        enter = next(i for i, r in enumerate(block) if r[:20].strip() == "Enter")
+        enter = next(
+            i for i, r in enumerate(block) if r[:20].strip() == "Enter"
+        )
         assert block.index(voice) == enter + 1  # сразу за строкой про набор

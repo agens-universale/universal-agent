@@ -30,7 +30,9 @@ _REGISTRY = {
     }
 }
 _CONFIG = {
-    "mcp-servers": {"srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}},
+    "mcp-servers": {
+        "srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}
+    },
 }
 
 
@@ -57,7 +59,9 @@ class _SandboxBackend:
 
 async def test_fabric_from_public_entry_builds_a_wrapper():
     """Главная проверка: фабрика из tools_data вызывается и отдаёт обёртку."""
-    tools_data, status = await aget_mcp_tools_data_for_config(_CONFIG, tools_cache=_FakeCache())
+    tools_data, status = await aget_mcp_tools_data_for_config(
+        _CONFIG, tools_cache=_FakeCache()
+    )
 
     assert _TOOL_NAME in tools_data, tools_data
     assert status == {"srv": {"ok": True}}
@@ -75,7 +79,9 @@ async def test_fabric_carries_os_backend_to_the_wrapper():
     видимый лишь внутри песочницы, будет вызван из процесса агента.
     """
     backend = _SandboxBackend()
-    tools_data, _ = await aget_mcp_tools_data_for_config(_CONFIG, tools_cache=_FakeCache(), os_backend=backend)
+    tools_data, _ = await aget_mcp_tools_data_for_config(
+        _CONFIG, tools_cache=_FakeCache(), os_backend=backend
+    )
 
     tool = tools_data[_TOOL_NAME]["tool_fabric"]()
 
@@ -93,7 +99,9 @@ async def test_acall_passes_os_backend_down_to_the_client(monkeypatch):
     monkeypatch.setattr(agent_tools, "acall_mcp_tool", _fake_acall)
 
     backend = _SandboxBackend()
-    tools_data, _ = await aget_mcp_tools_data_for_config(_CONFIG, tools_cache=_FakeCache(), os_backend=backend)
+    tools_data, _ = await aget_mcp_tools_data_for_config(
+        _CONFIG, tools_cache=_FakeCache(), os_backend=backend
+    )
     out = await tools_data[_TOOL_NAME]["tool_fabric"]().acall()
 
     assert out == "ok"

@@ -9,7 +9,11 @@ from typing import Callable
 
 from gc_core import onboarding
 from gc_core import onboarding_fields as _of
-from gc_core.onboarding import _valid_endpoint_url, authorization_header, mask_authorization  # re-export
+from gc_core.onboarding import (
+    _valid_endpoint_url,
+    authorization_header,
+    mask_authorization,
+)  # re-export
 from gc_core.utils.is_number import is_number
 
 
@@ -109,7 +113,10 @@ def _interpret(raw: str, models, shown) -> tuple:
     if not found:
         return "ask", raw
     if len(found) <= _LIST_SHOWN:
-        return "view", (found, f"найдено {len(found)} из {len(models)} · * — весь каталог")
+        return "view", (
+            found,
+            f"найдено {len(found)} из {len(models)} · * — весь каталог",
+        )
     return "view", (
         found[:_LIST_SHOWN],
         f"показаны {_LIST_SHOWN} из {len(found)} совпадений · уточните запрос · * — весь каталог",
@@ -129,13 +136,17 @@ class _Field:
     kind: str  # "endpoint" | "auth" | "model"
 
 
-_FIELDS = tuple(_Field(fs.key, fs.hint, kind=fs.kind) for fs in _of.ONBOARDING_FIELDS)
+_FIELDS = tuple(
+    _Field(fs.key, fs.hint, kind=fs.kind) for fs in _of.ONBOARDING_FIELDS
+)
 
 
 def _collect_auth(io: WizardIO, values: dict) -> None:
     io.printer("")
     io.printer(f"  {_of.ONBOARDING_FIELDS[1].label}")
-    io.printer("\n".join(f"  {i}) {opt}" for i, opt in enumerate(_of.AUTH_OPTIONS, 1)))
+    io.printer(
+        "\n".join(f"  {i}) {opt}" for i, opt in enumerate(_of.AUTH_OPTIONS, 1))
+    )
     choice = _select_single(io, "введите номер 1–3", 3, default=3)
     if choice == 1:
         io.printer(f"  {_of.TOKEN_HINT}")
@@ -143,7 +154,9 @@ def _collect_auth(io: WizardIO, values: dict) -> None:
         if raw:
             header = authorization_header(raw)
             values["Authorization"] = header
-            io.printer(f"  записано: Authorization: {mask_authorization(header)}")
+            io.printer(
+                f"  записано: Authorization: {mask_authorization(header)}"
+            )
     elif choice == 2:
         values["Authorization"] = ""  # чистит сентинел → политика довольна
         io.printer(f"  {_of.NO_AUTH_NOTE}")
@@ -154,7 +167,9 @@ def _effective(values: dict, config: dict, key: str, header: bool = False):
     if header:
         v = values.get("Authorization")
         if v is None:
-            v = (config.get("chat_completion_headers") or {}).get("Authorization")
+            v = (config.get("chat_completion_headers") or {}).get(
+                "Authorization"
+            )
         return v
     return values.get(key) if values.get(key) is not None else config.get(key)
 
@@ -171,7 +186,9 @@ def _print_models(io: WizardIO, shown, *, current: str) -> None:
         io.printer(f"  ⚠ {_of.MODEL_WARN}")
 
 
-def _current_line(config: dict, level: str, model_id: str, note: str = "") -> str:
+def _current_line(
+    config: dict, level: str, model_id: str, note: str = ""
+) -> str:
     """Строка «сейчас» шага. Имя записи в скобках — только когда слот задан:
     модель из легаси `agent.model` имени не имеет, и выдумывать его нельзя.
     `note` — подпись об источнике модели фоллбэка (M12): слот тогда не задан,
@@ -185,7 +202,9 @@ def _current_line(config: dict, level: str, model_id: str, note: str = "") -> st
     return f"сейчас: {model_id}{entry} · Enter — оставить"
 
 
-def _warn_if_tool_incapable(io: WizardIO, models, shown, model_id: str) -> None:
+def _warn_if_tool_incapable(
+    io: WizardIO, models, shown, model_id: str
+) -> None:
     """Предупреждение в момент ВЫБОРА: точный ввод id минует печать каталога, а ⚠
     живёт только в ней (`_print_models`) и только у показанного куска — на длинном
     каталоге модель без инструментов выбиралась без предупреждения вовсе (ревью
@@ -214,7 +233,10 @@ def _ask_as_is(io: WizardIO, query: str) -> tuple:
     io.printer("")
     io.printer("  таких у провайдера нет.")
     io.printer(f"  взять «{query}» как есть?")
-    raw = io.reader("  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): ", False).strip()
+    raw = io.reader(
+        "  > (y — да · n — нет · другой запрос · Enter — пропустить шаг): ",
+        False,
+    ).strip()
     if not raw:
         return "keep", ""
     folded = raw.casefold()
@@ -225,7 +247,9 @@ def _ask_as_is(io: WizardIO, query: str) -> tuple:
     return "query", raw
 
 
-def _apply_choice(io: WizardIO, models, shown, kind: str, payload) -> tuple[str, object]:
+def _apply_choice(
+    io: WizardIO, models, shown, kind: str, payload
+) -> tuple[str, object]:
     """Что делать с распознанным вводом шага «Модель».
 
     Возвращает пару «действие, значение»: `("return", id|None)` — шаг закончен,
@@ -266,10 +290,14 @@ def _choose_model(io: WizardIO, models, *, current: str) -> str | None:
             if note:
                 io.printer(f"  {note}")
             io.printer("")
-            raw = io.reader(f"  > (номер 1–{len(shown)} или часть имени): ", False).strip()
+            raw = io.reader(
+                f"  > (номер 1–{len(shown)} или часть имени): ", False
+            ).strip()
         else:
             raw, pending = pending, None
-        action, value = _apply_choice(io, models, shown, *_interpret(raw, models, shown))
+        action, value = _apply_choice(
+            io, models, shown, *_interpret(raw, models, shown)
+        )
         if action == "return":
             return value
         if action == "view":
@@ -291,7 +319,9 @@ def _fetch_models(config: dict, values: dict, fetch=None):
     from gc_core.model_picker import fetch_models
 
     fetch = fetch or fetch_models
-    endpoint = onboarding.configured_endpoint(_effective(values, config, "completions_url"))
+    endpoint = onboarding.configured_endpoint(
+        _effective(values, config, "completions_url")
+    )
     auth = _effective(values, config, "Authorization", header=True)
     if auth == onboarding.TOKEN_SENTINEL:
         auth = None
@@ -303,7 +333,9 @@ def _fetch_models(config: dict, values: dict, fetch=None):
         return None
 
 
-def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> list | None:
+def _collect_model(
+    io: WizardIO, config: dict, values: dict, *, fetch=None
+) -> list | None:
     """Шаг «Модель». Возвращает полученный список моделей (или None) — шаг
     уровней переиспользует его, второй поход в сеть за тем же ответом лишний.
 
@@ -320,7 +352,9 @@ def _collect_model(io: WizardIO, config: dict, values: dict, *, fetch=None) -> l
     # пустела, и «оставить как есть» было не на чем.
     current, fallback_note = onboarding.model_step_display(config)
     if current:
-        io.printer(f"  {_current_line(config, 'default', current, note=fallback_note)}")
+        io.printer(
+            f"  {_current_line(config, 'default', current, note=fallback_note)}"
+        )
     io.printer(f"  {_of.MODEL_FETCHING}")
     models = _fetch_models(config, values, fetch)
     if not models:
@@ -372,7 +406,15 @@ def _collect_levels(io: WizardIO, config: dict, values: dict, models) -> None:
             io.printer(f"  выбрано для {level}: {chosen}")
 
 
-def _collect_endpoint(io: WizardIO, config: dict, values: dict, field: "_Field", *, review_all: bool, pending) -> None:
+def _collect_endpoint(
+    io: WizardIO,
+    config: dict,
+    values: dict,
+    field: "_Field",
+    *,
+    review_all: bool,
+    pending,
+) -> None:
     """Шаг «Адрес»: печать заголовка и ввод до валидного URL либо до Enter."""
     io.printer("")
     io.printer(f"  {_of.ONBOARDING_FIELDS[0].label}")
@@ -392,7 +434,9 @@ def _collect_endpoint(io: WizardIO, config: dict, values: dict, field: "_Field",
         if _valid_endpoint_url(raw):
             values[field.leaf] = raw
             break
-        io.printer(f"  «{raw}» не похоже на URL (нужны http(s):// и хост). Введите ещё раз или Enter — пропустить.")
+        io.printer(
+            f"  «{raw}» не похоже на URL (нужны http(s):// и хост). Введите ещё раз или Enter — пропустить."
+        )
 
 
 def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
@@ -409,7 +453,14 @@ def collect_fields(io: WizardIO, config: dict, *, review_all: bool) -> dict:
             models = _collect_model(io, config, values)
             continue
         if field.kind == "endpoint":
-            _collect_endpoint(io, config, values, field, review_all=review_all, pending=pending)
+            _collect_endpoint(
+                io,
+                config,
+                values,
+                field,
+                review_all=review_all,
+                pending=pending,
+            )
             continue
     if review_all:
         # Уровни не входят в требования запуска (`_FIELD_CHECKS`), и удлинять ими
@@ -470,7 +521,9 @@ def _mcp_step(io: WizardIO, mcp) -> None:
     elif choice == 2:
         for i, name in enumerate(names, 1):
             io.printer(f"   [{i}] {name}")
-        for idx in _select_multi(io, "номера через запятую, напр. 1,3", len(names)):
+        for idx in _select_multi(
+            io, "номера через запятую, напр. 1,3", len(names)
+        ):
             mcp.install(names[idx - 1])
 
 
@@ -496,7 +549,9 @@ def _summary_lines(config: dict) -> list[str]:
             entry = f"  {note}"
         else:
             alias = (config.get("slots") or {}).get(level)
-            entry = f"  (имя записи «{alias}»)" if alias and alias != model else ""
+            entry = (
+                f"  (имя записи «{alias}»)" if alias and alias != model else ""
+            )
         lines.append(f"    {_SUMMARY_LABEL[level]:<12} {model}{entry}")
     return lines
 
@@ -519,7 +574,9 @@ def _broken_config_fate(*, refused: bool, wrote: bool) -> str:
     return " — записывать было нечего, файл остался в прежнем виде"
 
 
-def _report_outcome(io: WizardIO, config_path, *, refused: bool, wrote: bool) -> bool:
+def _report_outcome(
+    io: WizardIO, config_path, *, refused: bool, wrote: bool
+) -> bool:
     """Перечитать конфиг и напечатать итог мастера. True — напечатано «✓ Готово»."""
     try:
         fresh = _reload_config()
@@ -527,7 +584,9 @@ def _report_outcome(io: WizardIO, config_path, *, refused: bool, wrote: bool) ->
         # Второе, необработанное падение здесь было бы хуже первого: человек уже
         # потратил время на все вопросы мастера.
         fate = _broken_config_fate(refused=refused, wrote=wrote)
-        io.printer(f"\n  [ошибка] вы ответили на все вопросы, но конфиг всё ещё не загружается{fate}:")
+        io.printer(
+            f"\n  [ошибка] вы ответили на все вопросы, но конфиг всё ещё не загружается{fate}:"
+        )
         io.printer(onboarding.explain_broken_config(str(config_path), exc))
         return False
     if onboarding.is_unconfigured(fresh):
@@ -546,7 +605,13 @@ def _report_outcome(io: WizardIO, config_path, *, refused: bool, wrote: bool) ->
 
 
 def run(
-    config: dict, config_path, *, review_all: bool, io: WizardIO, mcp=None, deactivate_profile: bool = False
+    config: dict,
+    config_path,
+    *,
+    review_all: bool,
+    io: WizardIO,
+    mcp=None,
+    deactivate_profile: bool = False,
 ) -> bool:
     _rule_header(io)
     if deactivate_profile:
@@ -568,13 +633,17 @@ def run(
         # ради починки, и оставить конфиг несобираемым потому, что все поля он
         # пропустил, значит не сделать ровно то, что обещано строкой выше.
         if values or deactivate_profile:
-            missing = onboarding.write_wizard_values(config_path, values, deactivate_profile=deactivate_profile)
+            missing = onboarding.write_wizard_values(
+                config_path, values, deactivate_profile=deactivate_profile
+            )
             wrote = True
             if missing:
                 # Правило «всё или ничего» — про ПЛОСКУЮ запись; записи реестра ушли
                 # раньше отдельной транзакцией, поэтому файл уже не нетронут. Говорим
                 # о том, чего не хватает, а не о судьбе всего конфига.
-                io.printer(f"\n  [ошибка] не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную")
+                io.printer(
+                    f"\n  [ошибка] не записаны поля: {', '.join(missing)} — впишите их в конфиг вручную"
+                )
                 refused = True
     except onboarding.PartialWriteError as exc:
         # Часть записи уже на диске — обещать нетронутый файл нельзя (то же
@@ -584,7 +653,9 @@ def run(
         # порядка, и человек прочтёт про снятый профиль там, где его не снимали.
         io.printer(
             f"\n  [ошибка] остальное не записано: {exc} — при этом уже: "
-            + ", ".join(_of.LANDED_WORDS.get(name, name) for name in exc.written)
+            + ", ".join(
+                _of.LANDED_WORDS.get(name, name) for name in exc.written
+            )
         )
         refused = True
     except (ValueError, OSError) as exc:

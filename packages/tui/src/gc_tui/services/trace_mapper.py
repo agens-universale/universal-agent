@@ -17,9 +17,13 @@ _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Вторая ветка (<think>.*) — если </think> нет вовсе (модель не закрыла тег),
 # режем до конца строки (зеркалит stream_sink._THINK_RE), иначе сырое рассуждение
 # течёт в трейс. Порядок важен: закрытый спан матчим первым.
-_THINK_BLOCK_RE = re.compile(r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE)
+_THINK_BLOCK_RE = re.compile(
+    r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE
+)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
-_SUMMARIZED_PREFIX_RE = re.compile(r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE)
+_SUMMARIZED_PREFIX_RE = re.compile(
+    r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE
+)
 # Новый формат summary (master): <summary> содержит вложенные секционные теги
 # (<task_and_context>…) — разворачиваем их в текст, иначе сырой XML утекает в плашку.
 _SUMMARY_SECTION_RE = re.compile(r"<([a-z][a-z0-9_]*)>(.*?)</\1>", re.DOTALL)
@@ -41,7 +45,9 @@ def _clean_summary(inner_raw: str) -> str:
     sections = _SUMMARY_SECTION_RE.findall(text)
     if sections:
         text = "\n".join(
-            f"{tag.replace('_', ' ').capitalize()}: {body.strip()}" for tag, body in sections if body.strip()
+            f"{tag.replace('_', ' ').capitalize()}: {body.strip()}"
+            for tag, body in sections
+            if body.strip()
         )
     return text.strip()
 
@@ -110,7 +116,9 @@ def collect_skipped_call_ids(messages) -> set:
     return ids
 
 
-def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] = None) -> Optional[TraceEvent]:
+def map_message(
+    msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] = None
+) -> Optional[TraceEvent]:
     """Превращает payload-сообщение thread_store в TraceEvent.
 
     ``skipped_call_ids`` — набор call_id штатно пропущенных финализаторов (см.
@@ -147,7 +155,10 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
             # error_message — показываем (бэкенд-ошибки нужны пользователю).
             # Остальные (bounce, summary, context) — hidden=True: kind=system
             # учитывается polling-логикой (thinking_indicator), но в трейс не рендерится.
-            if stripped.startswith("<technical") and "</technical>" in stripped:
+            if (
+                stripped.startswith("<technical")
+                and "</technical>" in stripped
+            ):
                 m = _TECHNICAL_TAG_RE.search(stripped)
                 inner_text = (m.group(1).strip() if m else stripped)[:120]
                 tech_type = ""
@@ -228,15 +239,23 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
     # Special tool-event handling (must precede generic function_call mapping).
     name = msg.get("name") if isinstance(msg.get("name"), str) else None
     name = tool_id(name)
-    call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    call_id = (
+        msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    )
 
     # SKIPPED turn_finish (processing_responses.partition_work_then_finish): лишний
     # finish после первого или все finish после ask_human. Ни synthetic
     # skip-output (`skipped: true`), ни парный `function_call` не рендерим —
     # служебный статус, не ошибка. В data_*.jsonl и raw-payload всё остаётся.
-    if typ == "function_call_output" and _output_marked_skipped(msg.get("output")):
+    if typ == "function_call_output" and _output_marked_skipped(
+        msg.get("output")
+    ):
         return None
-    if typ == "function_call" and skipped_call_ids and call_id in skipped_call_ids:
+    if (
+        typ == "function_call"
+        and skipped_call_ids
+        and call_id in skipped_call_ids
+    ):
         return None
 
     # ASK_HUMAN — kind=ask_human, summary=question (TraceScreen mounts banner).
@@ -331,7 +350,10 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
                 _ir_data = json.loads(_ir_out)
             except json.JSONDecodeError:
                 _ir_data = None
-            if isinstance(_ir_data, dict) and tool_id(_ir_data.get("tool")) == "intermediate_reply":
+            if (
+                isinstance(_ir_data, dict)
+                and tool_id(_ir_data.get("tool")) == "intermediate_reply"
+            ):
                 return None
 
     # SESSION_TODO output — успешный глушим (машинный статус не нужен; чек-лист
@@ -346,9 +368,12 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
             except json.JSONDecodeError:
                 _st_data = None
         _st_is_todo = name == "session_todo" or (
-            isinstance(_st_data, dict) and tool_id(_st_data.get("tool")) == "session_todo"
+            isinstance(_st_data, dict)
+            and tool_id(_st_data.get("tool")) == "session_todo"
         )
-        if _st_is_todo and not (isinstance(_st_data, dict) and _st_data.get("ok") is False):
+        if _st_is_todo and not (
+            isinstance(_st_data, dict) and _st_data.get("ok") is False
+        ):
             return None
 
     # SUBMIT_SOLUTION / turn_finish output — глушим в двух случаях:
@@ -368,7 +393,10 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
                 _data = json.loads(_out)
             except json.JSONDecodeError:
                 _data = None
-            if isinstance(_data, dict) and tool_id(_data.get("tool")) == "submit_solution":
+            if (
+                isinstance(_data, dict)
+                and tool_id(_data.get("tool")) == "submit_solution"
+            ):
                 return None
 
     # ASK_HUMAN output — Фикс A. Идентификация в двух режимах (как в
@@ -388,7 +416,10 @@ def map_message(msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] 
                     _data = json.loads(_out)
                 except json.JSONDecodeError:
                     _data = None
-                if isinstance(_data, dict) and tool_id(_data.get("tool")) == "ask_human":
+                if (
+                    isinstance(_data, dict)
+                    and tool_id(_data.get("tool")) == "ask_human"
+                ):
                     is_ask_human = True
         if is_ask_human:
             response_text = _extract_ask_human_response(msg.get("output"))
@@ -524,7 +555,9 @@ def _arg_summary(name: str, args: dict) -> str:
         p = args.get("path")
         c = args.get("content", "")
         clen = len(c) if isinstance(c, str) else 0
-        return f"path={p!r}, content=<{clen} chars>" if isinstance(p, str) else ""
+        return (
+            f"path={p!r}, content=<{clen} chars>" if isinstance(p, str) else ""
+        )
     if name == "search_and_replace":
         p = args.get("path")
         o = args.get("old", "")
@@ -601,7 +634,11 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         err = data.get("error") or data.get("message") or ""
         # error может быть dict {type, message, ...} — извлекаем message/type.
         if isinstance(err, dict):
-            err = err.get("message") or err.get("type") or json.dumps(err, ensure_ascii=False)
+            err = (
+                err.get("message")
+                or err.get("type")
+                or json.dumps(err, ensure_ascii=False)
+            )
         elif isinstance(err, str) and data.get("message"):
             # Плоский код ошибки (напр. internal_tool_error) сам по себе ничего
             # не сообщает, а человекочитаемый текст лежит рядом в "message".
@@ -643,11 +680,15 @@ def _summarize_output(output: Any, *, error: bool) -> str:
     return ""
 
 
-def _map_function_event(msg: dict, *, no: int, ts: str, mid: Optional[str]) -> Optional[TraceEvent]:
+def _map_function_event(
+    msg: dict, *, no: int, ts: str, mid: Optional[str]
+) -> Optional[TraceEvent]:
     typ = msg.get("type")
     name = msg.get("name") if isinstance(msg.get("name"), str) else None
     name = tool_id(name)
-    call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    call_id = (
+        msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    )
 
     if typ == "function_call":
         args = coerce_args(msg.get("arguments"))

@@ -55,7 +55,9 @@ def connection_line_text(result) -> Text:
             t.append("✓ токен принят", style=OK)
             return t
         if result.auth_state == "not_required":
-            return Text("✓ сервер доступен · авторизация не требуется", style=OK)
+            return Text(
+                "✓ сервер доступен · авторизация не требуется", style=OK
+            )
         return Text("✓ сервер доступен", style=OK)
     if result.verdict == "rejected" and result.http_status == 401:
         if result.auth_state == "required":

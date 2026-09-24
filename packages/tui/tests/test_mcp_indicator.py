@@ -18,7 +18,9 @@ async def test_indicator_failed_settles_to_persistent_line(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.services.mcp_progress import McpProgress
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     _stub_factory(app)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -29,7 +31,9 @@ async def test_indicator_failed_settles_to_persistent_line(tmp_path):
         await pilot.pause()
         assert scr._mcp_status_row is not None
         body = _content(scr._mcp_status_row)
-        assert "office" in body and "⏳" in body  # многострочный блок, office грузится
+        assert (
+            "office" in body and "⏳" in body
+        )  # многострочный блок, office грузится
         # office упал, computer ок → all_reported → сначала финальный блок со
         # статусами (лингер 1с, видно что все проверены), потом строка с /mcp.
         prog.update("computer", {"status": "connected"})
@@ -57,7 +61,9 @@ async def test_indicator_warning_survives_trace_rebuild(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.services.mcp_progress import McpProgress
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     _stub_factory(app)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -67,7 +73,9 @@ async def test_indicator_warning_survives_trace_rebuild(tmp_path):
         scr._update_mcp_indicator()
         prog.update("office", {"status": "failed", "reason": "x"})
         scr._update_mcp_indicator()
-        await pilot.pause(1.2)  # лингер финального блока → строка-предупреждение
+        await pilot.pause(
+            1.2
+        )  # лингер финального блока → строка-предупреждение
         assert "/mcp" in _content(scr._mcp_status_row)
         # Пересборка трейса (все точки идут через _clear_trace)
         scr._switch_to_empty_state()
@@ -88,7 +96,9 @@ async def test_indicator_all_ok_settles_to_ready(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.services.mcp_progress import McpProgress
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     _stub_factory(app)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -122,7 +132,11 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
     from gc_tui.services.mcp_progress import McpProgress
     from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "mcp-servers": {"office": {}}})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "mcp-servers": {"office": {}}},
+    )
     _stub_factory(app)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -146,6 +160,8 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
         # Ровно одна «готов» во всём трейсе (готовность только в карточке).
         texts = [str(s.render()) for s in trace.query(Static)]
         ready_lines = [t for t in texts if "готов" in t]
-        assert len(ready_lines) == 1, f"Ожидалась одна строка готовности: {ready_lines}"
+        assert len(ready_lines) == 1, (
+            f"Ожидалась одна строка готовности: {ready_lines}"
+        )
         # Трейс чистый: блока-заголовка «Уведомления · N» нет.
         assert not any("Уведомления ·" in t for t in texts)

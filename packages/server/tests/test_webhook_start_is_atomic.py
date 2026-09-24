@@ -115,14 +115,18 @@ def _client() -> httpx.AsyncClient:
 
 
 async def _post(client: httpx.AsyncClient, text: str) -> httpx.Response:
-    return await client.post("/events/webhook", json={"task_id": "t", "system": "s", "text": text})
+    return await client.post(
+        "/events/webhook", json={"task_id": "t", "system": "s", "text": text}
+    )
 
 
 def _texts(delivered: list) -> list:
     return [json.loads(content)["text"] for content in delivered]
 
 
-def _watch_arrival(monkeypatch, registry: AgentRunRegistry, text: str) -> asyncio.Event:
+def _watch_arrival(
+    monkeypatch, registry: AgentRunRegistry, text: str
+) -> asyncio.Event:
     """Событие «вебхук с этим текстом дошёл до реестра».
 
     Дальше до ожидания брони у эндпоинта нет ни одного `await`, поэтому к
@@ -162,10 +166,14 @@ async def _failed_build_with_a_waiter(harness, monkeypatch):
         return await _within(asyncio.gather(first, second))
 
 
-async def test_waiting_webhook_builds_its_own_context_when_the_first_build_fails(harness, monkeypatch):
+async def test_waiting_webhook_builds_its_own_context_when_the_first_build_fails(
+    harness, monkeypatch
+):
     first, second = await _failed_build_with_a_waiter(harness, monkeypatch)
 
-    assert first.status_code == 500, "упавшая сборка обязана честно ответить ошибкой"
+    assert first.status_code == 500, (
+        "упавшая сборка обязана честно ответить ошибкой"
+    )
     assert second.status_code == 200
     assert second.json()["status"] == "started", (
         f"второй ответил {second.json()['status']!r}: его сообщение ждёт вебхука, "
@@ -173,10 +181,14 @@ async def test_waiting_webhook_builds_its_own_context_when_the_first_build_fails
     )
     await _settle(harness.registry)
     assert len(harness.agents) == 1
-    assert _texts(harness.agents[0].delivered) == ["второй"], "сообщение второго вебхука не дошло до агента"
+    assert _texts(harness.agents[0].delivered) == ["второй"], (
+        "сообщение второго вебхука не дошло до агента"
+    )
 
 
-async def test_waiting_webhook_joins_the_run_after_a_successful_build(harness, monkeypatch):
+async def test_waiting_webhook_joins_the_run_after_a_successful_build(
+    harness, monkeypatch
+):
     gate, entered, hold = asyncio.Event(), asyncio.Event(), asyncio.Event()
     harness.plan[:] = [{"entered": entered, "gate": gate, "hold": hold}]
     second_arrived = _watch_arrival(monkeypatch, harness.registry, "второй")
@@ -189,14 +201,23 @@ async def test_waiting_webhook_joins_the_run_after_a_successful_build(harness, m
         gate.set()
         first, second = await _within(asyncio.gather(first, second))
 
-    assert [first.json()["status"], second.json()["status"]] == ["started", "queued"]
-    assert harness.builds == 1, "построен второй контекст впустую: его никто не закроет"
+    assert [first.json()["status"], second.json()["status"]] == [
+        "started",
+        "queued",
+    ]
+    assert harness.builds == 1, (
+        "построен второй контекст впустую: его никто не закроет"
+    )
     hold.set()
     await _settle(harness.registry)
-    assert _texts(harness.agents[0].delivered) == ["первый", "второй"], "сообщения дошли до агента не в порядке прихода"
+    assert _texts(harness.agents[0].delivered) == ["первый", "второй"], (
+        "сообщения дошли до агента не в порядке прихода"
+    )
 
 
-async def test_nothing_is_left_behind_after_a_failed_build(harness, monkeypatch):
+async def test_nothing_is_left_behind_after_a_failed_build(
+    harness, monkeypatch
+):
     """После отказа сборки в реестре не остаётся ни брони, ни отложенного.
 
     Раньше сообщение ждущего оставалось в реестре без срока и уезжало в
@@ -230,7 +251,9 @@ def test_failed_context_build_releases_the_key():
 # --- статус во время сборки -------------------------------------------------
 
 
-async def test_status_during_the_build_is_running_not_the_previous_result(harness):
+async def test_status_during_the_build_is_running_not_the_previous_result(
+    harness,
+):
     """Пока строится контекст, статус — `running`, а не итог прошлого прогона.
 
     Бронь выдаётся ровно тогда, когда прошлый прогон закончился, а его запись
@@ -254,12 +277,16 @@ async def test_status_during_the_build_is_running_not_the_previous_result(harnes
         registry.release_reservation(system="s", task_id="t")
         after = (await client.get("/runs/s/t")).json()
 
-    assert during["status"] == "running", f"во время сборки статус {during['status']!r} — это итог прошлого прогона"
+    assert during["status"] == "running", (
+        f"во время сборки статус {during['status']!r} — это итог прошлого прогона"
+    )
     assert "result" not in during
     assert after["status"] == "completed"
 
 
-async def test_status_during_the_build_carries_the_reservation_time(harness, monkeypatch):
+async def test_status_during_the_build_carries_the_reservation_time(
+    harness, monkeypatch
+):
     """«Строится» отдаёт время брони, а не null.
 
     Прогона во время сборки ещё нет, и оба времени были null: зависшая сборка
@@ -267,7 +294,9 @@ async def test_status_during_the_build_carries_the_reservation_time(harness, mon
     подменены, чтобы «время брони» нельзя было спутать с «сейчас».
     """
     clock = SimpleNamespace(now=100.0)
-    monkeypatch.setattr(registry_module, "time", SimpleNamespace(time=lambda: clock.now))
+    monkeypatch.setattr(
+        registry_module, "time", SimpleNamespace(time=lambda: clock.now)
+    )
     gate, entered = asyncio.Event(), asyncio.Event()
     harness.plan[:] = [{"entered": entered, "gate": gate}]
 
@@ -283,9 +312,10 @@ async def test_status_during_the_build_carries_the_reservation_time(harness, mon
     await _settle(harness.registry)
 
     assert during["status"] == "running"
-    assert (during["started_at"], during["last_activity_at"]) == (100.0, 100.0), (
-        f"статус сборки не несёт времени брони: {during}"
-    )
+    assert (during["started_at"], during["last_activity_at"]) == (
+        100.0,
+        100.0,
+    ), f"статус сборки не несёт времени брони: {during}"
 
 
 # --- потолок ожидания чужой сборки -----------------------------------------
@@ -301,7 +331,9 @@ def _set_ceiling(monkeypatch, value) -> None:
     monkeypatch.setitem(server.SERVER_CONFIG, "server", server_cfg)
 
 
-async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(harness, monkeypatch):
+async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(
+    harness, monkeypatch
+):
     """Ждущий чужую сборку отвечает 503 по потолку, а сборка доходит до старта.
 
     Своего дедлайна у сборки нет, и ждущий ждал её без предела. Пока прогон
@@ -323,7 +355,9 @@ async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(har
             second = asyncio.create_task(_post(client, "второй"))
             done, _ = await asyncio.wait({second}, timeout=_CEILING_SEC + 2.0)
             waited = time.monotonic() - began
-            building, _ = harness.registry.get_status_snapshot(system="s", task_id="t")
+            building, _ = harness.registry.get_status_snapshot(
+                system="s", task_id="t"
+            )
         finally:
             gate.set()
             first = await _within(first)
@@ -336,7 +370,9 @@ async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(har
     assert second.status_code == 503, second.text
     assert second.json()["detail"]["status"] == "error", second.text
     assert waited >= _CEILING_SEC, f"503 раньше потолка: через {waited:.2f} с"
-    assert building is not None, "потолок ожидания сломал бронь: сборка ещё идёт, а ключ свободен"
+    assert building is not None, (
+        "потолок ожидания сломал бронь: сборка ещё идёт, а ключ свободен"
+    )
     assert first.status_code == 200 and first.json()["status"] == "started"
     assert harness.builds == 1
     await _settle(harness.registry)
@@ -344,7 +380,9 @@ async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(har
     assert _texts(harness.agents[0].delivered) == ["первый"]
 
 
-async def test_ceiling_covers_the_whole_request_not_each_foreign_build(harness, monkeypatch):
+async def test_ceiling_covers_the_whole_request_not_each_foreign_build(
+    harness, monkeypatch
+):
     """Потолок — на всё ожидание запроса, а не на каждую чужую сборку.
 
     После отказа сборки ключ занимает первый из ждущих, а остальные ждут уже
@@ -361,7 +399,10 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(harness, 
         {"entered": entered1, "gate": gate1, "fail": True},
         {"entered": entered2, "gate": gate2},
     ]
-    arrived = [_watch_arrival(monkeypatch, harness.registry, text) for text in ("второй", "третий")]
+    arrived = [
+        _watch_arrival(monkeypatch, harness.registry, text)
+        for text in ("второй", "третий")
+    ]
     answered_at: dict = {}
 
     async def _timed(client, text):
@@ -374,13 +415,20 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(harness, 
         waiters: list = []
         try:
             await _within(entered1.wait())
-            waiters = [asyncio.create_task(_timed(client, text)) for text in ("второй", "третий")]
+            waiters = [
+                asyncio.create_task(_timed(client, text))
+                for text in ("второй", "третий")
+            ]
             await _within(asyncio.gather(*(event.wait() for event in arrived)))
             began = time.monotonic()
             await asyncio.sleep(0.8 * ceiling)
             gate1.set()
             await _within(entered2.wait())
-            await asyncio.wait(waiters, timeout=ceiling + 1.5, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(
+                waiters,
+                timeout=ceiling + 1.5,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
         finally:
             gate1.set()
             gate2.set()
@@ -390,7 +438,9 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(harness, 
 
     assert first.status_code == 500
     rejected = [text for text, r in answers.items() if r.status_code == 503]
-    assert len(rejected) == 1, {text: r.status_code for text, r in answers.items()}
+    assert len(rejected) == 1, {
+        text: r.status_code for text, r in answers.items()
+    }
     waited = answered_at[rejected[0]] - began
     assert waited < ceiling + 0.4, (
         f"503 через {waited:.2f} с при потолке {ceiling} с: потолок отсчитан заново на второй чужой сборке"
@@ -413,7 +463,9 @@ def test_ceiling_is_read_from_the_server_config(raw, expected):
     assert server._context_build_wait_s(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["минута", 0, -5, True, float("inf"), float("nan")])
+@pytest.mark.parametrize(
+    "raw", ["минута", 0, -5, True, float("inf"), float("nan")]
+)
 def test_broken_ceiling_falls_back_to_the_default_loudly(raw, caplog):
     """Мусор в ключе не отключает потолок и не роняет старт, но и не молчит."""
     with caplog.at_level(logging.WARNING, logger=server.__name__):

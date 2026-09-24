@@ -51,5 +51,7 @@ def evict_stale_cache(
         if key in git_visible_keys and store.drop_entry(key):
             removed += 1
     if removed:
-        _logger.info("evicted %s stale cache key(s) superseded by git", removed)
+        _logger.info(
+            "evicted %s stale cache key(s) superseded by git", removed
+        )
     return removed

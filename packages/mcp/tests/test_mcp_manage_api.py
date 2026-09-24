@@ -2,7 +2,9 @@ from recommended_mcp.runtime import cli as cli
 
 
 def test_wire_unknown_name_returns_false(monkeypatch):
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], "root"))
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([], "root")
+    )
     assert cli.wire("nope") is False
 
 
@@ -11,9 +13,15 @@ def test_wire_known_name_calls_wire_one(monkeypatch):
         name = "office"
 
     calls = {}
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([E()], "root"))
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([E()], "root")
+    )
     monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
-    monkeypatch.setattr(cli, "_wire_one", lambda entry, root, dep: calls.setdefault("wired", entry.name))
+    monkeypatch.setattr(
+        cli,
+        "_wire_one",
+        lambda entry, root, dep: calls.setdefault("wired", entry.name),
+    )
     assert cli.wire("office") is True
     assert calls["wired"] == "office"
 
@@ -28,7 +36,11 @@ def test_unwire_delegates_to_wiring(monkeypatch):
 
 def test_remove_delegates_to_cmd_remove(monkeypatch):
     seen = {}
-    monkeypatch.setattr(cli, "_cmd_remove", lambda name, keep: seen.update(name=name, keep=keep) or 0)
+    monkeypatch.setattr(
+        cli,
+        "_cmd_remove",
+        lambda name, keep: seen.update(name=name, keep=keep) or 0,
+    )
     assert cli.remove("office", keep_package=True) == 0
     assert seen == {"name": "office", "keep": True}
 
@@ -41,7 +53,9 @@ def test_installed_state_not_installed(monkeypatch):
             type = "source"
             package = None
 
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([E()], "root"))
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([E()], "root")
+    )
     monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
     monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "—")
     st = cli.installed_state("office")
@@ -57,7 +71,9 @@ def test_installed_state_installed_with_version(monkeypatch):
             type = "pypi"
             package = "office-mcp==0.3.1"
 
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([E()], "root"))
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([E()], "root")
+    )
     monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
     monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "yes")
     import recommended_mcp.install as inst
@@ -71,7 +87,10 @@ def test_installed_state_installed_with_version(monkeypatch):
 
 def test_manual_server_names_reads_runtime_key():
     cfg = {"mcp-servers": {"corp-jira": {}, "corp-confluence": {}}}
-    assert sorted(cli.manual_server_names(cfg)) == ["corp-confluence", "corp-jira"]
+    assert sorted(cli.manual_server_names(cfg)) == [
+        "corp-confluence",
+        "corp-jira",
+    ]
     assert cli.manual_server_names(None) == []
 
 
@@ -87,11 +106,16 @@ def _pypi_entry(package):
 
 
 def test_available_update_pin_newer_than_installed():
-    assert cli._available_update(_pypi_entry("ddgs-mcp==0.2.0"), "0.1.0") == "0.2.0"
+    assert (
+        cli._available_update(_pypi_entry("ddgs-mcp==0.2.0"), "0.1.0")
+        == "0.2.0"
+    )
 
 
 def test_available_update_pin_equals_installed_is_none():
-    assert cli._available_update(_pypi_entry("ddgs-mcp==0.2.0"), "0.2.0") is None
+    assert (
+        cli._available_update(_pypi_entry("ddgs-mcp==0.2.0"), "0.2.0") is None
+    )
 
 
 def test_available_update_source_type_is_none():

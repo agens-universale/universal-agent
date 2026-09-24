@@ -25,8 +25,14 @@ INHERITED = ("ask_human", "tui_confirm", "permission_store", "thread_store")
 
 
 def _build_child_ctx_node() -> ast.AsyncFunctionDef:
-    tree = ast.parse(pathlib.Path(runner_module.__file__).read_text(encoding="utf-8"))
-    return next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_build_child_ctx")
+    tree = ast.parse(
+        pathlib.Path(runner_module.__file__).read_text(encoding="utf-8")
+    )
+    return next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_build_child_ctx"
+    )
 
 
 def _assigned_from_parent(node: ast.AsyncFunctionDef) -> set:
@@ -36,7 +42,10 @@ def _assigned_from_parent(node: ast.AsyncFunctionDef) -> set:
         if not isinstance(stmt, ast.Assign):
             continue
         for target in stmt.targets:
-            if not (isinstance(target, ast.Attribute) and getattr(target.value, "id", None) == "child_ctx"):
+            if not (
+                isinstance(target, ast.Attribute)
+                and getattr(target.value, "id", None) == "child_ctx"
+            ):
                 continue
             call = stmt.value
             if (

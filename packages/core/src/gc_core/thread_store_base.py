@@ -80,7 +80,9 @@ class _ThreadStoreInvariants:
             stamped["created_at"] = stamped["updated_at"]
         return stamped
 
-    def apply_runtime_flag(self, meta: Dict[str, Any], flag: str, *, active: bool) -> Dict[str, Any]:
+    def apply_runtime_flag(
+        self, meta: Dict[str, Any], flag: str, *, active: bool
+    ) -> Dict[str, Any]:
         """Взвести или снять флаг в секции ``runtime``, соблюдая инвариант.
 
         Инвариант: снятие ПОСЛЕДНЕГО флага убирает секцию целиком. «Нет
@@ -90,7 +92,9 @@ class _ThreadStoreInvariants:
         Имя флага валидируется здесь же: опечатка иначе прошла бы молча и
         завела бы флаг, которого никто не снимет.
         """
-        from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
+        from gc_core.persistence.meta_ownership import (
+            resolve_runtime_flag_name,
+        )
 
         flag = resolve_runtime_flag_name(flag)
         runtime = meta.setdefault("runtime", {})
@@ -102,7 +106,9 @@ class _ThreadStoreInvariants:
             meta.pop("runtime", None)
         return meta
 
-    def merge_runtime_meta(self, meta: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    def merge_runtime_meta(
+        self, meta: Dict[str, Any], patch: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Долить произвольные значения в ``runtime``, не тронув остальное.
 
         Копируем ПАТЧ, а не meta: вызывающий может держать переданный словарь
@@ -142,7 +148,12 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
       без файлов его нет, и ядро на это рассчитывает.
     """
 
-    def replace_messages(self, system_id: str, thread_id: str, messages: Sequence[Dict[str, Any]]) -> None:
+    def replace_messages(
+        self,
+        system_id: str,
+        thread_id: str,
+        messages: Sequence[Dict[str, Any]],
+    ) -> None:
         """Заместить историю треда, НЕ трогая meta и трассу субагентов.
 
         Зовётся компакцией у хранилищ, которые не объявляют
@@ -169,7 +180,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
             self.save_meta(system_id, thread_id, meta)
         self._restore_subagent_trace(system_id, thread_id, trace)
 
-    def _restore_subagent_trace(self, system_id: str, thread_id: str, records: Sequence[Dict[str, Any]]) -> None:
+    def _restore_subagent_trace(
+        self, system_id: str, thread_id: str, records: Sequence[Dict[str, Any]]
+    ) -> None:
         """Вернуть трассу на место после ``reset``. НЕ часть контракта.
 
         Умолчание идёт через ``append_subagent_trace`` и ТЕРЯЕТ ШТАМПЫ:
@@ -204,7 +217,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
     # --- чтение ------------------------------------------------------------
 
     @abstractmethod
-    def load_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    def load_messages(
+        self, system_id: str, thread_id: str
+    ) -> List[Dict[str, Any]]:
         """История треда в порядке записи. Нет треда — пустой список, не ошибка."""
 
     @abstractmethod
@@ -241,7 +256,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
         """
 
     @abstractmethod
-    def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+    def save_meta(
+        self, system_id: str, thread_id: str, meta: Dict[str, Any]
+    ) -> None:
         """Записать meta целиком. Штампы ставит ХРАНИЛИЩЕ — см. ``stamp_meta``."""
 
     @abstractmethod
@@ -257,11 +274,15 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
         """Точечно взвести или снять флаг в ``runtime`` — см. ``apply_runtime_flag``."""
 
     @abstractmethod
-    def update_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
+    def update_runtime_meta(
+        self, system_id: str, thread_id: str, patch: Dict[str, Any]
+    ) -> None:
         """Долить значения в ``runtime`` — см. ``merge_runtime_meta``."""
 
     @abstractmethod
-    def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
+    def discard_message(
+        self, system_id: str, thread_id: str, message_id: str
+    ) -> bool:
         """Удалить сообщение по ``id``; ``False``, если такого не было."""
 
     @abstractmethod
@@ -284,7 +305,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
         """Дописать запись трассы; ``ts`` и ``seq`` проставляет хранилище."""
 
     @abstractmethod
-    def read_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
+    def read_subagent_trace(
+        self, system_id: str, thread_id: str
+    ) -> List[SubagentTraceRecord]:
         """Трасса субагентов треда в порядке записи."""
 
 
@@ -302,7 +325,12 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
     отбрасывают.
     """
 
-    async def areplace_messages(self, system_id: str, thread_id: str, messages: Sequence[Dict[str, Any]]) -> None:
+    async def areplace_messages(
+        self,
+        system_id: str,
+        thread_id: str,
+        messages: Sequence[Dict[str, Any]],
+    ) -> None:
         """См. :meth:`ThreadStoreBase.replace_messages`."""
         trace = await self.aread_subagent_trace(system_id, thread_id)
         meta = await self.aload_meta(system_id, thread_id)
@@ -312,7 +340,9 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
             await self.asave_meta(system_id, thread_id, meta)
         await self._arestore_subagent_trace(system_id, thread_id, trace)
 
-    async def _arestore_subagent_trace(self, system_id: str, thread_id: str, records: Sequence[Dict[str, Any]]) -> None:
+    async def _arestore_subagent_trace(
+        self, system_id: str, thread_id: str, records: Sequence[Dict[str, Any]]
+    ) -> None:
         """См. :meth:`ThreadStoreBase._restore_subagent_trace`."""
         for record in records:
             await self.aappend_subagent_trace(
@@ -329,15 +359,21 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         return
 
     @abstractmethod
-    async def aload_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    async def aload_messages(
+        self, system_id: str, thread_id: str
+    ) -> List[Dict[str, Any]]:
         """См. :meth:`ThreadStoreBase.load_messages`."""
 
     @abstractmethod
-    async def aload_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
+    async def aload_thread_state(
+        self, system_id: str, thread_id: str
+    ) -> ThreadState:
         """См. :meth:`ThreadStoreBase.load_thread_state`."""
 
     @abstractmethod
-    async def aload_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
+    async def aload_meta(
+        self, system_id: str, thread_id: str
+    ) -> Dict[str, Any]:
         """См. :meth:`ThreadStoreBase.load_meta`."""
 
     @abstractmethod
@@ -353,7 +389,9 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         """См. :meth:`ThreadStoreBase.append_messages`."""
 
     @abstractmethod
-    async def asave_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+    async def asave_meta(
+        self, system_id: str, thread_id: str, meta: Dict[str, Any]
+    ) -> None:
         """См. :meth:`ThreadStoreBase.save_meta`."""
 
     @abstractmethod
@@ -369,11 +407,15 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         """См. :meth:`ThreadStoreBase.patch_runtime_flag`."""
 
     @abstractmethod
-    async def aupdate_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
+    async def aupdate_runtime_meta(
+        self, system_id: str, thread_id: str, patch: Dict[str, Any]
+    ) -> None:
         """См. :meth:`ThreadStoreBase.update_runtime_meta`."""
 
     @abstractmethod
-    async def adiscard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
+    async def adiscard_message(
+        self, system_id: str, thread_id: str, message_id: str
+    ) -> bool:
         """См. :meth:`ThreadStoreBase.discard_message`."""
 
     @abstractmethod
@@ -394,7 +436,9 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         """См. :meth:`ThreadStoreBase.append_subagent_trace`."""
 
     @abstractmethod
-    async def aread_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
+    async def aread_subagent_trace(
+        self, system_id: str, thread_id: str
+    ) -> List[SubagentTraceRecord]:
         """См. :meth:`ThreadStoreBase.read_subagent_trace`."""
 
 
@@ -405,7 +449,11 @@ def _abstract_names(cls: type) -> tuple:
     имена попадают в сообщения об ошибках, где скачущий порядок мешает
     сравнивать два запуска глазами. ``__dict__`` порядок определения хранит.
     """
-    return tuple(name for name, attr in cls.__dict__.items() if getattr(attr, "__isabstractmethod__", False))
+    return tuple(
+        name
+        for name, attr in cls.__dict__.items()
+        if getattr(attr, "__isabstractmethod__", False)
+    )
 
 
 #: Исполняемый контракт хранилища: по этим именам ``athread_store`` решает,

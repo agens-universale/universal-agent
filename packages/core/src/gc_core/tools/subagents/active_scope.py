@@ -43,7 +43,9 @@ class ChildInputScope:
         self._pending: List[Dict[str, Any]] = []
         self._on_enqueue: Optional[Callable[[Dict[str, Any]], None]] = None
 
-    def set_on_enqueue(self, callback: Optional[Callable[[Dict[str, Any]], None]]) -> None:
+    def set_on_enqueue(
+        self, callback: Optional[Callable[[Dict[str, Any]], None]]
+    ) -> None:
         self._on_enqueue = callback
 
     def enqueue(self, message: Dict[str, Any]) -> None:
@@ -66,7 +68,9 @@ class ChildInputScope:
 
 
 @contextmanager
-def activate_child_input(ctx: Any, *, parent_call_id: str) -> Iterator[ChildInputScope]:
+def activate_child_input(
+    ctx: Any, *, parent_call_id: str
+) -> Iterator[ChildInputScope]:
     """Зарегистрировать этого ребёнка как адресата ввода ДЛЯ ЭТОГО прогона."""
     scope = ChildInputScope(parent_call_id=parent_call_id)
     ctx.child_input_scope = scope

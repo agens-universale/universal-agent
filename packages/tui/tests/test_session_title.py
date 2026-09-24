@@ -27,7 +27,10 @@ def test_display_empty_meta_is_unnamed():
 
 
 def test_display_title_wins_over_last_actual():
-    meta = {"title": "parser bugfix", "last_actual": "реализуй спеку по ренейму"}
+    meta = {
+        "title": "parser bugfix",
+        "last_actual": "реализуй спеку по ренейму",
+    }
     assert display_name(meta) == "parser bugfix"
 
 
@@ -42,7 +45,9 @@ def test_display_last_actual_when_title_missing():
 
 
 def test_display_title_whitespace_only_falls_back():
-    assert display_name({"title": "   ", "last_actual": "fallback"}) == "fallback"
+    assert (
+        display_name({"title": "   ", "last_actual": "fallback"}) == "fallback"
+    )
 
 
 def test_display_title_stripped():
@@ -58,7 +63,10 @@ def test_display_non_string_fields_ignored():
 
 
 def test_display_task_wins_over_last_actual():
-    meta = {"task": "Добавить поле task в turn_finish", "last_actual": "реализуй спеку"}
+    meta = {
+        "task": "Добавить поле task в turn_finish",
+        "last_actual": "реализуй спеку",
+    }
     assert display_name(meta) == "Добавить поле task в turn_finish"
 
 
@@ -74,7 +82,10 @@ def test_display_title_wins_over_task():
 def test_task_title_strips_and_truncates():
     assert task_title({"task": "  hello  "}) == "hello"
     assert task_title({"task": "   "}) == ""
-    assert len(task_title({"task": "a" * (LAST_ACTUAL_MAX + 10)})) == LAST_ACTUAL_MAX
+    assert (
+        len(task_title({"task": "a" * (LAST_ACTUAL_MAX + 10)}))
+        == LAST_ACTUAL_MAX
+    )
 
 
 def test_task_subtitle_when_title_is_task():
@@ -88,7 +99,11 @@ def test_task_subtitle_empty_when_same_as_title():
 
 
 def test_task_subtitle_when_manual_title():
-    meta = {"title": "parser", "task": "Закрыть баг", "last_actual": "посмотри логи"}
+    meta = {
+        "title": "parser",
+        "task": "Закрыть баг",
+        "last_actual": "посмотри логи",
+    }
     assert task_subtitle(meta) == "Закрыть баг"
 
 
@@ -100,7 +115,10 @@ def test_task_subtitle_empty_without_task():
 
 
 def test_normalize_collapses_whitespace():
-    assert normalize_prompt_title("строка1\n строка2\t  три") == "строка1 строка2 три"
+    assert (
+        normalize_prompt_title("строка1\n строка2\t  три")
+        == "строка1 строка2 три"
+    )
 
 
 def test_normalize_truncates_to_max():
@@ -156,8 +174,17 @@ def test_task_subtitle_skips_candidate_equal_to_manual_title():
     но отличный last_actual остаётся подзаголовком (и в поиске)."""
     from gc_tui.services.session_title import task_subtitle
 
-    assert task_subtitle({"title": "Написать тесты", "task": "Написать тесты"}) == ""
     assert (
-        task_subtitle({"title": "Написать тесты", "task": "Написать тесты", "last_actual": "напиши тесты к скрипту"})
+        task_subtitle({"title": "Написать тесты", "task": "Написать тесты"})
+        == ""
+    )
+    assert (
+        task_subtitle(
+            {
+                "title": "Написать тесты",
+                "task": "Написать тесты",
+                "last_actual": "напиши тесты к скрипту",
+            }
+        )
         == "напиши тесты к скрипту"
     )

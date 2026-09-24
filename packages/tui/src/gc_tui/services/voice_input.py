@@ -48,7 +48,9 @@ class VoiceInputFlow:
         self._recorder: Any = None
         self._stt_started_at: float = 0.0
         self._band_peak: float = 0.0  # бегущий пик спектра для АРУ эквалайзера
-        self._band_display: list = [0.0] * 7  # EMA-сглаженные высоты для плавности
+        self._band_display: list = [
+            0.0
+        ] * 7  # EMA-сглаженные высоты для плавности
 
     @staticmethod
     def _spawn_thread(fn: Callable[[], None]) -> None:
@@ -110,7 +112,11 @@ class VoiceInputFlow:
         # (высота ⡀), чтобы эквалайзер выглядел полным, а не 1–2 столбцами.
         n = len(norm)
         smoothed = [
-            max(norm[i], 0.4 * (norm[i - 1] if i > 0 else 0.0), 0.4 * (norm[i + 1] if i + 1 < n else 0.0))
+            max(
+                norm[i],
+                0.4 * (norm[i - 1] if i > 0 else 0.0),
+                0.4 * (norm[i + 1] if i + 1 < n else 0.0),
+            )
             for i in range(n)
         ]
         if peak_raw > 0.003:
@@ -162,7 +168,9 @@ class VoiceInputFlow:
 
         Ровно одна точка, где двигается состояние картинки: рендер её только читает."""
         self._advance_bands()
-        if self.state == RECORDING and self.elapsed_seconds >= self._cfg.get("max_seconds", 120):
+        if self.state == RECORDING and self.elapsed_seconds >= self._cfg.get(
+            "max_seconds", 120
+        ):
             self.stop_and_transcribe()
 
     def stop_and_transcribe(self) -> None:

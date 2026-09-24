@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+)
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
 
@@ -22,9 +25,15 @@ async def test_batch_calls_first_active_rest_waiting():
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
-        a = ToolCallRow(call_id="a", tool_name="t1", args_summary="", waiting=True)
-        b = ToolCallRow(call_id="b", tool_name="t2", args_summary="", waiting=True)
-        c = ToolCallRow(call_id="c", tool_name="t3", args_summary="", waiting=True)
+        a = ToolCallRow(
+            call_id="a", tool_name="t1", args_summary="", waiting=True
+        )
+        b = ToolCallRow(
+            call_id="b", tool_name="t2", args_summary="", waiting=True
+        )
+        c = ToolCallRow(
+            call_id="c", tool_name="t3", args_summary="", waiting=True
+        )
         for row in (a, b, c):
             trace.mount(row)
             scr._active_calls[row.call_id] = row

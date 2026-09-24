@@ -70,13 +70,39 @@ class SessionsScreen(Screen):
 
     # Input: ctrl+a = home. Нужен select-all в фильтре (ЙЦУКЕН / Caps).
     BINDINGS = [
-        Binding("ctrl+a", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
-        Binding("ctrl+ф", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
-        Binding("ctrl+A", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
-        Binding("ctrl+Ф", "filter_select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding(
+            "ctrl+a",
+            "filter_select_all",
+            _ACT_SELECT_ALL,
+            show=False,
+            priority=True,
+        ),
+        Binding(
+            "ctrl+ф",
+            "filter_select_all",
+            _ACT_SELECT_ALL,
+            show=False,
+            priority=True,
+        ),
+        Binding(
+            "ctrl+A",
+            "filter_select_all",
+            _ACT_SELECT_ALL,
+            show=False,
+            priority=True,
+        ),
+        Binding(
+            "ctrl+Ф",
+            "filter_select_all",
+            _ACT_SELECT_ALL,
+            show=False,
+            priority=True,
+        ),
     ]
 
-    def __init__(self, *, threads_dir: str, system: str = "cli", **kwargs) -> None:
+    def __init__(
+        self, *, threads_dir: str, system: str = "cli", **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self._threads_dir = threads_dir
         self._system = system
@@ -98,7 +124,9 @@ class SessionsScreen(Screen):
             yield VerticalScroll(id="sessions-list")
             with Horizontal(id="sessions-filter-row"):
                 yield Static("> ", id="sessions-filter-prompt", markup=False)
-                yield Input(placeholder="поиск (id или текст)", id="sessions-filter")
+                yield Input(
+                    placeholder="поиск (id или текст)", id="sessions-filter"
+                )
             with Horizontal(id="sessions-footer"):
                 yield Static("", id="sessions-footer-left", markup=False)
                 yield Static("", id="sessions-footer-right", markup=False)
@@ -188,7 +216,9 @@ class SessionsScreen(Screen):
         else:
             left = "сессии · 0"
         self.query_one("#sessions-header-left", Static).update(left)
-        self.query_one("#sessions-header-right", Static).update(truncate_path_left(self._project_path(), _PATH_MAXLEN))
+        self.query_one("#sessions-header-right", Static).update(
+            truncate_path_left(self._project_path(), _PATH_MAXLEN)
+        )
 
     def _task_display_status(self, task) -> Optional[str]:
         """Статус для карточки: live-состояние активной сессии важнее meta.tui.status.
@@ -196,7 +226,9 @@ class SessionsScreen(Screen):
         Как TraceScreen._session_status_word — иначе после повторного старта в том же
         треде meta ещё «completed», хотя runner уже работает."""
         tui_state = getattr(self.app, "tui_state", None)
-        active_tid = getattr(tui_state, "active_task_id", None) if tui_state else None
+        active_tid = (
+            getattr(tui_state, "active_task_id", None) if tui_state else None
+        )
         if not active_tid or task.thread_id != active_tid:
             return task.status
         if tui_state.ask_human_state is not None:
@@ -218,14 +250,21 @@ class SessionsScreen(Screen):
         if not usage:
             return None
         cfg = getattr(self.app, "_config", None) or {}
-        return format_nonzero_cost(usage, cfg.get("pricing"), cfg.get("model"), cfg.get("completions_url"))
+        return format_nonzero_cost(
+            usage,
+            cfg.get("pricing"),
+            cfg.get("model"),
+            cfg.get("completions_url"),
+        )
 
     def _session_is_busy(self, thread_id: str) -> bool:
         """Чужой свежий lock → сессия занята другим TUI."""
         tui_id = getattr(self.app, "tui_id", "") or ""
         if not tui_id:
             return False
-        return is_held_by_other(self._threads_dir, self._system, thread_id, tui_id)
+        return is_held_by_other(
+            self._threads_dir, self._system, thread_id, tui_id
+        )
 
     def _meta_line(self, task) -> Text:
         t = Text(no_wrap=True, overflow="ellipsis")
@@ -241,7 +280,9 @@ class SessionsScreen(Screen):
             t.append(" · ", style=MUTED)
             t.append(cost, style=DIM)
         status = self._task_display_status(task)
-        if status:  # None — исход не записан → бейдж не показываем (без пустых «[]»)
+        if (
+            status
+        ):  # None — исход не записан → бейдж не показываем (без пустых «[]»)
             t.append(" · ", style=MUTED)
             t.append(f"[{status}]", style=_STATUS_COLOR.get(status, DEEP_DIM))
         if self._session_is_busy(task.thread_id):
@@ -274,19 +315,27 @@ class SessionsScreen(Screen):
         listview.remove_children()
         page = self._page_items()
         if not page:
-            listview.mount(Static("(нет сессий)", classes="line-meta", markup=False))
+            listview.mount(
+                Static("(нет сессий)", classes="line-meta", markup=False)
+            )
             return
         selected_card: Optional[Static] = None
         for idx, task in enumerate(page):
             suffix = " selected" if idx == self._selected_idx else ""
-            card = Static(self._card_text(task, selected=bool(suffix)), classes="card" + suffix, markup=False)
+            card = Static(
+                self._card_text(task, selected=bool(suffix)),
+                classes="card" + suffix,
+                markup=False,
+            )
             if suffix:
                 selected_card = card
             listview.mount(card)
         if selected_card is not None:
             # Элемент — ОДИН виджет (2–3 строки): scroll_visible тащит его целиком в
             # обе стороны кругового перехода (как карточка MCP).
-            self.call_after_refresh(selected_card.scroll_visible, animate=False)
+            self.call_after_refresh(
+                selected_card.scroll_visible, animate=False
+            )
 
     def _change_page(self, delta: int) -> None:
         new_page = max(0, min(self._page + delta, self._page_count() - 1))
@@ -332,7 +381,9 @@ class SessionsScreen(Screen):
             return
         page_len = len(self._page_items())
         if event.key == "up":
-            if page_len:  # круговой в пределах страницы: с первой ↑ → на последнюю
+            if (
+                page_len
+            ):  # круговой в пределах страницы: с первой ↑ → на последнюю
                 self._selected_idx = (self._selected_idx - 1) % page_len
                 self._render_list()
             event.stop()
@@ -379,7 +430,9 @@ class SessionsScreen(Screen):
     def _toggle_branch_filter(self) -> None:
         if self._current_branch is None:
             return  # не-git → no-op
-        self._branch_filter = "current" if self._branch_filter == "all" else "all"
+        self._branch_filter = (
+            "current" if self._branch_filter == "all" else "all"
+        )
         self._page = 0
         self._reload()
 
@@ -412,7 +465,10 @@ class SessionsScreen(Screen):
                 self._delete_task(task.thread_id)
 
         self.app.push_screen(
-            ConfirmScreen(title="Удаление", message=f"Удалить сессию {short}?\nЭто действие необратимо."),
+            ConfirmScreen(
+                title="Удаление",
+                message=f"Удалить сессию {short}?\nЭто действие необратимо.",
+            ),
             _on_result,
         )
 
@@ -431,7 +487,9 @@ class SessionsScreen(Screen):
             if criterion:
                 self._confirm_mass_delete(tasks, criterion, now)
 
-        self.app.push_screen(MassDeleteScreen(tasks=tasks, now=now), _on_criterion)
+        self.app.push_screen(
+            MassDeleteScreen(tasks=tasks, now=now), _on_criterion
+        )
 
     def _confirm_mass_delete(self, tasks: list, criterion: dict, now) -> None:
         from gc_tui.services.session_delete_select import select_for_deletion
@@ -451,7 +509,8 @@ class SessionsScreen(Screen):
 
         self.app.push_screen(
             ConfirmScreen(
-                title="Массовое удаление", message=f"Удалить {len(ids)} из {total} сессий?\nЭто действие необратимо."
+                title="Массовое удаление",
+                message=f"Удалить {len(ids)} из {total} сессий?\nЭто действие необратимо.",
             ),
             _on_confirm,
         )
@@ -468,7 +527,9 @@ class SessionsScreen(Screen):
                 return
             self._apply_rename(tid, value)
 
-        self.app.push_screen(RenameScreen(current=self._title_of(task)), _on_result)
+        self.app.push_screen(
+            RenameScreen(current=self._title_of(task)), _on_result
+        )
 
     def _apply_rename(self, thread_id: str, value: str) -> None:
         # пустое значение → откат к авто-имени: title="" сброшен, display_name
@@ -491,7 +552,10 @@ class SessionsScreen(Screen):
 
         self.app.push_screen(
             PreviewScreen(
-                segments=segments, thread_id=tid, project_path=self._project_path(), subagent_records=subagent_records
+                segments=segments,
+                thread_id=tid,
+                project_path=self._project_path(),
+                subagent_records=subagent_records,
             ),
             _on_result,
         )

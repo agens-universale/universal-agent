@@ -33,8 +33,14 @@ if __package__ in (None, ""):
     __package__ = "recommended_mcp"
 
 from recommended_mcp.manifest import MCPEntry, load_manifest
-from recommended_mcp.process_supervisor import RunSupervisor, stop_command_daemons
-from recommended_mcp.runtime.manifest_resolve import recipe_root, resolve_install_manifest_path
+from recommended_mcp.process_supervisor import (
+    RunSupervisor,
+    stop_command_daemons,
+)
+from recommended_mcp.runtime.manifest_resolve import (
+    recipe_root,
+    resolve_install_manifest_path,
+)
 
 
 class RunError(RuntimeError):
@@ -64,7 +70,9 @@ def run_entry(entry: MCPEntry, root: Path, supervisor: RunSupervisor) -> bool:
 def _run_docker_compose(entry: MCPEntry, pkg_path: Path) -> None:
     compose = pkg_path / "docker-compose.yml"
     if not compose.exists():
-        raise RunError(f"mcp {entry.name!r}: docker-compose.yml not found at {compose}")
+        raise RunError(
+            f"mcp {entry.name!r}: docker-compose.yml not found at {compose}"
+        )
     cmd = ["docker", "compose", "-f", str(compose), "up"]
     if entry.run and entry.run.detach:
         cmd.append("-d")
@@ -73,7 +81,11 @@ def _run_docker_compose(entry: MCPEntry, pkg_path: Path) -> None:
 
 
 def _command_daemon_names(manifest: list[MCPEntry]) -> list[str]:
-    return [entry.name for entry in manifest if entry.run is not None and entry.run.type == "command"]
+    return [
+        entry.name
+        for entry in manifest
+        if entry.run is not None and entry.run.type == "command"
+    ]
 
 
 def main() -> int:
@@ -113,10 +125,14 @@ def main() -> int:
                 if run_entry(entry, root, supervisor):
                     started_any = True
             if started_any:
-                print("[run] supervising started daemons — Ctrl+C to stop them")
+                print(
+                    "[run] supervising started daemons — Ctrl+C to stop them"
+                )
                 supervisor.wait_until_signal()
             else:
-                print("[run] nothing new to supervise (already running or stdio-only)")
+                print(
+                    "[run] nothing new to supervise (already running or stdio-only)"
+                )
         finally:
             supervisor.shutdown_managed()
         print("[done] run complete")

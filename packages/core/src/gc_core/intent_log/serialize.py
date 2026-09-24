@@ -40,17 +40,23 @@ def _parse_legacy_raw_body(body: str) -> tuple[str, str | dict[str, Any]]:
     except json.JSONDecodeError:
         parsed = None
     if isinstance(parsed, dict):
-        return tool_name, (parsed if "arguments" in parsed else {"arguments": parsed})
+        return tool_name, (
+            parsed if "arguments" in parsed else {"arguments": parsed}
+        )
     return tool_name, {"arguments": {}, "output": rest}
 
 
-def _legacy_string_to_record(text: str, *, turn: int = 1) -> IntentRecord | None:
+def _legacy_string_to_record(
+    text: str, *, turn: int = 1
+) -> IntentRecord | None:
     """Best-effort: old meta stored intent lines as plain strings."""
     line = str(text or "").strip()
     if not line:
         return None
     if line.startswith("[intent_scope:raw] "):
-        tool_name, content = _parse_legacy_raw_body(line[len("[intent_scope:raw] ") :].strip())
+        tool_name, content = _parse_legacy_raw_body(
+            line[len("[intent_scope:raw] ") :].strip()
+        )
         return validate_record(
             IntentRecord(
                 turn=turn,
@@ -106,16 +112,22 @@ def deserialize_list(items: Iterable[Any] | None) -> list[IntentRecord]:
             if record is not None:
                 out.append(record)
             continue
-        raise TypeError(f"Cannot deserialize intent record from {type(item)!r}")
+        raise TypeError(
+            f"Cannot deserialize intent record from {type(item)!r}"
+        )
     return out
 
 
-def serialize_for_meta(records: Iterable[IntentRecord | Mapping[str, Any]]) -> list[dict[str, Any]]:
+def serialize_for_meta(
+    records: Iterable[IntentRecord | Mapping[str, Any]],
+) -> list[dict[str, Any]]:
     """Persist intent log as structured list in thread meta (not JSONL file)."""
     return [validate_record(item).to_dict() for item in records]
 
 
-def records_to_jsonl_lines(records: Iterable[IntentRecord | Mapping[str, Any]]) -> list[str]:
+def records_to_jsonl_lines(
+    records: Iterable[IntentRecord | Mapping[str, Any]],
+) -> list[str]:
     """One canonical JSONL line per IntentRecord (§2.1)."""
     text = serialize(records)
     if not text:

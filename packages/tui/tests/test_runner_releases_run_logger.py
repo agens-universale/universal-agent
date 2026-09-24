@@ -26,7 +26,9 @@ def _registered(logger) -> bool:
 
 
 def _run_logger(tmp_path, run_id):
-    logger, _, _ = create_run_logger({"logs_dump_dir": str(tmp_path), "save_logs": True}, run_id=run_id)
+    logger, _, _ = create_run_logger(
+        {"logs_dump_dir": str(tmp_path), "save_logs": True}, run_id=run_id
+    )
     return logger
 
 
@@ -67,7 +69,9 @@ def test_release_during_a_run_waits_for_the_worker(tmp_path):
     assert ex.running.wait(5.0)
 
     runner.release()
-    assert _registered(logger) and logger.handlers, "отняли хендлеры у живого прогона"
+    assert _registered(logger) and logger.handlers, (
+        "отняли хендлеры у живого прогона"
+    )
 
     ex.stop_run()
     runner.wait(5.0)
@@ -111,7 +115,9 @@ def test_exited_app_is_collected(tmp_path):
         if name not in logging.Logger.manager.loggerDict:
             break
         time.sleep(0.02)
-    assert name not in logging.Logger.manager.loggerDict, "логгер прогона пережил приложение"
+    assert name not in logging.Logger.manager.loggerDict, (
+        "логгер прогона пережил приложение"
+    )
 
     gc.collect()
     alive = ref() is not None  # не держим App в кадре упавшего assert

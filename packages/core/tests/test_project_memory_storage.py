@@ -3,7 +3,10 @@ import threading
 
 import pytest
 from gc_core.project_memory import storage
-from gc_core.project_memory.storage import ProjectMemoryError, ProjectMemoryStat
+from gc_core.project_memory.storage import (
+    ProjectMemoryError,
+    ProjectMemoryStat,
+)
 
 
 def test_stat_missing_returns_zero(tmp_path):
@@ -49,7 +52,9 @@ def test_write_strips_whitespace(tmp_path):
 def test_write_atomic_no_tmp_leftover(tmp_path):
     p = tmp_path / "project_memory.md"
     storage.write(p, "abc")
-    leftovers = [name for name in os.listdir(tmp_path) if name.endswith(".tmp")]
+    leftovers = [
+        name for name in os.listdir(tmp_path) if name.endswith(".tmp")
+    ]
     assert leftovers == []
 
 
@@ -129,4 +134,6 @@ def test_concurrent_append_does_not_lose_data(tmp_path):
     final = p.read_text(encoding="utf-8")
     for prefix in ("A", "B"):
         for i in range(n_per_thread):
-            assert f"{prefix}-{i}" in final, f"missing {prefix}-{i} in final file"
+            assert f"{prefix}-{i}" in final, (
+                f"missing {prefix}-{i} in final file"
+            )

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 from gc_core.config_modules import env_vars
-from gc_core.message_policy.user_message_policy import is_technical_user_message_text
+from gc_core.message_policy.user_message_policy import (
+    is_technical_user_message_text,
+)
 from gc_core.runtime_notices import clear_runtime_notices
 from gc_core.thread_store import load_thread_messages
 from gc_tui.diff_tui.feedback import (
@@ -31,7 +33,14 @@ def cache_proj(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "n,word",
-    [(1, "файл"), (2, "файла"), (5, "файлов"), (11, "файлов"), (21, "файл"), (22, "файла")],
+    [
+        (1, "файл"),
+        (2, "файла"),
+        (5, "файлов"),
+        (11, "файлов"),
+        (21, "файл"),
+        (22, "файла"),
+    ],
 )
 def test_files_word(n, word):
     assert files_word(n) == word
@@ -51,7 +60,9 @@ def test_format_approve_ack_and_cta():
     assert format_approve_ack(0) is None
     assert format_pending_cta(["src/a.py"]) == "src/a.py\nF3/diff"
     assert format_pending_cta(["a.py", "b.py"]) == "a.py\nb.py\nF3/diff"
-    assert format_pending_cta([f"f{i}.py" for i in range(1, 6)]) == ("f1.py\nf2.py\nf3.py\nf4.py\nf5.py\nF3/diff")
+    assert format_pending_cta([f"f{i}.py" for i in range(1, 6)]) == (
+        "f1.py\nf2.py\nf3.py\nf4.py\nf5.py\nF3/diff"
+    )
     assert format_pending_cta([f"f{i}.py" for i in range(1, 8)]) == (
         "f1.py\nf2.py\nf3.py\nf4.py\nf5.py\n(5 из 7) F3/diff"
     )
@@ -61,7 +72,10 @@ def test_format_approve_ack_and_cta():
 
 
 def test_format_bulk_dual_layer_acks():
-    from gc_tui.diff_tui.feedback import format_bulk_approve_ack, format_bulk_undo_ack
+    from gc_tui.diff_tui.feedback import (
+        format_bulk_approve_ack,
+        format_bulk_undo_ack,
+    )
 
     assert format_bulk_approve_ack(2, 1) == "Принято: git: 2; cache: 1"
     assert format_bulk_approve_ack(3, 0) == "Принято: git: 3"
@@ -122,7 +136,9 @@ def test_build_undo_feedback_deleted_only():
 def test_build_undo_feedback_empty_keys():
     assert build_undo_feedback_message() is None
     assert build_undo_feedback_body() is None
-    assert "src/a.py" in (build_undo_feedback_body(restored_keys=["src/a.py"]) or "")
+    assert "src/a.py" in (
+        build_undo_feedback_body(restored_keys=["src/a.py"]) or ""
+    )
 
 
 def test_service_undo_returns_undone_keys(cache_proj):
@@ -216,7 +232,11 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
         assert feedback == [(["src/foo.py"], [])]
         assert scr._status == "Отменено: src/foo.py"
         msgs, _keys, _seq = load_thread_messages(str(threads_dir), "cli", tid)
-        technical = [m for m in msgs if is_technical_user_message_text(m.get("content", ""))]
+        technical = [
+            m
+            for m in msgs
+            if is_technical_user_message_text(m.get("content", ""))
+        ]
         assert len(technical) == 1
         assert "src/foo.py" in technical[0]["content"]
         assert "Changes reverted" in technical[0]["content"]

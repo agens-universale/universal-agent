@@ -19,4 +19,6 @@ def test_system_skills_root_exists_in_dev():
     root = Path(registry._system_skills_root())
     assert root == bundled_root() / "skills"
     assert root.is_dir()
-    assert any(root.iterdir()), "встроенные скиллы не найдены — список будет пуст"
+    assert any(root.iterdir()), (
+        "встроенные скиллы не найдены — список будет пуст"
+    )

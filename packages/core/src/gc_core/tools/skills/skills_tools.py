@@ -18,8 +18,16 @@ from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
 )
-from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE, copy_loop_warn, loop_warn_on_repeat
-from gc_core.tools.exec.exec_envelope import as_captured_stream, exec_channels_json
+from gc_core.loop_detector.constants import (
+    LOOP_WARN_KEY,
+    READ_PROFILE,
+    copy_loop_warn,
+    loop_warn_on_repeat,
+)
+from gc_core.tools.exec.exec_envelope import (
+    as_captured_stream,
+    exec_channels_json,
+)
 from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from gc_core.utils.arg_decorators import parse_json_object_argument
@@ -34,7 +42,10 @@ def _json_sanitize(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         return "binary data"
     if isinstance(value, dict):
-        return {(k if isinstance(k, str) else str(k)): _json_sanitize(v) for k, v in value.items()}
+        return {
+            (k if isinstance(k, str) else str(k)): _json_sanitize(v)
+            for k, v in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_json_sanitize(v) for v in value]
     if isinstance(value, (str, int, float, bool)):
@@ -62,27 +73,36 @@ def _wrap(
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class SkillsListTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
     async def acall(self, pack: Optional[str] = None, **kwargs: Any) -> str:
         pack = coalesce_optional_string(pack)
         try:
             skills = await self._registry.list_skills(pack=pack)
-            return _wrap(tool="skills_list", ok=True, result={"skills": skills})
+            return _wrap(
+                tool="skills_list", ok=True, result={"skills": skills}
+            )
         except Exception as exc:
             logger.error("skills_list failed: %s", exc, exc_info=True)
             return _wrap(
                 tool="skills_list",
                 ok=False,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_list failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_list failed: {exc}",
+                },
             )
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class LoadSkillTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
     async def acall(self, skill_id: str, **kwargs: Any) -> str:
@@ -121,12 +141,17 @@ class LoadSkillTool:
                 ok=False,
                 skill_id=skill_id,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_load failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_load failed: {exc}",
+                },
             )
 
 
 class RunSkillScriptTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
         self._ctx = kwargs.get("ctx")
         self._config_dict = kwargs.get("config_dict") or {}
@@ -146,9 +171,13 @@ class RunSkillScriptTool:
         **kwargs: Any,
     ) -> str:
         try:
-            resolved = await self._registry.resolve_script(skill_id=skill_id, script_name=script_name or "")
+            resolved = await self._registry.resolve_script(
+                skill_id=skill_id, script_name=script_name or ""
+            )
             if self._ctx is None or not hasattr(self._ctx, "os_backend"):
-                raise RuntimeError("skills_run_script requires a run context with os_backend")
+                raise RuntimeError(
+                    "skills_run_script requires a run context with os_backend"
+                )
             backend = self._ctx.os_backend
             python = "python3" if backend.is_sandbox else sys.executable
             run_argv = [python, resolved["path"]]
@@ -168,10 +197,12 @@ class RunSkillScriptTool:
                 timeout=exec_timeout_from_config_dict(self._config_dict),
             )
             stdout = as_captured_stream(
-                getattr(exec_result, "stdout_stream", None) or getattr(exec_result, "stdout", "")
+                getattr(exec_result, "stdout_stream", None)
+                or getattr(exec_result, "stdout", "")
             )
             stderr = as_captured_stream(
-                getattr(exec_result, "stderr_stream", None) or getattr(exec_result, "stderr", "")
+                getattr(exec_result, "stderr_stream", None)
+                or getattr(exec_result, "stderr", "")
             )
             result: Dict[str, Any] = {
                 "exit_code": exec_result.return_code,
@@ -183,10 +214,14 @@ class RunSkillScriptTool:
                 exec_channels_json(
                     stdout,
                     stderr,
-                    exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+                    exec_output_preview_edge_chars_from_config_dict(
+                        self._config_dict
+                    ),
                 )
             )
-            script_ok = not exec_result.timed_out and exec_result.return_code == 0
+            script_ok = (
+                not exec_result.timed_out and exec_result.return_code == 0
+            )
             return _wrap(
                 tool="skills_run_script",
                 ok=True,
@@ -239,7 +274,9 @@ class RunSkillScriptTool:
                 },
             )
 
-    def _json_arg_error(self, exc: JsonArgParseError, call_kwargs: Dict[str, Any]) -> str:
+    def _json_arg_error(
+        self, exc: JsonArgParseError, call_kwargs: Dict[str, Any]
+    ) -> str:
         return _wrap(
             tool="skills_run_script",
             ok=False,
@@ -248,18 +285,26 @@ class RunSkillScriptTool:
             argv=call_kwargs.get("argv"),
             args=call_kwargs.get("args"),
             result=None,
-            error={"code": "INVALID_ARGUMENT", "field": exc.field, "message": exc.message},
+            error={
+                "code": "INVALID_ARGUMENT",
+                "field": exc.field,
+                "message": exc.message,
+            },
         )
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class LoadReferenceTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
     async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
         try:
-            res = await self._registry.load_reference(skill_id=skill_id, slug=slug)
+            res = await self._registry.load_reference(
+                skill_id=skill_id, slug=slug
+            )
             return _wrap(
                 tool="skills_read_reference",
                 ok=True,
@@ -290,20 +335,27 @@ class LoadReferenceTool:
                 error={"code": "RESOURCE_NOT_FOUND", "message": str(exc)},
             )
         except Exception as exc:
-            logger.error("skills_read_reference failed: %s", exc, exc_info=True)
+            logger.error(
+                "skills_read_reference failed: %s", exc, exc_info=True
+            )
             return _wrap(
                 tool="skills_read_reference",
                 ok=False,
                 skill_id=skill_id,
                 slug=slug,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_read_reference failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_read_reference failed: {exc}",
+                },
             )
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class LoadAssetTool:
-    def __init__(self, registry: SkillsRegistry, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, registry: SkillsRegistry, *args: Any, **kwargs: Any
+    ) -> None:
         self._registry = registry
 
     async def acall(self, skill_id: str, slug: str, **kwargs: Any) -> str:
@@ -346,11 +398,16 @@ class LoadAssetTool:
                 skill_id=skill_id,
                 slug=slug,
                 result=None,
-                error={"code": "INTERNAL_ERROR", "message": f"skills_read_asset failed: {exc}"},
+                error={
+                    "code": "INTERNAL_ERROR",
+                    "message": f"skills_read_asset failed: {exc}",
+                },
             )
 
 
-def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str, Any]]:
+def get_skills_tools_data(
+    skills_registry: SkillsRegistry,
+) -> Dict[str, Dict[str, Any]]:
     """
     Собрать словарь инструментов работы со скиллами в формате tools_data.
     """
@@ -361,7 +418,9 @@ def get_skills_tools_data(skills_registry: SkillsRegistry) -> Dict[str, Dict[str
 
         return fabric
 
-    def _with_loop_warn(entry: Dict[str, Any], tool_cls: type) -> Dict[str, Any]:
+    def _with_loop_warn(
+        entry: Dict[str, Any], tool_cls: type
+    ) -> Dict[str, Any]:
         warn = copy_loop_warn(tool_cls)
         if warn is not None:
             entry[LOOP_WARN_KEY] = warn

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from gc_core.config_modules.backend import parse_chat_completions_max_tokens
 
@@ -37,17 +43,23 @@ class ChatCompletionsLlmConfig(BaseModel):
     @field_validator("max_tokens", mode="before")
     @classmethod
     def normalize_max_tokens(cls, value: Any) -> int:
-        return parse_chat_completions_max_tokens(value, default=DEFAULT_AUXILIARY_LLM_MAX_TOKENS)
+        return parse_chat_completions_max_tokens(
+            value, default=DEFAULT_AUXILIARY_LLM_MAX_TOKENS
+        )
 
     @field_validator("judge_max_tokens", mode="before")
     @classmethod
     def normalize_judge_max_tokens(cls, value: Any) -> int:
-        return parse_chat_completions_max_tokens(value, default=DEFAULT_JUDGE_MAX_TOKENS)
+        return parse_chat_completions_max_tokens(
+            value, default=DEFAULT_JUDGE_MAX_TOKENS
+        )
 
     @field_validator("subagent_role_max_tokens", mode="before")
     @classmethod
     def normalize_subagent_role_max_tokens(cls, value: Any) -> int:
-        return parse_chat_completions_max_tokens(value, default=DEFAULT_SUBAGENT_ROLE_MAX_TOKENS)
+        return parse_chat_completions_max_tokens(
+            value, default=DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+        )
 
     @field_validator("completion_kwargs", mode="before")
     @classmethod
@@ -116,13 +128,17 @@ def auxiliary_llm_from_config_dict(
 
     cc_params = cfg.get("chat_completions_params")
     if isinstance(cc_params, dict):
-        nested = _auxiliary_llm_dump_if_non_default(cc_params.get("auxiliary_llm"))
+        nested = _auxiliary_llm_dump_if_non_default(
+            cc_params.get("auxiliary_llm")
+        )
         if nested is None:
             nested = _auxiliary_llm_dump_if_non_default(cc_params.get("llm"))
         if nested is not None:
             return ChatCompletionsLlmConfig.model_validate(nested)
 
-    legacy = _auxiliary_llm_dump_if_non_default(cfg.get("chat_completions_llm"))
+    legacy = _auxiliary_llm_dump_if_non_default(
+        cfg.get("chat_completions_llm")
+    )
     if legacy is not None:
         return ChatCompletionsLlmConfig.model_validate(legacy)
 
@@ -135,5 +151,7 @@ def subagent_role_max_tokens_from_ctx(ctx: Any) -> int:
     на ``ctx.config_dict`` для двойников без готового профиля)."""
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     if not isinstance(auxiliary_llm, ChatCompletionsLlmConfig):
-        auxiliary_llm = auxiliary_llm_from_config_dict(getattr(ctx, "config_dict", None))
+        auxiliary_llm = auxiliary_llm_from_config_dict(
+            getattr(ctx, "config_dict", None)
+        )
     return auxiliary_llm.subagent_role_max_tokens

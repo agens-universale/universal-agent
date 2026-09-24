@@ -22,7 +22,9 @@ class AbstractSimpleTool(ABC):
             )
         backend = getattr(ctx, "os_backend", None)
         if backend is None:
-            raise RuntimeError(f"{type(self).__name__}: ctx.os_backend is missing; use acreate_run_context()")
+            raise RuntimeError(
+                f"{type(self).__name__}: ctx.os_backend is missing; use acreate_run_context()"
+            )
         return backend
 
     @property
@@ -44,7 +46,9 @@ class AbstractSimpleTool(ABC):
 
     @classmethod
     @abstractmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         pass
 
     @classmethod
@@ -59,7 +63,9 @@ class AbstractSimpleTool(ABC):
 
     @classmethod
     @abstractmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         pass
 
     @abstractmethod

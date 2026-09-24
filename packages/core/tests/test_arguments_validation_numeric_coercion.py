@@ -2,7 +2,10 @@
 # (ensure_real_tools_package), so an in-function import binds a different class object than
 # the one parse_and_validate_tool_arguments raises -> pytest.raises would miss it.
 import pytest
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 
 SPEC = {
     "type": "function",
@@ -106,40 +109,52 @@ def test_anyof_numeric_string_is_coerced():
     (not enum, not integer), and _coerce_numeric_strings skipped anyOf fields
     (type=None). Now it locates the integer branch and coerces.
     """
-    args = _validate_anyof({"path": "/a", "search": "s", "replace": "r", "occurrence": "2"})
+    args = _validate_anyof(
+        {"path": "/a", "search": "s", "replace": "r", "occurrence": "2"}
+    )
     assert args["occurrence"] == 2
     assert isinstance(args["occurrence"], int)
 
 
 def test_anyof_enum_string_not_coerced():
     """A non-numeric enum string stays a string (not coerced to a number)."""
-    args = _validate_anyof({"path": "/a", "search": "s", "replace": "r", "occurrence": "first"})
+    args = _validate_anyof(
+        {"path": "/a", "search": "s", "replace": "r", "occurrence": "first"}
+    )
     assert args["occurrence"] == "first"
     assert isinstance(args["occurrence"], str)
 
 
 def test_anyof_integer_passes_through():
     """A plain integer in an anyOf field passes validation unchanged."""
-    args = _validate_anyof({"path": "/a", "search": "s", "replace": "r", "occurrence": 3})
+    args = _validate_anyof(
+        {"path": "/a", "search": "s", "replace": "r", "occurrence": 3}
+    )
     assert args["occurrence"] == 3
 
 
 def test_anyof_zero_string_rejected_by_minimum():
     """After coercion, "0" -> 0 must still fail minimum:1."""
     with pytest.raises(WrongFunctionArgumentsException):
-        _validate_anyof({"path": "/a", "search": "s", "replace": "r", "occurrence": "0"})
+        _validate_anyof(
+            {"path": "/a", "search": "s", "replace": "r", "occurrence": "0"}
+        )
 
 
 def test_anyof_non_numeric_string_rejected():
     """A string that is neither numeric nor an enum value is rejected."""
     with pytest.raises(WrongFunctionArgumentsException):
-        _validate_anyof({"path": "/a", "search": "s", "replace": "r", "occurrence": "many"})
+        _validate_anyof(
+            {"path": "/a", "search": "s", "replace": "r", "occurrence": "many"}
+        )
 
 
 def test_anyof_fractional_string_rejected():
     """A fractional string in an integer-branch anyOf is rejected (not integer)."""
     with pytest.raises(WrongFunctionArgumentsException):
-        _validate_anyof({"path": "/a", "search": "s", "replace": "r", "occurrence": "2.5"})
+        _validate_anyof(
+            {"path": "/a", "search": "s", "replace": "r", "occurrence": "2.5"}
+        )
 
 
 def test_anyof_with_null_branch_still_coerces():

@@ -56,7 +56,9 @@ def _texts(messages) -> list:
     return out
 
 
-async def test_message_queued_before_the_run_reaches_the_first_batch(monkeypatch, tmp_path):
+async def test_message_queued_before_the_run_reaches_the_first_batch(
+    monkeypatch, tmp_path
+):
     """Положенное до `arun` уходит агенту в первом же запросе."""
     seen: list = []
 
@@ -67,9 +69,13 @@ async def test_message_queued_before_the_run_reaches_the_first_batch(monkeypatch
     ex.add_message({"role": "user", "content": "из брони"})
 
     # `arun` принимает СТРОКИ (в очередь же кладут словари — так делает сервер).
-    await ex.arun(["стартовое"], thread_id="t", start_new_thread=True, system="cli")
+    await ex.arun(
+        ["стартовое"], thread_id="t", start_new_thread=True, system="cli"
+    )
 
-    assert seen and "из брони" in seen[0], f"сообщение из очереди не доехало до модели: {seen}"
+    assert seen and "из брони" in seen[0], (
+        f"сообщение из очереди не доехало до модели: {seen}"
+    )
     assert "стартовое" in seen[0], f"стартовое сообщение потеряно: {seen}"
 
 
@@ -105,10 +111,16 @@ async def test_the_tail_does_not_leak_into_the_next_run(monkeypatch, tmp_path):
     ex = await _executor(monkeypatch, tmp_path, _on_call)
     holder["ex"] = ex
 
-    await ex.arun(["первый"], thread_id="t", start_new_thread=True, system="cli")
-    await ex.arun(["второй"], thread_id="t", start_new_thread=True, system="cli")
-
-    assert seen[1] == ["второй"], f"хвост прошлого прогона протёк в следующий: {seen[1]}"
-    assert [m["content"] for m in ex.take_undelivered_messages()] == ["не съедено"], (
-        "несъеденное пропало молча — а клиенту на него уже ответили «принято»"
+    await ex.arun(
+        ["первый"], thread_id="t", start_new_thread=True, system="cli"
     )
+    await ex.arun(
+        ["второй"], thread_id="t", start_new_thread=True, system="cli"
+    )
+
+    assert seen[1] == ["второй"], (
+        f"хвост прошлого прогона протёк в следующий: {seen[1]}"
+    )
+    assert [m["content"] for m in ex.take_undelivered_messages()] == [
+        "не съедено"
+    ], "несъеденное пропало молча — а клиенту на него уже ответили «принято»"

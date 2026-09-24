@@ -28,7 +28,9 @@ class AskHumanBanner(VerticalScroll):
     # Фокус остаётся в поле ответа; колёсико над баннером всё равно скроллит.
     can_focus = False
 
-    def __init__(self, *, question: str, via: str | None = None, **kwargs) -> None:
+    def __init__(
+        self, *, question: str, via: str | None = None, **kwargs
+    ) -> None:
         kwargs.setdefault("classes", "")
         kwargs["classes"] = ("ask-human-banner " + kwargs["classes"]).strip()
         super().__init__(**kwargs)
@@ -38,5 +40,9 @@ class AskHumanBanner(VerticalScroll):
     def compose(self) -> ComposeResult:
         from gc_tui.services.trace_render import build_block_widgets
 
-        yield Static(format_ask_label(self._via), classes="ah-label", markup=False)
-        yield from build_block_widgets(self._question, prose_bullet=False, event_no=0)
+        yield Static(
+            format_ask_label(self._via), classes="ah-label", markup=False
+        )
+        yield from build_block_widgets(
+            self._question, prose_bullet=False, event_no=0
+        )

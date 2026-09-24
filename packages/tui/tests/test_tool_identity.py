@@ -32,7 +32,9 @@ def test_legacy_names_pass_through():
 
 
 def test_unknown_and_empty_pass_through():
-    assert tool_id("session_memory") == "session_memory"  # не маппим (generic-рендер)
+    assert (
+        tool_id("session_memory") == "session_memory"
+    )  # не маппим (generic-рендер)
     assert tool_id("some_future_tool") == "some_future_tool"
     assert tool_id("") == ""
     assert tool_id(None) is None

@@ -1,6 +1,8 @@
 from typing import Any, Dict
 
-from gc_core.config_modules.chat_completions import subagent_role_max_tokens_from_ctx
+from gc_core.config_modules.chat_completions import (
+    subagent_role_max_tokens_from_ctx,
+)
 from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
@@ -213,7 +215,9 @@ class SpecialAgent(AbstractSubagent):
 
     async def _agenerate_role(self, ctx: Any, state: Any) -> str:
         """Роль генерируется aux-вызовом; форма одна — асинхронная."""
-        return await arequest_auxiliary_completion_text(**self._role_request_kwargs(ctx, state))
+        return await arequest_auxiliary_completion_text(
+            **self._role_request_kwargs(ctx, state)
+        )
 
     def get_initial_data(self):
         role_prompt = self.agent_role or ""
@@ -223,8 +227,12 @@ SPECIAL AGENT HANDOFF ADDENDUM
 - `blockers` / `assumptions` / `next_actions` are base schema fields — fill them (or `[]`).
 - Keep the final payload machine-readable and avoid prose-only final handoff.
 """
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
-        return self.with_handoff_contract(role_prompt, special_notes), assignment
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
+        return self.with_handoff_contract(
+            role_prompt, special_notes
+        ), assignment
 
     def get_agent_name(self):
         return self.agent_name

@@ -46,7 +46,9 @@ def _record_from_item(item: Any) -> Optional[ToolCallOutputRecord]:
 @dataclass
 class ToolCallOutputsStore:
     max_entries: int = 10
-    _records: OrderedDict[str, ToolCallOutputRecord] = field(default_factory=OrderedDict)
+    _records: OrderedDict[str, ToolCallOutputRecord] = field(
+        default_factory=OrderedDict
+    )
 
     _SERIALIZATION_SCHEMA_VERSION: int = 1
 
@@ -78,7 +80,9 @@ class ToolCallOutputsStore:
         self.max_entries = max_entries
         self._evict_if_needed()
 
-    def put(self, record: ToolCallOutputRecord) -> Optional[ToolCallOutputRecord]:
+    def put(
+        self, record: ToolCallOutputRecord
+    ) -> Optional[ToolCallOutputRecord]:
         if self.is_disabled():
             return None
         evicted: Optional[ToolCallOutputRecord] = None

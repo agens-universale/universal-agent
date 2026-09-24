@@ -27,7 +27,9 @@ async def test_palette_opens_on_slash_and_filters():
         await pilot.press("/")
         await pilot.press("s")
         palette = pilot.app.query_one(".palette")
-        rows_text = "\n".join(str(r.render()) for r in palette.query(".palette-row"))
+        rows_text = "\n".join(
+            str(r.render()) for r in palette.query(".palette-row")
+        )
         assert "/skills" in rows_text
         assert "/stop" in rows_text
         assert "/quit" not in rows_text  # filtered out
@@ -40,14 +42,18 @@ async def test_palette_opens_on_dot_only_and_closes_on_more_typing(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_palette import CommandPalette
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "."
         await pilot.pause(0.1)
         assert len(pilot.app.query(CommandPalette)) == 1
         palette = pilot.app.query_one(CommandPalette)
-        rows_text = "\n".join(str(r.render()) for r in palette.query(".palette-row"))
+        rows_text = "\n".join(
+            str(r.render()) for r in palette.query(".palette-row")
+        )
         assert "/help" in rows_text
         assert "/sessions" in rows_text
 
@@ -64,7 +70,9 @@ async def test_palette_dot_enter_executes_selected(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.help import HelpScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "."
@@ -83,7 +91,9 @@ async def test_palette_dot_tab_completes_with_slash(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "."
@@ -116,7 +126,9 @@ async def test_palette_enter_inserts_command_with_args(tmp_path):
     from gc_tui.widgets.command_palette import CommandPalette
     from gc_tui.widgets.file_picker import FilePicker
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         await pilot.press("/")
         await pilot.press("v")  # view
@@ -132,7 +144,9 @@ async def test_palette_enter_inserts_command_with_args(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_palette_enter_inserts_export_then_field_enter_runs(tmp_path, monkeypatch):
+async def test_palette_enter_inserts_export_then_field_enter_runs(
+    tmp_path, monkeypatch
+):
     """Из палитры Enter только подставляет `/export `; выполнение — следующим Enter в поле."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
@@ -149,7 +163,9 @@ async def test_palette_enter_inserts_export_then_field_enter_runs(tmp_path, monk
         [{"role": "user", "content": "вопрос", "id": "m1"}],
         set(),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "tid1"
@@ -181,7 +197,9 @@ async def test_palette_enter_executes_selected():
 
     async with TuiApp().run_test() as pilot:
         await pilot.press("/")
-        await pilot.press("s")  # sessions, settings, skills, skill, status, stop
+        await pilot.press(
+            "s"
+        )  # sessions, settings, skills, skill, status, stop
         await pilot.press("down")
         await pilot.press("down")  # index 2: skills
         await pilot.press("enter")
@@ -204,7 +222,9 @@ async def test_palette_closes_after_space_after_command_name(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_palette import CommandPalette
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
 
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -234,7 +254,9 @@ async def test_palette_first_row_selected_on_open(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_palette import CommandPalette
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/"
         await pilot.pause(0.1)
@@ -283,7 +305,11 @@ def test_hotkeys_align_to_a_common_column():
     assert rows["c"] == rows["c"].rstrip()  # без хоткея — без пустого хвоста
     # Ровно 3 пробела после самого длинного описания — столько же, сколько после самого
     # длинного имени. Было 2, и на одной строке рядом оказывались разные зазоры.
-    assert rows["b"] == rows["b"].split("описание подлиннее")[0] + "описание подлиннее   Ctrl+T"
+    assert (
+        rows["b"]
+        == rows["b"].split("описание подлиннее")[0]
+        + "описание подлиннее   Ctrl+T"
+    )
 
 
 def test_hotkey_column_counts_rows_without_hotkeys_too():
@@ -295,12 +321,16 @@ def test_hotkey_column_counts_rows_without_hotkeys_too():
 
     reg = CommandRegistry()
     reg.register(Command("a", (), "", "короткое", hotkey="F1"))
-    reg.register(Command("b", (), "", "описание намного длиннее и БЕЗ клавиши"))
+    reg.register(
+        Command("b", (), "", "описание намного длиннее и БЕЗ клавиши")
+    )
     palette = CommandPalette(reg, initial_filter="")
 
     row_a = palette._format_row(reg.lookup("a"))
     row_b = palette._format_row(reg.lookup("b"))
-    assert row_a.index("F1") == len(row_b) + 3  # хоткей правее длинной строки, зазор 3
+    assert (
+        row_a.index("F1") == len(row_b) + 3
+    )  # хоткей правее длинной строки, зазор 3
 
 
 def test_palette_has_no_hotkey_column_when_nobody_has_one():
@@ -337,14 +367,22 @@ async def test_palette_hugs_content(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
     async with app.run_test(size=(80, 40)) as pilot:
         reg = build_default_registry()
-        pal = CommandPalette(reg, initial_filter="se")  # фильтр → 2 реальные команды (/sessions, /settings)
+        pal = CommandPalette(
+            reg, initial_filter="se"
+        )  # фильтр → 2 реальные команды (/sessions, /settings)
         await app.screen.mount(pal)
         await pilot.pause()
         rows = pal._visible_rows()
-        assert len(rows) >= 1  # непустой список — не вырожденный нулевой случай
-        assert pal.styles.height is not None and pal.styles.height.is_auto  # height: auto
+        assert (
+            len(rows) >= 1
+        )  # непустой список — не вырожденный нулевой случай
+        assert (
+            pal.styles.height is not None and pal.styles.height.is_auto
+        )  # height: auto
         assert pal.region.height < 40  # не на весь экран
-        assert pal.region.height < 10  # рамка обнимает малый список, не растянута
+        assert (
+            pal.region.height < 10
+        )  # рамка обнимает малый список, не растянута
 
 
 @pytest.mark.asyncio
@@ -401,5 +439,7 @@ async def test_long_description_row_stays_one_line(tmp_path):
         await app.screen.mount(pal)
         await pilot.pause()
         for row in pal.query(".palette-row"):
-            assert row.region.height == 1, "строка палитры не должна переноситься"
+            assert row.region.height == 1, (
+                "строка палитры не должна переноситься"
+            )
         assert pal.region.height == pal.desired_height

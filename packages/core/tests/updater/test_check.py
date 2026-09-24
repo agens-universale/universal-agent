@@ -12,7 +12,9 @@ def test_update_available_when_remote_differs():
 
 
 def test_current_when_remote_same():
-    r = check_for_update(_src(commit="same"), ls_remote=lambda url, ref: "same")
+    r = check_for_update(
+        _src(commit="same"), ls_remote=lambda url, ref: "same"
+    )
     assert r.status == "current"
 
 
@@ -29,7 +31,9 @@ def test_default_branch_uses_head():
         return "c"
 
     check_for_update(_src(ref=None), ls_remote=_ls)
-    assert seen["ref"] == "HEAD"  # ref отсутствует → проверяем HEAD дефолтной ветки
+    assert (
+        seen["ref"] == "HEAD"
+    )  # ref отсутствует → проверяем HEAD дефолтной ветки
 
 
 def test_git_ls_remote_preserves_console_mode(monkeypatch):
@@ -57,7 +61,9 @@ def test_git_ls_remote_preserves_console_mode(monkeypatch):
         stdout = "abc123\trefs/heads/master\n"
 
     def _fake_run(*a, **kw):
-        assert calls == ["enter"]  # subprocess вызван внутри preserve_console_mode
+        assert calls == [
+            "enter"
+        ]  # subprocess вызван внутри preserve_console_mode
         return _Result()
 
     monkeypatch.setattr(check_mod.subprocess, "run", _fake_run)
@@ -69,11 +75,22 @@ def test_git_ls_remote_preserves_console_mode(monkeypatch):
 def test_update_available_from_state():
     from gc_core.updater.check import update_available_from_state
 
-    st = {"last_update_remote_commit": "new", "last_update_checked_installed": "old"}
-    assert update_available_from_state(st, "old") is True  # проверяли на old, remote new → доступно
-    assert update_available_from_state(st, "new") is False  # обновился до new (== remote) → нет
-    assert update_available_from_state(st, "newer") is False  # обновился ДАЛЬШЕ (checked!=installed) → гаснет
-    assert update_available_from_state({}, "old") is False  # нет сохранённого remote
+    st = {
+        "last_update_remote_commit": "new",
+        "last_update_checked_installed": "old",
+    }
+    assert (
+        update_available_from_state(st, "old") is True
+    )  # проверяли на old, remote new → доступно
+    assert (
+        update_available_from_state(st, "new") is False
+    )  # обновился до new (== remote) → нет
+    assert (
+        update_available_from_state(st, "newer") is False
+    )  # обновился ДАЛЬШЕ (checked!=installed) → гаснет
+    assert (
+        update_available_from_state({}, "old") is False
+    )  # нет сохранённого remote
     assert update_available_from_state(st, None) is False  # нет installed
 
 
@@ -85,9 +102,17 @@ def test_record_check_result_persists_and_preserves_on_none(tmp_path):
     p = tmp_path / "state.json"
     record_check_result(1000.0, "abc", "inst", p)
     d = json.loads(p.read_text(encoding="utf-8"))
-    assert d["last_update_check_ts"] == 1000.0 and d["last_update_remote_commit"] == "abc"
+    assert (
+        d["last_update_check_ts"] == 1000.0
+        and d["last_update_remote_commit"] == "abc"
+    )
     assert d["last_update_checked_installed"] == "inst"
-    record_check_result(2000.0, None, "inst", p)  # unknown/ошибка: стамп обновить, remote/checked сохранить
+    record_check_result(
+        2000.0, None, "inst", p
+    )  # unknown/ошибка: стамп обновить, remote/checked сохранить
     d = json.loads(p.read_text(encoding="utf-8"))
-    assert d["last_update_check_ts"] == 2000.0 and d["last_update_remote_commit"] == "abc"
+    assert (
+        d["last_update_check_ts"] == 2000.0
+        and d["last_update_remote_commit"] == "abc"
+    )
     assert d["last_update_checked_installed"] == "inst"

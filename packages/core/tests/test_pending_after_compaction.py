@@ -56,7 +56,11 @@ def _submit_solution_call():
         "type": "function_call",
         "name": "turn_finish",
         "arguments": json.dumps(
-            {"solution_type": "full_solution", "task_report": "Сделано по запросу пользователя", "handoff": "{}"},
+            {
+                "solution_type": "full_solution",
+                "task_report": "Сделано по запросу пользователя",
+                "handoff": "{}",
+            },
             ensure_ascii=False,
         ),
         "call_id": "call_finish",
@@ -89,7 +93,13 @@ def _pending_once(compacted):
     def _get_pending():
         if compacted["done"] and not compacted["consumed"]:
             compacted["consumed"] = True
-            return [{"role": "user", "content": "новое во время сжатия", "id": "m_new"}]
+            return [
+                {
+                    "role": "user",
+                    "content": "новое во время сжатия",
+                    "id": "m_new",
+                }
+            ]
         return []
 
     return _get_pending
@@ -97,7 +107,11 @@ def _pending_once(compacted):
 
 def test_pending_after_compaction_is_picked_up(monkeypatch):
     """Сообщение, пришедшее во время компакции, подхватывается → backend вызван для нового хода."""
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation)
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _accept_validation,
+    )
     compacted = {"done": False, "consumed": False}
 
     def _hook():
@@ -129,7 +143,11 @@ def test_pending_after_compaction_is_picked_up(monkeypatch):
 
 def test_no_pending_finishes_normally(monkeypatch):
     """Нет pending → финиш как раньше: компакция один раз, backend не зовётся (регресс инварианта)."""
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation)
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _accept_validation,
+    )
     hook_calls: list = []
 
     def _hook():
@@ -160,7 +178,11 @@ def test_no_pending_finishes_normally(monkeypatch):
 
 def test_stop_after_compaction_does_not_continue(monkeypatch):
     """stop_requested во время компакции → после continue верх цикла возвращает None, нового хода нет."""
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept_validation)
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _accept_validation,
+    )
     compacted = {"done": False, "consumed": False}
     stopped = {"flag": False}
 
@@ -210,7 +232,9 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
         gate_calls.append(kwargs)
         return await _accept_validation()
 
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture)
+    monkeypatch.setattr(
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
+    )
 
     result = run_coro(
         pr.arun_agent(
@@ -246,9 +270,13 @@ def test_pending_survives_failed_turn_begin(monkeypatch, caplog):
         return out
 
     with caplog.at_level(logging.WARNING):
-        picked = pr._pickup_pending_as_new_turn(_drain, _make_state(), _make_ctx())
+        picked = pr._pickup_pending_as_new_turn(
+            _drain, _make_state(), _make_ctx()
+        )
 
-    assert picked == [{"role": "user", "content": "второе сообщение", "id": "m_new"}]
+    assert picked == [
+        {"role": "user", "content": "второе сообщение", "id": "m_new"}
+    ]
     assert "недоступна" in caplog.text
 
 
@@ -256,7 +284,12 @@ def test_pending_empty_queue_does_not_begin_turn(monkeypatch):
     """Пустая очередь — ход завершается как обычно: фиксацию модели не трогаем
     (её ошибка не должна всплывать на ровном месте, когда подхватывать нечего)."""
     calls: list = []
-    monkeypatch.setattr(pr, "begin_turn_main_trace", lambda *a: calls.append(a))
+    monkeypatch.setattr(
+        pr, "begin_turn_main_trace", lambda *a: calls.append(a)
+    )
 
-    assert pr._pickup_pending_as_new_turn(list, _make_state(), _make_ctx()) is None
+    assert (
+        pr._pickup_pending_as_new_turn(list, _make_state(), _make_ctx())
+        is None
+    )
     assert calls == []

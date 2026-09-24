@@ -1,10 +1,21 @@
 """Unit tests for is_grep_native_safe / is_safe_grep_include."""
 
-from gc_core.utils.pattern_native_gate import is_grep_native_safe, is_safe_grep_include
+from gc_core.utils.pattern_native_gate import (
+    is_grep_native_safe,
+    is_safe_grep_include,
+)
 
 
 def test_denylist_python_markers():
-    for pat in (r"\d+", r"(?i)x", r"\s", r"\bword", r"a{2,3}", r"(?:x)", r"\1"):
+    for pat in (
+        r"\d+",
+        r"(?i)x",
+        r"\s",
+        r"\bword",
+        r"a{2,3}",
+        r"(?:x)",
+        r"\1",
+    ):
         assert is_grep_native_safe(pat, query_mode="python-re") is None
 
 

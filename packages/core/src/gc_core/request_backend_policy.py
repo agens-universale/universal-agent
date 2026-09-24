@@ -32,7 +32,9 @@ def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
     )
 
 
-def _raise_on_first_choice_error(ch0: Dict[str, Any], *, salvage_reasoning: bool) -> None:
+def _raise_on_first_choice_error(
+    ch0: Dict[str, Any], *, salvage_reasoning: bool
+) -> None:
     """Ошибка внутри ``choices[0]``: поле ``error`` или ``finish_reason="error"`` без payload."""
     err = ch0.get("error")
     if isinstance(err, dict):
@@ -41,12 +43,20 @@ def _raise_on_first_choice_error(ch0: Dict[str, Any], *, salvage_reasoning: bool
     if not (isinstance(fr, str) and fr.lower() == "error"):
         return
     msg = ch0.get("message") or {}
-    usable = has_payload(msg) if salvage_reasoning else bool(msg.get("content") or msg.get("tool_calls"))
+    usable = (
+        has_payload(msg)
+        if salvage_reasoning
+        else bool(msg.get("content") or msg.get("tool_calls"))
+    )
     if not usable:
-        raise EmbeddedChoiceError("provider returned finish_reason='error' with empty choice")
+        raise EmbeddedChoiceError(
+            "provider returned finish_reason='error' with empty choice"
+        )
 
 
-def _raise_on_embedded_choice_error(response: Dict[str, Any], *, salvage_reasoning: bool = False) -> None:
+def _raise_on_embedded_choice_error(
+    response: Dict[str, Any], *, salvage_reasoning: bool = False
+) -> None:
     """Поднять EmbeddedChoiceError, если провайдер зашил ошибку внутрь HTTP-200:
     choices[0].error = {code, message, metadata} (стиль OpenRouter, напр. 504
     "Upstream idle timeout"), top-level {"error": {...}} без choices, или
@@ -69,7 +79,9 @@ def _raise_on_embedded_choice_error(response: Dict[str, Any], *, salvage_reasoni
         return
     choices = response.get("choices")
     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        _raise_on_first_choice_error(choices[0], salvage_reasoning=salvage_reasoning)
+        _raise_on_first_choice_error(
+            choices[0], salvage_reasoning=salvage_reasoning
+        )
         return
     # Нет валидного choices — проверяем top-level error (вторая типовая форма).
     top_err = response.get("error")
@@ -77,12 +89,14 @@ def _raise_on_embedded_choice_error(response: Dict[str, Any], *, salvage_reasoni
         _raise_embedded_from_error_dict(top_err)
 
 
-def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
+def _reduced_chat_completions_max_tokens(
+    *, configured: int, minimum: int
+) -> int:
     reduced = int(configured * _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR)
     return max(int(minimum), reduced)
 
 
-async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
     initial_max_tokens: int,
@@ -111,7 +125,9 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
     transport retries. Connection errors/timeouts are not retried here.
     """
 
-    async def _send_once(max_tokens: int, *, transport_use_retry: bool) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    async def _send_once(
+        max_tokens: int, *, transport_use_retry: bool
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         payload = payload_factory(max_tokens)
         response = await arequest_backend_chat_completions(
             payload,
@@ -126,11 +142,15 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
             config_proxy=config_proxy,
         )
         if retry_embedded_choice_errors:
-            _raise_on_embedded_choice_error(response, salvage_reasoning=salvage_reasoning)
+            _raise_on_embedded_choice_error(
+                response, salvage_reasoning=salvage_reasoning
+            )
         return response, payload
 
     try:
-        return await _send_once(initial_max_tokens, transport_use_retry=use_retry)
+        return await _send_once(
+            initial_max_tokens, transport_use_retry=use_retry
+        )
     except Exception as first_exc:
         if not is_retriable_backend_error(first_exc):
             maybe_push_llm_failure_notice(
@@ -160,7 +180,9 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
             # Пауза кооперативная: time.sleep заморозил бы весь loop.
             await asyncio.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
             try:
-                return await _send_once(reduced_max_tokens, transport_use_retry=False)
+                return await _send_once(
+                    reduced_max_tokens, transport_use_retry=False
+                )
             except Exception as retry_exc:
                 current_max_tokens = reduced_max_tokens
                 if not is_retriable_backend_error(retry_exc):

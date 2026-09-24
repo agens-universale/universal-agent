@@ -18,7 +18,14 @@ class _FakeExecutor:
         self._event = threading.Event()
 
     async def arun(
-        self, messages, *, thread_id, start_new_thread=False, system=None, verbose=None, discard_writes_after_stop=False
+        self,
+        messages,
+        *,
+        thread_id,
+        start_new_thread=False,
+        system=None,
+        verbose=None,
+        discard_writes_after_stop=False,
     ):
         self._event.wait(timeout=2.0)
 
@@ -31,7 +38,9 @@ class _FakeExecutor:
 
 def test_factory_not_invoked_until_start():
     calls = []
-    runner = AgentRunner(executor_factory=lambda: calls.append(1) or _FakeExecutor())
+    runner = AgentRunner(
+        executor_factory=lambda: calls.append(1) or _FakeExecutor()
+    )
     assert calls == []  # сборка отложена, не на конструкции
     runner.start(query="x", thread_id="t1")
     time.sleep(0.1)
@@ -51,7 +60,9 @@ def test_factory_runs_off_caller_thread():
     runner.start(query="x", thread_id="t1")
     time.sleep(0.1)
     assert "thread" in built
-    assert built["thread"] != threading.current_thread().name  # построен в worker-потоке
+    assert (
+        built["thread"] != threading.current_thread().name
+    )  # построен в worker-потоке
     runner.stop()
     runner.wait(1.0)
 
@@ -63,7 +74,9 @@ def test_messages_before_build_are_buffered():
     assert fake.messages_added == []  # executor ещё не построен — буфер
     runner.start(query="x", thread_id="t1")
     time.sleep(0.1)
-    assert fake.messages_added == [{"role": "user", "content": "early"}]  # долит после сборки
+    assert fake.messages_added == [
+        {"role": "user", "content": "early"}
+    ]  # долит после сборки
     runner.stop()
     runner.wait(1.0)
 
@@ -76,8 +89,12 @@ async def test_warm_builds_executor_off_ui_thread(tmp_path):
     from gc_tui.app import TuiApp
 
     built = []
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
-    app._executor_factory = lambda: built.append(threading.current_thread().name) or _FakeExecutor()
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
+    app._executor_factory = lambda: (
+        built.append(threading.current_thread().name) or _FakeExecutor()
+    )
     main_name = threading.main_thread().name
     async with app.run_test() as pilot:
         await pilot.pause(0.5)  # даём warm-потоку собрать

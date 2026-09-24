@@ -16,7 +16,9 @@ async def test_view_space_opens_file_picker(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -36,7 +38,9 @@ async def test_command_without_arg_file_does_not_open_picker(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -56,7 +60,9 @@ async def test_at_inside_view_line_stays_file_arg_picker(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -78,7 +84,9 @@ async def test_view_complete_dir_drills_in_file_closes(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -104,7 +112,9 @@ async def test_view_escape_closes_picker_keeps_line(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -121,7 +131,9 @@ async def test_view_escape_closes_picker_keeps_line(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_at_prefixed_filename_completes_file_arg_not_at_branch(tmp_path):
+async def test_view_at_prefixed_filename_completes_file_arg_not_at_branch(
+    tmp_path,
+):
     """Имя файла начинается с '@' — Tab должен достроить его через file-arg
     ветку (приоритетнее @-сегмента, симметрично state 3b < @-детект в
     on_text_area_changed), а не через старую @-ветку (та задвоила бы
@@ -131,7 +143,9 @@ async def test_view_at_prefixed_filename_completes_file_arg_not_at_branch(tmp_pa
 
     _mk(tmp_path)
     (tmp_path / "@agents.py").write_text("x", encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -158,7 +172,9 @@ async def test_view_enter_no_matches_submits_command(tmp_path):
     from gc_tui.screens.file_view import FileViewerScreen
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -182,7 +198,9 @@ async def test_view_tab_cursor_left_of_arg_is_noop(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -209,7 +227,9 @@ async def test_backspace_to_bare_command_closes_file_picker(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -237,7 +257,9 @@ async def test_empty_matches_hide_picker_and_it_returns(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -265,7 +287,9 @@ async def test_at_segment_empty_matches_hide_picker(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -287,7 +311,9 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -299,7 +325,9 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
         assert picker is not None
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
-        assert picker.query_one(".palette-footer").query(".palette-keys")  # hint внутри докнутого подвала
+        assert picker.query_one(".palette-footer").query(
+            ".palette-keys"
+        )  # hint внутри докнутого подвала
         assert picker.desired_height == len(picker.children) + 3
         assert hint[0].region.bottom <= picker.region.bottom
 
@@ -314,8 +342,12 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
 
     (tmp_path / "agents").mkdir()
     for i in range(45):
-        (tmp_path / "agents" / f"agent{i:03d}.py").write_text("x", encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+        (tmp_path / "agents" / f"agent{i:03d}.py").write_text(
+            "x", encoding="utf-8"
+        )
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr._project_root = lambda: str(tmp_path)
@@ -330,8 +362,12 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
         picker = scr._file_picker
         assert picker is not None
         assert len(picker._entries) > 20  # список длиннее клэмпа
-        assert picker.region.height < picker.desired_height  # клэмп реально сработал — скролл включён
+        assert (
+            picker.region.height < picker.desired_height
+        )  # клэмп реально сработал — скролл включён
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
         assert hint[0].region.bottom <= 24  # на экране
-        assert hint[0].region.bottom <= picker.region.bottom  # внутри рамки пикера, видна без скролла
+        assert (
+            hint[0].region.bottom <= picker.region.bottom
+        )  # внутри рамки пикера, видна без скролла

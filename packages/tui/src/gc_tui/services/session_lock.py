@@ -53,7 +53,10 @@ def read_lock(path: str) -> Optional[dict[str, Any]]:
     heartbeat_at = data.get("heartbeat_at")
     if not isinstance(tui_id, str) or not tui_id.strip():
         return None
-    if not isinstance(heartbeat_at, str) or parse_iso_utc(heartbeat_at) is None:
+    if (
+        not isinstance(heartbeat_at, str)
+        or parse_iso_utc(heartbeat_at) is None
+    ):
         return None
     return {"tui_id": tui_id.strip(), "heartbeat_at": heartbeat_at}
 
@@ -92,7 +95,9 @@ def is_held_by_other(
     return is_fresh(lock, now=now)
 
 
-def _write_lock(path: str, tui_id: str, *, now: Optional[datetime] = None) -> None:
+def _write_lock(
+    path: str, tui_id: str, *, now: Optional[datetime] = None
+) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     payload = {"tui_id": tui_id, "heartbeat_at": _now_iso(now)}
     tmp_path = f"{path}.tmp"
@@ -112,7 +117,11 @@ def try_acquire(
     """Попытаться стать holder: write → re-read. False при свежем чужом или lost race."""
     path = lock_path(threads_dir, system, thread_id)
     existing = read_lock(path)
-    if existing is not None and existing["tui_id"] != tui_id and is_fresh(existing, now=now):
+    if (
+        existing is not None
+        and existing["tui_id"] != tui_id
+        and is_fresh(existing, now=now)
+    ):
         return False
     _write_lock(path, tui_id, now=now)
     after = read_lock(path)

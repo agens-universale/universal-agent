@@ -37,36 +37,74 @@ class _EditBatch:
 
 
 def _batch_arg_error(
-    edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
+    edits,
+    atomic,
+    dry_run,
+    backup,
+    return_diff,
+    diff_context_lines,
+    max_diff_chars,
+    expected_file_sha256,
 ) -> "tuple[str, Dict[str, Any]] | None":
     """(message, error) для первого невалидного аргумента батча либо None."""
     if not isinstance(edits, list) or len(edits) == 0:
-        return "Argument 'edits' must be a non-empty array.", {"type": "invalid_argument", "field": "edits"}
+        return "Argument 'edits' must be a non-empty array.", {
+            "type": "invalid_argument",
+            "field": "edits",
+        }
     if not isinstance(atomic, bool) or not atomic:
-        return "Argument 'atomic' must be true.", {"type": "invalid_argument", "field": "atomic"}
+        return "Argument 'atomic' must be true.", {
+            "type": "invalid_argument",
+            "field": "atomic",
+        }
     if not isinstance(dry_run, bool):
-        return "Argument 'dry_run' must be a boolean.", {"type": "invalid_argument", "field": "dry_run"}
-    return diff_arg_error(backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256)
+        return "Argument 'dry_run' must be a boolean.", {
+            "type": "invalid_argument",
+            "field": "dry_run",
+        }
+    return diff_arg_error(
+        backup,
+        return_diff,
+        diff_context_lines,
+        max_diff_chars,
+        expected_file_sha256,
+    )
 
 
 def _edit_arg_error(i: int, edit: Any) -> "tuple[str, Dict[str, Any]] | None":
     if not isinstance(edit, dict):
-        return f"Edit #{i} must be an object.", {"type": "invalid_argument", "field": "edits"}
+        return f"Edit #{i} must be an object.", {
+            "type": "invalid_argument",
+            "field": "edits",
+        }
     if "search" not in edit or "replace" not in edit:
-        return f"Edit #{i} must include 'search' and 'replace'.", {"type": "invalid_argument", "field": "edits"}
+        return f"Edit #{i} must include 'search' and 'replace'.", {
+            "type": "invalid_argument",
+            "field": "edits",
+        }
     if not isinstance(edit["search"], str) or edit["search"] == "":
-        return f"Edit #{i} has invalid 'search'.", {"type": "invalid_argument", "field": "search"}
+        return f"Edit #{i} has invalid 'search'.", {
+            "type": "invalid_argument",
+            "field": "search",
+        }
     if not isinstance(edit["replace"], str):
-        return f"Edit #{i} has invalid 'replace'.", {"type": "invalid_argument", "field": "replace"}
+        return f"Edit #{i} has invalid 'replace'.", {
+            "type": "invalid_argument",
+            "field": "replace",
+        }
     return None
 
 
-def _edit_failure_message(i: int, err: "Dict[str, Any] | None", meta: Dict[str, Any]) -> str:
+def _edit_failure_message(
+    i: int, err: "Dict[str, Any] | None", meta: Dict[str, Any]
+) -> str:
     if not (err and err.get("type") == "not_found"):
         return f"Edit #{i} failed. No changes applied."
     suggestions = meta.get("suggestions") or []
     if suggestions:
-        tops = ", ".join(f"line {s['line']} ({s['score']})" for s in suggestions)
+        tops = ", ".join(
+            f"line {s['line']} ({s['score']})" for s in suggestions
+        )
         return f"Edit #{i} failed: search not found. Top matches: {tops}."
     return f"Edit #{i} failed: search not found. No changes applied."
 
@@ -111,7 +149,9 @@ class ApplyFileEdits(AbstractSimpleTool):
     default_max_diff_chars = 12000
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_apply_file_edits",
@@ -142,7 +182,10 @@ class ApplyFileEdits(AbstractSimpleTool):
                                 },
                                 "occurrence": {
                                     "anyOf": [
-                                        {"type": "string", "enum": ["first", "last", "all"]},
+                                        {
+                                            "type": "string",
+                                            "enum": ["first", "last", "all"],
+                                        },
                                         {"type": "integer", "minimum": 1},
                                         {"type": "null"},
                                     ]
@@ -188,7 +231,9 @@ class ApplyFileEdits(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return (
             "Tool name: fs_apply_file_edits\n"
             "Apply multiple exact literal edits to one file atomically.\n"
@@ -204,7 +249,7 @@ class ApplyFileEdits(AbstractSimpleTool):
             "Pass expected_file_sha256 from file_info(include_hash=true) to detect stale readback.\n"
         )
 
-    def _result(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+    def _result(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         *,
         path: str,
@@ -236,7 +281,9 @@ class ApplyFileEdits(AbstractSimpleTool):
                 "total_replaced": total_replaced,
                 "edit_results": edit_results,
                 "failed_edit_index": failed_edit_index,
-                "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
+                "backup_path": tool_report_abspath(
+                    backup_path, workspace=self._workspace
+                ),
                 "diff": diff,
                 "diff_truncated": diff_truncated,
                 "message": message,
@@ -253,14 +300,18 @@ class ApplyFileEdits(AbstractSimpleTool):
         content: str,
         edit: Dict[str, Any],
     ) -> tuple[bool, str, Dict[str, Any], Dict[str, Any] | None, bool]:
-        resolved = resolve_edit_line_endings(content, edit["search"], edit["replace"])
+        resolved = resolve_edit_line_endings(
+            content, edit["search"], edit["replace"]
+        )
         search = resolved.search
         replace = resolved.replace
         occurrence = edit.get("occurrence")
         if occurrence is None:
             occurrence = "first"
         expected_matches = edit.get("expected_matches")
-        matches = collect_literal_matches(content, search, resolved.first_index)
+        matches = collect_literal_matches(
+            content, search, resolved.first_index
+        )
         match_count = len(matches)
         if match_count == 0:
             suggestions, _suggestions_total = build_edit_miss_suggestions(
@@ -320,7 +371,9 @@ class ApplyFileEdits(AbstractSimpleTool):
             if arg_error is not None:
                 batch.failure = (i, arg_error[0], arg_error[1])
                 return batch
-            ok_edit, next_content, meta, err, eol_adapted = self._apply_one_edit(content=batch.content, edit=edit)
+            ok_edit, next_content, meta, err, eol_adapted = (
+                self._apply_one_edit(content=batch.content, edit=edit)
+            )
             meta["index"] = i
             batch.edit_results.append(meta)
             batch.any_eol_adapted = batch.any_eol_adapted or eol_adapted
@@ -361,11 +414,19 @@ class ApplyFileEdits(AbstractSimpleTool):
             edit_results=[],
         )
         arg_error = _batch_arg_error(
-            edits, atomic, dry_run, backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
+            edits,
+            atomic,
+            dry_run,
+            backup,
+            return_diff,
+            diff_context_lines,
+            max_diff_chars,
+            expected_file_sha256,
         )
         if not isinstance(path, str):
             return fail(
-                message="Argument 'path' must be a string.", error={"type": "invalid_argument", "field": "path"}
+                message="Argument 'path' must be a string.",
+                error={"type": "invalid_argument", "field": "path"},
             )
         if arg_error is not None:
             return fail(message=arg_error[0], error=arg_error[1])
@@ -373,7 +434,9 @@ class ApplyFileEdits(AbstractSimpleTool):
         if not await self._backend.exists(path):
             return fail(message="File not found.", error={"type": "not_found"})
         if not await self._backend.is_file(path):
-            return fail(message="Path is not a file.", error={"type": "not_a_file"})
+            return fail(
+                message="Path is not a file.", error={"type": "not_a_file"}
+            )
         loaded = await load_text_source(
             self,
             path,
@@ -482,7 +545,9 @@ class ApplyFileEdits(AbstractSimpleTool):
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
-        out_bytes, write_error = await encode_and_write(self, path, current, encoding_used)
+        out_bytes, write_error = await encode_and_write(
+            self, path, current, encoding_used
+        )
         if write_error is not None:
             return partial(
                 message=write_error[0],

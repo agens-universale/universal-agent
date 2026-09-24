@@ -79,7 +79,9 @@ def test_escape_cancels_recording():
 
 def test_tick_autostops_at_max_seconds():
     rec = FakeRecorder()
-    flow, events = make_flow(rec, lambda pcm, cfg: "долгий текст", cfg={"max_seconds": 10})
+    flow, events = make_flow(
+        rec, lambda pcm, cfg: "долгий текст", cfg={"max_seconds": 10}
+    )
     flow.toggle()
     rec.elapsed = 5.0
     flow.tick()
@@ -184,7 +186,9 @@ def test_input_bands_agc_normalizes_to_peak():
     flow, _ = make_flow(rec, lambda pcm, cfg: "x")
     assert flow.input_bands == (0.0,) * 7  # idle — тишина
     flow.toggle()
-    assert all(abs(b - 1.0) < 0.02 for b in _settle(flow))  # АРУ: пик у потолка
+    assert all(
+        abs(b - 1.0) < 0.02 for b in _settle(flow)
+    )  # АРУ: пик у потолка
 
     rec2 = FakeRecorder()  # свежий flow: чистый пик
     rec2.band_levels = (0.05, 0.1, 0.02, 0.0, 0.0, 0.0, 0.0)

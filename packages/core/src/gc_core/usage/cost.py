@@ -18,7 +18,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict
 
-from gc_core.config_modules.pricing import ResolvedTariff, coerce_pricing, resolve_model_tariff
+from gc_core.config_modules.pricing import (
+    ResolvedTariff,
+    coerce_pricing,
+    resolve_model_tariff,
+)
 from gc_core.usage.account import LEGACY_CURRENCY, MONEY_FIELD, UsageAccount
 from gc_core.usage.currency import provider_currency_for_url
 
@@ -69,19 +73,28 @@ class CostReport:
     total_calls: int = 0
     total_missing_usage_calls: int = 0
     has_cost: bool = False  # есть хотя бы одна учтённая сумма (факт или тариф)
-    has_unpriced: bool = False  # есть категория с остатком, цену которого узнать нечем
+    has_unpriced: bool = (
+        False  # есть категория с остатком, цену которого узнать нечем
+    )
 
     @property
     def multi_currency(self) -> bool:
         return len(self.by_currency) > 1
 
 
-def _tariff_cost(tariff: ResolvedTariff, input_tokens: int, output_tokens: int, cached_tokens: int) -> float:
+def _tariff_cost(
+    tariff: ResolvedTariff,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int,
+) -> float:
     per = tariff.per_tokens
     cached = max(0, min(cached_tokens, input_tokens))
     if tariff.cache_read is not None:
         fresh = input_tokens - cached
-        input_cost = fresh / per * tariff.input + cached / per * tariff.cache_read
+        input_cost = (
+            fresh / per * tariff.input + cached / per * tariff.cache_read
+        )
     else:
         # Нет cache-ставки → весь input по обычной цене (как раньше).
         input_cost = input_tokens / per * tariff.input
@@ -94,24 +107,40 @@ def _billed_parts(bucket: dict, legacy_currency: str) -> list[CostPart]:
     for cur, amount in (bucket.get(MONEY_FIELD) or {}).items():
         key = legacy_currency if cur == LEGACY_CURRENCY else cur
         billed[key] = billed.get(key, 0.0) + float(amount or 0.0)
-    return [CostPart(amount, cur, "provider") for cur, amount in billed.items()]
+    return [
+        CostPart(amount, cur, "provider") for cur, amount in billed.items()
+    ]
 
 
-def _category_parts(bucket: dict, pricing_cfg, tariff, legacy_currency: str) -> tuple[list[CostPart], bool]:
+def _category_parts(
+    bucket: dict, pricing_cfg, tariff, legacy_currency: str
+) -> tuple[list[CostPart], bool]:
     """``(parts, unpriced)`` одной категории; без ``pricing.enabled`` — пусто."""
     if not pricing_cfg.enabled:
         return [], False
     parts: list[CostPart] = []
     if int(bucket.get("billed_calls", 0) or 0):
         parts.extend(_billed_parts(bucket, legacy_currency))
-    rest_in = int(bucket.get("input", 0) or 0) - int(bucket.get("billed_input", 0) or 0)
-    rest_out = int(bucket.get("output", 0) or 0) - int(bucket.get("billed_output", 0) or 0)
-    rest_cached = int(bucket.get("cached", 0) or 0) - int(bucket.get("billed_cached", 0) or 0)
+    rest_in = int(bucket.get("input", 0) or 0) - int(
+        bucket.get("billed_input", 0) or 0
+    )
+    rest_out = int(bucket.get("output", 0) or 0) - int(
+        bucket.get("billed_output", 0) or 0
+    )
+    rest_cached = int(bucket.get("cached", 0) or 0) - int(
+        bucket.get("billed_cached", 0) or 0
+    )
     if not (rest_in > 0 or rest_out > 0):
         return parts, False
     if tariff is None:
         return parts, True
-    parts.append(CostPart(_tariff_cost(tariff, rest_in, rest_out, rest_cached), tariff.currency, "tariff"))
+    parts.append(
+        CostPart(
+            _tariff_cost(tariff, rest_in, rest_out, rest_cached),
+            tariff.currency,
+            "tariff",
+        )
+    )
     return parts, False
 
 
@@ -143,7 +172,10 @@ def compute_cost(
     # Порядок категорий стабильный: по убыванию суммарных токенов, потом по имени.
     def _sort_key(item):
         cat, bucket = item
-        return (-(int(bucket.get("input", 0)) + int(bucket.get("output", 0))), cat)
+        return (
+            -(int(bucket.get("input", 0)) + int(bucket.get("output", 0))),
+            cat,
+        )
 
     for category, bucket in sorted(account.by_category.items(), key=_sort_key):
         inp = int(bucket.get("input", 0) or 0)
@@ -154,9 +186,13 @@ def compute_cost(
         if calls == 0:
             continue
 
-        parts, unpriced = _category_parts(bucket, pricing_cfg, tariff, legacy_currency)
+        parts, unpriced = _category_parts(
+            bucket, pricing_cfg, tariff, legacy_currency
+        )
         for part in parts:
-            report.by_currency[part.currency] = report.by_currency.get(part.currency, 0.0) + part.amount
+            report.by_currency[part.currency] = (
+                report.by_currency.get(part.currency, 0.0) + part.amount
+            )
         report.has_unpriced = report.has_unpriced or unpriced
 
         report.categories.append(

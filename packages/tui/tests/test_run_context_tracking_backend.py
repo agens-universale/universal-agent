@@ -70,4 +70,6 @@ def test_app_turns_the_journal_on():
     from gc_tui.app import TuiApp
 
     src = inspect.getsource(TuiApp._build_real_executor)
-    assert "attach_to_context" in src, "TuiApp перестал включать diff-журнал — F3 останется пустым"
+    assert "attach_to_context" in src, (
+        "TuiApp перестал включать diff-журнал — F3 останется пустым"
+    )

@@ -29,7 +29,11 @@ def _mcp_hint() -> str:
 
     if shutil.which("gc-mcp"):
         return "gc-mcp install — поставить, gc-mcp help — все команды"
-    return 'менеджер ставится отдельно: uv tool install "gc-mcp @ git+' + REPO_GIT_URL + '#subdirectory=packages/mcp"'
+    return (
+        'менеджер ставится отдельно: uv tool install "gc-mcp @ git+'
+        + REPO_GIT_URL
+        + '#subdirectory=packages/mcp"'
+    )
 
 
 def authorization_header(raw: str) -> str:
@@ -79,7 +83,11 @@ def env_ref_status(raw: Any) -> str:
     """Статус ссылки ${ENV:VAR} в СЫРОМ значении поля ("" — значение не ссылка)."""
     if not config_raw.env_refs(raw):
         return ""
-    return ENV_REF_MISSING if config_raw.missing_env_refs(raw) else ENV_REF_RESOLVED
+    return (
+        ENV_REF_MISSING
+        if config_raw.missing_env_refs(raw)
+        else ENV_REF_RESOLVED
+    )
 
 
 def display_value(raw: Any) -> str:
@@ -182,7 +190,9 @@ def _registry_is_self_sufficient(c: Dict[str, Any]) -> bool:
     return (
         c.get("backend_api_mode") == "chat_completions"
         and bool(models)
-        and all(_entry_carries_own_connection(entry) for entry in models.values())
+        and all(
+            _entry_carries_own_connection(entry) for entry in models.values()
+        )
     )
 
 
@@ -289,7 +299,9 @@ def is_unconfigured(config: Dict[str, Any]) -> bool:
     return bool(pending_requirements(config))
 
 
-def _registry_overridden_above(config_path, *, ignore_profile: bool = False) -> bool:
+def _registry_overridden_above(
+    config_path, *, ignore_profile: bool = False
+) -> bool:
     """Действующий реестр пришёл НЕ из того файла, который правит мастер: слой выше
     (проектный `.gc/config.yml`, managed) переопределил `models`/`slots.default`.
 
@@ -313,7 +325,11 @@ def _registry_overridden_above(config_path, *, ignore_profile: bool = False) -> 
         return False
     from gc_core.config_origin import origins
 
-    found = origins(str(config_path), ["models", "slots.default"], profile_override="" if ignore_profile else None)
+    found = origins(
+        str(config_path),
+        ["models", "slots.default"],
+        profile_override="" if ignore_profile else None,
+    )
     return any(origin.overlay_kind for origin in found.values())
 
 
@@ -431,7 +447,9 @@ def model_step_display(config: Dict[str, Any]) -> tuple:
     return "", ""
 
 
-def overriding_layer_note(config: Dict[str, Any], config_path=None, *, ignore_profile: bool = False) -> Optional[str]:
+def overriding_layer_note(
+    config: Dict[str, Any], config_path=None, *, ignore_profile: bool = False
+) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
     config.yml, а конфиг собирается стопкой слоёв — ось 2, §2).
 
@@ -445,8 +463,12 @@ def overriding_layer_note(config: Dict[str, Any], config_path=None, *, ignore_pr
         # Текст — общий для всех поверхностей (экран мастера и подсказка gc-cli),
         # поэтому это чистый факт без адреса действия: звать в «Настройки · Профили»
         # там, где TUI нет, значит врать. Адрес дописывает поверхность (спека §3).
-        return f'действует профиль "{profile}" — он перекроет модельные настройки'
-    if config.get("models") and _registry_overridden_above(config_path, ignore_profile=ignore_profile):
+        return (
+            f'действует профиль "{profile}" — он перекроет модельные настройки'
+        )
+    if config.get("models") and _registry_overridden_above(
+        config_path, ignore_profile=ignore_profile
+    ):
         return (
             "действует реестр моделей из другого слоя конфигурации — ваш выбор "
             "ляжет в основной конфиг, но этот слой его перекроет"
@@ -454,7 +476,9 @@ def overriding_layer_note(config: Dict[str, Any], config_path=None, *, ignore_pr
     return None
 
 
-def _configured_guide(stage: str, named: str, program: str, shown_path: str, profile_note: str) -> str:
+def _configured_guide(
+    stage: str, named: str, program: str, shown_path: str, profile_note: str
+) -> str:
     if stage == REPAIR_STAGE_WITHOUT_PROFILE:
         base = (
             f"[gc] Обязательные поля заполнены: {shown_path} — но "
@@ -473,7 +497,9 @@ def _configured_guide(stage: str, named: str, program: str, shown_path: str, pro
     return f"{base}\n[gc] {profile_note}." if profile_note else base
 
 
-def _setup_notes(config: Dict[str, Any], stage: str, named: str, program: str) -> str:
+def _setup_notes(
+    config: Dict[str, Any], stage: str, named: str, program: str
+) -> str:
     note = ""
     if _legacy_model_set(config):
         note = (
@@ -535,7 +561,9 @@ def setup_guide(
     # Имя снятого профиля — под охраной: пустое (указатель есть, а имени за ним
     # нет) печаталось как `профиль "" сломан` и отправляло человека искать
     # несуществующий файл. Та же охрана — у соседнего `_repair_message`.
-    named = f' "{repair.profile}"' if repair is not None and repair.profile else ""
+    named = (
+        f' "{repair.profile}"' if repair is not None and repair.profile else ""
+    )
     # Перекроет ли профиль выбор человека — вопрос к признаку деактивации, а не к
     # ступени: на ступени без профиля указатель бывает неснимаемым (лежит в
     # managed), и тогда профиль переживает запись и продолжает перекрывать реестр.
@@ -543,15 +571,23 @@ def setup_guide(
     # `tui/screens/onboarding.py::_layer_note`) — выведенный из ступени, он глушил
     # ремарку там, где экран её показывает.
     profile_note = overriding_layer_note(
-        config, config_path, ignore_profile=repair.deactivate_profile if repair is not None else False
+        config,
+        config_path,
+        ignore_profile=repair.deactivate_profile
+        if repair is not None
+        else False,
     )
     pending = pending_requirements(config)
     if not pending:
-        return _configured_guide(stage, named, program, _display_path(config_path), profile_note)
+        return _configured_guide(
+            stage, named, program, _display_path(config_path), profile_note
+        )
     fields = "\n".join(f"    • {r.hint}" for r in pending)
     note = _setup_notes(config, stage, named, program)
     if just_created:
-        header = "  GigaCode — конфигурация создана, настройка не завершена\n\n"
+        header = (
+            "  GigaCode — конфигурация создана, настройка не завершена\n\n"
+        )
         location = f"  Создан файл конфигурации:\n    {_display_path(config_path)}\n\n"
     else:
         header = "  GigaCode — настройка не завершена\n\n"
@@ -619,7 +655,9 @@ def _participant_lines(participants, flagged: bool) -> list[str]:
         suffix = ""
         if kind.startswith("profile:"):
             suffix = "   (активен: --profile)" if flagged else "   (активен)"
-        lines.append(f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{os.path.abspath(path)}{suffix}")
+        lines.append(
+            f"    {_BROKEN_CONFIG_LAYER_LABELS[kind].ljust(10)}{os.path.abspath(path)}{suffix}"
+        )
     return lines
 
 
@@ -627,11 +665,17 @@ def _broken_error_text_and_keys(exc: Exception) -> tuple[str, Any]:
     """Текст ошибки (pydantic-дамп — в читаемом виде) и названные ею ключи."""
     from pydantic import ValidationError as _ValidationError
 
-    from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, schema_error_details
+    from gc_core.config_modules.root import (
+        SCHEMA_ERROR_PREFIX,
+        schema_error_details,
+    )
     from gc_core.config_origin import error_keys
 
     if isinstance(exc, _ValidationError):
-        return f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}", _schema_error_keys(exc)
+        return (
+            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}",
+            _schema_error_keys(exc),
+        )
     if isinstance(exc.__cause__, _ValidationError):
         return str(exc), _schema_error_keys(exc.__cause__)
     error_text = str(exc)
@@ -639,17 +683,27 @@ def _broken_error_text_and_keys(exc: Exception) -> tuple[str, Any]:
 
 
 def _fix_targets(
-    culprits, keys, config_path: str, participants, error_text: str, *, flagged_profile_missing: bool, active
+    culprits,
+    keys,
+    config_path: str,
+    participants,
+    error_text: str,
+    *,
+    flagged_profile_missing: bool,
+    active,
 ) -> tuple[list[str], bool]:
     """Строки «что поправить» и признак «виновата база»."""
     import os
 
     if culprits:
         return [
-            f"поправить {', '.join(culprit.keys)} в:  {os.path.abspath(culprit.path)}" for culprit in culprits
+            f"поправить {', '.join(culprit.keys)} в:  {os.path.abspath(culprit.path)}"
+            for culprit in culprits
         ], any(culprit.kind == "base" for culprit in culprits)
     if flagged_profile_missing and "profile" in keys:
-        return [f'профиль "{active}" задан флагом --profile — такого профиля нет, исправить имя во флаге'], False
+        return [
+            f'профиль "{active}" задан флагом --profile — такого профиля нет, исправить имя во флаге'
+        ], False
     named = config_path
     for _, candidate in participants:
         if error_text.startswith(f"{candidate}:"):
@@ -658,26 +712,44 @@ def _fix_targets(
     return [f"поправить файл:  {os.path.abspath(named)}"], named == config_path
 
 
-def _workaround_lines(config_path: str, active, program: str, base_to_blame: bool) -> list[str]:
+def _workaround_lines(
+    config_path: str, active, program: str, base_to_blame: bool
+) -> list[str]:
     """Обход (без профиля) и, если виновата база, откат к шаблону."""
     import os
 
     from gc_core.config import _default_config_path, user_config_path
 
     def _same_path(a, b) -> bool:
-        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+        return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(
+            os.path.abspath(str(b))
+        )
 
-    config_flag = "" if _same_path(config_path, user_config_path()) else f' --config "{os.path.abspath(config_path)}"'
+    config_flag = (
+        ""
+        if _same_path(config_path, user_config_path())
+        else f' --config "{os.path.abspath(config_path)}"'
+    )
     lines: list[str] = []
     if active:
-        lines.append(f'запустить без профиля, ничего не потеряв:  {program}{config_flag} --profile ""')
-    if base_to_blame and not (config_flag and _same_path(config_path, _default_config_path())):
-        lines.append(f"откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli{config_flag} --reset-config")
+        lines.append(
+            f'запустить без профиля, ничего не потеряв:  {program}{config_flag} --profile ""'
+        )
+    if base_to_blame and not (
+        config_flag and _same_path(config_path, _default_config_path())
+    ):
+        lines.append(
+            f"откатить конфиг к шаблону (старый уйдёт в бэкап):  gc-cli{config_flag} --reset-config"
+        )
     return lines
 
 
 def explain_broken_config(
-    config_path: str, exc: Exception, *, program: str = "gc-cli", profile_override: Optional[str] = None
+    config_path: str,
+    exc: Exception,
+    *,
+    program: str = "gc-cli",
+    profile_override: Optional[str] = None,
 ) -> str:
     """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
     смог собрать конфиг. `exc` — пойманный `ValueError` (pydantic `ValidationError`
@@ -731,8 +803,12 @@ def explain_broken_config(
         return os.path.abspath(path)
 
     flagged = profile_override is not None
-    active = profile_override if flagged else resolve_profile_pointer(config_path)
-    participants = [("base", config_path)] + _overlay_paths(config_path, profile_override=profile_override)
+    active = (
+        profile_override if flagged else resolve_profile_pointer(config_path)
+    )
+    participants = [("base", config_path)] + _overlay_paths(
+        config_path, profile_override=profile_override
+    )
     # Имя из флага НЕ резолвится в файл — единственное, о чём вправе говорить совет
     # «такого профиля нет». Признаком служил один лишь факт флага, и на сломанном
     # САМОМ указателе (`profile: 123` в базе — ошибка схемы) совет объявлял
@@ -755,7 +831,9 @@ def explain_broken_config(
     # закрытым списком подозреваемых `error_keys`), и виновники ищутся по нему.
     # Сырой `ValidationError` первым аргументом — страховка на прямых вызовах.
     error_text, keys = _broken_error_text_and_keys(exc)
-    culprits = key_origins(config_path, keys, profile_override=profile_override)
+    culprits = key_origins(
+        config_path, keys, profile_override=profile_override
+    )
 
     fix_lines, base_to_blame = _fix_targets(
         culprits,
@@ -845,7 +923,9 @@ class RepairRefused(Exception):
     сообщение человеку: печатать как есть, код 1."""
 
 
-def _refusal_message(exc: Exception, profile: str, base_path, pointer_path) -> str:
+def _refusal_message(
+    exc: Exception, profile: str, base_path, pointer_path
+) -> str:
     """Текст отказа `RepairRefused` — один на обе точки входа (stderr gc-cli и
     stderr gc-ua до создания TuiApp). Советы — от точечного к грубому (правило
     `explain_broken_config`); `--profile ""` не советуем: база не грузится и без
@@ -870,7 +950,9 @@ def _refusal_message(exc: Exception, profile: str, base_path, pointer_path) -> s
     )
 
 
-def _repair_message(stage: str, exc: Exception, profile: str, pinned_by: Optional[str] = None) -> str:
+def _repair_message(
+    stage: str, exc: Exception, profile: str, pinned_by: Optional[str] = None
+) -> str:
     """Текст деградации — ОДИН на все поверхности (stderr gc-cli, stderr gc-ua без
     TTY, runtime-notice мастера). Говорит не только «сломано», но и что именно
     отброшено: человек обязан понимать, почему поля мастера выглядят иначе, чем
@@ -935,7 +1017,11 @@ def load_config_for_repair() -> RepairLoad:
     `explain_broken_config`, что и обычный старт (код 1, не трейсбек — ревью).
     Не четвёртая ступень с пустым конфигом: конфига нет, и молчаливый `None`
     в `RepairLoad.config` доехал бы до `resolve_threads_dir` следом."""
-    from gc_core.config import _default_config_path, load_config_ex, resolve_config_path
+    from gc_core.config import (
+        _default_config_path,
+        load_config_ex,
+        resolve_config_path,
+    )
 
     try:
         config, meta = load_config_ex(None)
@@ -947,7 +1033,9 @@ def load_config_for_repair() -> RepairLoad:
         config, meta = load_config_ex(None, profile_override="")
     except ValueError:
         try:
-            config, meta = load_config_ex(_default_config_path(), profile_override="")
+            config, meta = load_config_ex(
+                _default_config_path(), profile_override=""
+            )
         except ValueError:
             raise broken from None
         # Живой указатель на ступени шаблона — тупик записи (M10): гейт судит
@@ -964,14 +1052,26 @@ def load_config_for_repair() -> RepairLoad:
         base_path = resolve_config_path(None)
         profile = resolve_profile_pointer(base_path)
         if profile:
-            survivor = origins(base_path, ["profile"], profile_override="")["profile"]
+            survivor = origins(base_path, ["profile"], profile_override="")[
+                "profile"
+            ]
             pointer_path = survivor.overlay_path or str(base_path)
-            raise RepairRefused(_refusal_message(broken, profile, base_path, pointer_path)) from broken
+            raise RepairRefused(
+                _refusal_message(broken, profile, base_path, pointer_path)
+            ) from broken
         return RepairLoad(
-            config, meta, REPAIR_STAGE_TEMPLATE, _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""), "", False
+            config,
+            meta,
+            REPAIR_STAGE_TEMPLATE,
+            _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""),
+            "",
+            False,
         )
 
-    from gc_core.config_modules.layers import profile_pointer_write_target, resolve_profile_pointer
+    from gc_core.config_modules.layers import (
+        profile_pointer_write_target,
+        resolve_profile_pointer,
+    )
     from gc_core.config_origin import origins
 
     base_path = resolve_config_path(None)
@@ -990,13 +1090,20 @@ def load_config_for_repair() -> RepairLoad:
     if resolve_profile_pointer(base_path, candidates={target: erased}):
         # Указатель запись переживёт — человеку нужен файл, где он лежит: слой
         # называет та же витрина происхождения, спрошенная по тому же стеку.
-        survivor = origins(base_path, ["profile"], candidates={target: erased}, profile_override="")["profile"]
+        survivor = origins(
+            base_path,
+            ["profile"],
+            candidates={target: erased},
+            profile_override="",
+        )["profile"]
         pinned_by = survivor.overlay_path or str(base_path)
     return RepairLoad(
         config,
         meta,
         REPAIR_STAGE_WITHOUT_PROFILE,
-        _repair_message(REPAIR_STAGE_WITHOUT_PROFILE, broken, profile, pinned_by),
+        _repair_message(
+            REPAIR_STAGE_WITHOUT_PROFILE, broken, profile, pinned_by
+        ),
         profile,
         pinned_by is None,
     )
@@ -1076,12 +1183,17 @@ def _aliases_in_file(config_path) -> Dict[str, str]:
     if not isinstance(models, dict):
         return {}
     return {
-        alias: ((entry or {}).get("model") if isinstance(entry, dict) else None) or alias
+        alias: (
+            (entry or {}).get("model") if isinstance(entry, dict) else None
+        )
+        or alias
         for alias, entry in models.items()
     }
 
 
-def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = None) -> List[tuple]:
+def _registry_ops(
+    values: Dict[str, Any], existing: Optional[Dict[str, str]] = None
+) -> List[tuple]:
     """Операции реестра для собранных мастером моделей: `models.<alias>` + свой
     слот на каждый ЗАПОЛНЕННЫЙ уровень (незаполненный не пишет ничего — слот на
     несуществующий алиас нерезолвим, §4).
@@ -1098,7 +1210,9 @@ def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = N
     человек только что ввёл новое подключение."""
     ops: List[tuple] = []
     existing = existing or {}
-    planned: Dict[str, str] = {}  # алиас → id, уже запланированный этой записью
+    planned: Dict[
+        str, str
+    ] = {}  # алиас → id, уже запланированный этой записью
     for slot, key in MODEL_SLOT_KEYS.items():
         model_id = values.get(key)
         if not model_id:
@@ -1110,7 +1224,14 @@ def _registry_ops(values: Dict[str, Any], existing: Optional[Dict[str, str]] = N
         # «адрес и токен», — а прежние оставались осиротевшими: уровень, ходивший
         # на локальный сервер, уходил на общий endpoint с id локальной модели.
         # Порядок словарей важен: своё запланированное имя побеждает существующее.
-        alias = next((name for name, known_id in {**existing, **planned}.items() if known_id == model_id), None)
+        alias = next(
+            (
+                name
+                for name, known_id in {**existing, **planned}.items()
+                if known_id == model_id
+            ),
+            None,
+        )
         if alias is None:
             alias = default_alias_for(model_id)
             if alias in planned or existing.get(alias, model_id) != model_id:
@@ -1142,7 +1263,9 @@ class PartialWriteError(ValueError):
         self.written = tuple(written)
 
 
-def write_wizard_values(config_path, values: Dict[str, Any], *, deactivate_profile: bool = False) -> List[str]:
+def write_wizard_values(
+    config_path, values: Dict[str, Any], *, deactivate_profile: bool = False
+) -> List[str]:
     """Записать собранное мастером в `config_path` — ОДИН путь записи на обе
     поверхности (CLI-визард и TUI-мастер), политика живёт здесь.
 
@@ -1198,7 +1321,11 @@ def write_wizard_values(config_path, values: Dict[str, Any], *, deactivate_profi
         # Куда ложится `profile: ""` и как — общие с секцией «Профили» правила
         # (`profile_pointer_write_target` + `ocw.write_profile_pointer`): своя
         # редакция писала бы в слой, который следующий старт всё равно перекроет.
-        ocw.write_profile_pointer(profile_pointer_write_target(config_path), "", base_path=config_path)
+        ocw.write_profile_pointer(
+            profile_pointer_write_target(config_path),
+            "",
+            base_path=config_path,
+        )
         landed.append("profile_pointer")
     template_path = _default_config_path()
     # Шаблон недоступен (нет файла, нет прав, чужая кодировка) — это не повод
@@ -1208,7 +1335,11 @@ def write_wizard_values(config_path, values: Dict[str, Any], *, deactivate_profi
     # отказ ждал бы и `write_values`, только уже трейсбеком.
     template = read_user_text_or_none(template_path) or ""
     model_keys = set(MODEL_SLOT_KEYS.values())
-    flat = {FIELD_ANCHOR_PATHS.get(key, key): value for key, value in values.items() if key not in model_keys}
+    flat = {
+        FIELD_ANCHOR_PATHS.get(key, key): value
+        for key, value in values.items()
+        if key not in model_keys
+    }
     ops = _registry_ops(values, _aliases_in_file(config_path))
     # Форма отказа — по одному признаку: легло ли уже что-нибудь. Не легло ничего
     # (отказала самая первая запись) — исключение уходит наружу как было, и «конфиг
@@ -1230,7 +1361,10 @@ def write_wizard_values(config_path, values: Dict[str, Any], *, deactivate_profi
         landed.append("registry")
     try:
         return ocw.write_values(
-            config_path, flat, template_path=template_path if template else None, validate=validate_config_text
+            config_path,
+            flat,
+            template_path=template_path if template else None,
+            validate=validate_config_text,
         )
     except (ValueError, OSError) as exc:
         if landed:

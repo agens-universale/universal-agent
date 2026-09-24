@@ -25,7 +25,9 @@ _FILES = {
 
 def _tool(cls, files=None):
     tool = cls.__new__(cls)
-    return bind_os_backend(tool, FakeBackend(files if files is not None else _FILES))
+    return bind_os_backend(
+        tool, FakeBackend(files if files is not None else _FILES)
+    )
 
 
 def _error_type(raw):
@@ -43,7 +45,9 @@ def test_list_files_rejects_a_host_absolute_path_the_backend_calls_relative():
 
 async def test_find_in_files_rejects_a_host_absolute_path_the_backend_calls_relative():
     # У тула только асинхронный вход: синхронный `__call__` был шимом портала.
-    raw = await _tool(FindInFiles).acall(path="C:/work", pattern="needle", query_mode="text")
+    raw = await _tool(FindInFiles).acall(
+        path="C:/work", pattern="needle", query_mode="text"
+    )
 
     assert _error_type(raw) == "invalid_argument"
 
@@ -82,7 +86,9 @@ def test_refuse_breakdown_reports_backend_paths():
     tool = bind_os_backend(
         FindInFiles.__new__(FindInFiles),
         FakeBackend(files),
-        config_dict={"fs_tools": {"find_in_files": {"max_candidates_like": 1}}},
+        config_dict={
+            "fs_tools": {"find_in_files": {"max_candidates_like": 1}}
+        },
     )
     data = json.loads(tool(path="/work", pattern="needle", query_mode="text"))
 

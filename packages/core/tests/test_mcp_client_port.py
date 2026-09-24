@@ -1,5 +1,8 @@
 import pytest
-from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
+from gc_core.tools.connect_mcp.client_port import (
+    AgentRuntimeClient,
+    McpClientPort,
+)
 
 
 def test_port_asks_only_for_coroutines():
@@ -32,8 +35,14 @@ async def test_call_tool_does_not_coerce_a_non_dict_answer(monkeypatch):
         return ["legacy", "list", "answer"]
 
     monkeypatch.setattr(cp, "acall_tool_stream_http", _fake)
-    client = cp.AgentRuntimeClient("srv", {"transport": "stream_http", "url": "http://x:8000/mcp"})
-    assert await client.acall_tool("t", {}, timeout=1.0) == ["legacy", "list", "answer"]
+    client = cp.AgentRuntimeClient(
+        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    )
+    assert await client.acall_tool("t", {}, timeout=1.0) == [
+        "legacy",
+        "list",
+        "answer",
+    ]
 
 
 async def test_list_tools_routes_stream_http(monkeypatch):
@@ -54,7 +63,9 @@ async def test_list_tools_routes_stream_http(monkeypatch):
     from gc_core.tools.connect_mcp import client_port as cp
 
     monkeypatch.setattr(cp, "alist_tools_stream_http", fake_list)
-    client = cp.AgentRuntimeClient("srv", {"transport": "stream_http", "url": "http://x:8000/mcp"})
+    client = cp.AgentRuntimeClient(
+        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    )
 
     assert await client.alist_tools(timeout=3.0) == [{"name": "ask_user"}]
     assert seen == {"url": "http://x:8000/mcp", "timeout": 3.0}
@@ -63,16 +74,22 @@ async def test_list_tools_routes_stream_http(monkeypatch):
 async def test_call_tool_routes_stream_http(monkeypatch):
     seen = {}
 
-    async def fake_call(*, url, server_cfg, token, timeout, tool_name, arguments):
+    async def fake_call(
+        *, url, server_cfg, token, timeout, tool_name, arguments
+    ):
         seen["tool"] = tool_name
         return {"ok": True}
 
     from gc_core.tools.connect_mcp import client_port as cp
 
     monkeypatch.setattr(cp, "acall_tool_stream_http", fake_call)
-    client = cp.AgentRuntimeClient("srv", {"transport": "stream_http", "url": "http://x:8000/mcp"})
+    client = cp.AgentRuntimeClient(
+        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    )
 
-    assert await client.acall_tool("echo", {"a": 1}, timeout=2.0) == {"ok": True}
+    assert await client.acall_tool("echo", {"a": 1}, timeout=2.0) == {
+        "ok": True
+    }
     assert seen == {"tool": "echo"}
 
 
@@ -88,7 +105,9 @@ def test_sync_port_serves_only_persistent_stdio():
     import pytest as _pytest
     from gc_core.tools.connect_mcp import client_port as cp
 
-    client = cp.AgentRuntimeClient("srv", {"transport": "stream_http", "url": "http://x:8000/mcp"})
+    client = cp.AgentRuntimeClient(
+        "srv", {"transport": "stream_http", "url": "http://x:8000/mcp"}
+    )
     with _pytest.raises(RuntimeError, match="только для persistent stdio"):
         client.list_tools(timeout=1.0)
     with _pytest.raises(RuntimeError, match="только для persistent stdio"):
@@ -96,7 +115,9 @@ def test_sync_port_serves_only_persistent_stdio():
 
     # Легаси-транспорт теперь тоже сюда не ходит: до него доходила только
     # синхронная дискавери, а форма дискавери одна и корутинная.
-    legacy = cp.AgentRuntimeClient("srv", {"transport": "http", "url": "http://x/mcp"})
+    legacy = cp.AgentRuntimeClient(
+        "srv", {"transport": "http", "url": "http://x/mcp"}
+    )
     with _pytest.raises(RuntimeError, match="только для persistent stdio"):
         legacy.list_tools(timeout=1.0)
 
@@ -107,7 +128,9 @@ def test_unsupported_transport_raises():
         client.list_tools(timeout=1.0)
 
 
-async def test_os_backend_reaches_the_resolver_from_build_tools_data(monkeypatch):
+async def test_os_backend_reaches_the_resolver_from_build_tools_data(
+    monkeypatch,
+):
     """The backend RunContext already built must reach the per-server resolver."""
     seen = {}
 
@@ -122,10 +145,14 @@ async def test_os_backend_reaches_the_resolver_from_build_tools_data(monkeypatch
 
     from gc_core.tools.connect_mcp import registry as reg
 
-    monkeypatch.setitem(reg._adiscover_one.__globals__, "resolve_mcp_client", fake_resolve)
+    monkeypatch.setitem(
+        reg._adiscover_one.__globals__, "resolve_mcp_client", fake_resolve
+    )
 
     cfg = {"transport": "stream_http", "url": "http://x:8000/mcp"}
-    tools, status = await reg._adiscover_one("srv", cfg, timeout=1.0, os_backend=sandbox)
+    tools, status = await reg._adiscover_one(
+        "srv", cfg, timeout=1.0, os_backend=sandbox
+    )
     assert tools == []
     assert status["status"] == "failed"
     assert seen["backend"] is sandbox

@@ -33,7 +33,9 @@ def test_calculator_float_division():
 
 
 def test_calculator_deny_name_sum():
-    data = json.loads(with_local_ctx(Calculator)(expression="sum([1, 2, 3]) * 7"))
+    data = json.loads(
+        with_local_ctx(Calculator)(expression="sum([1, 2, 3]) * 7")
+    )
     assert data["ok"] is False
     # parsed ok (Call -> Name -> ...), rejected by walker as disallowed
     assert data["error"]["type"] == "disallowed_syntax"
@@ -46,7 +48,9 @@ def test_calculator_deny_attribute_escape():
 
 
 def test_calculator_deny_import_escape():
-    data = json.loads(with_local_ctx(Calculator)(expression="__import__('os')"))
+    data = json.loads(
+        with_local_ctx(Calculator)(expression="__import__('os')")
+    )
     assert data["ok"] is False
     assert data["error"]["type"] == "disallowed_syntax"
 
@@ -109,7 +113,9 @@ def test_calculator_non_str_rejected():
 def test_calculator_validate_before_eval():
     # C6: disallowed right operand must be rejected *before* the left side
     # (e.g. ZeroDivisionError) is evaluated.
-    data = json.loads(with_local_ctx(Calculator)(expression="1/0 + ().__class__"))
+    data = json.loads(
+        with_local_ctx(Calculator)(expression="1/0 + ().__class__")
+    )
     assert data["ok"] is False
     assert data["error"]["type"] == "disallowed_syntax"
 
@@ -130,4 +136,7 @@ def test_calculator_errors():
     tool = with_local_ctx(Calculator)
     assert json.loads(tool(expression=""))["error"]["field"] == "expression"
     assert json.loads(tool(expression="1/0"))["error"]["type"] == "eval_failed"
-    assert json.loads(tool(expression="x" * 3000))["error"]["type"] == "expression_too_long"
+    assert (
+        json.loads(tool(expression="x" * 3000))["error"]["type"]
+        == "expression_too_long"
+    )

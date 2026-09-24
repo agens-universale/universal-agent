@@ -5,7 +5,12 @@ from gc_testkit.net_support import tls_failure
 from gc_tui.voice.transcriber import transcribe
 from gc_tui.voice_runtime import net as net
 
-CFG = {"provider": "openai", "url": "https://stt.corp/v1/audio/transcriptions", "token": "t", "model": "m"}
+CFG = {
+    "provider": "openai",
+    "url": "https://stt.corp/v1/audio/transcriptions",
+    "token": "t",
+    "model": "m",
+}
 
 
 def test_openai_retries_after_ssl_error(monkeypatch):

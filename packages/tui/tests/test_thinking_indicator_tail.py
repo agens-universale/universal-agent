@@ -32,14 +32,18 @@ def _plain(ind):
 
 
 def test_elapsed_uses_cyrillic_s():
-    ind = ThinkingIndicator(started_at=0.0, state="thinking", clock=lambda: 8.0)
+    ind = ThinkingIndicator(
+        started_at=0.0, state="thinking", clock=lambda: 8.0
+    )
     assert "(8с" in _plain(ind)
     assert "(8s" not in _plain(ind)
 
 
 def test_processing_state_label():
     """state=processing → «сверяюсь…» (ответ дан, судья сверяет его перед закрытием)."""
-    ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 5.0)
+    ind = ThinkingIndicator(
+        started_at=0.0, state="processing", clock=lambda: 5.0
+    )
     p = _plain(ind)
     assert "сверяюсь…" in p
     assert "(5с" in p
@@ -51,13 +55,21 @@ def test_processing_breathes_dot_brightness():
     (тёмно-серая рампа) — плавно, без морф-спиннера «думаю…» и без смены формы."""
     from gc_tui.widgets.thinking_indicator import _PROCESSING_SHADES
 
-    ind = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)
+    ind = ThinkingIndicator(
+        started_at=0.0, state="processing", clock=lambda: 1.0
+    )
     glyphs, colors = set(), set()
     for f in range(40):
         ind._frame = f
         t = ind._render_text()
         glyphs.add(t.plain[0])  # первый символ строки = глиф
-        colors.add(next(str(s.style) for s in t.spans if t.plain[s.start : s.end] == "•"))
+        colors.add(
+            next(
+                str(s.style)
+                for s in t.spans
+                if t.plain[s.start : s.end] == "•"
+            )
+        )
     assert glyphs == {"•"}  # форма не меняется
     assert not (glyphs & set("·∙▴◂▾▸✦✧+"))  # ни морф, ни старая растущая точка
     assert len(colors) > 1  # цвет дышит
@@ -68,7 +80,9 @@ def test_processing_word_is_dim_not_accent():
     """Слово «сверяюсь…» — серым (dim), чтобы отличаться от accent-«думаю…»."""
     from gc_tui.widgets.thinking_indicator import _ACCENT, _DIM
 
-    t = ThinkingIndicator(started_at=0.0, state="processing", clock=lambda: 1.0)._render_text()
+    t = ThinkingIndicator(
+        started_at=0.0, state="processing", clock=lambda: 1.0
+    )._render_text()
     word_at = t.plain.index("сверяюсь")
     styles = [s.style for s in t.spans if s.start <= word_at < s.end]
     assert _DIM in styles
@@ -84,7 +98,9 @@ def test_tail_thinking_no_word_but_counter():
     )
     p = _plain(ind)
     assert "↓ 1.2k токенов" in p
-    assert "размышление" not in p  # word dropped; reasoning shown via the StreamBlock line
+    assert (
+        "размышление" not in p
+    )  # word dropped; reasoning shown via the StreamBlock line
 
 
 def test_tail_done_shows_obdumal():
@@ -101,7 +117,9 @@ def test_tail_done_shows_obdumal():
 
 
 def test_no_tail_without_sink():
-    ind = ThinkingIndicator(started_at=0.0, state="thinking", clock=lambda: 40.0)
+    ind = ThinkingIndicator(
+        started_at=0.0, state="thinking", clock=lambda: 40.0
+    )
     p = _plain(ind)
     assert "токенов" not in p
     assert "размышление" not in p
@@ -139,7 +157,9 @@ def test_reasoning_tag_hidden_by_default():
         started_at=0.0,
         state="thinking",
         clock=lambda: 8.0,
-        sink=_FakeSink(1200, ("thinking", None)),  # reasoning_tag defaults False
+        sink=_FakeSink(
+            1200, ("thinking", None)
+        ),  # reasoning_tag defaults False
     )
     assert "размышление" not in _plain(ind)
 

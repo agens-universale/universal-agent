@@ -15,5 +15,8 @@ def test_office_description_lists_powerpoint():
     from recommended_mcp.manifest import load_manifest, resolve_manifest_path
 
     root = RECIPES
-    entries = {e.name: e.description for e in load_manifest(resolve_manifest_path(root, None))}
+    entries = {
+        e.name: e.description
+        for e in load_manifest(resolve_manifest_path(root, None))
+    }
     assert "PowerPoint" in entries["office"]

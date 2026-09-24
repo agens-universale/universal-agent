@@ -62,7 +62,9 @@ def render_skills_catalog(skills_list: list[dict]) -> str:
 
     if bootstraps:
         lines.append("")
-        lines.append("## Skill packs — load the bootstrap skill to enter a guided multi-step workflow")
+        lines.append(
+            "## Skill packs — load the bootstrap skill to enter a guided multi-step workflow"
+        )
         lines.extend(_skill_line(s, with_pack_size=True) for s in bootstraps)
 
     if flats:

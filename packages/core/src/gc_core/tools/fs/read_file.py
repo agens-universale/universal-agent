@@ -19,9 +19,15 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 def _read_arg_error(offset, limit) -> "tuple[str, str] | None":
     """(field, message) для невалидного offset/limit либо None."""
     if offset is not None and not isinstance(offset, int):
-        return "offset", f"Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})"
+        return (
+            "offset",
+            f"Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})",
+        )
     if limit is not None and not isinstance(limit, int):
-        return "limit", f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})"
+        return (
+            "limit",
+            f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})",
+        )
     return None
 
 
@@ -166,7 +172,9 @@ class ReadFile(AbstractSimpleTool):
                     },
                     "limit": {
                         "type": "integer",
-                        "description": ("Max lines to read starting from offset. Default: to end of file."),
+                        "description": (
+                            "Max lines to read starting from offset. Default: to end of file."
+                        ),
                     },
                     "encoding": {
                         "type": "string",
@@ -283,7 +291,9 @@ Usage:
                 file_size_bytes=None,
             )
         if file_size_bytes is not None:
-            size_err = check_file_size(file_size_bytes, max_bytes, operation="fs_read_file")
+            size_err = check_file_size(
+                file_size_bytes, max_bytes, operation="fs_read_file"
+            )
             if size_err is not None:
                 return self._error_result(
                     path=path,
@@ -295,7 +305,10 @@ Usage:
                         "not a full read through this tool. "
                         "Raise fs_tools.max_read_bytes in config if needed."
                     ),
-                    error_details={"max_bytes": max_bytes, "actual_bytes": file_size_bytes},
+                    error_details={
+                        "max_bytes": max_bytes,
+                        "actual_bytes": file_size_bytes,
+                    },
                     file_size_bytes=file_size_bytes,
                 )
 
@@ -308,14 +321,21 @@ Usage:
                 message=f"Failed to read file: {e}",
                 file_size_bytes=file_size_bytes,
             )
-        decoded = decode_text_bytes(raw, encoding=encoding, include_preview=True)
+        decoded = decode_text_bytes(
+            raw, encoding=encoding, include_preview=True
+        )
         if not decoded.ok:
             err, extra = _decode_error_payload(decoded.error)
             return self._error_result(
                 path=path,
                 error_type=err["type"],
                 message=err.get("message"),
-                error_details={k: v for k, v in err.items() if k not in ("type", "message")} or None,
+                error_details={
+                    k: v
+                    for k, v in err.items()
+                    if k not in ("type", "message")
+                }
+                or None,
                 file_size_bytes=file_size_bytes,
                 extra_fields=extra,
             )

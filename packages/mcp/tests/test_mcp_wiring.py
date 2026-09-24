@@ -3,15 +3,28 @@ from gc_core.config_modules import env_vars
 
 
 def _gc(tmp_path):
-    return {"config": tmp_path / "cfg", "data": tmp_path / "d", "cache": tmp_path / "cache", "state": tmp_path / "s"}
+    return {
+        "config": tmp_path / "cfg",
+        "data": tmp_path / "d",
+        "cache": tmp_path / "cache",
+        "state": tmp_path / "s",
+    }
 
 
 def test_resolve_placeholders():
     from recommended_mcp.runtime.wiring import resolve_placeholders
 
-    block = {"command": "{npx}", "args": ["-y", "{cache}/x"], "transport": "stdio"}
+    block = {
+        "command": "{npx}",
+        "args": ["-y", "{cache}/x"],
+        "transport": "stdio",
+    }
     out = resolve_placeholders(block, npx="/n/npx", cache="/c")
-    assert out == {"command": "/n/npx", "args": ["-y", "/c/x"], "transport": "stdio"}
+    assert out == {
+        "command": "/n/npx",
+        "args": ["-y", "/c/x"],
+        "transport": "stdio",
+    }
 
 
 def test_wire_and_unwire(tmp_path, monkeypatch):
@@ -27,9 +40,13 @@ def test_wire_and_unwire(tmp_path, monkeypatch):
 
     wiring.wire_snippet("office", recipe, npx="/n/npx", cache="/c")
 
-    managed = yaml.safe_load((tmp_path / "cfg" / "config.local.yml").read_text(encoding="utf-8"))
+    managed = yaml.safe_load(
+        (tmp_path / "cfg" / "config.local.yml").read_text(encoding="utf-8")
+    )
     assert managed["mcp"]["servers"]["office"]["command"] == "office-mcp"
-    assert wiring.wired_servers() == {"office": managed["mcp"]["servers"]["office"]}
+    assert wiring.wired_servers() == {
+        "office": managed["mcp"]["servers"]["office"]
+    }
 
     assert wiring.unwire("office") is True
     assert wiring.wired_servers() == {}
@@ -69,7 +86,9 @@ def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
     from recommended_mcp.runtime import wiring
 
     recipe = RECIPES / "browser_playwright"
-    leftover = wiring.wire_snippet("browser_playwright", recipe, npx="/N/npx", cache="/C")
+    leftover = wiring.wire_snippet(
+        "browser_playwright", recipe, npx="/N/npx", cache="/C"
+    )
     srv = wiring.wired_servers()["browser_playwright"]
     assert srv["command"] == "/N/npx"
     assert "/C/playwright-mcp" in " ".join(srv["args"])

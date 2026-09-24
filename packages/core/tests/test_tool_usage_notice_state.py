@@ -98,7 +98,10 @@ def test_merge_tool_usage_notice_meta_to_base_preserves_ephemeral_keys():
 def test_init_tool_usage_notice_from_meta_on_state():
     state = _make_state()
     state.init_tool_usage_notice_from_meta(
-        {META_PROJECT_MEMORY_CONTENT_HASH: "h1", META_TOOL_USAGE_NOTICE_CNT: {"wm": 5}}
+        {
+            META_PROJECT_MEMORY_CONTENT_HASH: "h1",
+            META_TOOL_USAGE_NOTICE_CNT: {"wm": 5},
+        }
     )
     assert state.project_memory_content_hash == "h1"
     assert state.tool_usage_notice_cnt == {"wm": 5}
@@ -140,7 +143,9 @@ def test_meta_only_long_memory_check_cnt():
     assert get_project_memory_check_cnt(meta) == 5
 
 
-async def test_thread_session_persist_batch_writes_memory_meta(tmp_path, monkeypatch):
+async def test_thread_session_persist_batch_writes_memory_meta(
+    tmp_path, monkeypatch
+):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
     monkeypatch.setattr(

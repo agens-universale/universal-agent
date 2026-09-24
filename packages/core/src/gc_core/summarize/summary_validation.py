@@ -28,7 +28,9 @@ def has_nonempty_summary_body(text: str) -> bool:
 def fallback_summary_xml() -> str:
     filler = "- n/a"
     bodies = dict.fromkeys(section_tags(), filler)
-    bodies[primary_section_tag()] = f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
+    bodies[primary_section_tag()] = (
+        f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
+    )
     return assemble_summary_xml(bodies)
 
 
@@ -63,7 +65,9 @@ def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
     """
     preserved = extract_summary_bodies(invalid_text)
     repaired = extract_summary_bodies(repaired_text)
-    return assemble_summary_xml(merge_summary_bodies(preserved=preserved, repaired=repaired))
+    return assemble_summary_xml(
+        merge_summary_bodies(preserved=preserved, repaired=repaired)
+    )
 
 
 def resolve_after_repair_failure(

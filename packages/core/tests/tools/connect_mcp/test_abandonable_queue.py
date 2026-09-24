@@ -38,7 +38,9 @@ async def test_a_call_cancelled_while_queued_never_runs():
             _thread_name="queue-holder",
         )
     )
-    assert await asyncio.to_thread(holding.wait, 5), "первый вызов не занял слот"
+    assert await asyncio.to_thread(holding.wait, 5), (
+        "первый вызов не занял слот"
+    )
 
     second = asyncio.ensure_future(
         run_abandonable_in(

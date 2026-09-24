@@ -34,7 +34,10 @@ def test_summarizing_wins_over_finalizing():
 def test_finish_gate_checking_beats_finalized_sentinel():
     # Судья turn_finish реально работает (флаг поднят) → «сверяюсь…», даже когда
     # sentinel _finalized уже защёлкнут (регрессия видимости судьи).
-    assert _sub(finish_gate_checking=True, last_event_kind="_finalized") == "processing"
+    assert (
+        _sub(finish_gate_checking=True, last_event_kind="_finalized")
+        == "processing"
+    )
 
 
 def test_finish_gate_checking_beats_finalizing_flag():
@@ -44,7 +47,10 @@ def test_finish_gate_checking_beats_finalizing_flag():
 def test_finish_gate_checking_off_and_finalized_still_validating():
     # Регресс-гвоздь: флаг опущен (нет судьи/gate=off) → прежнее поведение,
     # ложного «сверяюсь» нет.
-    assert _sub(finish_gate_checking=False, last_event_kind="_finalized") == "validating"
+    assert (
+        _sub(finish_gate_checking=False, last_event_kind="_finalized")
+        == "validating"
+    )
 
 
 def test_summarizing_wins_over_finish_gate_checking():

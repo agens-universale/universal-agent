@@ -28,7 +28,9 @@ def build_install_target(source: UpdateSource) -> str:
     `gc-tui` — потерял бы TUI.
     """
     url = f"git+{source.url}" + (f"@{source.ref}" if source.ref else "")
-    subdir = source.subdirectory or app_version.PROFILE_SUBDIRS.get(source.dist)
+    subdir = source.subdirectory or app_version.PROFILE_SUBDIRS.get(
+        source.dist
+    )
     if subdir:
         url = f"{url}#subdirectory={subdir}"
     # Мета живёт в корне: для неё голого URL достаточно, имя добавляем только
@@ -85,7 +87,9 @@ def _wait_pid_dead_snippet(pid: int) -> str:
     return f"while kill -0 {pid} 2>/dev/null; do sleep 0.5; done"
 
 
-def _write_script(command: list, parent_pid: int, restart_cmd: Optional[list]) -> str:
+def _write_script(
+    command: list, parent_pid: int, restart_cmd: Optional[list]
+) -> str:
     is_win = os.name == "nt"
     if is_win:
         cmd_str = subprocess.list2cmdline(command)
@@ -115,8 +119,9 @@ def _write_script(command: list, parent_pid: int, restart_cmd: Optional[list]) -
     else:
         cmd_str = shlex.join(command)
         restart_str = shlex.join(restart_cmd) if restart_cmd else ""
-        body = f"#!/bin/sh\n{_wait_pid_dead_snippet(parent_pid)}\n{cmd_str}\n" + (
-            f"{restart_str}\n" if restart_str else ""
+        body = (
+            f"#!/bin/sh\n{_wait_pid_dead_snippet(parent_pid)}\n{cmd_str}\n"
+            + (f"{restart_str}\n" if restart_str else "")
         )
         fd, path = tempfile.mkstemp(suffix=f"-gc-update-pid{parent_pid}.sh")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -133,7 +138,9 @@ def _spawn(script_argv: list) -> None:
         # завершение. Своя консоль (в отличие от DETACHED_PROCESS = ноль консоли, где
         # tasklist/find/ping в :wait-цикле не отрабатывали и переустановка не стартовала),
         # переживает выход родителя.
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+        kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_CONSOLE", 0x00000010
+        )
     else:
         kwargs["start_new_session"] = True
     subprocess.Popen(script_argv, close_fds=True, **kwargs)

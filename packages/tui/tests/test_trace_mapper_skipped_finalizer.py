@@ -11,7 +11,9 @@ from gc_tui.services.trace_mapper import collect_skipped_call_ids, map_message
 
 
 # Точная форма synthetic skip-output из processing_responses.py:409-418.
-def _skip_output_payload(call_id: str, finalizer: str = "turn_ask_human") -> dict:
+def _skip_output_payload(
+    call_id: str, finalizer: str = "turn_ask_human"
+) -> dict:
     return {
         "id": "fco_skip",
         "type": "function_call_output",
@@ -29,13 +31,21 @@ def _finish_call_payload(call_id: str) -> dict:
         "type": "function_call",
         "name": "turn_finish",
         "call_id": call_id,
-        "arguments": json.dumps({"solution_type": "direct_answer", "task_report": "Готово.", "handoff": {}}),
+        "arguments": json.dumps(
+            {
+                "solution_type": "direct_answer",
+                "task_report": "Готово.",
+                "handoff": {},
+            }
+        ),
         "id": "fc_finish",
         "status": "completed",
     }
 
 
-def _ask_call_payload(call_id: str, question: str = "Чем могу помочь?") -> dict:
+def _ask_call_payload(
+    call_id: str, question: str = "Чем могу помочь?"
+) -> dict:
     return {
         "type": "function_call",
         "name": "turn_ask_human",
@@ -48,14 +58,18 @@ def _ask_call_payload(call_id: str, question: str = "Чем могу помоч�
 
 def test_skip_output_returns_none():
     """function_call_output со `skipped: true` → None (не красный [!]-баннер)."""
-    ev = map_message(_skip_output_payload("c1"), no=1, ts="2026-07-07T10:00:00+00:00")
+    ev = map_message(
+        _skip_output_payload("c1"), no=1, ts="2026-07-07T10:00:00+00:00"
+    )
     assert ev is None
 
 
 def test_skip_output_is_not_mapped_as_error():
     """Регресс-гвард против прежнего поведения: раньше skip-output (ok=False)
     маппился как kind='error'. Теперь — None, а не error."""
-    ev = map_message(_skip_output_payload("c1"), no=1, ts="2026-07-07T10:00:00+00:00")
+    ev = map_message(
+        _skip_output_payload("c1"), no=1, ts="2026-07-07T10:00:00+00:00"
+    )
     assert ev is None or ev.kind != "error"
 
 
@@ -141,7 +155,12 @@ def test_batch_only_real_finalizer_survives():
     skipped = collect_skipped_call_ids(batch)
     kinds = []
     for i, m in enumerate(batch):
-        ev = map_message(m, no=i + 1, ts="2026-07-07T10:00:00+00:00", skipped_call_ids=skipped)
+        ev = map_message(
+            m,
+            no=i + 1,
+            ts="2026-07-07T10:00:00+00:00",
+            skipped_call_ids=skipped,
+        )
         if ev is not None:
             kinds.append((ev.kind, ev.tool_name))
     assert ("ask_human", "ask_human") in kinds  # реальный вопрос

@@ -17,10 +17,14 @@ class _DeadRunner:
         return False
 
     def submit_ask_human_reply(self, text: str) -> None:
-        raise AssertionError("submit_ask_human_reply не должен вызываться на мёртвом runner")
+        raise AssertionError(
+            "submit_ask_human_reply не должен вызываться на мёртвом runner"
+        )
 
     def cancel_ask_human(self) -> None:
-        raise AssertionError("cancel_ask_human не должен вызываться на мёртвом runner")
+        raise AssertionError(
+            "cancel_ask_human не должен вызываться на мёртвом runner"
+        )
 
 
 class _LiveRunner:
@@ -85,7 +89,9 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
                 unblock_called.append(True)
 
             def submit_ask_human_reply(self, text: str) -> None:
-                raise AssertionError("submit_ask_human_reply не должен вызываться при Esc-stop")
+                raise AssertionError(
+                    "submit_ask_human_reply не должен вызываться при Esc-stop"
+                )
 
         runner = _LiveStoppable()
         app.active_runner = runner
@@ -100,13 +106,21 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         # runner.stop() вызван — флаг stop_requested выставлен в реальном executor-е
         assert stop_called == [True], "runner.stop() должен быть вызван"
         # cancel_ask_human вызван для разблокировки stdin (agent-thread в input())
-        assert unblock_called == [True], "cancel_ask_human должен быть вызван (unblock stdin)"
+        assert unblock_called == [True], (
+            "cancel_ask_human должен быть вызван (unblock stdin)"
+        )
         # UI-state очищен
         assert screen._ask_human_banner is None, "banner должен быть снят"
-        assert app.tui_state.ask_human_state is None, "ask_human_state должен быть сброшен"
-        assert app.active_runner is None, "active_runner должен быть обнулён (clean-restart pattern)"
+        assert app.tui_state.ask_human_state is None, (
+            "ask_human_state должен быть сброшен"
+        )
+        assert app.active_runner is None, (
+            "active_runner должен быть обнулён (clean-restart pattern)"
+        )
         # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
-        assert screen._thinking is not None, "ThinkingIndicator должен остаться (cancelled-state)"
+        assert screen._thinking is not None, (
+            "ThinkingIndicator должен остаться (cancelled-state)"
+        )
         assert screen._thinking._state == "cancelled", (
             f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"
         )
@@ -116,7 +130,9 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
 async def test_after_esc_stop_user_can_continue_thread(tmp_path):
     """После Esc-stop в live ask_human юзер пишет любой текст + Enter →
     стартует новый run на том же thread_id через runner.start()."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+    )
     (tmp_path / "threads").mkdir(exist_ok=True)
     thread_id = "ahstop00000000000000000000000001"
     app.tui_state.active_task_id = thread_id
@@ -158,7 +174,9 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
     async with app.run_test() as pilot:
         screen = app.screen
         screen._active_task_id = thread_id
-        screen._store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+        screen._store = FileTaskStore(
+            threads_dir=str(tmp_path / "threads"), system="cli"
+        )
         app.active_runner = cap
         await pilot.pause()
 
@@ -167,14 +185,18 @@ async def test_after_esc_stop_user_can_continue_thread(tmp_path):
 
         inp = screen.query_one("#cmdinput")
         inp.text = "продолжаем"
-        await screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="продолжаем"))
+        await screen.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="продолжаем")
+        )
         await pilot.pause()
 
         assert started, "runner.start должен быть вызван для продолжения треда"
         assert started[0]["thread_id"] == thread_id, (
             f"runner.start должен быть с thread_id={thread_id!r}, got {started[0]['thread_id']!r}"
         )
-        assert "продолжаем" in started[0]["query"], f"query должен содержать текст юзера, got {started[0]['query']!r}"
+        assert "продолжаем" in started[0]["query"], (
+            f"query должен содержать текст юзера, got {started[0]['query']!r}"
+        )
 
 
 @pytest.mark.asyncio
@@ -196,13 +218,20 @@ async def test_esc_in_zombie_state_unmounts_banner_and_falls_through(tmp_path):
         # tui_state.ask_human_state сброшен.
         assert app.tui_state.ask_human_state is None
         # Esc-state-machine отработала: input пуст, run нет → открыта модалка выхода.
-        modal = next((s for s in app.screen_stack if isinstance(s, ConfirmScreen)), None)
-        assert modal is not None and modal.query_one("#confirm-dialog").border_title == "Выход", (
+        modal = next(
+            (s for s in app.screen_stack if isinstance(s, ConfirmScreen)), None
+        )
+        assert (
+            modal is not None
+            and modal.query_one("#confirm-dialog").border_title == "Выход"
+        ), (
             "общая Esc-state-machine должна была открыть модалку выхода после снятия banner-а"
         )
 
 
-def _write_thread_dangling_ask_human(tmp_path: Path, *, thread_id: str) -> Path:
+def _write_thread_dangling_ask_human(
+    tmp_path: Path, *, thread_id: str
+) -> Path:
     """Persisted-тред: ask_human-call БЕЗ парного function_call_output."""
     threads = tmp_path / "threads"
     threads.mkdir(exist_ok=True)
@@ -250,11 +279,15 @@ def _write_thread_dangling_ask_human(tmp_path: Path, *, thread_id: str) -> Path:
 
 
 @pytest.mark.asyncio
-async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(tmp_path):
+async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(
+    tmp_path,
+):
     """Attach старого треда с dangling ask_human-call → banner НЕ остаётся
     на экране, в трассе есть meta-строка про прерванный вопрос."""
     thread_id = "ahdangling000000000000000000000a"
-    threads_dir = _write_thread_dangling_ask_human(tmp_path, thread_id=thread_id)
+    threads_dir = _write_thread_dangling_ask_human(
+        tmp_path, thread_id=thread_id
+    )
     app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
     async with app.run_test() as pilot:
         screen = app.screen
@@ -268,13 +301,16 @@ async def test_attach_with_dangling_ask_human_unmounts_banner_with_meta_line(tmp
         from gc_tui.widgets.trace_row import TraceRow
 
         trace_text = " ".join(
-            f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}" for w in screen.query(TraceRow)
+            f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}"
+            for w in screen.query(TraceRow)
         )
         assert "спрашивал" in trace_text
         assert "прерван" in trace_text
         # Фикс F: meta-строка должна содержать полный текст вопроса.
         # Без обрезок, как был задан в persisted ask_human-call payload.
-        assert "Подтверждаете?" in trace_text, f"полный текст вопроса должен быть в meta-строке, got: {trace_text!r}"
+        assert "Подтверждаете?" in trace_text, (
+            f"полный текст вопроса должен быть в meta-строке, got: {trace_text!r}"
+        )
 
 
 # --- компакция: ask_human-плашка не висит для уже отвеченного вопроса ---
@@ -325,7 +361,9 @@ async def test_attach_compacted_answered_ask_human_no_remnant(tmp_path):
     (не отдельная запись), диалог продолжился (summary + agent после вопроса).
     Attach НЕ должен показывать remnant 'прервано' — вопрос отвечён (репро #2)."""
     tid = "ahcompact0000000000000000000000a"
-    (tmp_path / f"data_cli_{tid}__pre_summary__20260605_100000.jsonl").write_text(
+    (
+        tmp_path / f"data_cli_{tid}__pre_summary__20260605_100000.jsonl"
+    ).write_text(
         _ah_envelope_lines(
             tid,
             [
@@ -340,7 +378,11 @@ async def test_attach_compacted_answered_ask_human_no_remnant(tmp_path):
             tid,
             [
                 _ah_dialog_summary_payload("вопрос подтверждён, продолжаем"),
-                {"id": "a1", "role": "assistant", "content": "Продолжаю работу."},
+                {
+                    "id": "a1",
+                    "role": "assistant",
+                    "content": "Продолжаю работу.",
+                },
             ],
         ),
         encoding="utf-8",
@@ -369,7 +411,10 @@ async def test_attach_compacted_answered_ask_human_no_remnant(tmp_path):
         assert app.tui_state.ask_human_state is None
         from gc_tui.widgets.trace_row import TraceRow
 
-        trace_text = " ".join(f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}" for w in scr.query(TraceRow))
+        trace_text = " ".join(
+            f"{getattr(w, '_prefix', '')}{getattr(w, '_content', '')}"
+            for w in scr.query(TraceRow)
+        )
         assert "прервано" not in trace_text
 
 
@@ -400,7 +445,9 @@ async def test_stream_reset_compacted_answered_clears_stale_banner(tmp_path):
     )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    app.active_runner = _LiveRunner()  # живой агент ждёт → attach оставит баннер
+    app.active_runner = (
+        _LiveRunner()
+    )  # живой агент ждёт → attach оставит баннер
     async with app.run_test() as pilot:
         scr = app.screen
         scr.attach_active_task(tid)
@@ -408,7 +455,9 @@ async def test_stream_reset_compacted_answered_clears_stale_banner(tmp_path):
         assert scr._ask_human_banner is not None  # живой вопрос — баннер есть
 
         # компакция: straddle-layout (call в архиве, summary+продолжение в live) + новый epoch
-        (tmp_path / f"data_cli_{tid}__pre_summary__20260605_120000.jsonl").write_text(
+        (
+            tmp_path / f"data_cli_{tid}__pre_summary__20260605_120000.jsonl"
+        ).write_text(
             _ah_envelope_lines(
                 tid,
                 [
@@ -422,7 +471,9 @@ async def test_stream_reset_compacted_answered_clears_stale_banner(tmp_path):
             _ah_envelope_lines(
                 tid,
                 [
-                    _ah_dialog_summary_payload("вопрос подтверждён, продолжаем"),
+                    _ah_dialog_summary_payload(
+                        "вопрос подтверждён, продолжаем"
+                    ),
                     {"id": "a1", "role": "assistant", "content": "Продолжаю."},
                 ],
             ),
@@ -451,7 +502,9 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
     текст + Enter — он улетит как обычное user-сообщение (через runner.start),
     тред продолжится. Pending user-реплика на экране есть."""
     thread_id = "ahdangling000000000000000000000b"
-    threads_dir = _write_thread_dangling_ask_human(tmp_path, thread_id=thread_id)
+    threads_dir = _write_thread_dangling_ask_human(
+        tmp_path, thread_id=thread_id
+    )
 
     started: list[dict] = []
 
@@ -465,7 +518,9 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
             return bool(started)
 
     app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
-    app._executor_factory = lambda: object()  # чтобы get_runner не строил реальный AgentExecutor
+    app._executor_factory = lambda: (
+        object()
+    )  # чтобы get_runner не строил реальный AgentExecutor
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -478,7 +533,9 @@ async def test_enter_in_zombie_continues_thread_as_new_user_message(tmp_path):
 
         inp = screen.query_one("#cmdinput")
         inp.text = "продолжаем"
-        await screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="продолжаем"))
+        await screen.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="продолжаем")
+        )
         await pilot.pause()
         assert started, "runner.start должен быть вызван для продолжения треда"
         assert started[0]["thread_id"] == thread_id
@@ -594,7 +651,9 @@ async def test_live_poll_keeps_active_banner_despite_flush_output(tmp_path):
                         "id": "fco_sm",
                         "type": "function_call_output",
                         "call_id": "call_sm",
-                        "output": json.dumps({"tool": "session_memory", "ok": True}),
+                        "output": json.dumps(
+                            {"tool": "session_memory", "ok": True}
+                        ),
                     },
                 ],
             ),
@@ -615,4 +674,6 @@ async def test_live_poll_keeps_active_banner_despite_flush_output(tmp_path):
         assert scr._ask_human_banner is not None, (
             "активный баннер НЕ должен сниматься в live при флаш-output'е после ask_human"
         )
-        assert app.tui_state.ask_human_state is not None  # состояние диалога цело
+        assert (
+            app.tui_state.ask_human_state is not None
+        )  # состояние диалога цело

@@ -19,7 +19,14 @@ class _OverflowingBackend(FakeBackend):
         raise WalkOutputTooLargeError(path, ceiling_chars=50_000_000)
         yield  # pragma: no cover
 
-    async def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+    async def iter_walk_entries(
+        self,
+        path,
+        *,
+        should_descend=None,
+        prune_names=(),
+        prune_dot_dirs=False,
+    ):
         raise WalkOutputTooLargeError(path, ceiling_chars=50_000_000)
         yield  # pragma: no cover
 

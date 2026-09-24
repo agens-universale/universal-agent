@@ -17,7 +17,9 @@ def _collect_tool_output_call_id(message: Dict) -> str | None:
     return None
 
 
-def _filter_assistant_tool_calls(message: Dict, future_tool_call_ids: set) -> Dict | None:
+def _filter_assistant_tool_calls(
+    message: Dict, future_tool_call_ids: set
+) -> Dict | None:
     """Оставить только tool_calls с ответом ниже; None — сообщение выбросить (пустое без вызовов)."""
     filtered_tool_calls = []
     for tool_call in message.get("tool_calls", []):
@@ -37,7 +39,9 @@ def _filter_assistant_tool_calls(message: Dict, future_tool_call_ids: set) -> Di
     return updated
 
 
-def _keep_function_call(message: Dict, future_tool_call_ids: set, keep_trailing: bool) -> bool:
+def _keep_function_call(
+    message: Dict, future_tool_call_ids: set, keep_trailing: bool
+) -> bool:
     call_id = message.get("call_id")
     if not isinstance(call_id, str) or not call_id:
         return False
@@ -45,13 +49,27 @@ def _keep_function_call(message: Dict, future_tool_call_ids: set, keep_trailing:
     return keep_trailing or call_id in future_tool_call_ids
 
 
-def _repair_message(message: Dict, future_tool_call_ids: set, keep_trailing: bool) -> Dict | None:
+def _repair_message(
+    message: Dict, future_tool_call_ids: set, keep_trailing: bool
+) -> Dict | None:
     """Сообщение для истории (возможно, с урезанными tool_calls) либо None — выбросить."""
-    if message.get("role") == "assistant" and isinstance(message.get("tool_calls"), list):
+    if message.get("role") == "assistant" and isinstance(
+        message.get("tool_calls"), list
+    ):
         # Optionally keep unresolved trailing assistant tool_calls as-is.
-        return message if keep_trailing else _filter_assistant_tool_calls(message, future_tool_call_ids)
+        return (
+            message
+            if keep_trailing
+            else _filter_assistant_tool_calls(message, future_tool_call_ids)
+        )
     if message.get("type") == "function_call":
-        return message if _keep_function_call(message, future_tool_call_ids, keep_trailing) else None
+        return (
+            message
+            if _keep_function_call(
+                message, future_tool_call_ids, keep_trailing
+            )
+            else None
+        )
     return message
 
 
@@ -80,7 +98,11 @@ def repair_tool_call_pairing(
             normalized_reversed.append(message)
             continue
 
-        keep_trailing = keep_latest_unanswered and not future_tool_call_ids and not normalized_reversed
+        keep_trailing = (
+            keep_latest_unanswered
+            and not future_tool_call_ids
+            and not normalized_reversed
+        )
         kept = _repair_message(message, future_tool_call_ids, keep_trailing)
         if kept is not None:
             normalized_reversed.append(kept)
@@ -110,7 +132,11 @@ def _is_plain_assistant(message: Dict) -> bool:
 def _take_leading_assistant(messages: List[Dict], i: int) -> tuple:
     """Проза assistant прямо перед серией tool_calls → (текст, reasoning, индекс серии)."""
     message = messages[i]
-    if not (_is_plain_assistant(message) and i + 1 < len(messages) and _has_tool_calls(messages[i + 1])):
+    if not (
+        _is_plain_assistant(message)
+        and i + 1 < len(messages)
+        and _has_tool_calls(messages[i + 1])
+    ):
         return "", [], i
     reasoning_parts: List[str] = []
     if "reasoning_content" in message:
@@ -136,7 +162,9 @@ def _merge_tool_call_run(messages: List[Dict], start: int) -> tuple:
     return merged_tool_calls, content_parts, reasoning_parts, j
 
 
-def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict]:
+def coalesce_consecutive_assistant_tool_calls(
+    messages: List[Dict],
+) -> List[Dict]:
     """
     Схлопывает подряд идущие assistant-сообщения с tool_calls в одно.
 
@@ -157,7 +185,9 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
             i += 1
             continue
 
-        leading_content, reasoning_parts, i = _take_leading_assistant(messages, i)
+        leading_content, reasoning_parts, i = _take_leading_assistant(
+            messages, i
+        )
         message = messages[i]
 
         if not _has_tool_calls(message):
@@ -169,7 +199,9 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
         if leading_content:
             content_parts.append(leading_content)
 
-        merged_tool_calls, run_parts, run_reasoning, j = _merge_tool_call_run(messages, i)
+        merged_tool_calls, run_parts, run_reasoning, j = _merge_tool_call_run(
+            messages, i
+        )
         content_parts.extend(run_parts)
         reasoning_parts.extend(run_reasoning)
 
@@ -187,10 +219,14 @@ def coalesce_consecutive_assistant_tool_calls(messages: List[Dict]) -> List[Dict
     return result
 
 
-_INTERRUPTED_ASSISTANT_PLACEHOLDER = "(previous turn was interrupted — continuing from the new request)"
+_INTERRUPTED_ASSISTANT_PLACEHOLDER = (
+    "(previous turn was interrupted — continuing from the new request)"
+)
 
 
-def inject_assistant_after_orphan_tool_outputs(messages: List[Dict]) -> List[Dict]:
+def inject_assistant_after_orphan_tool_outputs(
+    messages: List[Dict],
+) -> List[Dict]:
     """
     После tool-сообщений (role=tool) chat/completions API ожидает assistant
     (текстовый ответ или следующий tool_calls). Если вместо assistant идёт

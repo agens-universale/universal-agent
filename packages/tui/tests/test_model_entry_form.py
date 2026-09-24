@@ -40,7 +40,10 @@ def _form(**kwargs):
     from gc_tui.editors.model_entry_form import ModelEntryForm
 
     kwargs.setdefault("fetch", lambda *a, **k: None)
-    kwargs.setdefault("probe", lambda *a, **k: ProbeResult("unknown", None, None, 0, "нет сети"))
+    kwargs.setdefault(
+        "probe",
+        lambda *a, **k: ProbeResult("unknown", None, None, 0, "нет сети"),
+    )
     return ModelEntryForm(**kwargs)
 
 
@@ -94,7 +97,9 @@ async def test_draft_does_not_leak_before_submit(tmp_path):
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.query_one("#mef-url", Input).value = "https://new/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://new/v1/chat/completions"
         assert form.is_dirty() is True
         assert target.read_bytes() == before
         ok, alias, fields = form.submit()
@@ -166,7 +171,11 @@ async def test_empty_url_inherits_and_no_key_is_emitted():
     """Пустое поле адреса = наследование от основного конфига: ключ `url` не
     отдаётся вовсе (writer сохранит отсутствие ключа), а placeholder честно
     показывает, ЧТО именно унаследуется."""
-    form = _form(initial=None, existing_aliases=set(), effective_url="http://hub/v1/chat/completions")
+    form = _form(
+        initial=None,
+        existing_aliases=set(),
+        effective_url="http://hub/v1/chat/completions",
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "flash"
@@ -174,7 +183,9 @@ async def test_empty_url_inherits_and_no_key_is_emitted():
         ok, alias, fields = form.submit()
         assert (ok, alias) == (True, "flash")
         assert "url" not in fields
-        assert form.query_one("#mef-url", Input).placeholder == ("наследуется: http://hub/v1/chat/completions")
+        assert form.query_one("#mef-url", Input).placeholder == (
+            "наследуется: http://hub/v1/chat/completions"
+        )
 
 
 async def test_the_url_placeholder_names_the_address_that_really_acts():
@@ -199,7 +210,10 @@ async def test_the_url_placeholder_names_the_address_that_really_acts():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.query_one("#mef-url", Input).value == ""
-        assert form.query_one("#mef-url", Input).placeholder == "https://my-host/v1"
+        assert (
+            form.query_one("#mef-url", Input).placeholder
+            == "https://my-host/v1"
+        )
         # Токен той же записи и так честен — маска СВОЕГО секрета, не общего.
         assert "sk-HUB" not in form.query_one("#mef-token", Input).placeholder
 
@@ -234,7 +248,9 @@ async def test_clearing_a_prefilled_url_removes_the_key(tmp_path):
         assert form.is_dirty() is True
         # Placeholder виден ровно в этот момент — когда поле стёрли: он обязан
         # называть, ЧТО теперь будет действовать.
-        assert form.query_one("#mef-url", Input).placeholder == ("наследуется: http://hub/v1/chat/completions")
+        assert form.query_one("#mef-url", Input).placeholder == (
+            "наследуется: http://hub/v1/chat/completions"
+        )
         # Половину пары форма не сохранит и скажет почему — совет исполним отсюда же:
         # поле токена открыто, курсор на него встаёт.
         assert form.submit()[0] is False
@@ -245,7 +261,9 @@ async def test_clearing_a_prefilled_url_removes_the_key(tmp_path):
         ok, alias, fields = form.submit()
         assert ok is True and fields["url"] is None and fields["token"] is None
     upsert_model(target, alias, fields, template)
-    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"][
+        "flash"
+    ]
     assert "url" not in entry, entry  # ключи сняты — наследование
     assert "token" not in entry, entry
     assert entry["pricing"] == {"input": 0.3, "output": 1.2}
@@ -276,7 +294,9 @@ async def test_clearing_a_prefilled_model_id_removes_the_key(tmp_path):
         ok, alias, fields = form.submit()
         assert ok is True and fields["model"] is None
     upsert_model(target, alias, fields, template)
-    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"][
+        "flash"
+    ]
     assert "model" not in entry, entry
 
 
@@ -284,7 +304,12 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
     """Пункт «основной конфиг» нужен именно тем записям, у которых свой адрес ЕСТЬ:
     это единственный явный путь вернуть их к наследованию (решение 7). Список поверх
     своего адреса сам не раскрывается (канон `can_open`) — раскрывает Alt+↓."""
-    presets = [EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions")]
+    presets = [
+        EndpointPreset(
+            name="OpenRouter",
+            url="https://openrouter.ai/api/v1/chat/completions",
+        )
+    ]
     form = _form(
         initial={
             "alias": "flash",
@@ -300,7 +325,9 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
         assert form.presets_open is False  # поверх своего адреса — не сам
         assert form.reload_presets() is True  # Alt+↓ раскрывает явно
         await pilot.pause()
-        rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
+        rows = [
+            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+        ]
         assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
         # Слово «наследовать» несущее: адрес пункта часто совпадает с
         # обычным пресетом, и без него строка читалась бы дублем.
@@ -321,11 +348,23 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
 async def test_inherit_preset_leaves_the_field_empty():
     """Пункт «основной конфиг» в пресет-листе — осознанно оставить поле ПУСТЫМ:
     подстановка адреса убила бы живую связь с основным конфигом."""
-    presets = [EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions")]
-    form = _form(initial=None, existing_aliases=set(), presets=presets, effective_url="http://hub/v1/chat/completions")
+    presets = [
+        EndpointPreset(
+            name="OpenRouter",
+            url="https://openrouter.ai/api/v1/chat/completions",
+        )
+    ]
+    form = _form(
+        initial=None,
+        existing_aliases=set(),
+        presets=presets,
+        effective_url="http://hub/v1/chat/completions",
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()  # курсор на адресе, список раскрыт
-        rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
+        rows = [
+            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+        ]
         assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
         # Слово «наследовать» несущее: адрес пункта часто совпадает с
         # обычным пресетом, и без него строка читалась бы дублем.
@@ -351,7 +390,9 @@ async def test_token_is_read_only_while_the_connection_is_shared():
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
         assert token.disabled is True
-        assert "токен приходит из раздела «Подключение»" in str(form.query_one("#mef-noauth", Static).render())
+        assert "токен приходит из раздела «Подключение»" in str(
+            form.query_one("#mef-noauth", Static).render()
+        )
         assert form.own_connection() is False
 
 
@@ -366,7 +407,9 @@ async def test_typing_an_address_opens_the_token_and_drops_the_inherited_mask():
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
         assert token.disabled is False
@@ -386,8 +429,13 @@ async def test_the_pair_row_says_where_the_address_and_token_come_from():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         row = form.query_one("#mef-pair", Static)
-        assert str(row.render()) == "Адрес и токен: наследуются из раздела «Подключение»"
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        assert (
+            str(row.render())
+            == "Адрес и токен: наследуются из раздела «Подключение»"
+        )
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         assert str(row.render()) == "Адрес и токен: свои"
 
@@ -405,7 +453,10 @@ async def test_empty_common_token_is_explained_not_masked():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
-        assert token.placeholder == "общий токен не задан — запросы идут без авторизации"
+        assert (
+            token.placeholder
+            == "общий токен не задан — запросы идут без авторизации"
+        )
         ok, _alias, fields = form.submit()
         assert ok is True and "token" not in fields and "url" not in fields
 
@@ -423,7 +474,9 @@ async def test_the_form_refuses_to_save_an_address_without_a_token():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "flash"
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         ok, _alias, _fields = form.submit()
         assert ok is False
@@ -497,7 +550,9 @@ async def test_erasing_the_address_leaves_the_own_token_reachable():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "flash"
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         form.query_one("#mef-token", Input).value = "sk-OWN"
         await pilot.pause()
@@ -581,7 +636,9 @@ async def test_the_second_writing_of_the_pair_is_read_as_own():
             "alias": "flash",
             "model": "google/gemini-2.5-flash",
             "url": "https://my-host/v1/chat/completions",
-            "backend": {"chat_completion_headers": {"Authorization": "Bearer sk-OWN"}},
+            "backend": {
+                "chat_completion_headers": {"Authorization": "Bearer sk-OWN"}
+            },
         },
         existing_aliases={"flash"},
         effective_url="https://openrouter.ai/api/v1/chat/completions",
@@ -617,12 +674,16 @@ async def test_probe_does_not_send_the_inherited_token_to_a_typed_address():
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.query_one("#mef-url", Input).value = "https://foreign/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://foreign/v1/chat/completions"
         await pilot.pause()
         assert form.probe_connection() is True
         for _ in range(3):
             await pilot.pause()
-        assert seen and all(e.startswith("https://foreign") for e, _ in seen), seen
+        assert seen and all(
+            e.startswith("https://foreign") for e, _ in seen
+        ), seen
         assert [auth for _, auth in seen] == [None], seen  # общий ключ не ушёл
 
 
@@ -640,7 +701,9 @@ async def test_the_model_list_does_not_send_the_inherited_token_to_a_typed_addre
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.query_one("#mef-url", Input).value = "https://foreign/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://foreign/v1/chat/completions"
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
         form.move(-1)
@@ -669,7 +732,9 @@ async def test_untouched_token_field_keeps_the_saved_secret():
         assert "SECRETVALUE" not in token.placeholder  # только маска
         assert "***" in token.placeholder
         assert token.has_class("has-saved")  # маска красится как значение
-        form.query_one("#mef-url", Input).value = "https://new/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://new/v1/chat/completions"
         ok, _alias, fields = form.submit()
         assert ok is True
         assert "token" not in fields
@@ -768,14 +833,20 @@ async def test_ctrl_u_drops_the_own_token_mask_and_shows_the_inherited_one():
     теперь унаследуется. Результат клавиши обязан быть виден ДО сохранения — иначе
     она снова «невыводима из экрана» (смок владельца)."""
     form = _form(
-        initial={"alias": "flash", "model": "google/gemini-2.5-flash", "token": "sk-OWNSECRET"},
+        initial={
+            "alias": "flash",
+            "model": "google/gemini-2.5-flash",
+            "token": "sk-OWNSECRET",
+        },
         existing_aliases={"flash"},
         effective_auth="Bearer sk-HUBSECRET",
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
-        assert "OWNSECRET" not in token.placeholder  # свой секрет — только маской
+        assert (
+            "OWNSECRET" not in token.placeholder
+        )  # свой секрет — только маской
         assert not token.placeholder.startswith("наследуется")
         form.move(1)  # адрес → токен
         await pilot.pause()
@@ -783,7 +854,9 @@ async def test_ctrl_u_drops_the_own_token_mask_and_shows_the_inherited_one():
         await pilot.pause()
         assert form.token_cleared is True
         assert token.placeholder.startswith("наследуется")
-        assert "HUBSECRET" not in token.placeholder  # унаследованный — тоже маской
+        assert (
+            "HUBSECRET" not in token.placeholder
+        )  # унаследованный — тоже маской
         assert form.is_dirty() is True
 
 
@@ -810,7 +883,9 @@ async def test_ctrl_u_returns_the_whole_pair_from_either_field(field_id):
                 break
             form.move(1)
         await pilot.pause()
-        assert form._positions[form._idx] == field_id, "позиция недостижима курсором"
+        assert form._positions[form._idx] == field_id, (
+            "позиция недостижима курсором"
+        )
         assert form.clear_token() is True
         await pilot.pause()
         assert form.own_connection() is False
@@ -857,7 +932,9 @@ async def test_ctrl_u_from_the_token_field_leaves_the_cursor_on_a_live_field():
         await pilot.press("g")
         await pilot.pause()
         assert form.query_one("#mef-alias", Input).value == "flash"
-        assert form.query_one("#mef-url", Input).value == "g"  # печать ушла под курсор
+        assert (
+            form.query_one("#mef-url", Input).value == "g"
+        )  # печать ушла под курсор
         form.query_one("#mef-url", Input).value = ""
         await pilot.pause()
         ok, alias, _fields = form.submit()
@@ -907,7 +984,9 @@ async def test_ctrl_u_gets_the_record_out_of_half_a_pair():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "flash"
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         assert form.submit()[0] is False  # половина пары — не сохранить
         assert form.clear_token() is True  # курсор на адресе
@@ -933,7 +1012,9 @@ async def test_the_refusal_goes_away_with_the_state_it_was_about():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "flash"
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         assert form.submit()[0] is False
         error = form.query_one("#mef-error", Static)
@@ -962,7 +1043,9 @@ async def test_the_token_label_stays_silent_under_the_no_auth_checkbox():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert "●" in str(form.query_one("#mef-noauth", Static).render())
-        assert str(form.query_one("#mef-token-label", Static).render()) == "Токен"
+        assert (
+            str(form.query_one("#mef-token-label", Static).render()) == "Токен"
+        )
         assert form.clear_token() is True  # с адреса клавиша всё равно наша
 
 
@@ -1010,7 +1093,9 @@ async def test_ctrl_u_is_neither_promised_nor_taken_over_a_pair_in_backend():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.own_connection() is True
-        assert str(form.query_one("#mef-token-label", Static).render()) == "Токен"
+        assert (
+            str(form.query_one("#mef-token-label", Static).render()) == "Токен"
+        )
         assert form.can_return_shared_pair is False
         assert form.clear_token() is False  # курсор на адресе
         form.move(1)  # адрес → токен (поле живое)
@@ -1068,7 +1153,9 @@ async def test_the_inherit_preset_is_gated_like_the_key_that_does_the_same():
         await pilot.pause()
         assert own.reload_presets() is True
         await pilot.pause()
-        rows = [str(w.render()) for w in own.query(".mef-preset-row") if w.display]
+        rows = [
+            str(w.render()) for w in own.query(".mef-preset-row") if w.display
+        ]
         assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
 
 
@@ -1091,7 +1178,9 @@ async def test_ctrl_u_is_not_ours_off_the_pair_fields_or_over_a_shared_pair():
         await pilot.pause()
         assert form.clear_token() is False  # поле алиаса — не поле пары
         assert form.token_cleared is False
-        assert form.own_connection() is True  # пара цела, клавиша её не тронула
+        assert (
+            form.own_connection() is True
+        )  # пара цела, клавиша её не тронула
     # Вторая половина — про «возвращать нечего»: пара общая, и оба её поля пусты.
     shared = _form(
         initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
@@ -1102,7 +1191,9 @@ async def test_ctrl_u_is_not_ours_off_the_pair_fields_or_over_a_shared_pair():
     async with _harness(shared).run_test() as pilot:
         await pilot.pause()
         assert shared.own_connection() is False
-        assert shared.clear_token() is False  # курсор на адресе — и всё равно нет
+        assert (
+            shared.clear_token() is False
+        )  # курсор на адресе — и всё равно нет
         assert shared.token_cleared is False
 
 
@@ -1121,7 +1212,10 @@ async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_d
     )
     async with _harness(inherited).run_test() as pilot:
         await pilot.pause()
-        assert str(inherited.query_one("#mef-token-label", Static).render()) == "Токен"
+        assert (
+            str(inherited.query_one("#mef-token-label", Static).render())
+            == "Токен"
+        )
     own = _form(
         initial={
             "alias": "flash",
@@ -1152,9 +1246,13 @@ async def test_the_token_label_promises_ctrl_u_only_when_there_is_something_to_d
     )
     async with _harness(half).run_test() as pilot:
         await pilot.pause()
-        half.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        half.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
-        assert str(half.query_one("#mef-token-label", Static).render()) == ("Токен   Ctrl+U — вернуть наследование")
+        assert str(half.query_one("#mef-token-label", Static).render()) == (
+            "Токен   Ctrl+U — вернуть наследование"
+        )
 
 
 async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
@@ -1184,20 +1282,26 @@ async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
         assert form.clear_token() is True
         await pilot.pause()
         assert form.query_one("#mef-token", Input).disabled is True
-        form.query_one("#mef-url", Input).value = "https://my-host/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://my-host/v1/chat/completions"
         await pilot.pause()
         assert form.query_one("#mef-token", Input).disabled is False
         form.query_one("#mef-token", Input).value = "sk-NEW"
         await pilot.pause()
         assert form.token_cleared is False
         # Клавиша снова работает — и подпись снова о ней говорит.
-        assert str(form.query_one("#mef-token-label", Static).render()) == ("Токен   Ctrl+U — вернуть наследование")
+        assert str(form.query_one("#mef-token-label", Static).render()) == (
+            "Токен   Ctrl+U — вернуть наследование"
+        )
         ok, _alias, fields = form.submit()
         assert ok is True and fields["token"] == "sk-NEW"
         assert fields["url"] == "https://my-host/v1/chat/completions"
 
 
-async def test_saving_after_ctrl_u_removes_both_pair_keys_from_the_file(tmp_path):
+async def test_saving_after_ctrl_u_removes_both_pair_keys_from_the_file(
+    tmp_path,
+):
     """Главное последствие: в ФАЙЛЕ не осталось ни `token`, ни `url` — запись вернулась
     к общей паре целиком (§5). Один снятый токен был бы ровно запрещённой половиной, и
     отказал бы уже валидатор конфига. Соседние ключи, о которых форма не знает
@@ -1226,7 +1330,9 @@ async def test_saving_after_ctrl_u_removes_both_pair_keys_from_the_file(tmp_path
         ok, alias, fields = form.submit()
         assert ok is True and fields["token"] is None and fields["url"] is None
     upsert_model(target, alias, fields, template)
-    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"][
+        "flash"
+    ]
     assert "token" not in entry, entry  # ключи сняты — наследование
     assert "url" not in entry, entry
     assert entry["pricing"] == {"input": 0.3, "output": 1.2}
@@ -1246,7 +1352,12 @@ async def test_the_checkbox_and_ctrl_u_write_different_things(tmp_path):
         target = tmp_path / f"config-{case.replace('+', '-')}.yml"
         target.write_text(_REGISTRY_WITH_PRICING, encoding="utf-8")
         form = _form(
-            initial={"alias": "flash", "model": "google/gemini-2.5-flash", "url": own_url, "token": "sk-secret"},
+            initial={
+                "alias": "flash",
+                "model": "google/gemini-2.5-flash",
+                "url": own_url,
+                "token": "sk-secret",
+            },
             existing_aliases={"flash"},
             effective_url="http://hub/v1/chat/completions",
             effective_auth="Bearer sk-HUB",
@@ -1264,11 +1375,17 @@ async def test_the_checkbox_and_ctrl_u_write_different_things(tmp_path):
             ok, alias, fields = form.submit()
             assert ok is True
         upsert_model(target, alias, fields, template)
-        written[case] = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+        written[case] = yaml.safe_load(target.read_text(encoding="utf-8"))[
+            "models"
+        ]["flash"]
     assert written["checkbox"]["token"] == ""  # ● — осознанно без токена
     assert written["checkbox"]["url"] == own_url  # свой адрес при этом остался
-    assert "token" not in written["ctrl+u"], written["ctrl+u"]  # Ctrl+U — наследование
-    assert "url" not in written["ctrl+u"], written["ctrl+u"]  # и адрес вместе с ним
+    assert "token" not in written["ctrl+u"], written[
+        "ctrl+u"
+    ]  # Ctrl+U — наследование
+    assert "url" not in written["ctrl+u"], written[
+        "ctrl+u"
+    ]  # и адрес вместе с ним
 
 
 # --- алиас: валидация на месте -------------------------------------------------
@@ -1294,7 +1411,9 @@ async def test_duplicate_alias_is_rejected_with_an_honest_error():
         form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
         ok, _alias, _fields = form.submit()
         assert ok is False
-        assert "уже используется" in str(form.query_one("#mef-error", Static).render())
+        assert "уже используется" in str(
+            form.query_one("#mef-error", Static).render()
+        )
 
 
 @pytest.mark.parametrize("alias", ["[x]", "[/x]"])
@@ -1328,10 +1447,14 @@ async def test_empty_alias_derives_the_name_from_the_model_id():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         alias_field = form.query_one("#mef-alias", Input)
-        assert alias_field.placeholder == "имя из id модели"  # id пуст — принцип
+        assert (
+            alias_field.placeholder == "имя из id модели"
+        )  # id пуст — принцип
         form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
         await pilot.pause()
-        assert alias_field.placeholder == "gemini-2.5-flash-2"  # призрак = что возьмётся
+        assert (
+            alias_field.placeholder == "gemini-2.5-flash-2"
+        )  # призрак = что возьмётся
         # Выбор из списка пишется write_field'ом, который глушит Input.Changed, —
         # призрак обязан пересчитаться и на этом пути (живой смок: id из списка,
         # а в поле алиаса остался generic-текст).
@@ -1353,7 +1476,9 @@ async def test_empty_alias_and_model_together_are_rejected():
         await pilot.pause()
         ok, _alias, _fields = form.submit()
         assert ok is False
-        assert "укажите id модели или алиас" in str(form.query_one("#mef-error", Static).render())
+        assert "укажите id модели или алиас" in str(
+            form.query_one("#mef-error", Static).render()
+        )
 
 
 async def test_own_alias_is_editable_and_not_its_own_duplicate():
@@ -1361,26 +1486,38 @@ async def test_own_alias_is_editable_and_not_its_own_duplicate():
     форма, транзакцию ведёт секция), запись не считает саму себя дублем, а СТЁРТЫЙ
     алиас — «переименуй в имя по умолчанию»: призрак-placeholder называет имя из
     id, Enter принимает его."""
-    form = _form(initial={"alias": "flash", "model": "google/gemini-2.5-flash"}, existing_aliases={"flash", "glm"})
+    form = _form(
+        initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+        existing_aliases={"flash", "glm"},
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         field = form.query_one("#mef-alias", Input)
         assert field.value == "flash"  # предзаполнен, редактируем
-        assert form.original_alias == "flash"  # прежнее имя — секции, для rename
+        assert (
+            form.original_alias == "flash"
+        )  # прежнее имя — секции, для rename
         ok, alias, _fields = form.submit()
         assert (ok, alias) == (True, "flash")  # сам себе не дубль
         field.value = "glm"
         ok, _alias, _fields = form.submit()
         assert ok is False  # занятое имя — честная ошибка
-        assert "уже используется" in str(form.query_one("#mef-error", Static).render())
+        assert "уже используется" in str(
+            form.query_one("#mef-error", Static).render()
+        )
         field.value = "fresh"
         ok, alias, _fields = form.submit()
         assert (ok, alias) == (True, "fresh")  # переименование уходит секции
         field.value = ""
         await pilot.pause()
-        assert field.placeholder == "gemini-2.5-flash"  # призрак имени по умолчанию
+        assert (
+            field.placeholder == "gemini-2.5-flash"
+        )  # призрак имени по умолчанию
         ok, alias, _fields = form.submit()
-        assert (ok, alias) == (True, "gemini-2.5-flash")  # Enter принял призрак
+        assert (ok, alias) == (
+            True,
+            "gemini-2.5-flash",
+        )  # Enter принял призрак
 
 
 async def test_creating_an_entry_named_like_a_base_one_is_refused():
@@ -1390,18 +1527,28 @@ async def test_creating_an_entry_named_like_a_base_one_is_refused():
     набора — имя, занятое в основном конфиге, он не предложит."""
     from gc_tui.editors import model_entry_form as mef
 
-    form = _form(initial=None, existing_aliases=set(), base_aliases=frozenset({"flash", "gemini-2.5-flash"}))
+    form = _form(
+        initial=None,
+        existing_aliases=set(),
+        base_aliases=frozenset({"flash", "gemini-2.5-flash"}),
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "flash"
         form.query_one("#mef-model", Input).value = "zhipu/glm-4.6"
         ok, _alias, _fields = form.submit()
         assert ok is False
-        assert str(form.query_one("#mef-error", Static).render()) == mef._ALIAS_TAKEN_BY_BASE
+        assert (
+            str(form.query_one("#mef-error", Static).render())
+            == mef._ALIAS_TAKEN_BY_BASE
+        )
         form.query_one("#mef-alias", Input).value = ""
         form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
         await pilot.pause()
-        assert form.query_one("#mef-alias", Input).placeholder == "gemini-2.5-flash-2"
+        assert (
+            form.query_one("#mef-alias", Input).placeholder
+            == "gemini-2.5-flash-2"
+        )
 
 
 async def test_editing_an_own_entry_named_like_a_base_one_is_allowed():
@@ -1422,7 +1569,9 @@ async def test_editing_an_own_entry_named_like_a_base_one_is_allowed():
         await pilot.pause()
         form.query_one("#mef-model", Input).value = "zhipu/glm-4.6"
         ok, alias, fields = form.submit()
-        assert (ok, alias) == (True, "flash"), str(form.query_one("#mef-error", Static).render())
+        assert (ok, alias) == (True, "flash"), str(
+            form.query_one("#mef-error", Static).render()
+        )
         assert fields["model"] == "zhipu/glm-4.6"
         # Переименование В имя ДРУГОЙ базовой записи — это уже создание тёзки, только
         # из существующей: по-прежнему отказ.
@@ -1431,7 +1580,10 @@ async def test_editing_an_own_entry_named_like_a_base_one_is_allowed():
         assert ok is False
         from gc_tui.editors import model_entry_form as mef
 
-        assert str(form.query_one("#mef-error", Static).render()) == mef._ALIAS_TAKEN_BY_BASE
+        assert (
+            str(form.query_one("#mef-error", Static).render())
+            == mef._ALIAS_TAKEN_BY_BASE
+        )
 
 
 # --- тень: тёзка без своей пары наследует её у заслонённой записи ---------------
@@ -1442,7 +1594,11 @@ async def test_editing_an_own_entry_named_like_a_base_one_is_allowed():
 # `test_profile_effective_view`; здесь — то, что видно только с сетевой заглушкой
 # и на втором написании тени.
 
-_SHADOWED = {"model": "openai/gpt-5.5", "url": "https://base.example/v1/chat/completions", "token": "BASE-TOKEN"}
+_SHADOWED = {
+    "model": "openai/gpt-5.5",
+    "url": "https://base.example/v1/chat/completions",
+    "token": "BASE-TOKEN",
+}
 
 
 def _namesake_form(**kwargs):
@@ -1469,7 +1625,10 @@ async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pai
         seen.append((endpoint, auth))
         return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
 
-    form = _namesake_form(probe=fake_probe, fetch=lambda url, auth, **k: calls.append((url, auth)) or None)
+    form = _namesake_form(
+        probe=fake_probe,
+        fetch=lambda url, auth, **k: calls.append((url, auth)) or None,
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.probe_connection() is True
@@ -1503,7 +1662,9 @@ async def test_the_shadowed_record_is_read_in_its_second_writing_too():
         assert str(form.query_one("#mef-pair", Static).render()) == (
             "Адрес и токен: наследуются из записи основного конфига"
         )
-        assert form.query_one("#mef-url", Input).placeholder == ("наследуется: https://hdr.example/v1/chat/completions")
+        assert form.query_one("#mef-url", Input).placeholder == (
+            "наследуется: https://hdr.example/v1/chat/completions"
+        )
         token = form.query_one("#mef-token", Input)
         assert token.placeholder == "наследуется: Bearer HDR***"
         assert token.has_class("has-saved")
@@ -1521,11 +1682,15 @@ async def test_a_shadowed_record_without_a_token_is_explained_not_masked():
         seen.append((endpoint, auth))
         return ProbeResult("ok", 200, [], 5, "доступен")
 
-    form = _namesake_form(base_entry={**_SHADOWED, "token": ""}, probe=fake_probe)
+    form = _namesake_form(
+        base_entry={**_SHADOWED, "token": ""}, probe=fake_probe
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
-        assert token.placeholder == ("запись основного конфига без токена — запросы идут без авторизации")
+        assert token.placeholder == (
+            "запись основного конфига без токена — запросы идут без авторизации"
+        )
         assert not token.has_class("has-saved")
         assert form.probe_connection() is True
         for _ in range(3):
@@ -1552,10 +1717,14 @@ async def test_malformed_url_is_rejected():
         form.query_one("#mef-url", Input).value = "notaurl"
         ok, _alias, _fields = form.submit()
         assert ok is False
-        assert "http(s)://" in str(form.query_one("#mef-error", Static).render())
+        assert "http(s)://" in str(
+            form.query_one("#mef-error", Static).render()
+        )
 
 
-async def test_an_env_reference_in_the_address_is_not_a_malformed_url(monkeypatch):
+async def test_an_env_reference_in_the_address_is_not_a_malformed_url(
+    monkeypatch,
+):
     """Форма получает СЫРОЙ документ (`models_section._read_document` →
     `config_raw.read_document`, «без резолва ${ENV:VAR}»), и `${ENV:VAR}` в адресе —
     штатная документированная форма (`docs/configuration.md`: пример
@@ -1581,20 +1750,26 @@ async def test_an_env_reference_in_the_address_is_not_a_malformed_url(monkeypatc
         await pilot.pause()
         form.query_one("#mef-model", Input).value = "zhipu/glm-4.6"
         ok, alias, fields = form.submit()
-        assert (ok, alias) == (True, "flash"), str(form.query_one("#mef-error", Static).render())
+        assert (ok, alias) == (True, "flash"), str(
+            form.query_one("#mef-error", Static).render()
+        )
         assert fields["url"] == "${ENV:MEF_HUB}"  # ссылка уезжает ссылкой
         # Набрать плейсхолдер руками — тот же путь: структурная проверка смотрит на
         # ЗНАЧЕНИЕ, а не на то, трогали ли поле. С ЗАДАННОЙ переменной сохраняется.
         monkeypatch.setenv("MEF_OTHER", "https://other/v1/chat/completions")
         form.query_one("#mef-url", Input).value = "${ENV:MEF_OTHER}"
         await pilot.pause()
-        assert form.submit()[0] is True, str(form.query_one("#mef-error", Static).render())
+        assert form.submit()[0] is True, str(
+            form.query_one("#mef-error", Static).render()
+        )
         # А НЕзаданная разрывает пару — и отказ обязан назвать переменную, а не
         # отправить человека искать опечатку в полях (решение владельца, вариант Б).
         monkeypatch.delenv("MEF_OTHER", raising=False)
         await pilot.pause()
         assert form.submit()[0] is False
-        assert "MEF_OTHER" in str(form.query_one("#mef-error", Static).render())
+        assert "MEF_OTHER" in str(
+            form.query_one("#mef-error", Static).render()
+        )
 
 
 # --- Alt+↓ (подбор) и Ctrl+Space (проба) — РАЗНЫЕ клавиши -----------------------
@@ -1629,7 +1804,10 @@ async def test_the_model_list_loads_itself_on_field_entry():
         assert len(rows) == 2 and "google/gemini-2.5-flash" in rows[0], rows
         assert form.enter() is True  # подставить выделенную
         await pilot.pause()
-        assert form.query_one("#mef-model", Input).value == "google/gemini-2.5-flash"
+        assert (
+            form.query_one("#mef-model", Input).value
+            == "google/gemini-2.5-flash"
+        )
         assert form.reload_models() is True  # Alt+↓ — перечитать заново
         for _ in range(3):
             await pilot.pause()
@@ -1659,12 +1837,19 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
         calls.append((url, auth))
         return _models() if auth else None  # без токена сервер молчит
 
-    form = _form(initial=None, existing_aliases=set(), fetch=fetch, effective_url="http://hub/v1/chat/completions")
+    form = _form(
+        initial=None,
+        existing_aliases=set(),
+        fetch=fetch,
+        effective_url="http://hub/v1/chat/completions",
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         # Адрес — свой: над общим полем токена нет вовсе (§4), а сценарий именно про
         # токен, введённый после неудачи.
-        form.query_one("#mef-url", Input).value = "http://hub/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "http://hub/v1/chat/completions"
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
         form.move(-1)
@@ -1673,7 +1858,9 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
             await pilot.pause()
         from gc_tui.editors.field_list import LIST_FAILED
 
-        assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
+        assert LIST_FAILED in str(
+            form.query_one("#mef-model-status", Static).render()
+        )
         assert len(calls) == 1 and calls[0][1] is None
         form.move(1)
         form.move(1)  # id → алиас → адрес
@@ -1699,7 +1886,10 @@ async def test_the_autoload_answer_respects_can_open_over_a_typed_id():
     нему — явный Alt+↓."""
     from textual.widgets import Static
 
-    fetch = lambda *a, **k: [ModelInfo(id="gpt-4-turbo", tool_capable=True), ModelInfo(id="gpt-4", tool_capable=True)]
+    fetch = lambda *a, **k: [
+        ModelInfo(id="gpt-4-turbo", tool_capable=True),
+        ModelInfo(id="gpt-4", tool_capable=True),
+    ]
     form = _form(
         initial={"alias": "g", "model": "gpt-4"},
         existing_aliases={"g"},
@@ -1727,7 +1917,10 @@ async def test_the_forced_list_highlights_the_row_equal_to_the_field():
     (эталоны `preset_list._initial_index` / `voice_endpoint._model_initial_index`),
     а не первая уцелевшая под фильтром — там стоял сосед `gpt-4-turbo`, и Enter
     вписывал его вместо своего (второй дефект M6)."""
-    fetch = lambda *a, **k: [ModelInfo(id="gpt-4-turbo", tool_capable=True), ModelInfo(id="gpt-4", tool_capable=True)]
+    fetch = lambda *a, **k: [
+        ModelInfo(id="gpt-4-turbo", tool_capable=True),
+        ModelInfo(id="gpt-4", tool_capable=True),
+    ]
     form = _form(
         initial={"alias": "g", "model": "gpt-4"},
         existing_aliases={"g"},
@@ -1746,7 +1939,9 @@ async def test_the_forced_list_highlights_the_row_equal_to_the_field():
             await pilot.pause()
         assert form.list_open is True
         assert form.list_has_selection is True
-        selected = [r for r in (str(w.render()) for w in _rows(form)) if "▸" in r]
+        selected = [
+            r for r in (str(w.render()) for w in _rows(form)) if "▸" in r
+        ]
         assert selected and "gpt-4-turbo" not in selected[0], selected
         assert "gpt-4" in selected[0]
         assert form.enter() is True  # подставить подсвеченную
@@ -1762,7 +1957,10 @@ async def test_the_forced_list_highlights_nothing_when_the_typed_id_has_no_exact
     `_model_refilter_index` откатывал это решение фолбэком на первую уцелевшую
     строку — подсвечивала соседа, которого поле не называет. Один Enter тогда
     молча подставлял его вместо набранного (M6, находка #13, ревью MR #80)."""
-    fetch = lambda *a, **k: [ModelInfo(id="gpt-4-turbo", tool_capable=True), ModelInfo(id="gpt-4o", tool_capable=True)]
+    fetch = lambda *a, **k: [
+        ModelInfo(id="gpt-4-turbo", tool_capable=True),
+        ModelInfo(id="gpt-4o", tool_capable=True),
+    ]
     form = _form(
         initial={"alias": "g", "model": "gpt-4"},
         existing_aliases={"g"},
@@ -1780,11 +1978,17 @@ async def test_the_forced_list_highlights_nothing_when_the_typed_id_has_no_exact
         for _ in range(3):
             await pilot.pause()
         assert form.list_open is True
-        assert form.list_has_selection is False, "точного совпадения нет — подсвечивать нечего"
-        assert not [r for r in (str(w.render()) for w in _rows(form)) if "▸" in r]
+        assert form.list_has_selection is False, (
+            "точного совпадения нет — подсвечивать нечего"
+        )
+        assert not [
+            r for r in (str(w.render()) for w in _rows(form)) if "▸" in r
+        ]
         assert form.enter() is True  # список раскрыт, клавиша его
         await pilot.pause()
-        assert form.query_one("#mef-model", Input).value == "gpt-4", "Enter подставил соседа вместо набранного id"
+        assert form.query_one("#mef-model", Input).value == "gpt-4", (
+            "Enter подставил соседа вместо набранного id"
+        )
 
 
 async def test_a_changed_address_invalidates_the_fetched_model_list():
@@ -1798,7 +2002,12 @@ async def test_a_changed_address_invalidates_the_fetched_model_list():
         calls.append((url, auth))
         return _models()
 
-    form = _form(initial=None, existing_aliases=set(), fetch=fetch, effective_url="http://host-a/v1/chat/completions")
+    form = _form(
+        initial=None,
+        existing_aliases=set(),
+        fetch=fetch,
+        effective_url="http://host-a/v1/chat/completions",
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
@@ -1811,7 +2020,9 @@ async def test_a_changed_address_invalidates_the_fetched_model_list():
         form.move(1)
         form.move(1)  # id → алиас → адрес
         await pilot.pause()
-        form.query_one("#mef-url", Input).value = "http://host-b/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "http://host-b/v1/chat/completions"
         await pilot.pause()  # пресеты закрылись сами (нет совпадений)
         form.move(-1)
         form.move(-1)  # адрес → алиас → id модели
@@ -1823,7 +2034,10 @@ async def test_a_changed_address_invalidates_the_fetched_model_list():
 
 async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():
     form = _form(
-        initial=None, existing_aliases=set(), fetch=lambda *a, **k: None, effective_url="http://hub/v1/chat/completions"
+        initial=None,
+        existing_aliases=set(),
+        fetch=lambda *a, **k: None,
+        effective_url="http://hub/v1/chat/completions",
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -1834,7 +2048,9 @@ async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():
             await pilot.pause()  # автоподгрузка при входе
         from gc_tui.editors.field_list import LIST_FAILED
 
-        assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
+        assert LIST_FAILED in str(
+            form.query_one("#mef-model-status", Static).render()
+        )
 
 
 async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
@@ -1847,7 +2063,9 @@ async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
     def probe(endpoint, auth, verify, model, **kwargs):
         probes.append((endpoint, auth, model))
         if auth is None:
-            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
         return ProbeResult("ok", 200, None, 7, "доступен")
 
     form = _form(
@@ -1890,10 +2108,14 @@ async def test_probe_without_any_address_is_honest():
         await pilot.pause()
         assert form.probe_connection() is True
         await pilot.pause()
-        assert "адрес" in str(form.query_one("#mef-probe-line", Static).render())
+        assert "адрес" in str(
+            form.query_one("#mef-probe-line", Static).render()
+        )
 
 
-async def test_the_probe_resolves_env_references_before_the_request(monkeypatch):
+async def test_the_probe_resolves_env_references_before_the_request(
+    monkeypatch,
+):
     """`${ENV:VAR}` в полях — СЫРОЕ значение файла, а не адрес и не токен: в запрос
     обязано уйти раскрытое. Буквальный `Bearer ${ENV:MEF_TOK}` сервер отклоняет, и проба
     отвечала «✗ токен отклонён» на исправном конфиге.
@@ -1925,13 +2147,17 @@ async def test_the_probe_resolves_env_references_before_the_request(monkeypatch)
         for _ in range(3):
             await pilot.pause()
         assert seen, "проба не пошла"
-        assert all(e == "https://hub/v1/chat/completions" for e, _ in seen), seen
+        assert all(e == "https://hub/v1/chat/completions" for e, _ in seen), (
+            seen
+        )
         assert "Bearer sk-REAL" in [auth for _, auth in seen], seen
         # Поле остаётся сырым: раскрытое значение — только для запроса.
         assert form.query_one("#mef-url", Input).value == "${ENV:MEF_HUB}"
 
 
-async def test_typing_in_the_form_does_not_read_a_file_backed_token(monkeypatch, tmp_path):
+async def test_typing_in_the_form_does_not_read_a_file_backed_token(
+    monkeypatch, tmp_path
+):
     """`_as_validator_sees` (правило пары, `_pair_parts`) резолвит поля СИНХРОННО на
     каждое нажатие клавиши в mef-url/mef-token (`on_input_changed` → `_sync_pair_state`
     → `own_connection` → `_pair_parts`) — и до фикса разворачивал вместе с `${ENV:…}`
@@ -1952,18 +2178,28 @@ async def test_typing_in_the_form_does_not_read_a_file_backed_token(monkeypatch,
     cred = tmp_path / "cred.txt"
     cred.write_text("sk-FROM-FILE")
     form = _form(
-        initial={"alias": "flash", "model": "google/gemini-2.5-flash", "token": f"${{FILE:{cred}}}"},
+        initial={
+            "alias": "flash",
+            "model": "google/gemini-2.5-flash",
+            "token": f"${{FILE:{cred}}}",
+        },
         existing_aliases={"flash"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         url_input = form.query_one("#mef-url", Input)
-        url_input.value = "http://own/v1/chat/completions"  # печать одного символа
+        url_input.value = (
+            "http://own/v1/chat/completions"  # печать одного символа
+        )
         await pilot.pause()
-        assert reads == [], f"печать в #mef-url прочитала файл-кред с диска: {reads}"
+        assert reads == [], (
+            f"печать в #mef-url прочитала файл-кред с диска: {reads}"
+        )
 
 
-async def test_the_model_list_resolves_env_references_before_the_request(monkeypatch):
+async def test_the_model_list_resolves_env_references_before_the_request(
+    monkeypatch,
+):
     """Тот же страж для подбора списка: он уходит на эндпоинт САМ, при простом переходе
     курсора на поле id, — с буквальной ссылкой в адресе список молча не грузился бы
     никогда («✗ не удалось получить список»)."""
@@ -1988,10 +2224,14 @@ async def test_the_model_list_resolves_env_references_before_the_request(monkeyp
         form.move(-1)  # адрес → алиас → id модели
         for _ in range(3):
             await pilot.pause()
-        assert calls == [("https://hub/v1/chat/completions", "Bearer sk-REAL")], calls
+        assert calls == [
+            ("https://hub/v1/chat/completions", "Bearer sk-REAL")
+        ], calls
 
 
-async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(monkeypatch):
+async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(
+    monkeypatch,
+):
     """Переменной нет — резолв даст "", и стучаться в пустой адрес нечестно: под
     визуально заполненным полем и проба, и список соврали бы «нет соединения», как будто
     сломан сам сервер. Называем переменную (эталон — `screens/onboarding._auto_probe`,
@@ -2000,10 +2240,17 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(monkey
     calls = []
 
     form = _form(
-        initial={"alias": "flash", "model": "google/gemini-2.5-flash", "url": "${ENV:MEF_ABSENT}", "token": "sk-own"},
+        initial={
+            "alias": "flash",
+            "model": "google/gemini-2.5-flash",
+            "url": "${ENV:MEF_ABSENT}",
+            "token": "sk-own",
+        },
         existing_aliases={"flash"},
         fetch=lambda url, auth, **k: calls.append((url, auth)) or _models(),
-        probe=lambda *a, **k: calls.append(a) or ProbeResult("ok", 200, None, 1, "доступен"),
+        probe=lambda *a, **k: (
+            calls.append(a) or ProbeResult("ok", 200, None, 1, "доступен")
+        ),
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -2022,7 +2269,9 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(monkey
         assert calls == [], calls  # в сеть не ходили
 
 
-async def test_a_missing_env_variable_in_the_token_stops_the_probe(monkeypatch):
+async def test_a_missing_env_variable_in_the_token_stops_the_probe(
+    monkeypatch,
+):
     """Тот же гейт на ВТОРОМ конце связи — и он важнее адресного: `docs/configuration.md`
     сам толкает держать в `${ENV:…}` именно ТОКЕН, а `profiles.find_literal_tokens` в
     рантайме ругает литеральный.
@@ -2045,7 +2294,9 @@ async def test_a_missing_env_variable_in_the_token_stops_the_probe(monkeypatch):
             "token": "${ENV:MEF_NO_TOKEN}",
         },
         existing_aliases={"flash"},
-        probe=lambda *a, **k: calls.append(a) or ProbeResult("ok", 200, None, 1, "доступен"),
+        probe=lambda *a, **k: (
+            calls.append(a) or ProbeResult("ok", 200, None, 1, "доступен")
+        ),
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -2058,7 +2309,9 @@ async def test_a_missing_env_variable_in_the_token_stops_the_probe(monkeypatch):
         assert calls == [], calls  # в сеть не ходили
 
 
-async def test_a_missing_env_variable_in_the_token_stops_the_model_list(monkeypatch):
+async def test_a_missing_env_variable_in_the_token_stops_the_model_list(
+    monkeypatch,
+):
     """То же для подбора списка: он уходит на эндпоинт САМ, простым переходом курсора
     на поле id, — и уносил бы пустой ключ, отвечая «✗ не удалось получить список», как
     будто дело в сервере."""
@@ -2095,7 +2348,12 @@ async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
     клавиш зависят от того, раскрыт ли список и есть ли в нём подсвеченная строка.
     Спрашивать это ДЕЙСТВИЯМИ нельзя (`reload_models()` ходит в сеть) — форма отдаёт
     read-only признаки, как `ConnectionEditor`."""
-    presets = [EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions")]
+    presets = [
+        EndpointPreset(
+            name="OpenRouter",
+            url="https://openrouter.ai/api/v1/chat/completions",
+        )
+    ]
     form = _form(
         initial=None,
         existing_aliases=set(),
@@ -2122,7 +2380,10 @@ async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
         # обязан читать именно этот признак, а не «список не пуст».
         assert form.reload_presets() is True
         await pilot.pause()
-        assert (form.presets_open, form.presets_have_selection) == (True, False)
+        assert (form.presets_open, form.presets_have_selection) == (
+            True,
+            False,
+        )
         assert form.escape() is True  # свернуть — двигаться дальше
         await pilot.pause()
         form.move(-1)
@@ -2146,7 +2407,12 @@ async def test_both_lists_live_inside_their_field_frames():
     внутри рамки только выбор). Оба списка формы играют по одному правилу."""
     from textual.containers import VerticalScroll
 
-    presets = [EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions")]
+    presets = [
+        EndpointPreset(
+            name="OpenRouter",
+            url="https://openrouter.ai/api/v1/chat/completions",
+        )
+    ]
     form = _form(
         initial=None,
         existing_aliases=set(),
@@ -2163,9 +2429,15 @@ async def test_both_lists_live_inside_their_field_frames():
             await pilot.pause()  # автоподгрузка раскрыла список
         model_group = form.query_one("#mef-model-group")
         assert form.query_one("#mef-model", Input).parent is model_group
-        assert list(model_group.query(VerticalScroll)), "строки моделей — внутрь группы"
-        assert not list(model_group.query(".mef-model-hint")), "подсказка — снаружи рамки"
-        assert list(form.query(".mef-model-hint")), "подсказка списка обязана быть"
+        assert list(model_group.query(VerticalScroll)), (
+            "строки моделей — внутрь группы"
+        )
+        assert not list(model_group.query(".mef-model-hint")), (
+            "подсказка — снаружи рамки"
+        )
+        assert list(form.query(".mef-model-hint")), (
+            "подсказка списка обязана быть"
+        )
         # Раскрытый список модальный: пока в нём есть строки, ↑/↓ водят ПО НЕМУ —
         # уйти с поля можно только свернув его (канон §4.2.2).
         assert form.escape() is True
@@ -2175,8 +2447,12 @@ async def test_both_lists_live_inside_their_field_frames():
         await pilot.pause()
         url_group = form.query_one("#mef-url-group")
         assert form.query_one("#mef-url", Input).parent is url_group
-        assert list(url_group.query(VerticalScroll)), "строки пресетов — внутрь группы"
-        assert not list(url_group.query(".mef-url-preset-hint")), "подсказка — снаружи рамки"
+        assert list(url_group.query(VerticalScroll)), (
+            "строки пресетов — внутрь группы"
+        )
+        assert not list(url_group.query(".mef-url-preset-hint")), (
+            "подсказка — снаружи рамки"
+        )
 
 
 # --- сквозной с Task 1: merge писателя ------------------------------------------
@@ -2201,11 +2477,15 @@ async def test_submit_after_url_edit_keeps_pricing(tmp_path):
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.query_one("#mef-url", Input).value = "https://new/v1/chat/completions"
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://new/v1/chat/completions"
         ok, alias, fields = form.submit()
         assert ok is True
     upsert_model(target, alias, fields, template)
-    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"]["flash"]
+    entry = yaml.safe_load(target.read_text(encoding="utf-8"))["models"][
+        "flash"
+    ]
     assert entry["url"] == "https://new/v1/chat/completions"
     assert entry["pricing"] == {"input": 0.3, "output": 1.2}
     assert entry["token"] == "sk-secret"  # нетронутое поле не стёрло секрет
@@ -2221,7 +2501,12 @@ async def test_the_cursor_does_not_call_a_typed_address_inherited():
     url = "https://openrouter.ai/api/v1/chat/completions"
     presets = [EndpointPreset(name="OpenRouter", url=url)]
     form = _form(
-        initial={"alias": "flash", "model": "google/gemini-2.5-flash", "url": url, "token": "sk-own"},
+        initial={
+            "alias": "flash",
+            "model": "google/gemini-2.5-flash",
+            "url": url,
+            "token": "sk-own",
+        },
         existing_aliases={"flash"},
         presets=presets,
         effective_url=url,
@@ -2230,7 +2515,9 @@ async def test_the_cursor_does_not_call_a_typed_address_inherited():
         await pilot.pause()
         assert form.reload_presets() is True  # Alt+↓ поверх своего адреса
         await pilot.pause()
-        rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
+        rows = [
+            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+        ]
         selected = [r for r in rows if r.startswith("▸")]
         assert selected and "OpenRouter" in selected[0], rows
         assert "наследовать" not in selected[0], rows
@@ -2264,11 +2551,17 @@ async def test_a_failure_while_the_cursor_was_away_is_reported_on_return():
             await pilot.pause()
         from gc_tui.editors.field_list import LIST_FAILED
 
-        assert len(calls) == 1, "дребезг сломан: повторный запрос теми же параметрами"
-        assert LIST_FAILED in str(form.query_one("#mef-model-status", Static).render())
+        assert len(calls) == 1, (
+            "дребезг сломан: повторный запрос теми же параметрами"
+        )
+        assert LIST_FAILED in str(
+            form.query_one("#mef-model-status", Static).render()
+        )
 
 
-async def test_a_dangling_env_reference_is_judged_as_the_validator_judges_it(monkeypatch):
+async def test_a_dangling_env_reference_is_judged_as_the_validator_judges_it(
+    monkeypatch,
+):
     """Правило пары судит РАСКРЫТОЕ значение (решение владельца 2026-08-26, вариант Б),
     и форма обязана судить так же — её докстринг это и обещает.
 
@@ -2277,29 +2570,47 @@ async def test_a_dangling_env_reference_is_judged_as_the_validator_judges_it(mon
     требовал токен УБРАТЬ: запись не собиралась ни одним набором полей."""
     monkeypatch.delenv("MEF_PAIR_URL", raising=False)
     form = _form(
-        initial={"alias": "corp", "model": "corp/model-x", "url": "${ENV:MEF_PAIR_URL}"}, existing_aliases={"corp"}
+        initial={
+            "alias": "corp",
+            "model": "corp/model-x",
+            "url": "${ENV:MEF_PAIR_URL}",
+        },
+        existing_aliases={"corp"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-model", Input).value = "corp/model-y"
         ok, alias, fields = form.submit()
-        assert (ok, alias) == (True, "corp"), str(form.query_one("#mef-error", Static).render())
-        assert fields["url"] == "${ENV:MEF_PAIR_URL}", "в файл обязана уехать ССЫЛКА"
+        assert (ok, alias) == (True, "corp"), str(
+            form.query_one("#mef-error", Static).render()
+        )
+        assert fields["url"] == "${ENV:MEF_PAIR_URL}", (
+            "в файл обязана уехать ССЫЛКА"
+        )
 
 
-async def test_a_resolved_env_reference_still_needs_its_half_of_the_pair(monkeypatch):
+async def test_a_resolved_env_reference_still_needs_its_half_of_the_pair(
+    monkeypatch,
+):
     """Контроль той же монеты: переменная задана — адрес свой, и правило пары снова
     требует токен. Иначе запись ушла бы на свой хост с общим ключом."""
     monkeypatch.setenv("MEF_PAIR_URL", "https://corp/v1/chat/completions")
     form = _form(
-        initial={"alias": "corp", "model": "corp/model-x", "url": "${ENV:MEF_PAIR_URL}"}, existing_aliases={"corp"}
+        initial={
+            "alias": "corp",
+            "model": "corp/model-x",
+            "url": "${ENV:MEF_PAIR_URL}",
+        },
+        existing_aliases={"corp"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.query_one("#mef-model", Input).value = "corp/model-y"
         ok, _alias, _fields = form.submit()
         assert ok is False
-        assert "не задан токен" in str(form.query_one("#mef-error", Static).render())
+        assert "не задан токен" in str(
+            form.query_one("#mef-error", Static).render()
+        )
 
 
 async def test_empty_server_answer_is_not_reported_as_a_failure():
@@ -2326,7 +2637,10 @@ async def test_empty_server_answer_is_not_reported_as_a_failure():
         form.move(-1)  # адрес → алиас → id модели
         for _ in range(4):
             await pilot.pause()
-        assert str(form.query_one("#mef-model-status", Static).render()) == LIST_EMPTY
+        assert (
+            str(form.query_one("#mef-model-status", Static).render())
+            == LIST_EMPTY
+        )
 
 
 @pytest.mark.asyncio
@@ -2342,16 +2656,25 @@ async def test_a_mouse_click_lands_the_cursor_like_the_arrows_do():
         return _models()
 
     form = _form(
-        initial={"alias": "op", "model": "", "url": "https://openrouter.ai/api/v1/chat/completions", "token": "sk-x"},
+        initial={
+            "alias": "op",
+            "model": "",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "token": "sk-x",
+        },
         existing_aliases=set(),
         fetch=fetch,
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form._positions[form._idx] == "mef-url"  # предусловие: курсор на адресе
+        assert (
+            form._positions[form._idx] == "mef-url"
+        )  # предусловие: курсор на адресе
         await pilot.click("#mef-model")
         await pilot.pause()
-        assert form._positions[form._idx] == "mef-model", "клик не приземлил курсор"
+        assert form._positions[form._idx] == "mef-model", (
+            "клик не приземлил курсор"
+        )
         assert calls, "автоподгрузка не стартовала по клику"
         assert form.reload_models() is True  # Alt+↓ ожил
 
@@ -2366,7 +2689,12 @@ async def test_the_id_field_promises_alt_down_before_the_first_load():
     from gc_tui.editors.field_list import MODEL_RELOAD_HINT
 
     form = _form(
-        initial={"alias": "op", "model": "", "url": "https://openrouter.ai/api/v1/chat/completions", "token": "sk-x"},
+        initial={
+            "alias": "op",
+            "model": "",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "token": "sk-x",
+        },
         existing_aliases=set(),
         fetch=lambda *a, **k: None,
     )
@@ -2383,14 +2711,21 @@ async def test_a_click_on_the_noauth_row_lands_the_cursor_too():
     кортеже нет): после клика Space печатал пробел в прежнее поле вместо
     переключения."""
     form = _form(
-        initial={"alias": "op", "model": "m", "url": "https://openrouter.ai/api/v1/chat/completions", "token": "sk-x"},
+        initial={
+            "alias": "op",
+            "model": "m",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "token": "sk-x",
+        },
         existing_aliases=set(),
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         await pilot.click("#mef-noauth")
         await pilot.pause()
-        assert form._positions[form._idx] is None, "клик по галке не приземлил курсор"
+        assert form._positions[form._idx] is None, (
+            "клик по галке не приземлил курсор"
+        )
         assert form.toggle_no_auth() is True
 
 
@@ -2401,7 +2736,12 @@ async def test_a_mouse_landing_refreshes_the_screen_footer():
     футер обещает клавиши прошлой позиции."""
     calls = []
     form = _form(
-        initial={"alias": "op", "model": "m", "url": "https://openrouter.ai/api/v1/chat/completions", "token": "sk-x"},
+        initial={
+            "alias": "op",
+            "model": "m",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "token": "sk-x",
+        },
         existing_aliases=set(),
     )
     app = _harness(form)
@@ -2423,7 +2763,12 @@ async def test_typing_in_the_id_field_reopens_the_fetched_list_with_a_filter():
     (живой смок 2026-09-04). Без добытых моделей раскрывать нечего —
     поведение прежнее."""
     form = _form(
-        initial={"alias": "op", "model": "", "url": "https://openrouter.ai/api/v1/chat/completions", "token": "sk-x"},
+        initial={
+            "alias": "op",
+            "model": "",
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "token": "sk-x",
+        },
         existing_aliases=set(),
         fetch=lambda *a, **k: _models(),
     )

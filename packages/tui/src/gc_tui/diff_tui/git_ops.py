@@ -73,7 +73,9 @@ def _parse_porcelain_line(line: str) -> Optional[GitStatusEntry]:
         return None
 
     if xy == "??":
-        return GitStatusEntry(path=path, kind="created", state="pending", xy=xy)
+        return GitStatusEntry(
+            path=path, kind="created", state="pending", xy=xy
+        )
 
     x, y = xy[0], xy[1]
     # worktree dirty (y != ' ') → pending; чистое staging (x set, y space) → approved

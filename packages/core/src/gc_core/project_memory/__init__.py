@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from gc_core.project_memory.compaction import SOFT_APPEND_INPUT_LIMIT_CHARS, CompactionResult, acompact_text
+from gc_core.project_memory.compaction import (
+    SOFT_APPEND_INPUT_LIMIT_CHARS,
+    CompactionResult,
+    acompact_text,
+)
 from gc_core.project_memory.status import (
     attach_status_to_prompt_vars,
     build_project_memory_status,

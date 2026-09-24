@@ -1,7 +1,10 @@
 import json
 from typing import Any, Dict, Optional
 
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
+from gc_core.loop_detector.constants import (
+    GENERIC_PROFILE,
+    loop_warn_on_repeat,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
@@ -34,7 +37,10 @@ class Think(AbstractSimpleTool):
         reason = args.get("reason")
         if not isinstance(reason, str) or not reason.strip():
             return args
-        if any(isinstance(args.get(name), str) and args.get(name, "").strip() for name in _THINK_FIELDS):
+        if any(
+            isinstance(args.get(name), str) and args.get(name, "").strip()
+            for name in _THINK_FIELDS
+        ):
             return args
         remapped = dict(args)
         remapped["thoughts"] = reason

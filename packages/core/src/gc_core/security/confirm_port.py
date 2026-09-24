@@ -6,9 +6,13 @@ from typing import Any
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 
-CONFIRM_ALLOW_REMEMBER = "allow_remember"  # Y — exec + session True + few-shot allowed
+CONFIRM_ALLOW_REMEMBER = (
+    "allow_remember"  # Y — exec + session True + few-shot allowed
+)
 CONFIRM_ALLOW_ONCE = "allow_once"  # O — exec + run only
-CONFIRM_DENY_REMEMBER = "deny_remember"  # N — block + session False + few-shot denied
+CONFIRM_DENY_REMEMBER = (
+    "deny_remember"  # N — block + session False + few-shot denied
+)
 CONFIRM_DENY_ONCE = "deny_once"  # T — block + run only
 _VALID_CHOICES = {
     CONFIRM_ALLOW_REMEMBER,
@@ -132,7 +136,9 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
                     via=via,
                 )
             except TypeError:
-                choice = tui_confirm(title=title, question=question, fields=fields)
+                choice = tui_confirm(
+                    title=title, question=question, fields=fields
+                )
             result = coerce_confirm_choice(choice)
         else:
             # Non-TUI fallback (headless CLI / scripts). Product path is TUI;

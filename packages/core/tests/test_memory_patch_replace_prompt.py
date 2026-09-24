@@ -9,8 +9,14 @@ from gc_core.summarize.prompt_loading import (
     MEMORY_PATCH_SUBAGENT_GUIDANCE_TEXT,
     load_memory_patch_replace_prompt,
 )
-from gc_core.summarize.summary_spec import MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER, SUMMARY_SECTIONS
-from gc_core.summarize.working_memory_gateway import MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER, REGISTER_ORDER
+from gc_core.summarize.summary_spec import (
+    MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
+    SUMMARY_SECTIONS,
+)
+from gc_core.summarize.working_memory_gateway import (
+    MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER,
+    REGISTER_ORDER,
+)
 from gc_testkit import run_coro
 from gc_testkit.paths import ASSETS
 
@@ -54,10 +60,14 @@ def test_patch_replace_prompt_injects_subagent_guidance_when_flagged():
     assert MEMORY_PATCH_SUBAGENT_GUIDANCE_TEXT.splitlines()[0] in loaded
 
 
-def test_request_patch_replace_injects_subagent_guidance_in_system_only(monkeypatch):
+def test_request_patch_replace_injects_subagent_guidance_in_system_only(
+    monkeypatch,
+):
     captured: dict = {}
 
-    async def _fake_summary_text(*, ctx, state, messages, request_label, logger=None, **kwargs):
+    async def _fake_summary_text(
+        *, ctx, state, messages, request_label, logger=None, **kwargs
+    ):
         captured["messages"] = messages
         captured["label"] = request_label
         return "<goal>keep</goal>"

@@ -27,7 +27,12 @@ _CONTENT_RE = re.compile(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)')
 def _unescape_json_string(raw: str) -> str:
     """Минимальный JSON-unescape: \\n / \\t / \\" / \\\\ → реальные символы.
     Используется для regex-извлечённых значений (когда полный json.loads невозможен)."""
-    return raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
+    return (
+        raw.replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace('\\"', '"')
+        .replace("\\\\", "\\")
+    )
 
 
 def _try_parse_truncated_json(s: str) -> Any:
@@ -59,7 +64,9 @@ def _try_parse_truncated_json(s: str) -> Any:
             continue
         if c in "{[":
             stack.append(c)
-        elif (c == "}" and stack and stack[-1] == "{") or (c == "]" and stack and stack[-1] == "["):
+        elif (c == "}" and stack and stack[-1] == "{") or (
+            c == "]" and stack and stack[-1] == "["
+        ):
             stack.pop()
             last_value_end = i + 1
 
@@ -87,7 +94,9 @@ def _try_parse_truncated_json(s: str) -> Any:
             continue
         if c in "{[":
             stack2.append(c)
-        elif (c == "}" and stack2 and stack2[-1] == "{") or (c == "]" and stack2 and stack2[-1] == "["):
+        elif (c == "}" and stack2 and stack2[-1] == "{") or (
+            c == "]" and stack2 and stack2[-1] == "["
+        ):
             stack2.pop()
 
     closing = "".join("]" if c == "[" else "}" for c in reversed(stack2))

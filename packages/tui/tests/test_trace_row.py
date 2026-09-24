@@ -13,7 +13,9 @@ async def test_trace_row_composes_horizontal_with_two_statics():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="hello world", kind_class="line-agent")
+            yield TraceRow(
+                prefix="● ", content="hello world", kind_class="line-agent"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
@@ -38,7 +40,9 @@ async def test_trace_row_kind_class_lands_on_widget():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="[policy] ", content="test", kind_class="line-meta")
+            yield TraceRow(
+                prefix="[policy] ", content="test", kind_class="line-meta"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
@@ -60,7 +64,9 @@ async def test_trace_row_ctrl_click_emits_open_event_request():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="● ", content="x", kind_class="line-agent", event_no=42)
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=42
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -103,7 +109,12 @@ async def test_trace_row_event_no_zero_does_not_emit():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="[stopped]", content="", kind_class="line-meta", event_no=0)
+            yield TraceRow(
+                prefix="[stopped]",
+                content="",
+                kind_class="line-meta",
+                event_no=0,
+            )
 
         def on_open_event_request(self, message: OpenEventRequest) -> None:
             received.append(message.event_no)
@@ -140,7 +151,12 @@ async def test_trace_row_focusable_default_true():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield TraceRow(prefix="[skill] ", content="x", kind_class="line-meta", event_no=1)
+            yield TraceRow(
+                prefix="[skill] ",
+                content="x",
+                kind_class="line-meta",
+                event_no=1,
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)

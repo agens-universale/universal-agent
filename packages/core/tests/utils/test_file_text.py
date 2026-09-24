@@ -145,8 +145,12 @@ def test_decode_text_bytes_utf8_and_bom_round_trip():
     assert utf8.ok and utf8.encoding_used == "utf-8" and utf8.text == "hi\n"
 
     bom8 = decode_text_bytes(b"\xef\xbb\xbfhi\n")
-    assert bom8.ok and bom8.encoding_used == "utf-8-sig" and bom8.text == "hi\n"
-    assert encode_text_bytes(bom8.text, bom8.encoding_used).startswith(b"\xef\xbb\xbf")
+    assert (
+        bom8.ok and bom8.encoding_used == "utf-8-sig" and bom8.text == "hi\n"
+    )
+    assert encode_text_bytes(bom8.text, bom8.encoding_used).startswith(
+        b"\xef\xbb\xbf"
+    )
 
     raw16 = b"\xff\xfeH\x00i\x00"
     d16 = decode_text_bytes(raw16)
@@ -160,7 +164,9 @@ def test_decode_text_bytes_nul_and_legacy():
         "Уважаемые коллеги! Настоящим сообщаем, что заседание рабочей группы "
         "по внедрению системы состоится 15 марта 2024 года в переговорной.\n"
     ) * 3
-    err = decode_text_bytes(legacy.encode("cp1251"), include_preview=True).error
+    err = decode_text_bytes(
+        legacy.encode("cp1251"), include_preview=True
+    ).error
     assert err["type"] == "encoding_required"
     assert err["encoding_guess"] == "cp1251"
     assert err["encoding_confidence"] >= 0.5
@@ -204,9 +210,16 @@ def test_check_encoding_on_file_head_truncation():
 
     # Incomplete trailing UTF-8 sequence at cut — should still pass when truncated.
     sample = b"hello " + b"\xd0"  # start of a 2-byte Cyrillic char
-    assert check_encoding_on_file_head(sample, "utf-8", sample_is_complete_file=False) is None
+    assert (
+        check_encoding_on_file_head(
+            sample, "utf-8", sample_is_complete_file=False
+        )
+        is None
+    )
     # Same bytes as a complete file would be invalid UTF-8.
-    err = check_encoding_on_file_head(sample, "utf-8", sample_is_complete_file=True)
+    err = check_encoding_on_file_head(
+        sample, "utf-8", sample_is_complete_file=True
+    )
     assert err is not None and err["type"] == "undecodable_text"
 
 
@@ -228,7 +241,9 @@ def test_check_encoding_on_file_head_truncation():
     ],
 )
 def test_try_encode_text_bytes_for_append_no_bom(encoding, expected_payload):
-    data, err = try_encode_text_bytes_for_append("Ab" if encoding != "cp1251" else "\u0410b", encoding)
+    data, err = try_encode_text_bytes_for_append(
+        "Ab" if encoding != "cp1251" else "\u0410b", encoding
+    )
     assert err is None, err
     assert data == expected_payload
     # Crucially: no BOM anywhere in the appended payload.

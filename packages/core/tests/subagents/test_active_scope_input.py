@@ -7,7 +7,9 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from gc_core.message_policy.user_message_policy import wrap_technical_user_content
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
+)
 from gc_core.states import SharedStateData, State
 from gc_core.thread_store import read_subagent_trace
 from gc_core.tools.subagents.active_scope import (
@@ -78,7 +80,10 @@ def _make_ctx(cfg=None, **extra):
 class TestActiveScopeRegistry:
     def test_inactive_try_enqueue_false(self):
         ctx = SimpleNamespace()
-        assert try_enqueue_user_message(ctx, {"role": "user", "content": "hi"}) is False
+        assert (
+            try_enqueue_user_message(ctx, {"role": "user", "content": "hi"})
+            is False
+        )
         assert is_child_input_active(ctx) is False
         assert active_parent_call_id(ctx) is None
 
@@ -87,7 +92,12 @@ class TestActiveScopeRegistry:
         with activate_child_input(ctx, parent_call_id="call_sub_1") as scope:
             assert is_child_input_active(ctx) is True
             assert active_parent_call_id(ctx) == "call_sub_1"
-            assert try_enqueue_user_message(ctx, {"role": "user", "content": "steer"}) is True
+            assert (
+                try_enqueue_user_message(
+                    ctx, {"role": "user", "content": "steer"}
+                )
+                is True
+            )
             assert scope.drain() == [{"role": "user", "content": "steer"}]
             assert scope.drain() == []
         assert is_child_input_active(ctx) is False
@@ -119,7 +129,9 @@ class TestAgentExecutorRoutesToChild:
         import gc_core.agent_executor as _ae
         from gc_core.agent_executor import AgentExecutor
 
-        _activate = _ae.try_enqueue_user_message.__globals__["activate_child_input"]
+        _activate = _ae.try_enqueue_user_message.__globals__[
+            "activate_child_input"
+        ]
 
         ctx = MagicMock()
         # У MagicMock любой атрибут «есть», поэтому пустой скоуп задаём явно:
@@ -194,7 +206,9 @@ class TestRunnerWiresPending:
         assert captured["active_during"] is True
         assert captured["parent_call_id"] == "call_parent_9"
         assert callable(captured["get_pending"])
-        try_enqueue_user_message(ctx, {"role": "user", "content": "look at auth", "id": "m_steer"})
+        try_enqueue_user_message(
+            ctx, {"role": "user", "content": "look at auth", "id": "m_steer"}
+        )
         release.set()
         t.join(timeout=2)
         assert captured["drained"][0]["content"] == "look at auth"
@@ -225,7 +239,9 @@ class TestRunnerWiresPending:
         runner = SubagentRunner(ctx, orch, cfg)
 
         def _run():
-            with patch.object(runner, "_build_child_ctx", return_value=child_ctx):
+            with patch.object(
+                runner, "_build_child_ctx", return_value=child_ctx
+            ):
                 asyncio.run(
                     runner.arun(
                         "subagent_worker",
@@ -238,7 +254,9 @@ class TestRunnerWiresPending:
         t = threading.Thread(target=_run, daemon=True)
         t.start()
         assert barrier.wait(timeout=5)
-        try_enqueue_user_message(ctx, {"role": "user", "content": "check auth next", "id": "m_u1"})
+        try_enqueue_user_message(
+            ctx, {"role": "user", "content": "check auth next", "id": "m_u1"}
+        )
         # technical must enqueue but not emit nested user row
         try_enqueue_user_message(
             ctx,

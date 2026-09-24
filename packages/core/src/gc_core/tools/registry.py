@@ -20,7 +20,9 @@ from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
 from gc_core.tools.session.session_compact import SessionCompact
-from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
+from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
+    ReadStoredToolOutput,
+)
 from gc_core.tools.session.think import Think
 from gc_core.tools.session.todo import SessionTodo
 from gc_core.tools.session.working_memory import WorkingMemory
@@ -34,7 +36,9 @@ except ModuleNotFoundError:
     from gc_core.tools.exec.simple_fetch_url import FetchUrl
 
 
-def _tool_entry(tool_cls: type, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _tool_entry(
+    tool_cls: type, config_dict: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     # Deep-copy: inject_tool_fields / strict schema mutate the spec in place.
     # Several tools return a shared class-level parameters dict from
     # tool_description(); without a copy the second build_tools_data() in the
@@ -54,7 +58,9 @@ def _tool_entry(tool_cls: type, config_dict: Optional[Dict[str, Any]] = None) ->
     return entry
 
 
-def _fs_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _fs_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "fs_write_file": _tool_entry(WriteToFile, config_dict),
         "fs_append_file": _tool_entry(AppendToFile, config_dict),
@@ -69,7 +75,9 @@ def _fs_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict
     }
 
 
-def _exec_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _exec_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "exec_command": _tool_entry(ExecuteCommand, config_dict),
         "exec_calculator": _tool_entry(Calculator, config_dict),
@@ -80,7 +88,9 @@ def _exec_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Di
     }
 
 
-def _turn_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _turn_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "turn_ask_human": _tool_entry(AskHuman, config_dict),
         "turn_intermediate_reply": _tool_entry(IntermediateReply, config_dict),
@@ -88,23 +98,33 @@ def _turn_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Di
     }
 
 
-def _session_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _session_registry(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     registry: Dict[str, Dict[str, Any]] = {
         "session_think": _tool_entry(Think, config_dict),
-        "session_read_stored_tool_output": _tool_entry(ReadStoredToolOutput, config_dict),
+        "session_read_stored_tool_output": _tool_entry(
+            ReadStoredToolOutput, config_dict
+        ),
         "session_memory": _tool_entry(WorkingMemory, config_dict),
         "session_todo": _tool_entry(SessionTodo, config_dict),
     }
 
-    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    backend_mode = (
+        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    )
     if backend_mode == "chat_completions":
-        registry["session_read_user_intent_log"] = _tool_entry(ReadUserIntentLog, config_dict)
+        registry["session_read_user_intent_log"] = _tool_entry(
+            ReadUserIntentLog, config_dict
+        )
         registry["session_compact"] = _tool_entry(SessionCompact, config_dict)
 
     return registry
 
 
-def _project_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _project_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "project_memory": _tool_entry(ProjectMemory, config_dict),
     }
@@ -118,14 +138,24 @@ def _apply_stop_tools(
     if not isinstance(stop_tools_cfg, list):
         return tools_data
 
-    stop_tools = {tool_name.strip() for tool_name in stop_tools_cfg if isinstance(tool_name, str) and tool_name.strip()}
+    stop_tools = {
+        tool_name.strip()
+        for tool_name in stop_tools_cfg
+        if isinstance(tool_name, str) and tool_name.strip()
+    }
     if not stop_tools:
         return tools_data
 
-    return {tool_name: tool_data for tool_name, tool_data in tools_data.items() if tool_name not in stop_tools}
+    return {
+        tool_name: tool_data
+        for tool_name, tool_data in tools_data.items()
+        if tool_name not in stop_tools
+    }
 
 
-def _collect_builtin_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _collect_builtin_registry(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     """Все встроенные tools_data ДО применения stop_tools."""
     tools_data: Dict[str, Dict[str, Any]] = {}
     tools_data.update(_fs_registry(config_dict))
@@ -145,7 +175,9 @@ def all_builtin_tool_names(config_dict: Dict[str, Any]) -> set[str]:
     return set(_collect_builtin_registry(config_dict).keys())
 
 
-def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def get_builtin_tools_data(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     """
     Собрать словарь builtin tools в формате tools_data.
 
@@ -155,7 +187,9 @@ def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, A
     повторным проходом по слитому набору. Прямые вызывающие по-прежнему
     получают builtin уже без ``stop_tools``.
     """
-    return _apply_stop_tools(_collect_builtin_registry(config_dict), config_dict)
+    return _apply_stop_tools(
+        _collect_builtin_registry(config_dict), config_dict
+    )
 
 
 __all__ = [

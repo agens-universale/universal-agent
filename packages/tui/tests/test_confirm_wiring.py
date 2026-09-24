@@ -33,9 +33,13 @@ def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
     calls: list[tuple] = []
 
     fake_screen = types.SimpleNamespace(
-        show_confirm_banner=lambda t, q, f, via=None: calls.append((t, q, f, via)),
+        show_confirm_banner=lambda t, q, f, via=None: calls.append(
+            (t, q, f, via)
+        ),
     )
-    monkeypatch.setattr(app, "_main_screen", lambda: fake_screen, raising=False)
+    monkeypatch.setattr(
+        app, "_main_screen", lambda: fake_screen, raising=False
+    )
 
     # call_from_thread подменяем синхронной версией (немедленно выполняет fn).
     captured: list = []
@@ -45,7 +49,9 @@ def test_present_confirm_calls_call_from_thread_and_show_banner(monkeypatch):
         captured.append(fn)
         return result
 
-    monkeypatch.setattr(app, "call_from_thread", sync_call_from_thread, raising=False)
+    monkeypatch.setattr(
+        app, "call_from_thread", sync_call_from_thread, raising=False
+    )
 
     assert app._present_confirm("Title", "Question?", [("Path", "/x")]) is True
 
@@ -72,7 +78,9 @@ async def test_confirm_full_chain_via_run_test():
     app._executor_factory = lambda: None
 
     # Строим реальный AgentRunner с заглушкой-executor.
-    stub_executor = types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
+    stub_executor = types.SimpleNamespace(
+        stop_run=lambda: None, add_message=lambda m: None
+    )
     runner = AgentRunner(executor=stub_executor)
     app.active_runner = runner
 
@@ -86,7 +94,9 @@ async def test_confirm_full_chain_via_run_test():
         # Запускаем confirm на worker-потоке — он блокируется до ответа.
         def _worker():
             try:
-                res = confirm_fn(title="Тест", question="Удалить файл?", fields=[])
+                res = confirm_fn(
+                    title="Тест", question="Удалить файл?", fields=[]
+                )
                 result.append(res)
             except BaseException as exc:
                 result.append(exc)
@@ -99,7 +109,9 @@ async def test_confirm_full_chain_via_run_test():
 
         # Баннер должен быть смонтирован на экране.
         banners = list(pilot.app.query(ConfirmBanner))
-        assert len(banners) == 1, f"ожидали 1 ConfirmBanner, получили {len(banners)}"
+        assert len(banners) == 1, (
+            f"ожидали 1 ConfirmBanner, получили {len(banners)}"
+        )
 
         # Пользователь нажимает «y» → TraceScreen._answer_confirm → runner.submit_confirm_reply("allow_remember").
         await pilot.press("y")
@@ -134,7 +146,9 @@ async def test_confirm_reentrant_decline_then_approve():
     app = TuiApp(config={"model": "M"})
     app._executor_factory = lambda: None
 
-    stub_executor = types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
+    stub_executor = types.SimpleNamespace(
+        stop_run=lambda: None, add_message=lambda m: None
+    )
     runner = AgentRunner(executor=stub_executor)
     app.active_runner = runner
 
@@ -156,7 +170,9 @@ async def test_confirm_reentrant_decline_then_approve():
         await pilot.pause(0.3)
 
         banners = list(pilot.app.query(ConfirmBanner))
-        assert len(banners) == 1, f"confirm #1: ожидали 1 баннер, получили {len(banners)}"
+        assert len(banners) == 1, (
+            f"confirm #1: ожидали 1 баннер, получили {len(banners)}"
+        )
 
         await pilot.press("n")
         await pilot.pause(0.2)
@@ -164,7 +180,9 @@ async def test_confirm_reentrant_decline_then_approve():
         t1.join(timeout=3.0)
         assert not t1.is_alive(), "worker1 не завершился"
         assert len(results) == 1
-        assert results[0] == "deny_remember", f"confirm #1 должен вернуть 'deny_remember', вернул {results[0]}"
+        assert results[0] == "deny_remember", (
+            f"confirm #1 должен вернуть 'deny_remember', вернул {results[0]}"
+        )
 
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 0, "баннер должен быть снят после confirm #1"
@@ -182,7 +200,9 @@ async def test_confirm_reentrant_decline_then_approve():
         await pilot.pause(0.3)
 
         banners = list(pilot.app.query(ConfirmBanner))
-        assert len(banners) == 1, f"confirm #2: ожидали 1 баннер, получили {len(banners)}"
+        assert len(banners) == 1, (
+            f"confirm #2: ожидали 1 баннер, получили {len(banners)}"
+        )
 
         await pilot.press("y")
         await pilot.pause(0.2)
@@ -190,7 +210,9 @@ async def test_confirm_reentrant_decline_then_approve():
         t2.join(timeout=3.0)
         assert not t2.is_alive(), "worker2 не завершился"
         assert len(results) == 2
-        assert results[1] == "allow_remember", f"confirm #2 должен вернуть 'allow_remember', вернул {results[1]}"
+        assert results[1] == "allow_remember", (
+            f"confirm #2 должен вернуть 'allow_remember', вернул {results[1]}"
+        )
 
         banners = list(pilot.app.query(ConfirmBanner))
         assert len(banners) == 0, "баннер должен быть снят после confirm #2"
@@ -210,7 +232,9 @@ async def test_confirm_arrow_down_then_enter_selects_allow_once():
     app = TuiApp(config={"model": "M"})
     app._executor_factory = lambda: None
 
-    stub_executor = types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
+    stub_executor = types.SimpleNamespace(
+        stop_run=lambda: None, add_message=lambda m: None
+    )
     runner = AgentRunner(executor=stub_executor)
     app.active_runner = runner
 
@@ -221,7 +245,9 @@ async def test_confirm_arrow_down_then_enter_selects_allow_once():
 
         def _worker():
             try:
-                res = confirm_fn(title="Навигация", question="Выберите?", fields=[])
+                res = confirm_fn(
+                    title="Навигация", question="Выберите?", fields=[]
+                )
                 result.append(res)
             except BaseException as exc:
                 result.append(exc)
@@ -237,7 +263,9 @@ async def test_confirm_arrow_down_then_enter_selects_allow_once():
         await pilot.press("down")
         await pilot.pause(0.05)
         banner = banners[0]
-        assert banner.selected == 1, f"ожидали selected=1, получили {banner.selected}"
+        assert banner.selected == 1, (
+            f"ожидали selected=1, получили {banner.selected}"
+        )
 
         # Enter — подтверждает выделенный ([O] → "allow_once").
         await pilot.press("enter")
@@ -245,7 +273,9 @@ async def test_confirm_arrow_down_then_enter_selects_allow_once():
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] == "allow_once", f"ожидали 'allow_once', получили {result}"
+        assert result and result[0] == "allow_once", (
+            f"ожидали 'allow_once', получили {result}"
+        )
 
 
 @pytest.mark.asyncio
@@ -259,7 +289,9 @@ async def test_confirm_enter_default_selects_y():
     app = TuiApp(config={"model": "M"})
     app._executor_factory = lambda: None
 
-    stub_executor = types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None)
+    stub_executor = types.SimpleNamespace(
+        stop_run=lambda: None, add_message=lambda m: None
+    )
     runner = AgentRunner(executor=stub_executor)
     app.active_runner = runner
 
@@ -270,7 +302,9 @@ async def test_confirm_enter_default_selects_y():
 
         def _worker():
             try:
-                res = confirm_fn(title="Навигация", question="Выберите?", fields=[])
+                res = confirm_fn(
+                    title="Навигация", question="Выберите?", fields=[]
+                )
                 result.append(res)
             except BaseException as exc:
                 result.append(exc)
@@ -289,4 +323,6 @@ async def test_confirm_enter_default_selects_y():
 
         t.join(timeout=3.0)
         assert not t.is_alive()
-        assert result and result[0] == "allow_remember", f"ожидали 'allow_remember', получили {result}"
+        assert result and result[0] == "allow_remember", (
+            f"ожидали 'allow_remember', получили {result}"
+        )

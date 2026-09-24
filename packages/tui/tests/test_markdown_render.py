@@ -13,12 +13,16 @@ def test_pure_prose_is_one_run():
 
 
 def test_blank_lines_preserved_inside_run():
-    assert segment_answer("абзац1\n\nабзац2") == [Block("prose", "абзац1\n\nабзац2")]
+    assert segment_answer("абзац1\n\nабзац2") == [
+        Block("prose", "абзац1\n\nабзац2")
+    ]
 
 
 def test_heading_and_bullet_stay_in_prose_run():
     # синтаксис НЕ срезаем — render_prose отрисует # и - построчно
-    assert segment_answer("# Title\n- item") == [Block("prose", "# Title\n- item")]
+    assert segment_answer("# Title\n- item") == [
+        Block("prose", "# Title\n- item")
+    ]
 
 
 def test_edge_blank_lines_trimmed():
@@ -26,11 +30,15 @@ def test_edge_blank_lines_trimmed():
 
 
 def test_fenced_with_lang_is_code_block():
-    assert segment_answer("```python\nx = 1\ny = 2\n```") == [Block("code-block", "x = 1\ny = 2", "python")]
+    assert segment_answer("```python\nx = 1\ny = 2\n```") == [
+        Block("code-block", "x = 1\ny = 2", "python")
+    ]
 
 
 def test_fenced_no_lang():
-    assert segment_answer("```\nx = 1\n```") == [Block("code-block", "x = 1", None)]
+    assert segment_answer("```\nx = 1\n```") == [
+        Block("code-block", "x = 1", None)
+    ]
 
 
 def test_mixed_prose_and_code_splits_runs():
@@ -56,7 +64,9 @@ def test_table_alignment_markers():
 
 
 def test_pipe_line_without_separator_is_prose():
-    assert segment_answer("a | b | c\nплейн текст") == [Block("prose", "a | b | c\nплейн текст")]
+    assert segment_answer("a | b | c\nплейн текст") == [
+        Block("prose", "a | b | c\nплейн текст")
+    ]
 
 
 def test_table_ragged_row_padded():
@@ -71,7 +81,9 @@ def test_build_markdown_table_smoke():
 
 def test_build_markdown_table_column_count_and_justify():
     """Columns count matches headers; right-justified column has justify='right'."""
-    t = build_markdown_table(["Name", "Score"], [["Alice", "99"]], ["left", "right"])
+    t = build_markdown_table(
+        ["Name", "Score"], [["Alice", "99"]], ["left", "right"]
+    )
     assert len(t.columns) == 2
     assert t.columns[0].justify == "left"
     assert t.columns[1].justify == "right"
@@ -89,7 +101,9 @@ def test_build_markdown_table_inline_code_cell():
     # The cell is a rich.Text; iterate spans to find code-styled segment.
     cell = t.columns[0]._cells[0]  # first row, first column
     styles = [span.style for span in cell._spans]
-    assert any("#afbdff" in str(s) for s in styles), f"Expected code style #afbdff in cell spans, got: {styles}"
+    assert any("#afbdff" in str(s) for s in styles), (
+        f"Expected code style #afbdff in cell spans, got: {styles}"
+    )
 
 
 # ---- table_block_to_markdown: обратная сборка (таблица → копируемый markdown) ----

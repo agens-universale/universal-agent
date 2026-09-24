@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+)
 from gc_testkit import run_coro
 
 
@@ -78,11 +81,19 @@ def _patch_process(monkeypatch, *, apply_return='{"ok": true}'):
     from gc_core import processing_responses as pr
 
     async def _fake_aapply_tool(**kw):
-        return apply_return if isinstance(apply_return, str) else apply_return(kw)
+        return (
+            apply_return if isinstance(apply_return, str) else apply_return(kw)
+        )
 
     monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 
@@ -181,7 +192,9 @@ class TestEmitToolStartEnd:
                     _fc(
                         "session_todo",
                         "c1",
-                        json.dumps({"todos": [{"content": "a", "status": "pending"}]}),
+                        json.dumps(
+                            {"todos": [{"content": "a", "status": "pending"}]}
+                        ),
                     )
                 ],
                 state=_state(),
@@ -223,7 +236,9 @@ class TestEmitToolStartEnd:
         kinds = [e.kind for e in sink.drain()]
         assert kinds == ["tool_start", "tool_end", "tool_start", "tool_end"]
 
-    def test_wrong_arguments_emits_tool_end_and_returns_error_output(self, monkeypatch):
+    def test_wrong_arguments_emits_tool_end_and_returns_error_output(
+        self, monkeypatch
+    ):
         from gc_core import processing_responses as pr
 
         # Берём класс У МОДУЛЯ, который его и ловит.
@@ -238,11 +253,19 @@ class TestEmitToolStartEnd:
         WrongFunctionArgumentsException = pr.WrongFunctionArgumentsException
 
         async def _boom(**kw):
-            raise WrongFunctionArgumentsException("bad args", received_args="{}")
+            raise WrongFunctionArgumentsException(
+                "bad args", received_args="{}"
+            )
 
         monkeypatch.setattr(pr, "aapply_tool", _boom)
-        monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-        monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
+        monkeypatch.setattr(
+            pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+        )
+        monkeypatch.setattr(
+            pr,
+            "amaybe_update_intent_scope_from_tool",
+            _async_noop(lambda **kw: None),
+        )
         monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
         sink = QueueSubagentProgressSink()
@@ -255,7 +278,10 @@ class TestEmitToolStartEnd:
             )
         )
         assert [o["call_id"] for o in outs] == ["c_bad"]
-        assert json.loads(outs[0]["output"])["error"]["type"] == "invalid_arguments"
+        assert (
+            json.loads(outs[0]["output"])["error"]["type"]
+            == "invalid_arguments"
+        )
         events = sink.drain()
         assert [e.kind for e in events] == ["tool_start", "tool_end"]
         assert events[1].ok is False
@@ -267,7 +293,13 @@ class TestEmitIntermediateReply:
         answer = "Сейчас проверю структуру скилла"
         pr = _patch_process(
             monkeypatch,
-            apply_return=json.dumps({"tool": "turn_intermediate_reply", "ok": True, "answer": answer}),
+            apply_return=json.dumps(
+                {
+                    "tool": "turn_intermediate_reply",
+                    "ok": True,
+                    "answer": answer,
+                }
+            ),
         )
         sink = QueueSubagentProgressSink()
         run_coro(

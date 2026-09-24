@@ -57,7 +57,13 @@ def _with_cache_control(message: dict) -> dict:
     """Копия сообщения, где строка контента стала одной текстовой частью с меткой.
     Остальные ключи (``name``, ``tool_call_id`` и будущие) сохраняются как есть."""
     marked = dict(message)
-    marked["content"] = [{"type": "text", "text": message["content"], "cache_control": dict(CACHE_CONTROL)}]
+    marked["content"] = [
+        {
+            "type": "text",
+            "text": message["content"],
+            "cache_control": dict(CACHE_CONTROL),
+        }
+    ]
     return marked
 
 
@@ -67,7 +73,11 @@ def _mark_last_tail_candidate(messages: list) -> list:
     marked = list(messages)
     for index in range(len(marked) - 1, -1, -1):
         message = marked[index]
-        if isinstance(message, dict) and message.get("role") in _TAIL_ROLES and _is_candidate(message):
+        if (
+            isinstance(message, dict)
+            and message.get("role") in _TAIL_ROLES
+            and _is_candidate(message)
+        ):
             marked[index] = _with_cache_control(message)
             break
     return marked

@@ -21,7 +21,12 @@ from gc_core.utils.file_text import decode_text_best_effort
 from gc_tui.diff_tui import git_ops
 from gc_tui.diff_tui.mode import evict_stale_cache, resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key, orig_key
-from gc_tui.diff_tui.store import STATUS_CREATED, STATUS_DELETED, DiffStore, UndoResult
+from gc_tui.diff_tui.store import (
+    STATUS_CREATED,
+    STATUS_DELETED,
+    DiffStore,
+    UndoResult,
+)
 from gc_tui.diff_tui.touched import TouchedJournal
 from gc_tui.diff_tui.visual import build_created_file_diff, build_visual_diff
 
@@ -114,7 +119,9 @@ class DiffService:
             and thread_id.strip()
         ):
             try:
-                self._journal = TouchedJournal(threads_dir, system_id, thread_id)
+                self._journal = TouchedJournal(
+                    threads_dir, system_id, thread_id
+                )
             except ValueError:
                 self._journal = None
 
@@ -127,7 +134,11 @@ class DiffService:
         if self._cache_cleared:
             return
         if self.mode == "git-mode":
-            git_keys = {e.path for e in git_ops.git_status(self.launch_root) if self._cache_key(e.path) is not None}
+            git_keys = {
+                e.path
+                for e in git_ops.git_status(self.launch_root)
+                if self._cache_key(e.path) is not None
+            }
             evict_stale_cache(self._store, git_visible_keys=git_keys)
         self._cache_cleared = True
 
@@ -154,7 +165,12 @@ class DiffService:
         if key is not None and not Path(key).is_absolute():
             return key
         try:
-            return Path(path).resolve().relative_to(Path(self.launch_root).resolve()).as_posix()
+            return (
+                Path(path)
+                .resolve()
+                .relative_to(Path(self.launch_root).resolve())
+                .as_posix()
+            )
         except ValueError:
             return None
 
@@ -190,7 +206,9 @@ class DiffService:
 
     # --- list ---
 
-    def list_entries(self, *, pending_only: bool = False) -> list[DiffFileEntry]:
+    def list_entries(
+        self, *, pending_only: bool = False
+    ) -> list[DiffFileEntry]:
         self.ensure_mode_ready()
         touched = self._touched_paths()
         if not touched:
@@ -205,10 +223,16 @@ class DiffService:
             self._discard_own(*stale)
         return raw
 
-    def _list_hybrid(self, *, pending_only: bool, touched: set[str]) -> list[DiffFileEntry]:
+    def _list_hybrid(
+        self, *, pending_only: bool, touched: set[str]
+    ) -> list[DiffFileEntry]:
         git_entries = list(git_ops.git_status(self.launch_root))
         # protected / вне perimeter (.gc и т.п.) — не показываем в /diff
-        trackable_git = [e for e in git_entries if e.path in touched and self._cache_key(e.path) is not None]
+        trackable_git = [
+            e
+            for e in git_entries
+            if e.path in touched and self._cache_key(e.path) is not None
+        ]
         git_keys = {e.path for e in trackable_git}
         # конфликт → git побеждает; stale cache удаляем при refresh
         evict_stale_cache(self._store, git_visible_keys=git_keys)
@@ -227,7 +251,9 @@ class DiffService:
                 )
             )
 
-        for entry in self._list_cache(pending_only=pending_only, touched=touched):
+        for entry in self._list_cache(
+            pending_only=pending_only, touched=touched
+        ):
             if entry.key in git_keys:
                 continue
             out.append(
@@ -241,7 +267,9 @@ class DiffService:
             )
         return out
 
-    def _list_cache(self, *, pending_only: bool, touched: set[str]) -> list[DiffFileEntry]:
+    def _list_cache(
+        self, *, pending_only: bool, touched: set[str]
+    ) -> list[DiffFileEntry]:
         out: list[DiffFileEntry] = []
         for e in self._store.list_entries(cleanup_stale=True):
             if e.key not in touched:
@@ -251,11 +279,15 @@ class DiffService:
             kind: FileKind
             if e.status == STATUS_CREATED and not e.baseline_exists:
                 kind = "created"
-            elif e.status == STATUS_DELETED or (not disk.is_file() and orig.is_file()):
+            elif e.status == STATUS_DELETED or (
+                not disk.is_file() and orig.is_file()
+            ):
                 kind = "deleted"
             else:
                 kind = "modified"
-            state = self._cache_review_state(e.key, e.status, e.baseline_exists)
+            state = self._cache_review_state(
+                e.key, e.status, e.baseline_exists
+            )
             if pending_only and state != "pending":
                 continue
             out.append(
@@ -269,7 +301,9 @@ class DiffService:
             )
         return out
 
-    def _cache_review_state(self, key: str, status: str, baseline_exists: bool) -> ReviewState:
+    def _cache_review_state(
+        self, key: str, status: str, baseline_exists: bool
+    ) -> ReviewState:
         if status == STATUS_CREATED and not baseline_exists:
             return "pending"
         orig = self._store._orig_path(key)
@@ -484,7 +518,11 @@ class DiffService:
                     key=rel,
                     backend="git",
                 )
-            if entry is not None and entry.kind == "deleted" and entry.state == "approved":
+            if (
+                entry is not None
+                and entry.kind == "deleted"
+                and entry.state == "approved"
+            ):
                 return OpResult(
                     ok=True,
                     reason="already_deleted_in_index",
@@ -542,7 +580,9 @@ class DiffService:
             return ""
         return self._visual_diff_cache(path, mode=mode)
 
-    def _visual_diff_git(self, path: PathLike, *, mode: str = "adaptive") -> str:
+    def _visual_diff_git(
+        self, path: PathLike, *, mode: str = "adaptive"
+    ) -> str:
         rel = self._git_rel(path)
         if rel is None:
             return ""
@@ -594,7 +634,9 @@ class DiffService:
             max_diff_chars=self.max_diff_chars,
         )
 
-    def _build_deleted(self, *, key: str, orig_text: str, mode: str = "adaptive") -> str:
+    def _build_deleted(
+        self, *, key: str, orig_text: str, mode: str = "adaptive"
+    ) -> str:
         """disk↔``/dev/null`` удаление через ``build_visual_diff``."""
         return build_visual_diff(
             orig_text,
@@ -617,7 +659,9 @@ class DiffService:
         except OSError:
             return None
 
-    def _visual_diff_cache(self, path: PathLike, *, mode: str = "adaptive") -> str:
+    def _visual_diff_cache(
+        self, path: PathLike, *, mode: str = "adaptive"
+    ) -> str:
         key = self._cache_key(path)
         if key is None:
             return ""
@@ -625,7 +669,9 @@ class DiffService:
         disk = self._store._disk_path(key)
         index = self._store.load_index()
         meta = index.get(key) or {}
-        if meta.get("status") == STATUS_CREATED and not meta.get("baseline_exists"):
+        if meta.get("status") == STATUS_CREATED and not meta.get(
+            "baseline_exists"
+        ):
             return self._visual_diff_as_created(key, disk)
         if orig.is_file() and not disk.is_file():
             old = self._read_disk(orig)

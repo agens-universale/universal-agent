@@ -76,7 +76,9 @@ def test_main_returns_zero_and_reports_counts(aged_tree, monkeypatch, capsys):
     assert not (sandboxes / "swarm_g_t1").exists()
 
 
-def test_main_prints_only_keys_cleanup_threads_returns(aged_tree, monkeypatch, capsys):
+def test_main_prints_only_keys_cleanup_threads_returns(
+    aged_tree, monkeypatch, capsys
+):
     """Отчёт не должен упоминать счётчиков, которых нет в stats.
 
     Сетка держит именно рассинхрон печати с контрактом `cleanup_threads()`:
@@ -88,7 +90,12 @@ def test_main_prints_only_keys_cleanup_threads_returns(aged_tree, monkeypatch, c
     cleanup_mod.main()
 
     stats = cleanup_mod.cleanup_threads(str(threads), str(sandboxes), 24.0)
-    assert set(stats) == {"threads_removed", "sandboxes_removed", "kept", "errors"}
+    assert set(stats) == {
+        "threads_removed",
+        "sandboxes_removed",
+        "kept",
+        "errors",
+    }
     # «orphan» и «matching» — словарь той версии, где песочница удалялась парой
     # со своим тредом. Проходы давно расцеплены, слова обязаны были уйти вместе
     # с ключом.

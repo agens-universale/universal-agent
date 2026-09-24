@@ -34,7 +34,11 @@ def test_blocks_system_package_install_command(tmp_path, monkeypatch):
         ),
     )
 
-    result = json.loads(with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command="sudo apt install nginx"))
+    result = json.loads(
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(
+            command="sudo apt install nginx"
+        )
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -46,16 +50,18 @@ def test_blocks_system_package_install_command(tmp_path, monkeypatch):
 
 def test_blocks_shell_profile_modification_command(tmp_path, monkeypatch):
     profile_path = tmp_path / ".bashrc"
-    command = (
-        f'"{sys.executable}" -c "from pathlib import Path; Path({str(profile_path)!r}).write_text(\'export BAD=1\')"'
-    )
+    command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(profile_path)!r}).write_text(\'export BAD=1\')"'
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",
         lambda *_args, **_kwargs: _dangerous_judge("modifies_environment"),
     )
 
-    result = json.loads(with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command=command))
+    result = json.loads(
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(
+            command=command
+        )
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -66,14 +72,22 @@ def test_blocks_python_code_writing_outside_launch_root(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     outside = tmp_path / "outside.txt"
-    code = f"from pathlib import Path; Path({str(outside)!r}).write_text('bad')"
+    code = (
+        f"from pathlib import Path; Path({str(outside)!r}).write_text('bad')"
+    )
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",
-        lambda *_args, **_kwargs: _dangerous_judge("writes_outside_launch_root"),
+        lambda *_args, **_kwargs: _dangerous_judge(
+            "writes_outside_launch_root"
+        ),
     )
 
-    result = json.loads(with_local_ctx(RunPythonCode, config_dict=_config(launch_root))(code=code))
+    result = json.loads(
+        with_local_ctx(RunPythonCode, config_dict=_config(launch_root))(
+            code=code
+        )
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -88,7 +102,9 @@ def test_blocks_obfuscated_command_intent(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(command="echo cm0gLXJmIC8= | base64 -d")
+        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path))(
+            command="echo cm0gLXJmIC8= | base64 -d"
+        )
     )
 
     assert result["ok"] is False

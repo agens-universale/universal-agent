@@ -32,16 +32,24 @@ async def test_preview_renders_trace_widgets_and_header():
     class _A(App):
         def on_mount(self):
             self.push_screen(
-                PreviewScreen(segments=_segs(records), thread_id="abc12345xyz", project_path="D:\\dev\\proj\\foo"),
+                PreviewScreen(
+                    segments=_segs(records),
+                    thread_id="abc12345xyz",
+                    project_path="D:\\dev\\proj\\foo",
+                ),
                 lambda v: result.update(v=v),
             )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
-        assert len(scr.query(UserReplyContainer)) == 1  # реальный виджет трейса
+        assert (
+            len(scr.query(UserReplyContainer)) == 1
+        )  # реальный виджет трейса
         assert len(scr.query("#cmdinput")) == 0  # без поля ввода
         # шапка слева — «превью · сессия <id8>» (промпт сессии не дублируется)
-        assert "сессия abc12345" in str(scr.query_one("#header-left", Static).render())
+        assert "сессия abc12345" in str(
+            scr.query_one("#header-left", Static).render()
+        )
         # путь проекта справа в шапке
         assert "foo" in str(scr.query_one("#header-right", Static).render())
         # футер — только подсказки, без правого блока
@@ -67,20 +75,42 @@ async def test_preview_summary_marker_collapsed_then_toggles():
     segments = [
         {
             "index": 0,
-            "messages": [_rec({"role": "user", "content": "вопрос", "id": "m0"})],
-            "compacted_by": {"ts": "t", "messages_in_segment": 1, "synthesis": "СИНТЕЗ-ПРЕВЬЮ"},
+            "messages": [
+                _rec({"role": "user", "content": "вопрос", "id": "m0"})
+            ],
+            "compacted_by": {
+                "ts": "t",
+                "messages_in_segment": 1,
+                "synthesis": "СИНТЕЗ-ПРЕВЬЮ",
+            },
         },
-        {"index": 1, "messages": [_rec({"role": "user", "content": "ответ", "id": "m1"})], "compacted_by": None},
+        {
+            "index": 1,
+            "messages": [
+                _rec({"role": "user", "content": "ответ", "id": "m1"})
+            ],
+            "compacted_by": None,
+        },
     ]
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(PreviewScreen(segments=segments, thread_id="t", project_path="p"))
+            self.push_screen(
+                PreviewScreen(
+                    segments=segments, thread_id="t", project_path="p"
+                )
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
-        body = next(w for w in scr.query(SummaryMarker) if w.has_class("summary-body"))
-        marker = next(w for w in scr.query(SummaryMarker) if w.has_class("summary-marker"))
+        body = next(
+            w for w in scr.query(SummaryMarker) if w.has_class("summary-body")
+        )
+        marker = next(
+            w
+            for w in scr.query(SummaryMarker)
+            if w.has_class("summary-marker")
+        )
         prefix = lambda: str(marker.query_one(".trace-prefix").render())
         # свёрнут по умолчанию — стрелка вправо
         assert body.has_class("hidden")
@@ -117,15 +147,26 @@ async def test_preview_enter_resumes_even_with_summary():
         {
             "index": 0,
             "messages": [_rec({"role": "user", "content": "q", "id": "m0"})],
-            "compacted_by": {"ts": "t", "messages_in_segment": 1, "synthesis": "СВОДКА"},
+            "compacted_by": {
+                "ts": "t",
+                "messages_in_segment": 1,
+                "synthesis": "СВОДКА",
+            },
         },
-        {"index": 1, "messages": [_rec({"role": "user", "content": "a", "id": "m1"})], "compacted_by": None},
+        {
+            "index": 1,
+            "messages": [_rec({"role": "user", "content": "a", "id": "m1"})],
+            "compacted_by": None,
+        },
     ]
 
     class _A(App):
         def on_mount(self):
             self.push_screen(
-                PreviewScreen(segments=segments, thread_id="t", project_path="p"), lambda v: result.update(v=v)
+                PreviewScreen(
+                    segments=segments, thread_id="t", project_path="p"
+                ),
+                lambda v: result.update(v=v),
             )
 
     async with _A().run_test() as pilot:
@@ -165,7 +206,10 @@ async def test_preview_enter_resumes_when_row_focused():
     class _A(App):
         def on_mount(self):
             self.push_screen(
-                PreviewScreen(segments=segments, thread_id="t", project_path="p"), lambda v: result.update(v=v)
+                PreviewScreen(
+                    segments=segments, thread_id="t", project_path="p"
+                ),
+                lambda v: result.update(v=v),
             )
 
     async with _A().run_test() as pilot:
@@ -210,7 +254,11 @@ async def test_preview_mounts_nested_subagent_rows():
             "parent_call_id": "parent1",
             "seq": 1,
             "kind": "call",
-            "payload": {"call_id": "n1", "name": "fs_read_file", "arguments": {"path": "a.py"}},
+            "payload": {
+                "call_id": "n1",
+                "name": "fs_read_file",
+                "arguments": {"path": "a.py"},
+            },
         },
         {
             "parent_call_id": "parent1",
@@ -219,7 +267,9 @@ async def test_preview_mounts_nested_subagent_rows():
             "payload": {
                 "call_id": "n2",
                 "name": "session_todo",
-                "arguments": {"todos": [{"content": "step", "status": "pending"}]},
+                "arguments": {
+                    "todos": [{"content": "step", "status": "pending"}]
+                },
             },
         },
     ]
@@ -227,7 +277,12 @@ async def test_preview_mounts_nested_subagent_rows():
     class _A(App):
         def on_mount(self):
             self.push_screen(
-                PreviewScreen(segments=segments, thread_id="t", project_path="p", subagent_records=records)
+                PreviewScreen(
+                    segments=segments,
+                    thread_id="t",
+                    project_path="p",
+                    subagent_records=records,
+                )
             )
 
     async with _A().run_test() as pilot:
@@ -266,7 +321,11 @@ async def test_preview_without_records_unchanged():
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(PreviewScreen(segments=segments, thread_id="t", project_path="p"))
+            self.push_screen(
+                PreviewScreen(
+                    segments=segments, thread_id="t", project_path="p"
+                )
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -284,7 +343,10 @@ async def test_preview_escape_false():
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(PreviewScreen(segments=[], thread_id="t", project_path="p"), lambda v: result.update(v=v))
+            self.push_screen(
+                PreviewScreen(segments=[], thread_id="t", project_path="p"),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         await pilot.press("escape")

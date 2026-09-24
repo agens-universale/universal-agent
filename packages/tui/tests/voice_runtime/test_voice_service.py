@@ -12,22 +12,37 @@ from gc_tui.voice_runtime.service import (
 )
 from gc_tui.voice_runtime.state import VoiceState
 
-ST = VoiceState(version="v0.8.3", root="C:/data/voice/speaches", port=8735, model="Systran/faster-whisper-small")
+ST = VoiceState(
+    version="v0.8.3",
+    root="C:/data/voice/speaches",
+    port=8735,
+    model="Systran/faster-whisper-small",
+)
 
 
 def test_urls():
     assert service_url(ST) == "http://127.0.0.1:8735"
-    assert transcriptions_url(ST) == "http://127.0.0.1:8735/v1/audio/transcriptions"
+    assert (
+        transcriptions_url(ST)
+        == "http://127.0.0.1:8735/v1/audio/transcriptions"
+    )
 
 
 def test_build_run_spec_command_env():
     spec = build_run_spec(ST)
     assert spec.command == "uv"
-    assert spec.args[:4] == ("run", "--no-sync", "--project", "C:/data/voice/speaches")
+    assert spec.args[:4] == (
+        "run",
+        "--no-sync",
+        "--project",
+        "C:/data/voice/speaches",
+    )
     assert "uvicorn" in spec.args and "speaches.main:create_app" in spec.args
     assert spec.args[-2:] == ("--port", "8735")
     env = dict(spec.env)
-    assert env["ENABLE_UI"] == "false"  # без ui-extra create_app падает на gradio
+    assert (
+        env["ENABLE_UI"] == "false"
+    )  # без ui-extra create_app падает на gradio
     assert env["WHISPER__TTL"] == "-1"  # ключ пина v0.8.3 (не STT_MODEL_TTL)
     # cpu жёстко: auto у ctranslate2 = CUDA по наличию драйвера → краш без cuDNN
     assert env["WHISPER__INFERENCE_DEVICE"] == "cpu"
@@ -67,4 +82,6 @@ def test_preheat_posts_and_swallow_errors():
     def boom(url, **kwargs):
         raise OSError("connection refused")
 
-    assert preheat(ST, post=boom) is False  # прогрев никогда не роняет вызывающего
+    assert (
+        preheat(ST, post=boom) is False
+    )  # прогрев никогда не роняет вызывающего

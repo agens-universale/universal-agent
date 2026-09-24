@@ -26,7 +26,9 @@ def test_core_exports_one_form():
     import gc_core.run_context as rc
 
     assert hasattr(rc, "acreate_run_context")
-    assert not hasattr(rc, "create_run_context"), "вернулась вторая нативная сборка контекста"
+    assert not hasattr(rc, "create_run_context"), (
+        "вернулась вторая нативная сборка контекста"
+    )
     assert "create_run_context" not in rc.__all__
 
 
@@ -43,7 +45,12 @@ def test_the_form_carries_its_real_signature():
 
     params = inspect.signature(acreate_run_context).parameters
     assert "kwargs" not in params, "сигнатура снова спрятана за **kwargs"
-    for name in ("thread_store", "tools_cache", "os_backend", "level_provider"):
+    for name in (
+        "thread_store",
+        "tools_cache",
+        "os_backend",
+        "level_provider",
+    ):
         assert name in params, f"параметр {name} пропал из публичной сигнатуры"
 
 
@@ -57,7 +64,11 @@ def test_no_frontend_builds_the_context_synchronously(pkg):
             if not isinstance(node, ast.Call):
                 continue
             f = node.func
-            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+            name = (
+                f.attr
+                if isinstance(f, ast.Attribute)
+                else getattr(f, "id", None)
+            )
             if name == "create_run_context":
                 offenders.append(f"{path.relative_to(REPO)}:{node.lineno}")
     assert offenders == [], f"синхронная сборка контекста: {offenders}"
@@ -68,4 +79,6 @@ def test_docs_no_longer_claim_a_second_form():
     text = (REPO / "docs/async.md").read_text(encoding="utf-8")
 
     assert "Единственное исключение — `create_run_context`" not in text
-    assert "MCP-сессии привязаны к тому loop'у, на котором\nзаведены" not in text
+    assert (
+        "MCP-сессии привязаны к тому loop'у, на котором\nзаведены" not in text
+    )

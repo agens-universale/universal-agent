@@ -18,12 +18,18 @@ def test_explicit_tui_stream_wins():
     assert resolve_tui_stream_enabled({"tui_stream": True}) is True
     assert resolve_tui_stream_enabled({"tui_stream": False}) is False
     # явный tui_stream побеждает legacy stream
-    assert resolve_tui_stream_enabled({"tui_stream": False, "stream": True}) is False
+    assert (
+        resolve_tui_stream_enabled({"tui_stream": False, "stream": True})
+        is False
+    )
 
 
 def test_legacy_stream_fallback_when_tui_unset():
     # tui_stream не задан (None или отсутствует) → падаем на legacy backend.stream
-    assert resolve_tui_stream_enabled({"tui_stream": None, "stream": False}) is False
+    assert (
+        resolve_tui_stream_enabled({"tui_stream": None, "stream": False})
+        is False
+    )
     assert resolve_tui_stream_enabled({"stream": False}) is False
 
 

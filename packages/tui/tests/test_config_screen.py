@@ -49,7 +49,9 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
     """Пустой реестр — легаси-резолв, плоский ключ остаётся именем модели."""
     from gc_tui.screens.config import _profile_header_text
 
-    text = _profile_header_text({"model": "qwen3-coder"}, profile_source=None).plain
+    text = _profile_header_text(
+        {"model": "qwen3-coder"}, profile_source=None
+    ).plain
     assert "модель: qwen3-coder" in text
 
 
@@ -88,7 +90,9 @@ async def test_command_config_opens_screen(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import ConfigScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         await pilot.app.screen._handle_command("config")
@@ -104,7 +108,9 @@ async def test_config_screen_esc_returns_to_main(tmp_path):
     from gc_tui.screens.config import ConfigScreen
     from gc_tui.screens.main import TraceScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         await pilot.app.screen._handle_command("config")
@@ -122,7 +128,9 @@ async def test_config_screen_has_header_and_footer(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import ConfigScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         scr = ConfigScreen(config=app._config, config_path=app._config_path)
@@ -162,7 +170,9 @@ async def test_config_screen_fieldset_panels(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import ConfigScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         scr = ConfigScreen(config=app._config, config_path=app._config_path)
@@ -184,7 +194,9 @@ async def test_config_screen_snapshot_hint_caption(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import _SNAPSHOT_HINT, ConfigScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         scr = ConfigScreen(config=app._config, config_path=app._config_path)
@@ -206,7 +218,9 @@ async def test_config_trace_quiet_focus_keeps_keyboard_scroll(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.config import ConfigScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
         scr = ConfigScreen(config=app._config, config_path=app._config_path)
@@ -223,7 +237,9 @@ def test_quiet_focus_and_panel_rules_in_tcss():
 
     import gc_tui as tui
 
-    tcss = (Path(tui.__file__).parent / "styles.tcss").read_text(encoding="utf-8")
+    tcss = (Path(tui.__file__).parent / "styles.tcss").read_text(
+        encoding="utf-8"
+    )
     assert "#trace.quiet-focus:focus" in tcss
     assert "outline: none" in tcss
     assert ".config-panel" in tcss
@@ -236,7 +252,9 @@ def test_filter_config_by_key_matches_key_keeps_subtree():
     from gc_tui.screens.config import _filter_config_by_key
 
     cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
-    assert _filter_config_by_key(cfg, "mcp") == {"mcp-servers": {"srv": {"transport": "http"}}}
+    assert _filter_config_by_key(cfg, "mcp") == {
+        "mcp-servers": {"srv": {"transport": "http"}}
+    }
 
 
 def test_filter_config_by_key_nested_keeps_path():
@@ -291,4 +309,6 @@ async def test_config_filter_input_focused_and_filters(tmp_path):
         await pilot.pause()
         assert scr._filter == "mcp"
         # блок путей остаётся при активном фильтре (фильтруем только YAML-панель)
-        assert any(p.border_title == "пути" for p in scr.query(".config-panel"))
+        assert any(
+            p.border_title == "пути" for p in scr.query(".config-panel")
+        )

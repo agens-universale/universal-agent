@@ -4,12 +4,16 @@ from gc_core.tools.skills.registry import SkillsRegistry
 def _write_skill(root, sid):
     d = root / sid
     d.mkdir(parents=True)
-    (d / "SKILL.md").write_text(f"---\nname: {sid}\ndescription: d\n---\nbody\n", encoding="utf-8")
+    (d / "SKILL.md").write_text(
+        f"---\nname: {sid}\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
 
 
 def _isolated(system):
     """Реестр только с тестовым system_root — без user/project скиллов среды."""
-    return SkillsRegistry(system_root=str(system), user_root="", project_root="")
+    return SkillsRegistry(
+        system_root=str(system), user_root="", project_root=""
+    )
 
 
 async def test_get_skill_self_heals_for_just_created(tmp_path):
@@ -18,7 +22,9 @@ async def test_get_skill_self_heals_for_just_created(tmp_path):
     reg = _isolated(system)
     await reg.list_skills()  # загрузка кэша (видит только first)
     _write_skill(system, "alias-game")  # скилл создан «посреди прогона»
-    detail = await reg.load_skill_detail("alias-game")  # промах → reload → найден
+    detail = await reg.load_skill_detail(
+        "alias-game"
+    )  # промах → reload → найден
     assert detail["id"] == "alias-game"
 
 
@@ -40,7 +46,9 @@ async def test_list_skills_is_fresh(tmp_path):
     ids0 = {s["id"] for s in await reg.list_skills()}
     assert ids0 == {"first"}
     _write_skill(system, "second")
-    ids1 = {s["id"] for s in await reg.list_skills()}  # свежий список без рестарта
+    ids1 = {
+        s["id"] for s in await reg.list_skills()
+    }  # свежий список без рестарта
     assert "second" in ids1
 
 
@@ -49,7 +57,9 @@ async def test_reference_slug_miss_does_not_reload(tmp_path, monkeypatch):
     system = tmp_path / "system"
     skill = system / "qa"
     (skill / "references").mkdir(parents=True)
-    (skill / "SKILL.md").write_text("---\nname: qa\ndescription: d\n---\nb\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: qa\ndescription: d\n---\nb\n", encoding="utf-8"
+    )
     (skill / "references" / "good.md").write_text("g", encoding="utf-8")
     reg = _isolated(system)
     await reg.load_skill_detail("qa")  # загрузка кэша (1 скан)
@@ -64,5 +74,7 @@ async def test_reference_slug_miss_does_not_reload(tmp_path, monkeypatch):
     import pytest
 
     with pytest.raises(KeyError):
-        await reg.load_reference("qa", "no-such-slug")  # скилл найден, slug — нет
+        await reg.load_reference(
+            "qa", "no-such-slug"
+        )  # скилл найден, slug — нет
     assert calls["n"] == 0  # reload не вызывался (скилл был найден)

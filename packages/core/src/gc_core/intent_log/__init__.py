@@ -19,7 +19,12 @@ from gc_core.intent_log.record import (
     record_from_dict,
     validate_record,
 )
-from gc_core.intent_log.serialize import deserialize_list, records_to_jsonl_lines, serialize, serialize_for_meta
+from gc_core.intent_log.serialize import (
+    deserialize_list,
+    records_to_jsonl_lines,
+    serialize,
+    serialize_for_meta,
+)
 
 __all__ = [
     "ACTION_FINAL_ANSWER",

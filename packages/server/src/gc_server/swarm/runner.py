@@ -40,7 +40,9 @@ _KNOWN_RAW_SECTIONS = frozenset(
 )
 
 
-def _normalize_agent_overrides_to_raw(overrides: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_agent_overrides_to_raw(
+    overrides: Dict[str, Any],
+) -> Dict[str, Any]:
     """Привести agent_overrides к raw-структуре YAML.
 
     - Если на верхнем уровне есть хотя бы одна известная секция — считаем raw,
@@ -76,11 +78,17 @@ def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
         return os.path.join(config_dir, value)
 
     if env_vars.env.swarm_agentmd_path is not None:
-        paths_section["agent_md_path"] = _resolve(str(env_vars.env.swarm_agentmd_path))
+        paths_section["agent_md_path"] = _resolve(
+            str(env_vars.env.swarm_agentmd_path)
+        )
     if env_vars.env.swarm_threads_dir is not None:
-        paths_section["threads_data_path"] = _resolve(str(env_vars.env.swarm_threads_dir))
+        paths_section["threads_data_path"] = _resolve(
+            str(env_vars.env.swarm_threads_dir)
+        )
     if env_vars.env.swarm_skills_dir is not None:
-        paths_section["skills_data_path"] = _resolve(str(env_vars.env.swarm_skills_dir))
+        paths_section["skills_data_path"] = _resolve(
+            str(env_vars.env.swarm_skills_dir)
+        )
 
 
 def _utc_now_iso() -> str:
@@ -89,7 +97,9 @@ def _utc_now_iso() -> str:
 
 def _compute_deadline_iso(timeout_seconds: int) -> str:
     """Вернуть ISO-timestamp когда sworm должен быть принудительно убит по таймауту."""
-    return (datetime.now(UTC) + timedelta(seconds=int(timeout_seconds))).isoformat()
+    return (
+        datetime.now(UTC) + timedelta(seconds=int(timeout_seconds))
+    ).isoformat()
 
 
 def _materialize_runtime_config(
@@ -153,7 +163,9 @@ def _materialize_runtime_config(
     except Exception:
         project_path = None
 
-    if project_path is not None and os.path.abspath(project_path) != os.path.abspath(host_config_path):
+    if project_path is not None and os.path.abspath(
+        project_path
+    ) != os.path.abspath(host_config_path):
         project_text = read_user_text_or_none(project_path)
         if project_text is None:
             logger.warning(
@@ -330,7 +342,9 @@ def start_swarm_process(
         host_config_path = _resolve_host_config_path(swarm_cfg)
         if host_config_path:
             try:
-                _materialize_runtime_config(host_config_path, sandbox_dir, swarm_cfg)
+                _materialize_runtime_config(
+                    host_config_path, sandbox_dir, swarm_cfg
+                )
             except Exception:
                 logger.exception(
                     "swarm %s: runtime config materialization failed (proceeding without it)",
@@ -362,7 +376,9 @@ def start_swarm_process(
         agent_dep_dir: str = swarm_cfg.get("agent_dep_dir", "") or ""
         extra_mounts: list = swarm_cfg.get("extra_mounts", []) or []
         # В env передаём как newline-separated строку — wrapper читает построчно.
-        extra_mounts_env = "\n".join(str(p) for p in extra_mounts if str(p).strip())
+        extra_mounts_env = "\n".join(
+            str(p) for p in extra_mounts if str(p).strip()
+        )
 
         # Передаём базовый контекст через переменные окружения.
         env = os.environ.copy()
@@ -379,7 +395,9 @@ def start_swarm_process(
                 "SWARM_LIMIT_MEMORY_MB": str(limits.get("memory_mb", "")),
                 "SWARM_LIMIT_DISK_MB": str(limits.get("disk_mb", "")),
                 "SWARM_LIMIT_CPU_PERCENT": str(limits.get("cpu_percent", "")),
-                "SWARM_LIMIT_TIMEOUT_SECONDS": str(limits.get("timeout_seconds", "")),
+                "SWARM_LIMIT_TIMEOUT_SECONDS": str(
+                    limits.get("timeout_seconds", "")
+                ),
                 # Полный payload запроса можем передать в окружение как JSON-строку.
                 "SWARM_PAYLOAD_JSON": json.dumps(payload, ensure_ascii=False),
                 # Внешний трейс. Пусто = не задан: обёртка тогда не добавляет флаг,

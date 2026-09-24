@@ -13,7 +13,9 @@ from gc_core.utils import win_console as wc
 def test_restores_saved_mode(monkeypatch):
     calls = {}
     monkeypatch.setattr(wc, "_get_input_mode", lambda: 0x1B7)
-    monkeypatch.setattr(wc, "_set_input_mode", lambda m: calls.__setitem__("set", m))
+    monkeypatch.setattr(
+        wc, "_set_input_mode", lambda m: calls.__setitem__("set", m)
+    )
     with wc.preserve_console_mode():
         pass
     assert calls["set"] == 0x1B7  # режим восстановлен после блока
@@ -22,7 +24,9 @@ def test_restores_saved_mode(monkeypatch):
 def test_noop_when_no_console(monkeypatch):
     calls = {}
     monkeypatch.setattr(wc, "_get_input_mode", lambda: None)  # консоли нет
-    monkeypatch.setattr(wc, "_set_input_mode", lambda m: calls.__setitem__("set", m))
+    monkeypatch.setattr(
+        wc, "_set_input_mode", lambda m: calls.__setitem__("set", m)
+    )
     with wc.preserve_console_mode():
         pass
     assert "set" not in calls  # нечего восстанавливать — не трогаем
@@ -31,7 +35,9 @@ def test_noop_when_no_console(monkeypatch):
 def test_restores_even_on_exception(monkeypatch):
     calls = {}
     monkeypatch.setattr(wc, "_get_input_mode", lambda: 0x1B7)
-    monkeypatch.setattr(wc, "_set_input_mode", lambda m: calls.__setitem__("set", m))
+    monkeypatch.setattr(
+        wc, "_set_input_mode", lambda m: calls.__setitem__("set", m)
+    )
     try:
         with wc.preserve_console_mode():
             raise RuntimeError("boom")

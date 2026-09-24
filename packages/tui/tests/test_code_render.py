@@ -37,7 +37,10 @@ def test_highlight_has_no_trailing_newline():
 
 
 def test_highlight_colors_tokens():
-    colors = {str(span.style.color) for span in highlight_code("def f(): pass", "python").spans}
+    colors = {
+        str(span.style.color)
+        for span in highlight_code("def f(): pass", "python").spans
+    }
     assert len(colors) > 1
 
 
@@ -102,7 +105,11 @@ def test_comments_use_dim_not_monokai_grey():
     from gc_tui.palette import DIM
 
     text = highlight_code("def f():\n    # проверка\n    return 1", "python")
-    comment = next(span for span in text.spans if "проверка" in text.plain[span.start : span.end])
+    comment = next(
+        span
+        for span in text.spans
+        if "проверка" in text.plain[span.start : span.end]
+    )
     assert comment.style.color.triplet.hex == DIM.lower()
 
 

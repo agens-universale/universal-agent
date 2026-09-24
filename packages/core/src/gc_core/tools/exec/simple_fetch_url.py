@@ -69,11 +69,21 @@ class SimpleFetchUrl(FetchUrlBase):
     @staticmethod
     def _find_meta_description(html: str) -> Optional[str]:
         """Сырое значение ``content`` первого ``<meta name="description">``."""
-        for tag_match in re.finditer(r"<meta\b([^>]*)>", html, flags=re.IGNORECASE | re.DOTALL):
+        for tag_match in re.finditer(
+            r"<meta\b([^>]*)>", html, flags=re.IGNORECASE | re.DOTALL
+        ):
             attrs = tag_match.group(1)
-            if not re.search(r"""\bname\s*=\s*(['"])description\1""", attrs, flags=re.IGNORECASE):
+            if not re.search(
+                r"""\bname\s*=\s*(['"])description\1""",
+                attrs,
+                flags=re.IGNORECASE,
+            ):
                 continue
-            content_match = re.search(r"""\bcontent\s*=\s*(['"])(.*?)\1""", attrs, flags=re.IGNORECASE | re.DOTALL)
+            content_match = re.search(
+                r"""\bcontent\s*=\s*(['"])(.*?)\1""",
+                attrs,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
             if content_match:
                 return content_match.group(2)
         return None
@@ -106,7 +116,11 @@ class SimpleFetchUrl(FetchUrlBase):
         if not inner:
             return "\n\n"
         level = 1
-        if len(tag_name) == 2 and tag_name.startswith("h") and tag_name[1].isdigit():
+        if (
+            len(tag_name) == 2
+            and tag_name.startswith("h")
+            and tag_name[1].isdigit()
+        ):
             level = max(1, min(6, int(tag_name[1])))
         return f"\n\n{'#' * level} {inner}\n\n"
 
@@ -128,16 +142,38 @@ class SimpleFetchUrl(FetchUrlBase):
     @classmethod
     def _extract_simple_html_text(cls, html: str) -> str:
         content = html or ""
-        content = re.sub(r"(?is)<(script|style|noscript|svg|head)\b[^>]*>.*?</\1>", " ", content)
+        content = re.sub(
+            r"(?is)<(script|style|noscript|svg|head)\b[^>]*>.*?</\1>",
+            " ",
+            content,
+        )
         content = re.sub(r"(?i)<br\s*/?>", "\n", content)
         content = re.sub(r"(?i)</tr\s*>", "\n", content)
-        content = re.sub(r"(?is)<(p|div)\b[^>]*>(.*?)</\1>", cls._html_block_to_text, content)
-        content = re.sub(r"(?is)<(h[1-6])\b[^>]*>(.*?)</\1>", cls._html_heading_to_markdown, content)
-        content = re.sub(r"(?is)<li\b[^>]*>(.*?)</li>", cls._html_list_item_to_text, content)
+        content = re.sub(
+            r"(?is)<(p|div)\b[^>]*>(.*?)</\1>",
+            cls._html_block_to_text,
+            content,
+        )
+        content = re.sub(
+            r"(?is)<(h[1-6])\b[^>]*>(.*?)</\1>",
+            cls._html_heading_to_markdown,
+            content,
+        )
+        content = re.sub(
+            r"(?is)<li\b[^>]*>(.*?)</li>", cls._html_list_item_to_text, content
+        )
         content = re.sub(r"(?i)</?(ul|ol)\b[^>]*>", "\n", content)
-        content = re.sub(r"(?is)<pre\b[^>]*>(.*?)</pre>", cls._html_pre_to_text, content)
-        content = re.sub(r"(?is)<(td|th)\b[^>]*>(.*?)</\1>", cls._html_table_cell_to_text, content)
-        content = re.sub(r"(?i)</?(table|thead|tbody|tfoot)\b[^>]*>", "\n", content)
+        content = re.sub(
+            r"(?is)<pre\b[^>]*>(.*?)</pre>", cls._html_pre_to_text, content
+        )
+        content = re.sub(
+            r"(?is)<(td|th)\b[^>]*>(.*?)</\1>",
+            cls._html_table_cell_to_text,
+            content,
+        )
+        content = re.sub(
+            r"(?i)</?(table|thead|tbody|tfoot)\b[^>]*>", "\n", content
+        )
         content = cls._strip_tags(content)
         content = re.sub(r"[ \t]*\|[ \t]*(\n|$)", r"\1", content)
         # Normalize whitespace-only lines to real empty lines before collapsing.
@@ -150,7 +186,11 @@ class SimpleFetchUrl(FetchUrlBase):
         return content.strip()
 
     async def _arequest_with_retries(
-        self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy
+        self,
+        normalized_url: str,
+        headers: Dict[str, str],
+        effective_timeout,
+        normalized_proxy,
     ):
         """(response, None) либо (None, kwargs ошибки для _result)."""
         attempts = 1 + self.max_retries
@@ -159,7 +199,9 @@ class SimpleFetchUrl(FetchUrlBase):
         # (`path_policy.resolve_tool_context`); чтение config_dict напрямую давало
         # пустой чёрный список и per-hop проверка ничего не проверяла.
         _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
-        _allowed_schemes = list(_policy.url_allowed_schemes or ["http", "https"])
+        _allowed_schemes = list(
+            _policy.url_allowed_schemes or ["http", "https"]
+        )
         _url_blacklist = list(_policy.url_blacklist or [])
         # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
         # переходов считается петлёй.
@@ -170,7 +212,9 @@ class SimpleFetchUrl(FetchUrlBase):
         session = get_async_client(
             # Явный `proxy` тула — первым аргументом, иначе он молча
             # игнорируется (тот же промах, что был в fetch_url).
-            proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url)
+            proxies=resolve_proxies(
+                normalized_proxy, os.environ, normalized_url
+            )
         )
         for attempt in range(1, attempts + 1):
             try:
@@ -209,7 +253,8 @@ class SimpleFetchUrl(FetchUrlBase):
                     content_type=None,
                     result_type="error",
                     error={
-                        "type": _decision.error_type or "url_blocked_by_policy",
+                        "type": _decision.error_type
+                        or "url_blocked_by_policy",
                         "reason": _decision.reason,
                         "matched_rule": _decision.matched_rule,
                         "blocked_on_redirect": True,
@@ -221,7 +266,12 @@ class SimpleFetchUrl(FetchUrlBase):
                     return None, failure
                 await asyncio.sleep(self.retry_backoff_seconds * attempt)
         return None, dict(
-            ok=False, result_type="error", error={"type": "request_failed", "message": "Unknown request failure."}
+            ok=False,
+            result_type="error",
+            error={
+                "type": "request_failed",
+                "message": "Unknown request failure.",
+            },
         )
 
     @enforce_url_policy(url_arg="url")
@@ -236,7 +286,9 @@ class SimpleFetchUrl(FetchUrlBase):
         **kwargs: Any,
     ) -> str:
         # Проверка аргументов и попадание в кэш — общие с fetch_url.
-        early, request = self._begin_fetch(url, timeout, max_preview_chars, offset, limit, proxy)
+        early, request = self._begin_fetch(
+            url, timeout, max_preview_chars, offset, limit, proxy
+        )
         if request is None:
             return early
         _result = functools.partial(self._result, url=url)
@@ -253,7 +305,15 @@ class SimpleFetchUrl(FetchUrlBase):
         status_code = response.status_code
         raw_content = getattr(response, "content", b"")
         if self._is_binary_response(content_type, raw_content):
-            return _result(**self._binary_payload(final_url, status_code, content_type, request.offset, request.limit))
+            return _result(
+                **self._binary_payload(
+                    final_url,
+                    status_code,
+                    content_type,
+                    request.offset,
+                    request.limit,
+                )
+            )
 
         text = response.text or ""
         page_meta = self._extract_meta(text)
@@ -261,7 +321,9 @@ class SimpleFetchUrl(FetchUrlBase):
         # чистый CPU на размере страницы. У `fetch_url` он по этой же причине
         # давно уходит в поток (замер там: 237 мс инлайн против 22 мс), а
         # здесь оставался на loop.
-        extracted = await asyncio.to_thread(self._extract_simple_html_text, text)
+        extracted = await asyncio.to_thread(
+            self._extract_simple_html_text, text
+        )
         if extracted:
             self._put_to_cache(request.cache_key, extracted, page_meta)
             return _result(

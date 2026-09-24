@@ -44,11 +44,17 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
     """
     return {
         "backend_api_mode": "chat_completions",
-        "chat_completions_system_prompt_path": str(prompts_dir / "chat_completions_system_prompt.md"),
-        "chat_completions_intent_guard_prompt_path": str(prompts_dir / "chat_completions_intent_guard_prompt.md"),
+        "chat_completions_system_prompt_path": str(
+            prompts_dir / "chat_completions_system_prompt.md"
+        ),
+        "chat_completions_intent_guard_prompt_path": str(
+            prompts_dir / "chat_completions_intent_guard_prompt.md"
+        ),
         "skills_data_path": str(skills_dir),
         "summary_params": {
-            "chat_completions_summary_prompt_path": str(prompts_dir / "chat_completions_summary_prompt.md"),
+            "chat_completions_summary_prompt_path": str(
+                prompts_dir / "chat_completions_summary_prompt.md"
+            ),
             "chat_completions_memory_patch_replace_prompt_path": str(
                 prompts_dir / "chat_completions_memory_patch_replace.md"
             ),

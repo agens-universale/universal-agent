@@ -13,12 +13,21 @@ def test_validate_normalizes_verdict_separators_and_case():
     # «potentially dangerous» через пробел / дефис / в другом регистре — частый
     # формат слабой модели; нормализуем, не падаем.
     assert (
-        validate_judge_result({"verdict": "potentially dangerous", "risk_flags": ["x"]}).verdict == cm.DANGEROUS_VERDICT
+        validate_judge_result(
+            {"verdict": "potentially dangerous", "risk_flags": ["x"]}
+        ).verdict
+        == cm.DANGEROUS_VERDICT
     )
     assert (
-        validate_judge_result({"verdict": "potentially-dangerous", "risk_flags": ["x"]}).verdict == cm.DANGEROUS_VERDICT
+        validate_judge_result(
+            {"verdict": "potentially-dangerous", "risk_flags": ["x"]}
+        ).verdict
+        == cm.DANGEROUS_VERDICT
     )
-    assert validate_judge_result({"verdict": "  SAFE  "}).verdict == cm.SAFE_VERDICT
+    assert (
+        validate_judge_result({"verdict": "  SAFE  "}).verdict
+        == cm.SAFE_VERDICT
+    )
 
 
 def test_validate_still_rejects_unknown_verdict():
@@ -36,13 +45,20 @@ def test_retry_recovers_on_second_attempt():
 
     def client(payload):
         calls["n"] += 1
-        return {"verdict": "nonsense"} if calls["n"] == 1 else {"verdict": "safe"}
+        return (
+            {"verdict": "nonsense"} if calls["n"] == 1 else {"verdict": "safe"}
+        )
 
-    assert cm.run_command_judge_with_retry(client, {}, retries=1).verdict == cm.SAFE_VERDICT
+    assert (
+        cm.run_command_judge_with_retry(client, {}, retries=1).verdict
+        == cm.SAFE_VERDICT
+    )
     assert calls["n"] == 2
 
 
 def test_retry_raises_after_exhausting():
     # стабильный мусор → пробрасываем (декоратор переведёт в judge_unavailable → fail-closed).
     with pytest.raises(ValueError):
-        cm.run_command_judge_with_retry(lambda p: {"verdict": "nonsense"}, {}, retries=1)
+        cm.run_command_judge_with_retry(
+            lambda p: {"verdict": "nonsense"}, {}, retries=1
+        )

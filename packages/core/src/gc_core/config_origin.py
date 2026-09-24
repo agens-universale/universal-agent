@@ -21,7 +21,10 @@ from typing import Any, Dict, Iterable, Optional
 
 from gc_core import config_raw
 from gc_core.config_modules.merge import deep_merge
-from gc_core.config_modules.root import PROFILE_SCHEMA_ERROR_PREFIX, SCHEMA_ERROR_PREFIX
+from gc_core.config_modules.root import (
+    PROFILE_SCHEMA_ERROR_PREFIX,
+    SCHEMA_ERROR_PREFIX,
+)
 
 # Подписи слоёв для UI (значение — то, что видит пользователь). Профильные подписи —
 # шаблоны с `{name}` (имя профиля = стем пути файла, см. overlay_label ниже): одно
@@ -54,7 +57,9 @@ class Origin:
 
     raw: Any  # значение в БАЗОВОМ файле, как записано (может быть ${ENV:VAR})
     overlay_kind: str  # "" | "managed" | "project" — кто перекрыл
-    overlay_path: Optional[str]  # путь перекрывающего файла (None — не перекрыто)
+    overlay_path: Optional[
+        str
+    ]  # путь перекрывающего файла (None — не перекрыто)
     effective: Any  # что действует после всех слоёв (до env-резолва)
 
     @property
@@ -62,7 +67,9 @@ class Origin:
         return self.overlay_kind != ""
 
 
-def _overlay_paths(base_path: str, *, profile_override: Optional[str] = None) -> list[tuple[str, str]]:
+def _overlay_paths(
+    base_path: str, *, profile_override: Optional[str] = None
+) -> list[tuple[str, str]]:
     """[(kind, path)] в порядке приоритета load_config: managed, project, затем
     (спека §2, ось 2 — контент профиля ложится ПОВЕРХ всех файловых слоёв) активный
     профиль, если указатель резолвится. Указатель — общим резолвом
@@ -87,7 +94,10 @@ def _overlay_paths(base_path: str, *, profile_override: Optional[str] = None) ->
         project_local_config_path,
     )
     from gc_core.config_modules.layers import resolve_profile_pointer
-    from gc_core.config_modules.profiles import discover_profiles, profile_roots
+    from gc_core.config_modules.profiles import (
+        discover_profiles,
+        profile_roots,
+    )
 
     base_abs = os.path.abspath(base_path)
     out: list[tuple[str, str]] = []
@@ -100,12 +110,20 @@ def _overlay_paths(base_path: str, *, profile_override: Optional[str] = None) ->
     if project is not None and os.path.abspath(project) != base_abs:
         out.append(("project", project))
 
-    pointer = profile_override if profile_override is not None else resolve_profile_pointer(base_path)
+    pointer = (
+        profile_override
+        if profile_override is not None
+        else resolve_profile_pointer(base_path)
+    )
     if pointer:
         roots = profile_roots(_Path(os.getcwd()), _Path(base_path))
         ref = discover_profiles(roots).get(pointer)
         if ref is not None:
-            kind = "profile:project" if ref.root_kind == "project" else "profile:base"
+            kind = (
+                "profile:project"
+                if ref.root_kind == "project"
+                else "profile:base"
+            )
             out.append((kind, str(ref.path)))
 
     return out
@@ -131,7 +149,9 @@ def origins(
     `profile_override` — как у `_overlay_paths`.
     """
     keys = list(dotted_keys)
-    _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
+    _candidates = {
+        Path(p).resolve(): doc for p, doc in (candidates or {}).items()
+    }
 
     def _document(path):
         # `{}` — настоящий (пустой) кандидат, а не «кандидата нет»: `or` их бы спутал.
@@ -145,7 +165,9 @@ def origins(
     kinds: Dict[str, str] = dict.fromkeys(keys, "")
     paths: Dict[str, Optional[str]] = dict.fromkeys(keys)
 
-    for overlay_kind, overlay_path in _overlay_paths(base_path, profile_override=profile_override):
+    for overlay_kind, overlay_path in _overlay_paths(
+        base_path, profile_override=profile_override
+    ):
         merged = deep_merge(merged, _document(overlay_path))
         for dotted in keys:
             value = config_raw.value_at(merged, dotted)
@@ -155,7 +177,10 @@ def origins(
 
     return {
         dotted: Origin(
-            raw=raw[dotted], overlay_kind=kinds[dotted], overlay_path=paths[dotted], effective=effective[dotted]
+            raw=raw[dotted],
+            overlay_kind=kinds[dotted],
+            overlay_path=paths[dotted],
+            effective=effective[dotted],
         )
         for dotted in keys
     }
@@ -169,7 +194,14 @@ def origins(
 # её секция или она сама: `assign.subagents.<имя>` ищется в файлах именно этим
 # путём. Голая секция `assign` называла бы файл, где привязок больше, а не тот,
 # где лежит сломанная (ревью: смешанная ошибка теряла строку про привязки).
-ERROR_SUSPECT_KEYS = ("slots.default", "slots.light", "slots.max", "assign", "models", "profile")
+ERROR_SUSPECT_KEYS = (
+    "slots.default",
+    "slots.light",
+    "slots.max",
+    "assign",
+    "models",
+    "profile",
+)
 
 # Отказ резолва указателя (`profiles.resolve_profile`) ключа не называет — он
 # по-русски: 'профиль "<имя>" не найден; искал: …'. Без этой сверки файл с
@@ -188,16 +220,23 @@ def error_keys(error_text: str) -> list:
     виновник первой (нередко единственной) ошибки терялся (ревью MR #80, #3:
     снималась только конфиговая вводная, профильная — нет). `removeprefix` двух
     подряд безопасен: текст начинается максимум с одной из них."""
-    error_text = error_text.removeprefix(SCHEMA_ERROR_PREFIX).removeprefix(PROFILE_SCHEMA_ERROR_PREFIX)
+    error_text = error_text.removeprefix(SCHEMA_ERROR_PREFIX).removeprefix(
+        PROFILE_SCHEMA_ERROR_PREFIX
+    )
     heads = [segment.split(": ", 1)[0] for segment in error_text.split("; ")]
     heads = [
-        "profile" if head.startswith(_POINTER_NOT_FOUND[0]) and head.endswith(_POINTER_NOT_FOUND[1]) else head
+        "profile"
+        if head.startswith(_POINTER_NOT_FOUND[0])
+        and head.endswith(_POINTER_NOT_FOUND[1])
+        else head
         for head in heads
     ]
     keys: list = []
     for suspect in ERROR_SUSPECT_KEYS:
         for head in heads:
-            if (head == suspect or head.startswith(f"{suspect}.")) and head not in keys:
+            if (
+                head == suspect or head.startswith(f"{suspect}.")
+            ) and head not in keys:
                 keys.append(head)
     return keys
 
@@ -240,7 +279,12 @@ def error_origins(
     (`onboarding.explain_broken_config`) и отказа записи, вынесенного по стеку
     (`config_modules.registry_write`): вторая редакция правила «какой файл
     виноват» разошлась бы с первой на первой же правке списка подозреваемых."""
-    return key_origins(base_path, error_keys(error_text), candidates=candidates, profile_override=profile_override)
+    return key_origins(
+        base_path,
+        error_keys(error_text),
+        candidates=candidates,
+        profile_override=profile_override,
+    )
 
 
 def key_origins(
@@ -257,13 +301,29 @@ def key_origins(
     Под `profile_override` указатель `profile` в файлах инертен — загрузчик его
     не читает, имя пришло из флага — и виновником не называется: человека
     послали бы править ключ, который в этой сессии ничего не решал."""
-    keys = [key for key in keys if not (profile_override is not None and key == "profile")]
+    keys = [
+        key
+        for key in keys
+        if not (profile_override is not None and key == "profile")
+    ]
     if not keys:
         return []
-    found = origins(base_path, keys, candidates=candidates, profile_override=profile_override)
+    found = origins(
+        base_path,
+        keys,
+        candidates=candidates,
+        profile_override=profile_override,
+    )
     by_file: Dict[str, tuple] = {}
     for key in keys:
         origin = found[key]
-        kind, path = (origin.overlay_kind, origin.overlay_path) if origin.overlay_path else ("base", str(base_path))
+        kind, path = (
+            (origin.overlay_kind, origin.overlay_path)
+            if origin.overlay_path
+            else ("base", str(base_path))
+        )
         by_file.setdefault(path, (kind, []))[1].append(key)
-    return [ErrorOrigin(kind=kind, path=path, keys=tuple(file_keys)) for path, (kind, file_keys) in by_file.items()]
+    return [
+        ErrorOrigin(kind=kind, path=path, keys=tuple(file_keys))
+        for path, (kind, file_keys) in by_file.items()
+    ]

@@ -21,7 +21,9 @@ def test_contains_all_cells():
 
 
 def test_has_no_trailing_newline():
-    assert not table_to_text(HEADERS, ROWS, ALIGNS, width=60).plain.endswith("\n")
+    assert not table_to_text(HEADERS, ROWS, ALIGNS, width=60).plain.endswith(
+        "\n"
+    )
 
 
 def test_narrow_width_produces_more_lines():
@@ -31,7 +33,9 @@ def test_narrow_width_produces_more_lines():
 
 
 def test_lines_fit_requested_width():
-    for line in table_to_text(HEADERS, ROWS, ALIGNS, width=40).plain.split("\n"):
+    for line in table_to_text(HEADERS, ROWS, ALIGNS, width=40).plain.split(
+        "\n"
+    ):
         assert len(line) <= 40
 
 

@@ -28,7 +28,9 @@ def _specs(send_tool_strict: bool) -> list:
     # `run_coro_blocking`. Фикстура синхронная и своего loop не имеет, поэтому
     # поднимаем его здесь одним `asyncio.run`.
     async def _build():
-        return await abuild_tools_data({**_CONFIG, "send_tool_strict": send_tool_strict})
+        return await abuild_tools_data(
+            {**_CONFIG, "send_tool_strict": send_tool_strict}
+        )
 
     _, specs, *_ = asyncio.run(_build())
     return specs
@@ -70,7 +72,9 @@ def test_disabled_keeps_strict_out_of_chat_completions_payload(specs_off):
     wire = normalize_chat_completions_tools(specs_off)
 
     assert wire
-    assert [t["function"]["name"] for t in wire if "strict" in t["function"]] == []
+    assert [
+        t["function"]["name"] for t in wire if "strict" in t["function"]
+    ] == []
 
 
 def test_disabled_keeps_strict_out_of_responses_payload(specs_off):
@@ -81,6 +85,8 @@ def test_disabled_keeps_strict_out_of_responses_payload(specs_off):
         previous_response_id=None,
     )
 
-    call_data = create_call_data_responses([{"role": "user", "content": "hi"}], state)
+    call_data = create_call_data_responses(
+        [{"role": "user", "content": "hi"}], state
+    )
 
     assert [t["name"] for t in call_data["tools"] if "strict" in t] == []

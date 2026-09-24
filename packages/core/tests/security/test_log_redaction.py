@@ -52,7 +52,13 @@ def test_no_false_positive_on_plain_text():
 
 def test_sensitive_keys_masked():
     r = Redactor()
-    out = r.redact({"Authorization": "Bearer x", "X-Api-Key": "secret123", "model": "qwen"})
+    out = r.redact(
+        {
+            "Authorization": "Bearer x",
+            "X-Api-Key": "secret123",
+            "model": "qwen",
+        }
+    )
     assert out["Authorization"] == MASK
     assert out["X-Api-Key"] == MASK
     assert out["model"] == "qwen"
@@ -114,7 +120,14 @@ def test_token_count_keys_not_masked():
 def test_token_word_keys_masked():
     """Одиночное слово token / *_token — секрет, маскируем."""
     r = Redactor()
-    out = r.redact({"token": "abc", "access_token": "xyz", "auth_token": "q", "x-token": "w"})
+    out = r.redact(
+        {
+            "token": "abc",
+            "access_token": "xyz",
+            "auth_token": "q",
+            "x-token": "w",
+        }
+    )
     assert out["token"] == MASK
     assert out["access_token"] == MASK
     assert out["auth_token"] == MASK

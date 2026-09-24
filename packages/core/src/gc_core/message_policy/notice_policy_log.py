@@ -37,7 +37,9 @@ def log_notice_policy_step(
         parts.append(f"tool_usage_notice_cnt: {', '.join(tool_parts)}")
 
     if long_interval is not None and long_check_cnt is not None:
-        parts.append(f"project_memory_check_cnt={long_check_cnt}/{long_interval}")
+        parts.append(
+            f"project_memory_check_cnt={long_check_cnt}/{long_interval}"
+        )
 
     if not parts:
         return

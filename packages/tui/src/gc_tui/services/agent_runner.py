@@ -198,7 +198,9 @@ class AgentRunner:
         with self._build_lock:
             if self._executor is None:
                 if self._executor_factory is None:
-                    raise RuntimeError("AgentRunner: ни executor, ни executor_factory не заданы")
+                    raise RuntimeError(
+                        "AgentRunner: ни executor, ни executor_factory не заданы"
+                    )
                 self._executor = self._executor_factory()
                 # Ставим порт на ctx собранного executor: ядро спросит через
                 # него вместо stdin. redirect_stdin оставляем — он страхует
@@ -230,7 +232,9 @@ class AgentRunner:
 
         with self._lock:
             self._workers += 1
-        threading.Thread(target=_target, name="gc-ua-warm", daemon=True).start()
+        threading.Thread(
+            target=_target, name="gc-ua-warm", daemon=True
+        ).start()
 
     def is_running(self) -> bool:
         with self._lock:
@@ -289,14 +293,18 @@ class AgentRunner:
                 finally:
                     self._worker_exit()
 
-            t = threading.Thread(target=_target, name="gc-ua-compact", daemon=True)
+            t = threading.Thread(
+                target=_target, name="gc-ua-compact", daemon=True
+            )
             self._thread = t
             self._workers += 1
         t.start()
         return True
 
     @staticmethod
-    def _run_args(*, query, technical, message_id, display_query, skill_loaded):
+    def _run_args(
+        *, query, technical, message_id, display_query, skill_loaded
+    ):
         """Построить параллельные списки аргументов для executor.run.
 
         Технический хвост (technical) получает None в display_contents/skills_loaded,
@@ -311,7 +319,12 @@ class AgentRunner:
             display_contents = [display_query, None]
             skills_loaded = [skill_loaded, None]
             mids = [message_id, None] if message_id else None
-        return {"msgs": msgs, "display_contents": display_contents, "skills_loaded": skills_loaded, "message_ids": mids}
+        return {
+            "msgs": msgs,
+            "display_contents": display_contents,
+            "skills_loaded": skills_loaded,
+            "message_ids": mids,
+        }
 
     def start(
         self,
@@ -363,7 +376,12 @@ class AgentRunner:
         return t is not None and t.is_alive() and self._thread_kind != "run"
 
     def _spawn_run_locked(
-        self, batch: dict, *, thread_id: str, start_new_thread: bool, system: str
+        self,
+        batch: dict,
+        *,
+        thread_id: str,
+        start_new_thread: bool,
+        system: str,
     ) -> threading.Thread:
         """Завести воркер прогона. Звать под `_lock`; запускает вызывающий."""
         self._thread_kind = "run"
@@ -379,7 +397,9 @@ class AgentRunner:
         self._workers += 1
         return t
 
-    def _run_worker(self, batch: dict, thread_id: str, start_new_thread: bool, system: str) -> None:
+    def _run_worker(
+        self, batch: dict, thread_id: str, start_new_thread: bool, system: str
+    ) -> None:
         executor = None
         # Закрыл ли ЭТОТ воркер свой прогон. Закрытый прогон трогать больше
         # нельзя: сразу после закрытия `add_message` вправе завести следующий
@@ -407,7 +427,13 @@ class AgentRunner:
                 if self._stop_requested:
                     ending = "stopped"
                     return
-                _run_agent(executor, batch, thread_id=thread_id, start_new_thread=start_new_thread, system=system)
+                _run_agent(
+                    executor,
+                    batch,
+                    thread_id=thread_id,
+                    start_new_thread=start_new_thread,
+                    system=system,
+                )
                 while True:
                     outcome = getattr(executor, "last_terminal_outcome", None)
                     if self._on_complete is not None:
@@ -426,7 +452,13 @@ class AgentRunner:
                     # отдельным ходом того же треда: иначе executor (он в TUI
                     # один на сессию) отдал бы его СЛЕДУЮЩЕМУ запросу
                     # пользователя, позади этого запроса и одним с ним батчем.
-                    _run_agent(executor, _tail_batch(tail), thread_id=thread_id, start_new_thread=False, system=system)
+                    _run_agent(
+                        executor,
+                        _tail_batch(tail),
+                        thread_id=thread_id,
+                        start_new_thread=False,
+                        system=system,
+                    )
             except Exception as exc:
                 self._emit_error(exc)
             except asyncio.CancelledError:
@@ -439,10 +471,14 @@ class AgentRunner:
                     # Мимо закрытия — ошибка, отмена или стоп до старта прогона.
                     # Хвост не доигрываем: реплики упавшего хода UI уже пометил
                     # неотправленными (`_mark_pending_failed`).
-                    self._close_or_take_tail(executor, ending=ending, lost=in_flight)
+                    self._close_or_take_tail(
+                        executor, ending=ending, lost=in_flight
+                    )
                 self._worker_exit()
 
-    def _close_or_take_tail(self, executor, *, ending: str = "", lost: list | tuple = ()) -> list:
+    def _close_or_take_tail(
+        self, executor, *, ending: str = "", lost: list | tuple = ()
+    ) -> list:
         """Хвост, который надо доиграть, — или закрыть прогон, если доигрывать нечего.
 
         Проверка и закрытие — один шаг под `_lock`, как и решение в
@@ -547,7 +583,12 @@ class AgentRunner:
             # Занятый воркер — это и идущий прогон (сообщение уйдёт в его
             # очередь), и `/compact`: ход рядом с ним шёл бы параллельно сжатию
             # на том же executor и треде.
-            if self._busy_locked() or target is None or self._stop_requested or self._marked_stopped:
+            if (
+                self._busy_locked()
+                or target is None
+                or self._stop_requested
+                or self._marked_stopped
+            ):
                 ex.add_message(message)
                 return
             # Прогон уже закрылся: UI спросил `is_running()` до закрытия, а
@@ -601,7 +642,11 @@ class AgentRunner:
         ``timeout_sec`` — макс. ожидание ответа (default ``CONFIRM_WAIT_TIMEOUT_SEC``).
         По таймауту / stop → fail-closed ``deny_once`` (O11).
         """
-        wait_timeout = CONFIRM_WAIT_TIMEOUT_SEC if timeout_sec is None else float(timeout_sec)
+        wait_timeout = (
+            CONFIRM_WAIT_TIMEOUT_SEC
+            if timeout_sec is None
+            else float(timeout_sec)
+        )
 
         def _tui_confirm(
             *,

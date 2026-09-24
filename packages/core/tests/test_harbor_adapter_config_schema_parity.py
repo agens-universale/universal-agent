@@ -46,14 +46,19 @@ def _schema_defaults() -> dict:
 def test_bench_config_covers_every_schema_key():
     missing = sorted(set(_schema_defaults()) - set(_config()))
 
-    assert missing == [], f"schema keys absent from the bench config: {missing}"
+    assert missing == [], (
+        f"schema keys absent from the bench config: {missing}"
+    )
 
 
 def test_keys_consumers_read_hard_are_present():
     """A KeyError on any of these kills every trial of a bench run."""
     config = _config()
 
-    assert config["backend_request_timeout_sec"] == AppConfig.model_validate({}).backend.request_timeout_sec
+    assert (
+        config["backend_request_timeout_sec"]
+        == AppConfig.model_validate({}).backend.request_timeout_sec
+    )
 
 
 def test_bench_defaults_win_over_schema_defaults():
@@ -75,9 +80,17 @@ def test_profile_overrides_win_over_bench_defaults():
 
 
 def test_runtime_url_and_model_win_over_profile():
-    config = _config({"completions_url": "http://stale/v1/chat/completions", "model": "stale-model"})
+    config = _config(
+        {
+            "completions_url": "http://stale/v1/chat/completions",
+            "model": "stale-model",
+        }
+    )
 
-    assert config["completions_url"] == "http://127.0.0.1:9999/v1/chat/completions"
+    assert (
+        config["completions_url"]
+        == "http://127.0.0.1:9999/v1/chat/completions"
+    )
     assert config["model"] == "test-model"
 
 
@@ -85,4 +98,6 @@ def test_nested_override_merges_instead_of_replacing():
     config = _config({"chat_completion_kwargs": {"tool_choice": "none"}})
 
     assert config["chat_completion_kwargs"]["tool_choice"] == "none"
-    assert config["chat_completion_kwargs"]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert config["chat_completion_kwargs"]["chat_template_kwargs"] == {
+        "enable_thinking": False
+    }

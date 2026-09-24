@@ -19,7 +19,11 @@ def _post(status=None, net="", json_body=True, payload=None):
     """Подменный chat/completions. Четвёртым элементом идёт ТЕЛО ответа (разобранный
     JSON или None), а не флаг «тело было JSON»: по нему проба и вердикт выносит, и
     канарейка сравнивает ответы. `json_body=False` — не-JSON (HTML гейтвея)."""
-    body = payload if payload is not None else ({"error": {"message": "x"}} if json_body else None)
+    body = (
+        payload
+        if payload is not None
+        else ({"error": {"message": "x"}} if json_body else None)
+    )
 
     def post_ex(endpoint, auth, model, *, verify=True, http_post_ex=None):
         return status, net, 11, body
@@ -37,10 +41,23 @@ def test_probe_auth_ignores_public_models_route():
     public_models = _fetch(models=[mp.ModelInfo(id="m1")], status=200)
     completions_needs_token = _post(status=401)
 
-    old = probe("http://x/v1/chat/completions", None, True, "", fetch_ex=public_models, post_ex=completions_needs_token)
+    old = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "",
+        fetch_ex=public_models,
+        post_ex=completions_needs_token,
+    )
     assert old.verdict == "ok"  # прежнее поведение probe() не тронуто
 
-    r = probe_auth("http://x/v1/chat/completions", None, True, "", post_ex=completions_needs_token)
+    r = probe_auth(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "",
+        post_ex=completions_needs_token,
+    )
     assert r.verdict == "rejected" and r.http_status == 401
 
 
@@ -54,7 +71,13 @@ def test_probe_auth_rejects_non_latin1_without_network():
         sent["n"] += 1
         return 200, "", 1, True
 
-    r = probe_auth("http://x/v1/chat/completions", "Bearer уквxxx", True, "", post_ex=post_ex)
+    r = probe_auth(
+        "http://x/v1/chat/completions",
+        "Bearer уквxxx",
+        True,
+        "",
+        post_ex=post_ex,
+    )
     assert sent["n"] == 0
     assert r.verdict == "rejected" and "недопустимые символы" in r.detail
     assert r.auth_state == "rejected"
@@ -64,7 +87,13 @@ def test_offline_flag_only_for_real_network_failure():
     """«Сервер недоступен» можно писать только когда до сервера не дошли.
     Прочие unknown (сервер ответил, но не вердиктно) обязаны нести свою причину —
     иначе клиентская ошибка читается как лежачий сервер."""
-    net = probe("http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(status=None, net="timeout"))
+    net = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(status=None, net="timeout"),
+    )
     assert net.verdict == "unknown" and net.offline is True
 
     server_5xx = probe(
@@ -90,7 +119,11 @@ def test_non_latin1_token_is_a_data_verdict():
 
 def test_ok_from_stage1_models():
     r = probe(
-        "http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(models=[mp.ModelInfo(id="m1")], status=200)
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(models=[mp.ModelInfo(id="m1")], status=200),
     )
     assert r.verdict == "ok" and r.models and r.latency_ms == 7
     assert r.reachable and r.auth_ok
@@ -114,7 +147,12 @@ def test_stage1_401_with_working_post_is_ok():
 def test_stage1_401_and_post_401_is_rejected():
     """401 и на models-цепочке, и на самом chat/completions → токен отклонён."""
     r = probe(
-        "http://x/v1/chat/completions", "Bearer bad", True, "m1", fetch_ex=_fetch(status=401), post_ex=_post(status=401)
+        "http://x/v1/chat/completions",
+        "Bearer bad",
+        True,
+        "m1",
+        fetch_ex=_fetch(status=401),
+        post_ex=_post(status=401),
     )
     assert r.verdict == "rejected" and r.http_status == 401
     assert "401" in r.detail and not r.auth_ok
@@ -125,7 +163,12 @@ def test_no_model_dummy_post_non401_token_accepted():
     с заглушкой ответил 500 «незнакомая модель» → авторизация пройдена → ok.
     Строка «Подключение» судит только сервер+токен, модель не её забота."""
     r = probe(
-        "http://x/v1/chat/completions", "Bearer good", True, "", fetch_ex=_fetch(status=401), post_ex=_post(status=500)
+        "http://x/v1/chat/completions",
+        "Bearer good",
+        True,
+        "",
+        fetch_ex=_fetch(status=401),
+        post_ex=_post(status=500),
     )
     assert r.verdict == "ok" and r.auth_ok
 
@@ -133,7 +176,12 @@ def test_no_model_dummy_post_non401_token_accepted():
 def test_no_model_dummy_post_401_is_rejected():
     """Без модели: POST-заглушка тоже 401 → токен отклонён."""
     r = probe(
-        "http://x/v1/chat/completions", "Bearer bad", True, "", fetch_ex=_fetch(status=401), post_ex=_post(status=401)
+        "http://x/v1/chat/completions",
+        "Bearer bad",
+        True,
+        "",
+        fetch_ex=_fetch(status=401),
+        post_ex=_post(status=401),
     )
     assert r.verdict == "rejected" and r.http_status == 401
 
@@ -177,25 +225,52 @@ def test_no_model_sends_dummy_probe_model():
         seen["model"] = model
         return 500, "", 11, True
 
-    r = probe("http://x/v1/chat/completions", "Bearer good", True, "", fetch_ex=_fetch(status=401), post_ex=post_ex)
+    r = probe(
+        "http://x/v1/chat/completions",
+        "Bearer good",
+        True,
+        "",
+        fetch_ex=_fetch(status=401),
+        post_ex=post_ex,
+    )
     assert r.verdict == "ok"
     assert seen["model"] and "probe" in seen["model"]
 
 
 def test_network_stage1_is_unknown():
-    r = probe("http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(net="timeout"))
+    r = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(net="timeout"),
+    )
     assert r.verdict == "unknown" and not r.reachable
     assert "timeout" in r.detail
 
 
 def test_404_on_models_falls_to_stage2_ok():
-    r = probe("http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(status=404), post_ex=_post(status=200))
+    r = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=_post(status=200),
+    )
     assert r.verdict == "ok" and r.models is None  # сервер жив, списка нет
 
 
 def test_404_on_models_and_stage2_404_json_blames_model():
     """Реальная модель, 404 с JSON-телом → приложение не знает модель."""
-    r = probe("http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(status=404), post_ex=_post(status=404))
+    r = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=_post(status=404),
+    )
     assert r.verdict == "rejected" and r.http_status == 404
     assert "404" in r.detail and "модел" in r.detail
 
@@ -218,27 +293,51 @@ def test_404_on_models_and_stage2_404_html_names_both():
 
 def test_stage2_401_is_rejected():
     r = probe(
-        "http://x/v1/chat/completions", "Bearer bad", True, "m1", fetch_ex=_fetch(status=404), post_ex=_post(status=401)
+        "http://x/v1/chat/completions",
+        "Bearer bad",
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=_post(status=401),
     )
     assert r.verdict == "rejected" and r.http_status == 401
 
 
 def test_stage2_network_is_unknown():
     r = probe(
-        "http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(status=404), post_ex=_post(net="conn refused")
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=_post(net="conn refused"),
     )
     assert r.verdict == "unknown"
 
 
 def test_stage2_5xx_is_unknown_not_rejected():
-    r = probe("http://x/v1/chat/completions", None, True, "m1", fetch_ex=_fetch(status=404), post_ex=_post(status=500))
+    r = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=_post(status=500),
+    )
     assert r.verdict == "unknown"  # 500 — не вердикт о данных
 
 
 def test_no_model_stage1_404_dummy_post_ok():
     """Без модели ступень 2 работает и после 404-цепочки (заглушка вместо
     «задайте модель»): POST прошёл → сервер жив, auth ок."""
-    r = probe("http://x/v1/chat/completions", None, True, "", fetch_ex=_fetch(status=404), post_ex=_post(status=200))
+    r = probe(
+        "http://x/v1/chat/completions",
+        None,
+        True,
+        "",
+        fetch_ex=_fetch(status=404),
+        post_ex=_post(status=200),
+    )
     assert r.verdict == "ok"
 
 
@@ -287,7 +386,13 @@ def test_auth_accepted_when_401_moves_to_404():
     """Живой кейс ST (несуществующая модель): контроль без токена → 401, с
     токеном → 404. Отказ «переехал» дальше авторизации → путь существует,
     ТОКЕН ПРИНЯТ; 404 — про модель, это забота секции «Модель»."""
-    wt = ProbeResult("rejected", 404, None, 25, "отклонено сервером (404): проверьте адрес и имя модели")
+    wt = ProbeResult(
+        "rejected",
+        404,
+        None,
+        25,
+        "отклонено сервером (404): проверьте адрес и имя модели",
+    )
     r = interpret_auth(_r401(), wt, has_token=True)
     assert r.verdict == "ok" and r.auth_state == "accepted"
     assert r.detail == "токен принят"
@@ -307,15 +412,23 @@ def test_probe_connection_runs_canary_only_when_ambiguous():
 
     calls = []
 
-    def fake(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+    def fake(
+        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+    ):
         calls.append(auth)
         if auth is None:
-            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
         if auth == "Bearer user":
-            return ProbeResult("rejected", 404, None, 5, "отклонено сервером (404)")
+            return ProbeResult(
+                "rejected", 404, None, 5, "отклонено сервером (404)"
+            )
         return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
 
-    r = probe_connection("http://x/v1/chat/completions", "Bearer user", True, "", probe_fn=fake)
+    r = probe_connection(
+        "http://x/v1/chat/completions", "Bearer user", True, "", probe_fn=fake
+    )
     assert len(calls) == 3  # control + токен + канарейка
     assert r.verdict == "ok" and r.auth_state == "accepted"
 
@@ -326,11 +439,15 @@ def test_probe_connection_skips_canary_on_plain_401():
 
     calls = []
 
-    def fake(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+    def fake(
+        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+    ):
         calls.append(auth)
         return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
 
-    r = probe_connection("http://x/v1/chat/completions", "Bearer bad", True, "", probe_fn=fake)
+    r = probe_connection(
+        "http://x/v1/chat/completions", "Bearer bad", True, "", probe_fn=fake
+    )
     assert len(calls) == 2  # control + токен, канарейки нет
     assert r.auth_state == "rejected"
 
@@ -341,11 +458,15 @@ def test_probe_connection_skips_probing_when_server_needs_no_token():
 
     calls = []
 
-    def fake(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+    def fake(
+        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+    ):
         calls.append(auth)
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    r = probe_connection("http://x/v1/chat/completions", "Bearer any", True, "", probe_fn=fake)
+    r = probe_connection(
+        "http://x/v1/chat/completions", "Bearer any", True, "", probe_fn=fake
+    )
     assert calls == [None]
     assert r.auth_state == "not_required"
 
@@ -390,8 +511,22 @@ def test_auth_accepted_when_only_the_body_differs():
     валидный дошёл до проверки модели («Invalid model name»), мусорный застрял на
     поиске ключа в базе («No connected db.»). Одного статуса мало: по нему сервер
     выглядит неразличающим, и настоящий токен объявлялся неподтверждённым."""
-    wt = ProbeResult("ok", 400, None, 25, "доступен", body_signature='{"error":{"message":"Invalid model name"}}')
-    canary = ProbeResult("ok", 400, None, 25, "доступен", body_signature='{"error":{"message":"No connected db."}}')
+    wt = ProbeResult(
+        "ok",
+        400,
+        None,
+        25,
+        "доступен",
+        body_signature='{"error":{"message":"Invalid model name"}}',
+    )
+    canary = ProbeResult(
+        "ok",
+        400,
+        None,
+        25,
+        "доступен",
+        body_signature='{"error":{"message":"No connected db."}}',
+    )
     r = interpret_auth(_r401(), wt, has_token=True, canary=canary)
     assert r.verdict == "ok" and r.auth_state == "accepted"
 
@@ -427,7 +562,14 @@ def test_auth_network_failure_keeps_the_offline_flag():
     Ручная пересборка по полям теряла его (и потеряет любое будущее поле
     ProbeResult): рендер печатал «? не удалось проверить…» вместо
     «✗ сервер недоступен», а глиф «Подключения» судил по неполным данным."""
-    wt = ProbeResult("unknown", None, None, 5000, "нет соединения (ConnectionError)", offline=True)
+    wt = ProbeResult(
+        "unknown",
+        None,
+        None,
+        5000,
+        "нет соединения (ConnectionError)",
+        offline=True,
+    )
     r = interpret_auth(_r401(), wt, has_token=True)
     assert r.offline is True
     assert r.verdict == "unknown" and r.auth_state != "accepted"
@@ -442,6 +584,12 @@ def test_auth_unknown_control_passes_through():
 
 def test_auth_404_control_not_about_auth():
     """404 на контроле — проблема пути/модели, не авторизации → отдаём как есть."""
-    ctrl = ProbeResult("rejected", 404, None, 20, "отклонено сервером (404): проверьте путь")
+    ctrl = ProbeResult(
+        "rejected", 404, None, 20, "отклонено сервером (404): проверьте путь"
+    )
     r = interpret_auth(ctrl, None, has_token=False)
-    assert r.verdict == "rejected" and "404" in r.detail and "авторизаци" not in r.detail
+    assert (
+        r.verdict == "rejected"
+        and "404" in r.detail
+        and "авторизаци" not in r.detail
+    )

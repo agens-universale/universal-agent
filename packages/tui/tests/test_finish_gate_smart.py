@@ -43,7 +43,9 @@ def test_schema_rejects_unknown_mode():
 def test_state_counter_starts_zero_and_resets_on_flush():
     from gc_core.states import State
 
-    st = State.__new__(State)  # без тяжёлого __init__ (get_project_data и т.п.)
+    st = State.__new__(
+        State
+    )  # без тяжёлого __init__ (get_project_data и т.п.)
     st.turn_tool_calls = 0
     st.current_user_intent = []
     st.user_intent_log = []
@@ -56,9 +58,14 @@ def test_state_counter_starts_zero_and_resets_on_flush():
 def test_apply_finish_gate_mode_projects_smart():
     from gc_tui.toggles import apply_finish_gate_mode
 
-    cfg = {"tui_finish_gate_mode": "smart", "tui_finish_gate_mode_explicit": True}
+    cfg = {
+        "tui_finish_gate_mode": "smart",
+        "tui_finish_gate_mode_explicit": True,
+    }
     apply_finish_gate_mode(cfg)
-    assert cfg["strict_turn_finish_validation"] is True  # судья потенциально включён
+    assert (
+        cfg["strict_turn_finish_validation"] is True
+    )  # судья потенциально включён
     assert cfg["finish_gate_smart"] is True
 
 
@@ -67,22 +74,37 @@ def test_apply_finish_gate_mode_on_off_unchanged():
 
     on = {"tui_finish_gate_mode": "on", "tui_finish_gate_mode_explicit": True}
     apply_finish_gate_mode(on)
-    assert on["strict_turn_finish_validation"] is True and on["finish_gate_smart"] is False
-    off = {"tui_finish_gate_mode": "off", "tui_finish_gate_mode_explicit": True}
+    assert (
+        on["strict_turn_finish_validation"] is True
+        and on["finish_gate_smart"] is False
+    )
+    off = {
+        "tui_finish_gate_mode": "off",
+        "tui_finish_gate_mode_explicit": True,
+    }
     apply_finish_gate_mode(off)
-    assert off["strict_turn_finish_validation"] is False and off["finish_gate_smart"] is False
+    assert (
+        off["strict_turn_finish_validation"] is False
+        and off["finish_gate_smart"] is False
+    )
 
 
 def _guard(cfg, turn_tool_calls):
     from gc_core.intent_guard.guard import FinishGateGuard
 
     ctx = SimpleNamespace(config_dict=cfg)
-    state = SimpleNamespace(parent_state_id=None, turn_tool_calls=turn_tool_calls)
+    state = SimpleNamespace(
+        parent_state_id=None, turn_tool_calls=turn_tool_calls
+    )
     return FinishGateGuard(ctx=ctx, state=state)
 
 
 def test_smart_skips_judge_without_tool_calls():
-    cfg = {"backend_api_mode": "chat_completions", "strict_turn_finish_validation": True, "finish_gate_smart": True}
+    cfg = {
+        "backend_api_mode": "chat_completions",
+        "strict_turn_finish_validation": True,
+        "finish_gate_smart": True,
+    }
     assert _guard(cfg, 0).enabled is False
     assert _guard(cfg, 1).enabled is True
 
@@ -90,9 +112,17 @@ def test_smart_skips_judge_without_tool_calls():
 def test_cli_server_unaffected_no_smart_key():
     """CLI/server: apply_finish_gate_mode не зовётся → ключа finish_gate_smart нет →
     guard работает как прежде (strict AND chat_completions), счётчик не читается."""
-    cfg = {"backend_api_mode": "chat_completions", "strict_turn_finish_validation": True}
-    assert _guard(cfg, 0).enabled is True  # 0 вызовов не гасит судью без smart-ключа
-    off = {"backend_api_mode": "chat_completions", "strict_turn_finish_validation": False}
+    cfg = {
+        "backend_api_mode": "chat_completions",
+        "strict_turn_finish_validation": True,
+    }
+    assert (
+        _guard(cfg, 0).enabled is True
+    )  # 0 вызовов не гасит судью без smart-ключа
+    off = {
+        "backend_api_mode": "chat_completions",
+        "strict_turn_finish_validation": False,
+    }
     assert _guard(off, 5).enabled is False
 
 
@@ -120,7 +150,9 @@ def test_technical_user_message_does_not_reset_tool_counter():
     """Technical user (reject судьи / bounce / bad args) не сбрасывает счётчик
     и не попадает в current_user_intent."""
     from gc_core.intent_log.user_turn import append_user_asks_from_messages
-    from gc_core.processing_responses import _make_technical_feedback_user_message
+    from gc_core.processing_responses import (
+        _make_technical_feedback_user_message,
+    )
     from gc_core.states import State
 
     st = State.__new__(State)
@@ -138,7 +170,9 @@ def test_technical_user_message_does_not_reset_tool_counter():
     assert st.current_user_intent == []
 
 
-def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatch):
+def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(
+    monkeypatch,
+):
     """Юзер дописал во время хода (pending drain) — счётчик не обнуляется;
     finish_gate_smart всё ещё видит tool calls и зовёт судью."""
     import json
@@ -153,9 +187,13 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         tool_name = kwargs.get("tool_name")
         arguments = kwargs.get("arguments")
         if tool_name != "turn_finish":
-            return json.dumps({"tool": tool_name, "ok": True}, ensure_ascii=False)
+            return json.dumps(
+                {"tool": tool_name, "ok": True}, ensure_ascii=False
+            )
         try:
-            payload = json.loads(arguments) if isinstance(arguments, str) else {}
+            payload = (
+                json.loads(arguments) if isinstance(arguments, str) else {}
+            )
         except Exception:
             payload = {}
         result = {
@@ -188,7 +226,9 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
             feedback_for_agent="",
         )
 
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture)
+    monkeypatch.setattr(
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _capture
+    )
 
     phase = {"n": 0}
 
@@ -209,7 +249,11 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
                 "type": "function_call",
                 "name": "turn_finish",
                 "arguments": json.dumps(
-                    {"solution_type": "full_solution", "task_report": "done", "handoff": "{}"},
+                    {
+                        "solution_type": "full_solution",
+                        "task_report": "done",
+                        "handoff": "{}",
+                    },
                     ensure_ascii=False,
                 ),
                 "call_id": "call_finish",
@@ -221,8 +265,14 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
     # Заглушка КОРУТИННАЯ: ядро ждёт `aapply_tool` нативно, синхронная даёт
     # "object str can't be used in 'await' expression".
     monkeypatch.setattr(pr, "aapply_tool", stub_turn_finish_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
 
     state = State(
         verbose=False,
@@ -244,7 +294,13 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(monkeypatc
         if not pending_sent["done"] and int(state.turn_tool_calls or 0) >= 1:
             pending_sent["done"] = True
             counter_when_pending.append(state.turn_tool_calls)
-            return [{"role": "user", "content": "уточнение mid-turn", "id": "m_mid"}]
+            return [
+                {
+                    "role": "user",
+                    "content": "уточнение mid-turn",
+                    "id": "m_mid",
+                }
+            ]
         return []
 
     ctx = SimpleNamespace(

@@ -8,7 +8,12 @@ async def test_build_registry_parallel_and_status(monkeypatch):
         if name == "ok":
             return (
                 [{"name": "do_x", "description": "d"}],
-                {"status": "connected", "reason": None, "tool_count": 1, "elapsed_ms": 5},
+                {
+                    "status": "connected",
+                    "reason": None,
+                    "tool_count": 1,
+                    "elapsed_ms": 5,
+                },
             )
         # «Зависание» дольше дедлайна — ждать его мы не обязаны.
         #
@@ -21,13 +26,26 @@ async def test_build_registry_parallel_and_status(monkeypatch):
         import asyncio
 
         await asyncio.sleep(timeout + 2)
-        return ([], {"status": "connected", "reason": None, "tool_count": 0, "elapsed_ms": 0})
+        return (
+            [],
+            {
+                "status": "connected",
+                "reason": None,
+                "tool_count": 0,
+                "elapsed_ms": 0,
+            },
+        )
 
     monkeypatch.setattr(reg, "_adiscover_one", fake_discover_one)
-    servers = {"ok": {"transport": "stdio", "command": "x"}, "hang": {"transport": "stdio", "command": "y"}}
+    servers = {
+        "ok": {"transport": "stdio", "command": "x"},
+        "hang": {"transport": "stdio", "command": "y"},
+    }
 
     t0 = time.monotonic()
-    tools, status = await reg._abuild_tools_registry(servers, discovery_timeout_sec=1)
+    tools, status = await reg._abuild_tools_registry(
+        servers, discovery_timeout_sec=1
+    )
     elapsed = time.monotonic() - t0
 
     assert elapsed < 1.5
@@ -41,7 +59,11 @@ async def test_discover_one_bad_command_failed_fast():
     t0 = time.monotonic()
     tools, status = await reg._adiscover_one(
         "office",
-        {"transport": "stdio", "command": "definitely-not-a-real-cmd-xyz", "args": ["--x"]},
+        {
+            "transport": "stdio",
+            "command": "definitely-not-a-real-cmd-xyz",
+            "args": ["--x"],
+        },
         timeout=8,
     )
     assert time.monotonic() - t0 < 5
@@ -57,8 +79,12 @@ def test_humanize_unwraps_exception_group():
         pass
 
     inner = ConnectError("Connection refused")
-    eg = ExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)", [inner])
-    reason = reg._humanize_discovery_error(eg, {"url": "http://localhost:8931/mcp"})
+    eg = ExceptionGroup(
+        "unhandled errors in a TaskGroup (1 sub-exception)", [inner]
+    )
+    reason = reg._humanize_discovery_error(
+        eg, {"url": "http://localhost:8931/mcp"}
+    )
     assert "нет соединения" in reason
     assert "localhost:8931" in reason
     assert "TaskGroup" not in reason

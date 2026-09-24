@@ -35,21 +35,35 @@ def _wire_runner(monkeypatch, runner, child):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
+    monkeypatch.setattr(
+        runner, "_build_child_state", as_coro(lambda role: child)
+    )
     monkeypatch.setattr(
         runner,
         "_build_child_ctx",
-        as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr-step")),
+        as_coro(
+            lambda tool_name: SimpleNamespace(logger=None, run_id="cr-step")
+        ),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
 
-    monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
-    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: "")
-    monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
+    monkeypatch.setattr(
+        runner_mod, "init_subagent_open_turn", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "get_thread_memory_registers_from_shared",
+        lambda shared: {},
+    )
+    monkeypatch.setattr(
+        runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
+    )
+    monkeypatch.setattr(
+        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+    )
 
     async def _create(*a, **k):
         return _Inst()
@@ -65,13 +79,17 @@ def _runner():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
+    ctx = SimpleNamespace(
+        logger=None, run_id="r", auth_connector=None, is_tui=False
+    )
     return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
 
 
 async def test_step_limit_returns_ok_false_not_completed(monkeypatch):
     runner, _orch = _runner()
-    child = _FakeChildState(steps=5, max_steps=5, terminal_outcome="step_limit")
+    child = _FakeChildState(
+        steps=5, max_steps=5, terminal_outcome="step_limit"
+    )
     subagent_cls = _wire_runner(monkeypatch, runner, child)
 
     async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -87,7 +105,9 @@ async def test_step_limit_returns_ok_false_not_completed(monkeypatch):
             }
         )
 
-    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    out = await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
     # Runner pass-through: child envelope returned as-is (spec §6.2).
     payload = json.loads(out)
     assert payload["ok"] is False
@@ -105,7 +125,9 @@ async def test_normal_complete_still_ok_true(monkeypatch):
     async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
         return "done"
 
-    out = await runner._arun_internal("subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent)
+    out = await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["meta"]["finish_reason"] == "completed"

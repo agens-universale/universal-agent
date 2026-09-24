@@ -48,7 +48,9 @@ async def test_confirm_y_returns_true_n_returns_false():
 
     async with TuiApp().run_test() as pilot:
         results = []
-        pilot.app.push_screen(ConfirmScreen(message="ok?"), lambda v: results.append(v))
+        pilot.app.push_screen(
+            ConfirmScreen(message="ok?"), lambda v: results.append(v)
+        )
         await pilot.pause()
         await pilot.press("y")
         await pilot.pause()

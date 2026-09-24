@@ -51,7 +51,14 @@ def test_partially_broken_list_is_not_a_checklist():
     Тул такой вызов отклоняет целиком и список не меняет; рисовать при этом
     «чек-лист 0/1» (или «очищен») значило бы врать о состоянии."""
     ev = map_message(
-        _call({"todos": [{"content": "ok", "status": "pending"}, {"status": "bad"}]}),
+        _call(
+            {
+                "todos": [
+                    {"content": "ok", "status": "pending"},
+                    {"status": "bad"},
+                ]
+            }
+        ),
         no=1,
         ts="t",
     )
@@ -60,7 +67,13 @@ def test_partially_broken_list_is_not_a_checklist():
 
 def test_output_suppressed_by_name():
     ev = map_message(
-        {"id": "m2", "type": "function_call_output", "name": "session_todo", "call_id": "call_1", "output": "{}"},
+        {
+            "id": "m2",
+            "type": "function_call_output",
+            "name": "session_todo",
+            "call_id": "call_1",
+            "output": "{}",
+        },
         no=2,
         ts="t",
     )
@@ -71,7 +84,12 @@ def test_output_suppressed_by_tool_key_chat_completions():
     # chat_completions: у output нет name, но JSON содержит "tool".
     out = json.dumps({"tool": "session_todo", "ok": True, "count": 3})
     ev = map_message(
-        {"id": "m3", "type": "function_call_output", "call_id": "call_1", "output": out},
+        {
+            "id": "m3",
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": out,
+        },
         no=3,
         ts="t",
     )
@@ -91,7 +109,12 @@ def test_garbage_arguments_do_not_map_to_todo_kind():
     from gc_tui.services.trace_mapper import map_message
 
     ev = map_message(
-        {"type": "function_call", "name": "session_todo", "call_id": "c1", "arguments": "оборванный json{{{"},
+        {
+            "type": "function_call",
+            "name": "session_todo",
+            "call_id": "c1",
+            "arguments": "оборванный json{{{",
+        },
         no=1,
         ts="t",
     )
@@ -125,7 +148,14 @@ def test_ok_output_still_suppressed():
 
     from gc_tui.services.trace_mapper import map_message
 
-    out = _json.dumps({"tool": "session_todo", "ok": True, "count": 2, "message": "Checklist replaced: 2 items."})
+    out = _json.dumps(
+        {
+            "tool": "session_todo",
+            "ok": True,
+            "count": 2,
+            "message": "Checklist replaced: 2 items.",
+        }
+    )
     ev = map_message(
         {"type": "function_call_output", "call_id": "c1", "output": out},
         no=2,

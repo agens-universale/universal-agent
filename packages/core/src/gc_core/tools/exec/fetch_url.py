@@ -47,7 +47,9 @@ class FetchUrl(FetchUrlBase):
                 "content_type, is_binary, result_type, extracted_source, truncated, error, pagination fields), "
                 "then bulk text fields last (content, preview)."
             ),
-            timeout_description=(f"HTTP timeout in seconds. Default is {cls.timeout_seconds}."),
+            timeout_description=(
+                f"HTTP timeout in seconds. Default is {cls.timeout_seconds}."
+            ),
             preview_description="Maximum number of characters for HTML/text preview in the response. Default 1200.",
         )
 
@@ -114,7 +116,9 @@ Usage:
             r"""<meta\b(?=[^>]*\bproperty\s*=\s*(['"])og:description\1)(?=[^>]*\bcontent\s*=\s*(['"])(.*?)\2)[^>]*>""",
         ]
         for pattern in description_patterns:
-            description_match = re.search(pattern, html, flags=re.IGNORECASE | re.DOTALL)
+            description_match = re.search(
+                pattern, html, flags=re.IGNORECASE | re.DOTALL
+            )
             if description_match:
                 return description_match.group(3)
         return None
@@ -144,19 +148,29 @@ Usage:
         return summary_html, fallback_text
 
     async def _arequest_with_retries(
-        self, normalized_url: str, headers: Dict[str, str], effective_timeout, normalized_proxy
+        self,
+        normalized_url: str,
+        headers: Dict[str, str],
+        effective_timeout,
+        normalized_proxy,
     ):
         """(response, None) либо (None, kwargs ошибки для _result)."""
         # Контекст политики нужен на КАЖДОМ переходе редиректа, а не только
         # на стартовом адресе (его проверил гвард `enforce_url_policy`).
-        policy_context = resolve_tool_context(self, ctx=self._ctx, state=self._state)
+        policy_context = resolve_tool_context(
+            self, ctx=self._ctx, state=self._state
+        )
         last_exc = None
         attempts = 1 + self.max_retries
         for attempt in range(1, attempts + 1):
             try:
                 # Таймаут — на запрос: клиент общий и переиспользуется. Явный
                 # `proxy` тула идёт ПЕРВЫМ аргументом: он и должен побеждать окружение.
-                client = get_async_client(proxies=resolve_proxies(normalized_proxy, os.environ, normalized_url))
+                client = get_async_client(
+                    proxies=resolve_proxies(
+                        normalized_proxy, os.environ, normalized_url
+                    )
+                )
                 # Каждый переход проверяется политикой (см. redirect_policy).
                 response = await fetch_validating_redirects(
                     client,
@@ -204,7 +218,9 @@ Usage:
             result_type="error",
             error={
                 "type": "request_failed",
-                "message": str(last_exc) if last_exc else "Unknown request failure.",
+                "message": str(last_exc)
+                if last_exc
+                else "Unknown request failure.",
                 "attempts_total": attempts,
             },
         )
@@ -213,25 +229,33 @@ Usage:
         """(page_meta, (source, text)) — читаемый текст первым сработавшим экстрактором, иначе (page_meta, None)."""
         # Разбор — в поток: он синхронный, тяжёлый (trafilatura/lxml) и на
         # больших страницах занимает секунды.
-        page_meta, extracted_text = await asyncio.to_thread(self._parse_primary, text, url)
+        page_meta, extracted_text = await asyncio.to_thread(
+            self._parse_primary, text, url
+        )
         if extracted_text and extracted_text.strip():
             c = extracted_text.strip()
             if not self._looks_like_garbled_text(c):
                 return page_meta, ("trafilatura", c)
         try:
-            summary_html, fallback_text = await asyncio.to_thread(self._parse_readability, text, url)
+            summary_html, fallback_text = await asyncio.to_thread(
+                self._parse_readability, text, url
+            )
             if fallback_text and fallback_text.strip():
                 c = fallback_text.strip()
                 if not self._looks_like_garbled_text(c):
                     return page_meta, ("readability_trafilatura", c)
             cleaned_summary = self._strip_html_tags(summary_html)
-            if cleaned_summary and not self._looks_like_garbled_text(cleaned_summary):
+            if cleaned_summary and not self._looks_like_garbled_text(
+                cleaned_summary
+            ):
                 return page_meta, ("readability_stripped", cleaned_summary)
         except Exception:
             pass
         return page_meta, None
 
-    def _decode_failed_payload(self, final_url, status_code, content_type, e: Exception) -> Dict[str, Any]:
+    def _decode_failed_payload(
+        self, final_url, status_code, content_type, e: Exception
+    ) -> Dict[str, Any]:
         return dict(
             ok=True,
             final_url=final_url,
@@ -257,7 +281,9 @@ Usage:
         **kwargs,
     ) -> str:
         # Проверка аргументов и попадание в кэш — общие с simple_fetch_url.
-        early, request = self._begin_fetch(url, timeout, max_preview_chars, offset, limit, proxy)
+        early, request = self._begin_fetch(
+            url, timeout, max_preview_chars, offset, limit, proxy
+        )
         if request is None:
             return early
         _result = functools.partial(self._result, url=url)
@@ -269,7 +295,9 @@ Usage:
             request.url, headers, request.timeout, request.proxy
         )
         if isinstance(request_error, tuple):
-            return self._url_policy_blocked_result(request_error[1], request.url)
+            return self._url_policy_blocked_result(
+                request_error[1], request.url
+            )
         if request_error is not None:
             return _result(**request_error)
 
@@ -280,20 +308,34 @@ Usage:
         is_binary = self._is_binary_response(content_type, raw_content)
 
         if is_binary:
-            return _result(**self._binary_payload(final_url, status_code, content_type, request.offset, request.limit))
+            return _result(
+                **self._binary_payload(
+                    final_url,
+                    status_code,
+                    content_type,
+                    request.offset,
+                    request.limit,
+                )
+            )
 
         # Prefer explicit decoding via requests (respects apparent encoding)
         try:
             text = response.text or ""
         except Exception as e:
             # If decoding fails, treat as binary to avoid dumping bytes into chat
-            return _result(**self._decode_failed_payload(final_url, status_code, content_type, e))
+            return _result(
+                **self._decode_failed_payload(
+                    final_url, status_code, content_type, e
+                )
+            )
 
         # Разбор — в поток: он синхронный, тяжёлый (trafilatura/lxml) и на
         # больших страницах занимает секунды. Пока __call__ был синхронным,
         # диспетчер уводил в поток весь тул; теперь тул корутинный, и без
         # to_thread разбор встал бы на event loop вызывающего.
-        page_meta, extracted = await self._aextract_readable(text, str(response.url))
+        page_meta, extracted = await self._aextract_readable(
+            text, str(response.url)
+        )
         if extracted is not None:
             source, c = extracted
             self._put_to_cache(request.cache_key, c, page_meta)

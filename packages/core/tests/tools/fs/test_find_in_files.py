@@ -81,8 +81,12 @@ def _assert_slim_success_keys(data):
 class TestSingleFile:
     def test_single_file_match(self, tmp_path):
         f = tmp_path / "code.py"
-        f.write_text("import os\nprint('hello')\nimport os\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="import")
+        f.write_text(
+            "import os\nprint('hello')\nimport os\n", encoding="utf-8"
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="import"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
         assert data["mode"] == "file"
@@ -124,7 +128,9 @@ class TestSingleFile:
     def test_single_file_match_limit(self, tmp_path):
         f = tmp_path / "many.py"
         f.write_text("X\n" * 500, encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=10)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=10
+        )
         assert data["ok"] is True
         assert data["count"] == 10
         assert data["stop_reason"] == "match_limit"
@@ -139,7 +145,9 @@ class TestSingleFile:
     def test_single_file_limit_capped(self, tmp_path):
         f = tmp_path / "many.py"
         f.write_text("X\n" * 500, encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=500)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=500
+        )
         assert data["ok"] is True
         assert data["limit_eff"] == 300
         assert data["limit_requested"] == 500
@@ -152,7 +160,9 @@ class TestSingleFile:
     def test_single_file_limit_capped_no_match(self, tmp_path):
         f = tmp_path / "t.txt"
         f.write_text("hello\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="zzz", limit=500)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="zzz", limit=500
+        )
         assert data["ok"] is True
         assert data["limit_eff"] == 300
         assert data["limit_capped"] is True
@@ -187,7 +197,9 @@ class TestSingleFile:
         """Inline (?i) flag should set effective CI even without the arg."""
         f = tmp_path / "t.txt"
         f.write_text("Hello\nHELLO\nhello\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="(?i)hello")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="(?i)hello"
+        )
         assert data["ok"] is True
         assert data["count"] == 3
         assert data["case_insensitive"] is True
@@ -202,7 +214,9 @@ class TestSingleFileRejections:
     def test_binary_file_skipped(self, tmp_path):
         f = tmp_path / "blob.bin"
         f.write_bytes(b"\x00\x01\x02\x03" * 100)
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="anything")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="anything"
+        )
         assert data["ok"] is True
         assert data["count"] == 0
         assert data["scan_complete"] is True
@@ -226,7 +240,10 @@ class TestSingleFileRejections:
         assert data["scan_complete"] is False
         assert data["more_matches_may_exist"] is False
         assert data["guidance"] is not None
-        assert "size limit" in data["guidance"].lower() or "chunks" in data["guidance"]
+        assert (
+            "size limit" in data["guidance"].lower()
+            or "chunks" in data["guidance"]
+        )
 
 
 # ------------------------------------------------------------------
@@ -244,7 +261,9 @@ class TestDirectoryBasic:
                 "c.py": "target again\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
         assert data["mode"] == "dir"
@@ -261,7 +280,9 @@ class TestDirectoryBasic:
                 "b.py": "bar\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\w+")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\w+"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
         assert data["scan_complete"] is True
@@ -277,7 +298,9 @@ class TestDirectoryBasic:
                 "b.py": "bar\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="zzz")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="zzz"
+        )
         assert data["ok"] is True
         assert data["count"] == 0
         assert data["scan_complete"] is True
@@ -287,7 +310,12 @@ class TestDirectoryBasic:
     def test_dir_match_limit_A(self, tmp_path):
         files = {f"f{i}.py": "HIT\n" for i in range(20)}
         _make_tree(tmp_path, files)
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="HIT", limit=5)
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="HIT",
+            limit=5,
+        )
         assert data["ok"] is True
         assert data["count"] == 5
         assert data["stop_reason"] == "match_limit"
@@ -446,7 +474,9 @@ class TestExcludedDirs:
                 "venv/lib.py": "target\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert "excluded_dirs" not in data
@@ -491,7 +521,9 @@ class TestExcludedDirs:
                 "venv/sub/deep.py": "target\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(venv), pattern="target")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(venv), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
 
@@ -504,7 +536,9 @@ class TestExcludedDirs:
                 "main.py": "target\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
 
@@ -731,7 +765,10 @@ class TestDirectoryLimits:
         assert data["scan_complete"] is False
         assert data["more_matches_may_exist"] is True
         assert data["guidance"] is not None
-        assert "partial" in data["guidance"].lower() or "budget" in data["guidance"].lower()
+        assert (
+            "partial" in data["guidance"].lower()
+            or "budget" in data["guidance"].lower()
+        )
         # no breakdown on open budget (v1)
         assert "top_level_dirs" not in data
 
@@ -745,7 +782,12 @@ class TestDirectoryLimits:
                 "c.py": "HIT\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="HIT", limit=3)
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="HIT",
+            limit=3,
+        )
         assert data["ok"] is True
         assert data["count"] == 3
         assert data["stop_reason"] == "match_limit"
@@ -761,7 +803,9 @@ class TestDirectoryLimits:
                 "b.py": "needle\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="needle"
+        )
         assert data["ok"] is True
         assert "stop_reason" not in data
         assert data["scan_complete"] is True
@@ -784,7 +828,9 @@ class TestPrefilterNeedles:
                 "c.py": "nothing\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="foo")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="foo"
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert data["matches"][0]["file"].endswith("a.py")
@@ -818,7 +864,9 @@ class TestPrefilterNeedles:
                 "b.py": "abc\n",
             },
         )
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\d+")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\d+"
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert data["matches"][0]["file"].endswith("a.py")
@@ -980,7 +1028,9 @@ class TestErrorEnvelopes:
     def test_bad_regex(self, tmp_path):
         f = tmp_path / "t.txt"
         f.write_text("hello\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern=r"[unclosed")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern=r"[unclosed"
+        )
         assert data["ok"] is False
         assert data["error"]["type"] == "invalid_argument"
         assert data["error"]["field"] == "pattern"
@@ -1282,7 +1332,9 @@ class TestFilePatternEdge:
         )
         assert data["ok"] is True
         assert data["count"] == 1
-        assert data["matches"][0]["file"].endswith("src/a.py") or data["matches"][0]["file"].endswith("src\\a.py")
+        assert data["matches"][0]["file"].endswith("src/a.py") or data[
+            "matches"
+        ][0]["file"].endswith("src\\a.py")
 
     def test_file_pattern_all_files(self, tmp_path):
         _make_tree(
@@ -1320,7 +1372,9 @@ class TestMatchFormat:
     def test_match_has_required_fields(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("line1\nneedle\nline3\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["count"] == 1
         m = data["matches"][0]
         assert "file" in m
@@ -1332,7 +1386,9 @@ class TestMatchFormat:
     def test_line_content_single_line(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("alpha\nneedle here\nbeta\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         assert m["line"] == 2
         assert m["end_line"] == 2
@@ -1350,10 +1406,14 @@ class TestMatchFormat:
         long_line = "needle " + ("y" * 600)
         f = tmp_path / "t.py"
         f.write_text(long_line + "\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         assert m["line_content"].startswith("needle ")
-        assert m["line_content"].endswith(f"...[line_truncated: showing first 500 of {len(long_line)} chars]")
+        assert m["line_content"].endswith(
+            f"...[line_truncated: showing first 500 of {len(long_line)} chars]"
+        )
         assert m["line_content"].startswith(long_line[:500])
 
     def test_line_content_window_around_match_when_past_head(self, tmp_path):
@@ -1361,7 +1421,9 @@ class TestMatchFormat:
         long_line = ("x" * 600) + "needle" + ("y" * 80)
         f = tmp_path / "t.py"
         f.write_text(long_line + "\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         lc = m["line_content"]
         assert "needle" in lc
@@ -1376,12 +1438,16 @@ class TestMatchFormat:
         long_line = ("a" * 700) + "TAILMATCH"
         f = tmp_path / "t.py"
         f.write_text(long_line + "\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="TAILMATCH")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="TAILMATCH"
+        )
         lc = data["matches"][0]["line_content"]
         assert lc.startswith("...")
         assert "TAILMATCH" in lc
         # Match at EOL → no trailing "..." before the total marker.
-        assert lc.endswith(f"TAILMATCH[line_truncated: total {len(long_line)} chars]")
+        assert lc.endswith(
+            f"TAILMATCH[line_truncated: total {len(long_line)} chars]"
+        )
 
     def test_multiline_match_line_content_is_start_line_only(self, tmp_path):
         f = tmp_path / "t.md"
@@ -1414,7 +1480,9 @@ class TestMatchFormat:
     def test_context_surrounds_match(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("l1\nl2\nl3\nneedle\nl5\nl6\nl7\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         assert "context" in m
         assert isinstance(m["context"], str)
@@ -1423,20 +1491,26 @@ class TestMatchFormat:
     def test_multiple_matches_line_numbers(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("a\nneedle\nb\nneedle\nc\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["count"] == 2
         assert [m["line"] for m in data["matches"]] == [2, 4]
 
     def test_match_at_file_start(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("needle\nline2\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["matches"][0]["line"] == 1
 
     def test_match_at_file_end(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("line1\nneedle\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["matches"][0]["line"] == 2
 
 
@@ -1449,7 +1523,9 @@ class TestSlimLimits:
     def test_quiet_scan_omits_limits(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("x\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=50)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=50
+        )
         assert data["ok"] is True
         assert "limit_requested" not in data
         assert "limit_eff" not in data
@@ -1458,7 +1534,9 @@ class TestSlimLimits:
     def test_match_limit_has_limit_eff_only(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("x\n" * 20, encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=5)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=5
+        )
         assert data["stop_reason"] == "match_limit"
         assert data["limit_eff"] == 5
         assert "limit_requested" not in data

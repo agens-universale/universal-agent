@@ -63,7 +63,9 @@ class SwarmMonitor:
     def start_in_background(self) -> None:
         if self._thread is not None:
             return
-        self._thread = threading.Thread(target=self._run_loop, name="swarm-monitor", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run_loop, name="swarm-monitor", daemon=True
+        )
         self._thread.start()
 
     def _check_one_swarm(self, swarm_id: str) -> None:
@@ -86,7 +88,9 @@ class SwarmMonitor:
                 swarm_logs_dir=self._swarm_logs_dir,
             )
         except Exception:
-            logger.exception("swarm monitor: check_and_finalize failed for %s", swarm_id)
+            logger.exception(
+                "swarm monitor: check_and_finalize failed for %s", swarm_id
+            )
             return
 
         if not meta:

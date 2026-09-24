@@ -92,5 +92,11 @@ def post(url: str, *, config_proxy: Optional[str] = None, **kwargs):
     from gc_core.utils.http_proxy import resolve_proxies
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
-    proxies = None if is_loopback(url) else resolve_proxies(config_proxy, os.environ, url)
-    return NO_NETRC_SESSION.post(url, proxies=proxies, fresh_client=_injected, **kwargs)
+    proxies = (
+        None
+        if is_loopback(url)
+        else resolve_proxies(config_proxy, os.environ, url)
+    )
+    return NO_NETRC_SESSION.post(
+        url, proxies=proxies, fresh_client=_injected, **kwargs
+    )

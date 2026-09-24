@@ -13,7 +13,9 @@ import types
 # ---------------------------------------------------------------------------
 
 
-def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=True):
+def _patch_entry_prereqs(
+    monkeypatch, tmp_path, config_dict, *, unconfigured=True
+):
     """
     Monkeypatch the prerequisites that main() calls before the onboarding block,
     so we never reach importlib.import_module('tui.app') or app.run().
@@ -23,7 +25,11 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
     import gc_tui as tui_mod
 
     # ensure_project_gc_dir — side-effectful, short-circuit it
-    monkeypatch.setattr("gc_core.config_modules.env_vars.ensure_project_gc_dir", lambda: None, raising=False)
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.ensure_project_gc_dir",
+        lambda: None,
+        raising=False,
+    )
     # Patch tui's own reference to ensure_project_gc_dir (it imports lazily inside main)
     # We'll patch via the module that main() uses at runtime:
     from gc_core.config_modules import env_vars as env_mod
@@ -37,10 +43,15 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
     monkeypatch.setattr(
         cfg_mod,
         "load_config_ex",
-        lambda path=None, **kw: (dict(config_dict), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+        lambda path=None, **kw: (
+            dict(config_dict),
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
-    monkeypatch.setattr(cfg_mod, "user_config_path", lambda: tmp_path / "config.yml")
+    monkeypatch.setattr(
+        cfg_mod, "user_config_path", lambda: tmp_path / "config.yml"
+    )
     monkeypatch.setattr(cfg_mod, "_bootstrap_user_config", lambda: True)
 
     from gc_core import onboarding as ob_mod
@@ -49,7 +60,9 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
     monkeypatch.setattr(
         ob_mod,
         "setup_guide",
-        lambda path, cfg, program="gc-ua", just_created=False: f"[gc] setup guide: edit {path}/config.yml",
+        lambda path, cfg, program="gc-ua", just_created=False: (
+            f"[gc] setup guide: edit {path}/config.yml"
+        ),
     )
 
     return tui_mod
@@ -60,7 +73,9 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict, *, unconfigured=Tru
 # ---------------------------------------------------------------------------
 
 
-def test_non_tty_onboarding_prints_guide_and_returns_0(monkeypatch, tmp_path, capsys):
+def test_non_tty_onboarding_prints_guide_and_returns_0(
+    monkeypatch, tmp_path, capsys
+):
     """
     WIRING: when _interactive()→False and config is unconfigured,
     main() must print the setup guide to stderr and return 0 — no Textual.
@@ -72,7 +87,9 @@ def test_non_tty_onboarding_prints_guide_and_returns_0(monkeypatch, tmp_path, ca
     """
     import gc_tui as tui_mod
 
-    _patch_entry_prereqs(monkeypatch, tmp_path, config_dict={}, unconfigured=True)
+    _patch_entry_prereqs(
+        monkeypatch, tmp_path, config_dict={}, unconfigured=True
+    )
 
     # Suppress tui.app import inside main() by providing a fake module
     fake_app_mod = types.ModuleType("gc_tui.app")
@@ -107,7 +124,9 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
     """
     import gc_tui as tui_mod
 
-    _patch_entry_prereqs(monkeypatch, tmp_path, config_dict={}, unconfigured=True)
+    _patch_entry_prereqs(
+        monkeypatch, tmp_path, config_dict={}, unconfigured=True
+    )
 
     # TTY gate → interactive
     monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
@@ -115,13 +134,19 @@ def test_interactive_unconfigured_sets_auto_mode(monkeypatch, tmp_path):
     # resolve_threads_dir requires threads_data_path — patch it
     from gc_core import thread_store as ts_mod
 
-    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
+    monkeypatch.setattr(
+        ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads")
+    )
 
     # Also suppress daemon_autostart (imported in main)
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
 
-    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
-    monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
+    monkeypatch.setattr(
+        mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False
+    )
 
     # Capture app attributes and intercept run()
     captured = {}

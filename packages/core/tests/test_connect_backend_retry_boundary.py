@@ -16,7 +16,15 @@ from gc_testkit import run_coro
 from transport_fakes import install_transport, sse_body
 
 _OK_BODY = sse_body(
-    {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]},
+    {
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop",
+            }
+        ]
+    },
 )
 
 
@@ -28,7 +36,9 @@ def _flaky_handler(failures: int):
         calls["n"] += 1
         if calls["n"] <= failures:
             return httpx.Response(404, json={"error": "not found"})
-        return httpx.Response(200, text=_OK_BODY, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200, text=_OK_BODY, headers={"content-type": "text/event-stream"}
+        )
 
     return handler
 
@@ -44,7 +54,11 @@ def _no_backoff_sleep(monkeypatch):
 def _call(**kwargs):
     return run_coro(
         cb.arequest_backend_chat_completions(
-            {"model": "m", "messages": []}, {}, url="http://x", on_delta=lambda kind, text: None, **kwargs
+            {"model": "m", "messages": []},
+            {},
+            url="http://x",
+            on_delta=lambda kind, text: None,
+            **kwargs,
         )
     )
 

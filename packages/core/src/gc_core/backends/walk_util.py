@@ -24,10 +24,14 @@ from typing import AsyncIterator, Callable, Iterable, Optional, Sequence
 class WalkEntry:
     rel: str
     is_dir: bool
-    size: Optional[int] = None  # bytes for files when known cheaply; None otherwise (symlinks too)
+    size: Optional[int] = (
+        None  # bytes for files when known cheaply; None otherwise (symlinks too)
+    )
 
 
-def pruned_dir_predicate(prune_names: Sequence[str], prune_dot_dirs: bool) -> Callable[[str], bool]:
+def pruned_dir_predicate(
+    prune_names: Sequence[str], prune_dot_dirs: bool
+) -> Callable[[str], bool]:
     """The single "is this directory name pruned?" rule shared by every walk."""
     names = frozenset(n for n in prune_names if n)
 
@@ -56,7 +60,10 @@ def iter_walk_entries_from_flat(
         subdirs: list[str] = []
         for _name, entry in dir_children.get(parent_rel, []):
             yield entry
-            if entry.is_dir and (should_descend is None or should_descend(_abs(join, root, entry.rel))):
+            if entry.is_dir and (
+                should_descend is None
+                or should_descend(_abs(join, root, entry.rel))
+            ):
                 subdirs.append(entry.rel)
         for subdir_rel in subdirs:
             yield from _dfs(subdir_rel)
@@ -73,7 +80,9 @@ def iter_walk_from_flat(
 ) -> Iterable[tuple[str, bool]]:
     """``iter_walk_entries_from_flat`` over plain ``(relpath, is_dir)`` rows."""
     sized = [WalkEntry(rel, is_d) for rel, is_d in entries]
-    for entry in iter_walk_entries_from_flat(sized, should_descend=should_descend, join=join, root=root):
+    for entry in iter_walk_entries_from_flat(
+        sized, should_descend=should_descend, join=join, root=root
+    ):
         yield entry.rel, entry.is_dir
 
 
@@ -89,10 +98,14 @@ def prune_flat_entries(
     if not prune_names and not prune_dot_dirs:
         return list(entries)
     pruned = pruned_dir_predicate(prune_names, prune_dot_dirs)
-    return [e for e in entries if not any(pruned(p) for p in e.rel.split("/")[:-1])]
+    return [
+        e for e in entries if not any(pruned(p) for p in e.rel.split("/")[:-1])
+    ]
 
 
-def _dfs_flat(dir_children: dict, parent_rel: str, should_descend, join, root: str) -> Iterable[str]:
+def _dfs_flat(
+    dir_children: dict, parent_rel: str, should_descend, join, root: str
+) -> Iterable[str]:
     subdirs: list[str] = []
     for name, is_d in dir_children.get(parent_rel, []):
         rel = (parent_rel + "/" + name) if parent_rel else name
@@ -101,7 +114,9 @@ def _dfs_flat(dir_children: dict, parent_rel: str, should_descend, join, root: s
         elif should_descend is None or should_descend(_abs(join, root, rel)):
             subdirs.append(rel)
     for subdir_rel in subdirs:
-        yield from _dfs_flat(dir_children, subdir_rel, should_descend, join, root)
+        yield from _dfs_flat(
+            dir_children, subdir_rel, should_descend, join, root
+        )
 
 
 def iter_files_from_flat(
@@ -175,7 +190,9 @@ def _group_by_parent(entries: list) -> dict:
     return dir_children
 
 
-def _abs(join: Optional[Callable[[str, str], str]], root: str, rel: str) -> str:
+def _abs(
+    join: Optional[Callable[[str, str], str]], root: str, rel: str
+) -> str:
     if join is not None and root:
         return join(root, rel)
     return rel

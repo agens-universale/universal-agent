@@ -31,7 +31,9 @@ def test_mcp_cards_text_shows_status_reason_tools():
     assert "команда 'computer-mcp' не найдена" in text
     assert "1 connected" in text and "1 failed" in text
     scr.cards[0].toggle()  # раскрыли office
-    assert "read" in scr.rendered_text()  # короткое имя (префикс mcp_office_ срезан)
+    assert (
+        "read" in scr.rendered_text()
+    )  # короткое имя (префикс mcp_office_ срезан)
 
 
 def test_mcp_cards_empty_when_no_snapshot():
@@ -47,7 +49,11 @@ async def test_mcp_screen_with_snapshot(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x", "token": "T"}}}
+    cfg = {
+        "mcp-servers": {
+            "search": {"transport": "sse", "url": "http://x", "token": "T"}
+        }
+    }
     snap = {
         "search": {
             "status": "connected",
@@ -66,7 +72,9 @@ async def test_mcp_screen_with_snapshot(tmp_path):
         assert "search.web" not in t  # свёрнуто
         scr.cards[0].toggle()
         await pilot.pause()
-        assert "search.web" in _yaml_of(scr)  # имя без префикса mcp_ остаётся как есть
+        assert "search.web" in _yaml_of(
+            scr
+        )  # имя без префикса mcp_ остаётся как есть
 
 
 @pytest.mark.asyncio
@@ -91,7 +99,9 @@ async def test_mcp_screen_empty(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+    )
     async with app.run_test() as pilot:
         scr = McpScreen(config={"mcp-servers": {}}, tools_snapshot={})
         await app.push_screen(scr)
@@ -106,7 +116,9 @@ async def test_mcp_screen_esc_returns_to_main(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+    )
     async with app.run_test() as pilot:
         await pilot.app.screen._handle_command("mcp")
         await pilot.pause()
@@ -137,10 +149,19 @@ async def test_mcp_screen_has_header_and_footer(tmp_path):
 def test_mcp_card_reason_on_failed_line():
     from gc_tui.screens.mcp import McpScreen
 
-    snap = {"computer": {"status": "failed", "reason": "команда не найдена", "description": "GUI", "tools": []}}
+    snap = {
+        "computer": {
+            "status": "failed",
+            "reason": "команда не найдена",
+            "description": "GUI",
+            "tools": [],
+        }
+    }
     text = McpScreen(tools_snapshot=snap).rendered_text()
     failed_line = next(ln for ln in text.splitlines() if "failed" in ln)
-    assert "команда не найдена" in failed_line  # причина в той же строке, что failed
+    assert (
+        "команда не найдена" in failed_line
+    )  # причина в той же строке, что failed
     assert "причина:" not in text  # старого отдельного «причина:» больше нет
 
 
@@ -177,7 +198,12 @@ def test_card_collapsed_shows_marker_glyph_and_desc_but_no_tools():
             "status": "connected",
             "reason": None,
             "description": "Read office docs",
-            "tools": [{"name": "mcp_office_read_file", "description": "Читает документ"}],
+            "tools": [
+                {
+                    "name": "mcp_office_read_file",
+                    "description": "Читает документ",
+                }
+            ],
         },
     )
     text = card._renderable().plain
@@ -195,8 +221,14 @@ def test_card_expanded_lists_tools_with_stripped_prefix_and_description():
             "reason": None,
             "description": "d",
             "tools": [
-                {"name": "mcp_office_read_file", "description": "Читает документ"},
-                {"name": "mcp_office_create_docx", "description": "Создаёт .docx"},
+                {
+                    "name": "mcp_office_read_file",
+                    "description": "Читает документ",
+                },
+                {
+                    "name": "mcp_office_create_docx",
+                    "description": "Создаёт .docx",
+                },
             ],
         },
     )
@@ -207,7 +239,9 @@ def test_card_expanded_lists_tools_with_stripped_prefix_and_description():
     assert "read_file" in text and "Читает документ" in text
     assert "create_docx" in text and "Создаёт .docx" in text
     # колонка имён выровнена: описание начинается на одной позиции
-    lines = [ln for ln in text.splitlines() if "Читает" in ln or "Создаёт" in ln]
+    lines = [
+        ln for ln in text.splitlines() if "Читает" in ln or "Создаёт" in ln
+    ]
     assert lines[0].index("Читает") == lines[1].index("Создаёт")
 
 
@@ -245,7 +279,15 @@ def test_card_failed_collapsed_truncates_reason_expanded_shows_full():
 
 
 def test_card_toggle_flips_expanded_and_marker():
-    card = _card("office", {"status": "connected", "reason": None, "description": "", "tools": []})
+    card = _card(
+        "office",
+        {
+            "status": "connected",
+            "reason": None,
+            "description": "",
+            "tools": [],
+        },
+    )
     assert card.expanded is False
     card.toggle()
     assert card.expanded is True

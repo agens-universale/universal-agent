@@ -34,7 +34,9 @@ def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
             )
         )
     # Битая установка: state есть, а окружение снесено/повреждено.
-    from gc_tui.voice_runtime.state import load_state  # ленивый: не тянуть при импорте
+    from gc_tui.voice_runtime.state import (
+        load_state,
+    )  # ленивый: не тянуть при импорте
 
     st = load_state()
     if st is not None and not Path(st.root).is_dir():
@@ -51,7 +53,10 @@ def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
 
 def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
     """Конфиг-проблемы голосового ввода. Пустая секция — не замечание."""
-    from gc_core.config_modules.voice import voice_enabled, voice_section_filled
+    from gc_core.config_modules.voice import (
+        voice_enabled,
+        voice_section_filled,
+    )
 
     voice = config_dict.get("voice") or {}
     if not voice_section_filled(voice):
@@ -66,7 +71,9 @@ def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
                 highlights=("voice",),
             )
         ]
-    from gc_tui.voice.recorder import available  # ленивый: аудио-стек может отсутствовать
+    from gc_tui.voice.recorder import (
+        available,
+    )  # ленивый: аудио-стек может отсутствовать
 
     notices: List[Notice] = []
     if not available():

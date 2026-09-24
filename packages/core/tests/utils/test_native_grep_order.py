@@ -72,5 +72,7 @@ async def test_without_a_cap_only_the_transport_ceiling_marks_truncation():
 
 async def test_with_a_cap_the_old_contract_still_holds():
     res = await _run(OUT, max_matches=1)
-    assert [(m["file"], m["line"]) for m in res.matches] == [("/work/zzz.py", 1)]
+    assert [(m["file"], m["line"]) for m in res.matches] == [
+        ("/work/zzz.py", 1)
+    ]
     assert res.truncated is True

@@ -100,7 +100,9 @@ def _empty_bucket() -> Dict[str, Any]:
 
 
 class UsageAccount:
-    def __init__(self, by_category: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    def __init__(
+        self, by_category: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> None:
         self.by_category: Dict[str, Dict[str, Any]] = {}
         if by_category:
             for category, bucket in by_category.items():
@@ -109,7 +111,9 @@ class UsageAccount:
                 dst = self._bucket(str(category))
                 for field in _FIELDS:
                     raw = bucket.get(field, 0)
-                    dst[field] = int(raw) if isinstance(raw, (int, float)) else 0
+                    dst[field] = (
+                        int(raw) if isinstance(raw, (int, float)) else 0
+                    )
                 dst[MONEY_FIELD] = _money_from_raw(bucket)
 
     def _bucket(self, category: str) -> Dict[str, Any]:
@@ -155,7 +159,9 @@ class UsageAccount:
         bucket["calls"] += 1
         bucket["missing_usage_calls"] += 1
 
-    def merge(self, other: UsageAccount, as_category: Optional[str] = None) -> None:
+    def merge(
+        self, other: UsageAccount, as_category: Optional[str] = None
+    ) -> None:
         """Влить чужой счёт. ``as_category`` — свернуть все категории other в одну
         (используется для субагентов: их вклад → категория ``subagent`` родителя)."""
         if not isinstance(other, UsageAccount):
@@ -175,13 +181,21 @@ class UsageAccount:
         ``self`` — кумулятив, а ``baseline`` — снимок до старта прогона.
         """
         out = UsageAccount()
-        base = baseline.by_category if isinstance(baseline, UsageAccount) else {}
+        base = (
+            baseline.by_category if isinstance(baseline, UsageAccount) else {}
+        )
         for category, bucket in self.by_category.items():
             base_bucket = base.get(category, {})
             dst = out._bucket(category)
             has_delta = False
             for field in _FIELDS:
-                value = max(0, int(_num(bucket.get(field, 0)) - _num(base_bucket.get(field, 0))))
+                value = max(
+                    0,
+                    int(
+                        _num(bucket.get(field, 0))
+                        - _num(base_bucket.get(field, 0))
+                    ),
+                )
                 dst[field] = value
                 if value:
                     has_delta = True

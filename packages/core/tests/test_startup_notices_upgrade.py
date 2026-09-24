@@ -5,12 +5,19 @@ from gc_core.upgrade_gate import UpgradeInfo
 
 
 def _collect(upgrade_info):
-    return collect_startup_notices({}, set(), None, is_tui=False, upgrade_info=upgrade_info)
+    return collect_startup_notices(
+        {}, set(), None, is_tui=False, upgrade_info=upgrade_info
+    )
 
 
 def test_upgrade_notice_rendered():
     notices = _collect(UpgradeInfo(old_version="0.2.0", new_version="0.3.0"))
-    assert any(n.code == "agent_upgraded" and "0.2.0" in n.message and "0.3.0" in n.message for n in notices)
+    assert any(
+        n.code == "agent_upgraded"
+        and "0.2.0" in n.message
+        and "0.3.0" in n.message
+        for n in notices
+    )
 
 
 def test_upgrade_notice_without_old_version():

@@ -24,7 +24,9 @@ def isolated_env_empty_layers(monkeypatch, tmp_path):
     return fake
 
 
-async def test_factory_three_layer_when_no_path(isolated_env_empty_layers, tmp_path):
+async def test_factory_three_layer_when_no_path(
+    isolated_env_empty_layers, tmp_path
+):
     """Без skills_data_path в config → three-layer registry, видит system-скиллы."""
     reg = get_skills_registry({})
     items = await reg.list_skills()
@@ -34,7 +36,9 @@ async def test_factory_three_layer_when_no_path(isolated_env_empty_layers, tmp_p
     assert all(s["source"] == "system" for s in items)
 
 
-async def test_factory_three_layer_when_config_is_none(isolated_env_empty_layers):
+async def test_factory_three_layer_when_config_is_none(
+    isolated_env_empty_layers,
+):
     """config_dict=None работает так же, как пустой dict."""
     reg = get_skills_registry(None)
     items = await reg.list_skills()
@@ -60,7 +64,9 @@ async def test_factory_single_source_when_path_set(monkeypatch, tmp_path):
     assert items[0]["source"] == "user"
 
 
-async def test_factory_empty_skills_data_path_falls_back_to_three_layer(monkeypatch, tmp_path):
+async def test_factory_empty_skills_data_path_falls_back_to_three_layer(
+    monkeypatch, tmp_path
+):
     """skills_data_path = "" (пустая строка) → three-layer, не single-source."""
     fake = EnvVars(gc_home=tmp_path / "home")
     monkeypatch.setattr(env_vars, "env", fake)

@@ -40,7 +40,9 @@ MANIFESTS = [
 ]
 
 PIN_RE = re.compile(r'"(gc-[a-z]+)==\d+\.\d+\.\d+"')
-VERSION_RE = re.compile(r'^(\s*version\s*=\s*")(\d+\.\d+\.\d+)("\s*)$', re.MULTILINE)
+VERSION_RE = re.compile(
+    r'^(\s*version\s*=\s*")(\d+\.\d+\.\d+)("\s*)$', re.MULTILINE
+)
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
@@ -55,8 +57,12 @@ def _bump_manifest(path: Path, new: str, dry: bool) -> list[str]:
         old_ver = m.group(2)
         if old_ver == new:
             continue
-        new_text = new_text.replace(m.group(0), f"{m.group(1)}{new}{m.group(3)}", 1)
-        changes.append(f"  {path.relative_to(ROOT)}: version {old_ver} → {new}")
+        new_text = new_text.replace(
+            m.group(0), f"{m.group(1)}{new}{m.group(3)}", 1
+        )
+        changes.append(
+            f"  {path.relative_to(ROOT)}: version {old_ver} → {new}"
+        )
     if new_text != text and not dry:
         path.write_text(new_text, encoding="utf-8")
     return changes
@@ -105,20 +111,29 @@ def _verify(new: str) -> bool:
 def _uv_lock() -> None:
     uv = shutil.which("uv")
     if uv is None:
-        raise SystemExit("ERROR: uv not found in PATH; cannot regenerate uv.lock")
+        raise SystemExit(
+            "ERROR: uv not found in PATH; cannot regenerate uv.lock"
+        )
     print("\nRegenerating uv.lock...")
     subprocess.run([uv, "lock"], check=True, cwd=ROOT)
     print("  uv.lock updated")
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Bump all workspace versions and regenerate uv.lock.")
+    ap = argparse.ArgumentParser(
+        description="Bump all workspace versions and regenerate uv.lock."
+    )
     ap.add_argument("version", help="New version, e.g. 0.3.1")
-    ap.add_argument("--dry-run", action="store_true", help="Show changes without writing")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Show changes without writing"
+    )
     args = ap.parse_args()
 
     if not VERSION_PATTERN.match(args.version):
-        print(f"ERROR: '{args.version}' is not a valid X.Y.Z version", file=sys.stderr)
+        print(
+            f"ERROR: '{args.version}' is not a valid X.Y.Z version",
+            file=sys.stderr,
+        )
         return 2
 
     new = args.version

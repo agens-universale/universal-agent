@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from gc_core.mcp_runtime.paths import mcp_bin_dir, mcp_env_root, runtime_state_path
+from gc_core.mcp_runtime.paths import (
+    mcp_bin_dir,
+    mcp_env_root,
+    runtime_state_path,
+)
 
 
 @dataclass(frozen=True)
@@ -32,7 +36,9 @@ def save_runtime_state(*, manifest_path: Path | None) -> McpRuntimeState:
     payload = {
         "venv_dir": str(state.venv_dir),
         "bin_dir": str(state.bin_dir),
-        "manifest_path": str(state.manifest_path) if state.manifest_path else None,
+        "manifest_path": str(state.manifest_path)
+        if state.manifest_path
+        else None,
         "updated_at": state.updated_at,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

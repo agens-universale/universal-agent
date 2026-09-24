@@ -58,7 +58,9 @@ async def test_cancel_in_the_first_step_does_not_skip_the_rest(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await ae._aclose_mcp_and_release(object())
 
-    assert order == ["stdio", "stream", "owner"], f"уборка оборвалась на отмене: {order}"
+    assert order == ["stdio", "stream", "owner"], (
+        f"уборка оборвалась на отмене: {order}"
+    )
 
 
 async def test_cancel_in_the_second_step_still_releases_ownership(monkeypatch):

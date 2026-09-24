@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
-from gc_core.intent_guard.final_report_consistency import avalidate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import (
+    avalidate_final_report_vs_user_intent,
+)
 from gc_core.intent_guard.guard import judge_available
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
@@ -24,11 +26,17 @@ class TextAnswerDecision:
     reject_feedback: str | None = None
 
 
-async def ajudge_text_answer(ctx: Any, state: Any, assistant_text: str) -> ValidationResult | None:
+async def ajudge_text_answer(
+    ctx: Any, state: Any, assistant_text: str
+) -> ValidationResult | None:
     """Результат валидатора для текст-ответа; None → ошибка (→ generic bounce)."""
     try:
-        current = records_to_jsonl_lines(deserialize_list(getattr(state, "current_user_intent", []) or []))
-        context_log = records_to_jsonl_lines(deserialize_list(getattr(state, "user_intent_log", []) or []))
+        current = records_to_jsonl_lines(
+            deserialize_list(getattr(state, "current_user_intent", []) or [])
+        )
+        context_log = records_to_jsonl_lines(
+            deserialize_list(getattr(state, "user_intent_log", []) or [])
+        )
         return await avalidate_final_report_vs_user_intent(
             ctx=ctx,
             state=state,
@@ -41,7 +49,9 @@ async def ajudge_text_answer(ctx: Any, state: Any, assistant_text: str) -> Valid
         return None
 
 
-async def ashould_return_text_answer(ctx: Any, state: Any, assistant_text: str) -> TextAnswerDecision:
+async def ashould_return_text_answer(
+    ctx: Any, state: Any, assistant_text: str
+) -> TextAnswerDecision:
     """Принять ли текст-ответ как ответ хода — по режиму ``text_answer_mode``.
 
     Пустой текст → reject (любой режим). ``allow`` → accept без судьи. ``judge`` →
@@ -63,5 +73,7 @@ async def ashould_return_text_answer(ctx: Any, state: Any, assistant_text: str) 
             return TextAnswerDecision(False)
         if getattr(result, "action", "") == "accept":
             return TextAnswerDecision(True)
-        return TextAnswerDecision(False, build_text_answer_reject_feedback(result))
+        return TextAnswerDecision(
+            False, build_text_answer_reject_feedback(result)
+        )
     return TextAnswerDecision(False)

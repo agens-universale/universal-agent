@@ -43,7 +43,9 @@ def meta_has_persisted_agent_state(meta: Mapping[str, Any]) -> bool:
     return bool(_intent_records_non_empty(meta.get("current_user_intent")))
 
 
-def reject_legacy_memory_keys(payload: Mapping[str, Any], *, path: str = "root") -> None:
+def reject_legacy_memory_keys(
+    payload: Mapping[str, Any], *, path: str = "root"
+) -> None:
     if "memory_files" in payload:
         raise StateSchemaError(
             f"Legacy field 'memory_files' is not supported at {path} "
@@ -57,7 +59,9 @@ def reject_legacy_memory_keys(payload: Mapping[str, Any], *, path: str = "root")
         )
 
 
-def require_state_schema_version(payload: Mapping[str, Any], *, context: str) -> None:
+def require_state_schema_version(
+    payload: Mapping[str, Any], *, context: str
+) -> None:
     version = payload.get("state_schema_version")
     if version != STATE_SCHEMA_VERSION:
         raise StateSchemaError(
@@ -76,7 +80,9 @@ def validate_thread_meta_for_load(meta: Mapping[str, Any]) -> None:
 
 def validate_state_snapshot_for_load(payload: Mapping[str, Any]) -> None:
     if not payload:
-        raise StateSchemaError("State snapshot payload must be a non-empty dict.")
+        raise StateSchemaError(
+            "State snapshot payload must be a non-empty dict."
+        )
     reject_legacy_memory_keys(payload)
     require_state_schema_version(payload, context="state snapshot")
 
@@ -112,18 +118,24 @@ def normalize_session_todo(raw: Any) -> list[dict[str, str]]:
 
 def serialize_shared_block(shared: Any) -> dict[str, Any]:
     # JSON key ``working_memory`` — legacy persist name; same dict as ``session_memory`` tool.
-    working_memory = normalize_working_memory(getattr(shared, "working_memory", None))
+    working_memory = normalize_working_memory(
+        getattr(shared, "working_memory", None)
+    )
     notes_md = str(getattr(shared, "notes_md", "") or "")
     fetch_url_cache = getattr(shared, "fetch_url_cache", None)
     cache: dict[str, Any] = {}
     if isinstance(fetch_url_cache, Mapping):
         cache = dict(fetch_url_cache)
     confirm_rules = getattr(shared, "confirm_rules", None)
-    rules: dict[str, Any] = dict(confirm_rules) if isinstance(confirm_rules, Mapping) else {}
+    rules: dict[str, Any] = (
+        dict(confirm_rules) if isinstance(confirm_rules, Mapping) else {}
+    )
     return {
         "working_memory": working_memory,
         "notes_md": notes_md,
         "fetch_url_cache": cache,
         "confirm_rules": rules,
-        "session_todo": normalize_session_todo(getattr(shared, "session_todo", None)),
+        "session_todo": normalize_session_todo(
+            getattr(shared, "session_todo", None)
+        ),
     }

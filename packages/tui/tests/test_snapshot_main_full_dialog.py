@@ -13,13 +13,19 @@ def test_main_full_dialog_snapshot(snap_compare, tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
 
     tid = "7f3a9b1c"
-    fake = StubExecutor(threads_dir=str(tmp_path), system="cli", scenario="full_dialog")
+    fake = StubExecutor(
+        threads_dir=str(tmp_path), system="cli", scenario="full_dialog"
+    )
     fake.run(["расскажи об этом проекте"], thread_id=tid)
     # Фикс cwd → детерминированный футер в снапшоте.
-    FileTaskStore(threads_dir=str(tmp_path), system="cli").update_tui_meta(tid, {"cwd": "/work/project"})
+    FileTaskStore(threads_dir=str(tmp_path), system="cli").update_tui_meta(
+        tid, {"cwd": "/work/project"}
+    )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
     )
 
     async def setup(pilot):

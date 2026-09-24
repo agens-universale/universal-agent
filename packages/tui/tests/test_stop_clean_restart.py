@@ -58,8 +58,13 @@ async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
         await pilot.pause()
         # Информационных «·»-строк не должно быть (кроме «нет активного запуска»
         # и «confirm отменён» — но их здесь нет, runner был живой).
-        meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        assert not any("·" in str(r.query_one(".trace-prefix").render()) for r in meta_rows)
+        meta_rows = [
+            r for r in scr.query(TraceRow) if r.has_class("line-meta")
+        ]
+        assert not any(
+            "·" in str(r.query_one(".trace-prefix").render())
+            for r in meta_rows
+        )
 
 
 @pytest.mark.asyncio
@@ -98,7 +103,14 @@ async def test_cmd_stop_no_active_runner_renders_meta():
         pilot.app.active_runner = None
         scr._cmd_stop()
         await pilot.pause()
-        meta_rows = [r for r in scr.query(TraceRow) if r.has_class("line-meta")]
-        row = next(r for r in meta_rows if "нет активного запуска" in str(r.query_one(".trace-content").render()))
+        meta_rows = [
+            r for r in scr.query(TraceRow) if r.has_class("line-meta")
+        ]
+        row = next(
+            r
+            for r in meta_rows
+            if "нет активного запуска"
+            in str(r.query_one(".trace-content").render())
+        )
         prefix = str(row.query_one(".trace-prefix").render())
         assert "·" in prefix and "[stopped]" not in prefix

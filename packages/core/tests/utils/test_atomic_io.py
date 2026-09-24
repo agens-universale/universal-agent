@@ -29,7 +29,9 @@ def test_retries_transient_winerror_then_succeeds(monkeypatch):
             raise _winerr(5)  # ACCESS_DENIED дважды, затем успех
 
     monkeypatch.setattr("gc_core.utils.atomic_io.os.replace", _fake_replace)
-    monkeypatch.setattr("gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None
+    )
 
     atomic_replace("src", "dst")
     assert calls["n"] == 3
@@ -44,7 +46,9 @@ def test_sharing_violation_also_retried(monkeypatch):
             raise _winerr(32)  # SHARING_VIOLATION
 
     monkeypatch.setattr("gc_core.utils.atomic_io.os.replace", _fake_replace)
-    monkeypatch.setattr("gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None
+    )
 
     atomic_replace("src", "dst")
     assert calls["n"] == 2
@@ -58,7 +62,9 @@ def test_persistent_transient_error_raises_after_bounded_attempts(monkeypatch):
         raise _winerr(5)
 
     monkeypatch.setattr("gc_core.utils.atomic_io.os.replace", _fake_replace)
-    monkeypatch.setattr("gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None
+    )
 
     with pytest.raises(PermissionError):
         atomic_replace("src", "dst", attempts=4)
@@ -70,10 +76,14 @@ def test_non_windows_error_raises_immediately(monkeypatch):
 
     def _fake_replace(a, b):
         calls["n"] += 1
-        raise OSError("ENOENT")  # winerror отсутствует → POSIX-путь, без ретрая
+        raise OSError(
+            "ENOENT"
+        )  # winerror отсутствует → POSIX-путь, без ретрая
 
     monkeypatch.setattr("gc_core.utils.atomic_io.os.replace", _fake_replace)
-    monkeypatch.setattr("gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "gc_core.utils.atomic_io.time.sleep", lambda *_a, **_k: None
+    )
 
     with pytest.raises(OSError):
         atomic_replace("src", "dst")

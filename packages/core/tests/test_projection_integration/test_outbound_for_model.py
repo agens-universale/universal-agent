@@ -28,7 +28,9 @@ def _assistant_contents(outbound_messages: list[dict]) -> list[str]:
     return [
         m["content"]
         for m in outbound_messages
-        if isinstance(m, dict) and m.get("role") == "assistant" and isinstance(m.get("content"), str)
+        if isinstance(m, dict)
+        and m.get("role") == "assistant"
+        and isinstance(m.get("content"), str)
     ]
 
 
@@ -38,7 +40,14 @@ def test_outbound_keeps_think_as_in_messages(capture_outbound):
 
     run_coro(
         pr._arequest_backend_canonical(
-            [{"id": "u2", "type": "message", "role": "user", "content": "продолжай"}],
+            [
+                {
+                    "id": "u2",
+                    "type": "message",
+                    "role": "user",
+                    "content": "продолжай",
+                }
+            ],
             state,
             ctx,
         )
@@ -58,12 +67,18 @@ def test_outbound_keeps_think_as_in_messages(capture_outbound):
     user_texts = [
         m["content"]
         for m in outbound
-        if isinstance(m, dict) and m.get("role") == "user" and isinstance(m.get("content"), str)
+        if isinstance(m, dict)
+        and m.get("role") == "user"
+        and isinstance(m.get("content"), str)
     ]
     assert USER_LITERAL_THINK in user_texts
 
     assert state.messages == before
-    assert any(DIRTY_THINK in str(m.get("content")) for m in state.messages if isinstance(m, dict))
+    assert any(
+        DIRTY_THINK in str(m.get("content"))
+        for m in state.messages
+        if isinstance(m, dict)
+    )
 
 
 def test_trigger_volume_on_same_dirty_history_excludes_think():
@@ -86,7 +101,9 @@ def test_trigger_volume_on_same_dirty_history_excludes_think():
         if m.get("role") == "assistant" and m.get("type") == "message":
             raw = m.get("content")
             if isinstance(raw, list):
-                dirty_assistant_lens += sum(len(p.get("text", "")) for p in raw if isinstance(p, dict))
+                dirty_assistant_lens += sum(
+                    len(p.get("text", "")) for p in raw if isinstance(p, dict)
+                )
             elif isinstance(raw, str):
                 dirty_assistant_lens += len(raw)
     assert sum(len(t) for t in assistant_projected) < dirty_assistant_lens

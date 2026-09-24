@@ -1,10 +1,20 @@
 """Интеграция захвата: connect_backend пишет usage в активный usage_scope."""
 
 import gc_core.utils.connect_backend as cb
-from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, MONEY_FIELD, UsageAccount
+from gc_core.usage.account import (
+    CATEGORY_MAIN,
+    CATEGORY_SUMMARY,
+    MONEY_FIELD,
+    UsageAccount,
+)
 from gc_core.usage.context import usage_scope
 from gc_testkit import run_coro
-from transport_fakes import install_transport, json_response, sse_body, stream_response
+from transport_fakes import (
+    install_transport,
+    json_response,
+    sse_body,
+    stream_response,
+)
 
 
 def _patch_post(monkeypatch, payload: dict):
@@ -22,7 +32,11 @@ def test_chat_completions_capture_with_usage(monkeypatch):
     )
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_MAIN, "chat_completions"):
-        run_coro(cb.arequest_backend_chat_completions({}, {}, url="http://x", use_retry=False))
+        run_coro(
+            cb.arequest_backend_chat_completions(
+                {}, {}, url="http://x", use_retry=False
+            )
+        )
     assert acc.by_category[CATEGORY_MAIN]["input"] == 120
     assert acc.by_category[CATEGORY_MAIN]["output"] == 30
     assert acc.by_category[CATEGORY_MAIN]["calls"] == 1
@@ -32,7 +46,11 @@ def test_chat_completions_capture_without_usage(monkeypatch):
     _patch_post(monkeypatch, {"choices": [{"message": {"content": "ok"}}]})
     acc = UsageAccount()
     with usage_scope(acc, CATEGORY_SUMMARY, "chat_completions"):
-        run_coro(cb.arequest_backend_chat_completions({}, {}, url="http://x", use_retry=False))
+        run_coro(
+            cb.arequest_backend_chat_completions(
+                {}, {}, url="http://x", use_retry=False
+            )
+        )
     assert acc.by_category[CATEGORY_SUMMARY]["missing_usage_calls"] == 1
     assert acc.by_category[CATEGORY_SUMMARY]["input"] == 0
 
@@ -47,7 +65,11 @@ def test_chat_completions_uncategorized_when_no_scope(monkeypatch, caplog):
     )
     # Вне usage_scope — не падаем, фиксируем предупреждение (детектор дыр).
     with caplog.at_level("WARNING"):
-        run_coro(cb.arequest_backend_chat_completions({}, {}, url="http://x", use_retry=False))
+        run_coro(
+            cb.arequest_backend_chat_completions(
+                {}, {}, url="http://x", use_retry=False
+            )
+        )
     assert any("usage_scope" in r.message for r in caplog.records)
 
 
@@ -76,7 +98,11 @@ class _FakeStreamResponse:
 
 _STREAM_BODY = sse_body(
     {"id": "x", "choices": [{"index": 0, "delta": {"content": "hi"}}]},
-    {"id": "x", "choices": [], "usage": {"prompt_tokens": 200, "completion_tokens": 50}},
+    {
+        "id": "x",
+        "choices": [],
+        "usage": {"prompt_tokens": 200, "completion_tokens": 50},
+    },
 )
 
 
@@ -145,9 +171,13 @@ def test_record_usage_fixes_currency_by_endpoint():
             "https://openrouter.ai/api/v1/chat/completions",
         )
         record_usage(
-            {"prompt_tokens": 100, "completion_tokens": 10, "cost": 200.0}, "https://routerai.ru/v1/chat/completions"
+            {"prompt_tokens": 100, "completion_tokens": 10, "cost": 200.0},
+            "https://routerai.ru/v1/chat/completions",
         )
-    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {"$": 2.0, "₽": 200.0}
+    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {
+        "$": 2.0,
+        "₽": 200.0,
+    }
 
 
 def test_record_usage_without_url_keeps_currency_unknown():
@@ -157,8 +187,12 @@ def test_record_usage_without_url_keeps_currency_unknown():
 
     account = UsageAccount()
     with usage_scope(account, CATEGORY_MAIN):
-        record_usage({"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.5})
-    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {LEGACY_CURRENCY: 0.5}
+        record_usage(
+            {"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.5}
+        )
+    assert account.by_category[CATEGORY_MAIN][MONEY_FIELD] == {
+        LEGACY_CURRENCY: 0.5
+    }
 
 
 def test_orphan_account_delivers_cost():
@@ -169,6 +203,7 @@ def test_orphan_account_delivers_cost():
     from gc_core.usage.context import record_usage
 
     record_usage(
-        {"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.25}, "https://openrouter.ai/api/v1/chat/completions"
+        {"prompt_tokens": 10, "completion_tokens": 1, "cost": 0.25},
+        "https://openrouter.ai/api/v1/chat/completions",
     )
     assert _orphan_account.account.totals()[MONEY_FIELD]["$"] == before + 0.25

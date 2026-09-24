@@ -8,9 +8,14 @@ from gc_core.message_format.dialog_history import (
     trim_history_to_max_dialogue_chars,
     trim_original_user_messages_to_max_chars,
 )
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    wrap_technical_user_content,
+)
 from gc_core.summarize.compaction import apply_summary_state_patch
-from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
+from gc_core.summarize.thread_summarizer import (
+    asummarize_dialog_via_chat_completions,
+)
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
@@ -19,8 +24,12 @@ from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
 
 def _patch_chat_completion(monkeypatch, fake):
     """Патчит имя там, где оно связано после `from ... import ...`."""
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
+    monkeypatch.setattr(
+        "gc_core.summarize.thread_summarizer.arequest_summary_text", fake
+    )
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", fake
+    )
 
 
 def _patch_memory_patch_empty(monkeypatch):
@@ -36,7 +45,9 @@ def _patch_memory_patch_empty(monkeypatch):
 
 
 def _ctx(trigger_chars: int = 120000):
-    incremental_batch_chars = int(trigger_chars * 1.4) if trigger_chars > 0 else 0
+    incremental_batch_chars = (
+        int(trigger_chars * 1.4) if trigger_chars > 0 else 0
+    )
     return types.SimpleNamespace(
         config_dict={
             "model": "test-model",
@@ -75,7 +86,9 @@ def _flatten_turns(turns):
 
 
 def _valid_summary(seed: str) -> str:
-    return valid_summary_xml_for_tests(seed=f"{seed} context details and scope.")
+    return valid_summary_xml_for_tests(
+        seed=f"{seed} context details and scope."
+    )
 
 
 def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
@@ -85,7 +98,10 @@ def test_summarize_incremental_empty_history_no_model_call(monkeypatch):
         calls.append(kwargs)
         return "should_not_happen"
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _never_call)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -110,7 +126,10 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
         calls.append(kwargs)
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -126,7 +145,9 @@ def test_summarize_incremental_single_batch_one_summary_call(monkeypatch):
     assert len(calls) == 1
 
 
-def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch):
+def test_memory_deltas_applied_to_working_memory_not_inside_summary(
+    monkeypatch,
+):
     history = _flatten_turns([_make_turn("hi", "hello")])
 
     async def _fake_request(**kwargs):
@@ -143,7 +164,10 @@ def test_memory_deltas_applied_to_working_memory_not_inside_summary(monkeypatch)
             ),
         )
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
@@ -200,9 +224,15 @@ def test_memory_patch_replace_overwrites_stale_state_register(monkeypatch):
             ),
         )
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
+    monkeypatch.setattr(
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        _fake_replace,
+    )
 
     state = types.SimpleNamespace(
         default_model="test-model",
@@ -249,13 +279,19 @@ def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
     history = _flatten_turns([_make_turn("user request", "assistant")])
 
     async def _fake_request(**kwargs):
-        user_content = next((m["content"] for m in kwargs["messages"] if m["role"] == "user"), "")
+        user_content = next(
+            (m["content"] for m in kwargs["messages"] if m["role"] == "user"),
+            "",
+        )
         assert "<user_intent_log" not in user_content
         assert "<current_user_intent>" not in user_content
         assert "<project_data>" not in user_content
         return _valid_summary("single")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -270,7 +306,9 @@ def test_summarize_user_prompt_excludes_intent_blocks(monkeypatch):
     )
 
 
-def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
+def test_summarize_incremental_two_batches_previous_summary_passed(
+    monkeypatch,
+):
     history = _flatten_turns(
         [
             _make_turn("user1" + "a" * 3500, "assistant1"),
@@ -282,7 +320,9 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
 
     async def _fake_request(**kwargs):
         messages = kwargs["messages"]
-        user_content = next((m["content"] for m in messages if m["role"] == "user"), "")
+        user_content = next(
+            (m["content"] for m in messages if m["role"] == "user"), ""
+        )
         seen_user_prompts.append(user_content)
         return next(responses)
 
@@ -292,9 +332,15 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
         replace_calls.append(kwargs)
         return types.SimpleNamespace(request_messages=[], raw_response="")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
+    monkeypatch.setattr(
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        _fake_replace,
+    )
 
     result = run_coro(
         asummarize_dialog_via_chat_completions(
@@ -320,7 +366,13 @@ def test_summarize_incremental_two_batches_previous_summary_passed(monkeypatch):
 def test_batches_respect_turn_boundaries():
     history = [
         {"type": "message", "role": "user", "content": "u"},
-        {"type": "function_call", "role": "assistant", "call_id": "id1", "name": "tool_a", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "role": "assistant",
+            "call_id": "id1",
+            "name": "tool_a",
+            "arguments": "{}",
+        },
         {"type": "function_call_output", "call_id": "id1", "output": "ok1"},
         {"type": "message", "role": "assistant", "content": "done"},
     ]
@@ -347,11 +399,27 @@ def _assert_turns_preserve_all_messages(turns, history):
 def test_group_into_turns_user_tool_tool_result_assistant():
     history = [
         {"type": "message", "role": "user", "content": "сделай X"},
-        {"type": "function_call", "role": "assistant", "call_id": "id1", "name": "tool_a", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "role": "assistant",
+            "call_id": "id1",
+            "name": "tool_a",
+            "arguments": "{}",
+        },
         {"type": "function_call_output", "call_id": "id1", "output": "ok1"},
-        {"type": "function_call", "role": "assistant", "call_id": "id2", "name": "tool_b", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "role": "assistant",
+            "call_id": "id2",
+            "name": "tool_b",
+            "arguments": "{}",
+        },
         {"type": "function_call_output", "call_id": "id2", "output": "ok2"},
-        {"type": "message", "role": "assistant", "content": "Готово, сделал X."},
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": "Готово, сделал X.",
+        },
     ]
     turns = group_into_turns(history)
     assert _turns_reconstruct_history(turns) == history
@@ -364,7 +432,12 @@ def test_group_into_turns_user_tool_tool_result_assistant():
 
 def test_group_into_turns_tool_call_user_tool_result():
     history = [
-        {"type": "function_call", "call_id": "cid1", "name": "t", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "call_id": "cid1",
+            "name": "t",
+            "arguments": "{}",
+        },
         {"type": "message", "role": "user", "content": "подожди"},
         {"type": "function_call_output", "call_id": "cid1", "output": "done"},
     ]
@@ -378,8 +451,18 @@ def test_group_into_turns_tool_call_user_tool_result():
 
 def test_group_into_turns_tool1_tool2_result1_result2():
     history = [
-        {"type": "function_call", "call_id": "id1", "name": "tool_a", "arguments": "{}"},
-        {"type": "function_call", "call_id": "id2", "name": "tool_b", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "call_id": "id1",
+            "name": "tool_a",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "call_id": "id2",
+            "name": "tool_b",
+            "arguments": "{}",
+        },
         {"type": "function_call_output", "call_id": "id1", "output": "res1"},
         {"type": "function_call_output", "call_id": "id2", "output": "res2"},
     ]
@@ -405,9 +488,19 @@ def test_group_into_turns_chain_user_assistant_user_assistant():
 
 def test_group_into_turns_chain_fc1_user_fc2_fco1_fco2():
     history = [
-        {"type": "function_call", "call_id": "id1", "name": "t1", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "call_id": "id1",
+            "name": "t1",
+            "arguments": "{}",
+        },
         {"type": "message", "role": "user", "content": "стоп"},
-        {"type": "function_call", "call_id": "id2", "name": "t2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "call_id": "id2",
+            "name": "t2",
+            "arguments": "{}",
+        },
         {"type": "function_call_output", "call_id": "id1", "output": "r1"},
         {"type": "function_call_output", "call_id": "id2", "output": "r2"},
     ]
@@ -422,11 +515,20 @@ def test_group_into_turns_chain_fc1_user_fc2_fco1_fco2():
 def test_group_into_turns_empty_and_orphans():
     assert group_into_turns([]) == []
 
-    orphan_fc = [{"type": "function_call", "call_id": "orphan", "name": "tool", "arguments": "{}"}]
+    orphan_fc = [
+        {
+            "type": "function_call",
+            "call_id": "orphan",
+            "name": "tool",
+            "arguments": "{}",
+        }
+    ]
     turns_fc = group_into_turns(orphan_fc)
     assert len(turns_fc) == 1 and len(turns_fc[0]) == 1
 
-    orphan_fco = [{"type": "function_call_output", "call_id": "x", "output": "y"}]
+    orphan_fco = [
+        {"type": "function_call_output", "call_id": "x", "output": "y"}
+    ]
     turns_fco = group_into_turns(orphan_fco)
     assert len(turns_fco) == 1 and len(turns_fco[0]) == 1
 
@@ -434,13 +536,17 @@ def test_group_into_turns_empty_and_orphans():
 def test_message_text_limited_truncates_to_max_message_chars():
     msg = {"role": "user", "content": "x" * 60000}
     text = message_text_limited(msg, 50000)
-    assert text.startswith('<cutted_envelope truncated="true" shown_chars="50000"')
+    assert text.startswith(
+        '<cutted_envelope truncated="true" shown_chars="50000"'
+    )
     assert "TEXT CUTTED" not in text
 
 
 def test_build_history_text_includes_full_dialog_summary_under_per_message_cap():
     payload = "z" * 40000
-    content = wrap_technical_user_content(payload, technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY)
+    content = wrap_technical_user_content(
+        payload, technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY
+    )
     messages = [{"role": "user", "content": content}]
     out = build_history_text(messages, max_chars=0, max_message_chars=500)
     assert payload in out
@@ -475,7 +581,9 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
     async def _fake_request(**kwargs):
         calls["n"] += 1
         messages = kwargs["messages"]
-        user_content = next((m["content"] for m in messages if m["role"] == "user"), "")
+        user_content = next(
+            (m["content"] for m in messages if m["role"] == "user"), ""
+        )
         seen_user_prompts.append(user_content)
         if calls["n"] == 1:
             return _valid_summary("too-long-before-compress") + ("X" * 200)
@@ -483,7 +591,10 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
             return _valid_summary("compressed-summary")
         return _valid_summary("final-summary")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -540,7 +651,9 @@ def test_build_history_text_max_chars_takes_tail_of_formatted_rows():
     assert out.strip().startswith('<message n="3">')
 
 
-def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(monkeypatch):
+def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(
+    monkeypatch,
+):
     """Батчи уже ограничены split_turns_into_char_batches; второй хвост по строкам не применяем."""
     captured: list[dict] = []
 
@@ -556,7 +669,10 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
     async def _fake_request(**_kwargs):
         return valid_summary_xml_for_tests(seed="x")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -576,12 +692,17 @@ def test_summarize_pipeline_calls_build_history_text_with_max_chars_disabled(mon
 
 
 def test_summarize_merges_existing_user_intent_log(monkeypatch):
-    history = _flatten_turns([_make_turn("new user request", "assistant reply")])
+    history = _flatten_turns(
+        [_make_turn("new user request", "assistant reply")]
+    )
 
     async def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -590,7 +711,9 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
             ctx=_ctx(trigger_chars=999999),
             state=_state(),
             full_history_messages=history,
-            user_intent_log=user_ask_records("older user request", "new user request", turn=1),
+            user_intent_log=user_ask_records(
+                "older user request", "new user request", turn=1
+            ),
         )
     )
     assert result["user_intent_log"] == meta_intent_log(
@@ -607,8 +730,12 @@ def test_summarize_merges_existing_user_intent_log(monkeypatch):
         state=state,
         raw_summary=result["raw_summary"],
         last_dialog_steps=result["last_dialog_steps"],
-        memory_append_deltas=result.get("memory_append_deltas", WorkingMemoryDeltas()),
-        memory_replace_deltas=result.get("memory_replace_deltas", WorkingMemoryDeltas()),
+        memory_append_deltas=result.get(
+            "memory_append_deltas", WorkingMemoryDeltas()
+        ),
+        memory_replace_deltas=result.get(
+            "memory_replace_deltas", WorkingMemoryDeltas()
+        ),
         summarized_messages_count=len(history),
     )
     assert "<original_user_messages>" not in built
@@ -625,7 +752,10 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
     async def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -652,13 +782,18 @@ def test_summarize_preserves_user_intent_log_chronological_order(monkeypatch):
     )
 
 
-def test_summarize_filters_technical_messages_from_user_intent_log(monkeypatch):
+def test_summarize_filters_technical_messages_from_user_intent_log(
+    monkeypatch,
+):
     history = _flatten_turns([_make_turn("real request", "assistant")])
 
     async def _fake_request(**_kwargs):
         return _valid_summary("single-batch")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -683,7 +818,10 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
             return "[assistant] raw transcript"
         return _valid_summary("repaired")
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
@@ -698,7 +836,9 @@ def test_invalid_summary_triggers_one_repair_retry(monkeypatch):
     assert calls["n"] == 2
 
 
-def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(monkeypatch):
+def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(
+    monkeypatch,
+):
     history = _flatten_turns([_make_turn("u1", "a1")])
     llm_calls = {"repair": 0}
 
@@ -715,10 +855,16 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(m
         llm_calls["repair"] += 1
         return "<goal>repaired memory body</goal>"
 
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
     _patch_chat_completion(monkeypatch, _fake_summary)
     _patch_memory_patch_empty(monkeypatch)
-    monkeypatch.setattr("gc_core.summarize.memory_suggestions.arequest_patch_replace", _fake_replace)
+    monkeypatch.setattr(
+        "gc_core.summarize.memory_suggestions.arequest_patch_replace",
+        _fake_replace,
+    )
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_memory_deltas_format_repair",
         _fake_repair,
@@ -732,6 +878,12 @@ def test_memory_patch_replace_format_repair_runs_once_for_long_unparsed_output(m
         )
     )
     assert result["memory_replace_deltas"].goal == "repaired memory body"
-    assert result["trace"]["memory_patch"]["replace"]["format_repair_attempted"] is True
-    assert result["trace"]["memory_patch"]["replace"]["format_repair_success"] is True
+    assert (
+        result["trace"]["memory_patch"]["replace"]["format_repair_attempted"]
+        is True
+    )
+    assert (
+        result["trace"]["memory_patch"]["replace"]["format_repair_success"]
+        is True
+    )
     assert llm_calls["repair"] == 1

@@ -9,7 +9,11 @@ def _app(tmp_path):
     return TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M", "tui_finish_gate_mode": "on", "tui_text_answer_mode": "judge"},
+        config={
+            "model": "M",
+            "tui_finish_gate_mode": "on",
+            "tui_text_answer_mode": "judge",
+        },
     )
 
 
@@ -41,12 +45,19 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "gc_core.config.load_config_ex",
-        lambda *_a, **_k: (dict(fresh), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+        lambda *_a, **_k: (
+            dict(fresh),
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
-    monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "gc_core.config.apply_cli_overrides", lambda *_a, **_k: None
+    )
     app.reload_config()
 
-    assert app._config["model"] == "fresh-model"  # база реально перечиталась мокнутым load_config_ex
+    assert (
+        app._config["model"] == "fresh-model"
+    )  # база реально перечиталась мокнутым load_config_ex
     assert app.effective_config()["tui_text_answer_mode"] == "allow"
 
 
@@ -59,7 +70,9 @@ def test_overrides_survive_reload_if_changed(tmp_path):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+    )
     app._config_path = str(cfg_file)
     app.reload_config()  # база + снимок mtime установлены
     app.set_session_override("tui.text_answer_mode", "allow")
@@ -75,7 +88,9 @@ def test_overrides_survive_reload_if_changed(tmp_path):
 
     eff = app.effective_config()
     assert eff["tui_finish_gate_mode"] == "off"  # база реально перечиталась
-    assert eff["tui_text_answer_mode"] == "allow"  # сессия пережила перечитывание
+    assert (
+        eff["tui_text_answer_mode"] == "allow"
+    )  # сессия пережила перечитывание
 
 
 def test_load_session_overrides_replaces_whole_set(tmp_path):
@@ -104,12 +119,17 @@ def test_apply_toggle_writes_session_not_config_file(tmp_path):
 
     assert apply_toggle(app, "gate", "off") == "off"
     assert toggle_state(app, "gate") == "off"
-    assert cfg_file.read_text(encoding="utf-8") == 'tui:\n  finish_gate_mode: "on"\n'
+    assert (
+        cfg_file.read_text(encoding="utf-8")
+        == 'tui:\n  finish_gate_mode: "on"\n'
+    )
 
     from gc_tui.services.stores.file_store import FileTaskStore
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    saved = (store.get_task_meta("t1").get("tui") or {}).get("session_settings")
+    saved = (store.get_task_meta("t1").get("tui") or {}).get(
+        "session_settings"
+    )
     assert saved == {"tui.finish_gate_mode": "off"}
 
 
@@ -128,7 +148,9 @@ def test_apply_toggle_rolls_back_when_meta_write_fails(tmp_path, monkeypatch):
 
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
-    app.set_session_override("tui.text_answer_mode", "allow")  # уже применённое до сбоя
+    app.set_session_override(
+        "tui.text_answer_mode", "allow"
+    )  # уже применённое до сбоя
 
     def boom(self, task_id, patch, system=None):
         raise OSError("disk full")
@@ -162,7 +184,9 @@ def test_apply_toggle_without_active_thread_keeps_session(tmp_path):
         ("off", "on", "on"),
     ],
 )
-def test_effective_gate_matrix_global_x_override(tmp_path, global_val, override, expected):
+def test_effective_gate_matrix_global_x_override(
+    tmp_path, global_val, override, expected
+):
     """Матрица (глобал × сессионный оверрайд) эффективного /gate (дизайн
     2026-07-21 §2, гейт §9): без оверрайда действует глобал; с оверрайдом —
     оверрайд. Ключ присутствует в файле → tui_finish_gate_mode_explicit=True
@@ -171,8 +195,12 @@ def test_effective_gate_matrix_global_x_override(tmp_path, global_val, override,
     from gc_tui.toggles import toggle_state
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text(f'tui:\n  finish_gate_mode: "{global_val}"\n', encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
+    cfg_file.write_text(
+        f'tui:\n  finish_gate_mode: "{global_val}"\n', encoding="utf-8"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+    )
     app._config_path = str(cfg_file)
     app.reload_config()
     if override is not None:
@@ -197,7 +225,10 @@ def test_apply_session_overrides_applies_pair(tmp_path):
     assert eff["tui_text_answer_mode"] == "judge"
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     saved = read_from_meta(store.get_task_meta("t1"))
-    assert saved == {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}
+    assert saved == {
+        "tui.finish_gate_mode": "smart",
+        "tui.text_answer_mode": "judge",
+    }
 
 
 def test_clear_session_overrides_removes_pair(tmp_path):
@@ -209,17 +240,23 @@ def test_clear_session_overrides_removes_pair(tmp_path):
             "tui.text_answer_mode": "allow",
         }
     )
-    app.clear_session_overrides(("tui.finish_gate_mode", "tui.text_answer_mode"))
+    app.clear_session_overrides(
+        ("tui.finish_gate_mode", "tui.text_answer_mode")
+    )
     # оверрайдов нет — эффективный конфиг = база (ключи сессии сняты)
     assert app._session_overrides == {}
 
 
-def test_apply_session_overrides_rolls_back_on_meta_failure(tmp_path, monkeypatch):
+def test_apply_session_overrides_rolls_back_on_meta_failure(
+    tmp_path, monkeypatch
+):
     from gc_tui.services.stores.file_store import FileTaskStore
 
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
-    app.set_session_override("tui.text_answer_mode", "deny")  # уже применённое до сбоя
+    app.set_session_override(
+        "tui.text_answer_mode", "deny"
+    )  # уже применённое до сбоя
 
     def boom(self, task_id, patch, system=None):
         raise OSError("disk full")
@@ -237,7 +274,9 @@ def test_apply_session_overrides_rolls_back_on_meta_failure(tmp_path, monkeypatc
     assert app._session_overrides == {"tui.text_answer_mode": "deny"}
 
 
-def test_clear_session_overrides_noop_when_nothing_to_clear(tmp_path, monkeypatch):
+def test_clear_session_overrides_noop_when_nothing_to_clear(
+    tmp_path, monkeypatch
+):
     from gc_tui.services.stores.file_store import FileTaskStore
 
     app = _app(tmp_path)

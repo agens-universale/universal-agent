@@ -24,7 +24,10 @@ def _harness(editor):
 
 
 def _models():
-    return [ModelInfo(id="good-model", tool_capable=True), ModelInfo(id="bad-model", tool_capable=False)]
+    return [
+        ModelInfo(id="good-model", tool_capable=True),
+        ModelInfo(id="bad-model", tool_capable=False),
+    ]
 
 
 def _models3():
@@ -99,7 +102,9 @@ async def test_typed_name_gets_no_mark_and_enter_means_next():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
-        ed.query_one("#onb-model", Input).value = "my/own"  # ни одна модель не совпала
+        ed.query_one(
+            "#onb-model", Input
+        ).value = "my/own"  # ни одна модель не совпала
         await pilot.pause()
         assert ed.mark() is None  # метить нечего — Enter значит «далее»
         assert ed.submit() == "my/own"  # но значение доезжает
@@ -111,7 +116,13 @@ async def test_typed_name_gets_no_mark_and_enter_means_next():
 async def test_model_editor_lists_models_and_marks_warn(wait_for=None):
     from gc_tui.editors.model import ModelEditor
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: _models())
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: _models(),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()  # воркер fetch отработал (fake мгновенный)
@@ -119,7 +130,9 @@ async def test_model_editor_lists_models_and_marks_warn(wait_for=None):
         rows = [str(w.render()) for w in _options(ed)]
         assert any("good-model" in r for r in rows)
         assert any("bad-model" in r and "⚠" in r for r in rows)
-        assert ed.submit() == "good-model"  # нет текущей → курсор на первой модели
+        assert (
+            ed.submit() == "good-model"
+        )  # нет текущей → курсор на первой модели
 
 
 async def test_model_editor_manual_entry_when_fetch_fails():
@@ -146,7 +159,13 @@ async def test_typed_value_is_taken_when_nothing_matches():
     набранное не совпало ни с одной строкой, submit() отдаёт текст поля."""
     from gc_tui.editors.model import ModelEditor
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: _models())
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: _models(),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -159,7 +178,13 @@ async def test_typed_value_is_taken_when_nothing_matches():
 async def test_model_editor_source_line_when_list_loaded():
     from gc_tui.editors.model import ModelEditor
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: _models())
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: _models(),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -172,7 +197,12 @@ async def test_model_editor_active_gets_current_label_and_preselects_cursor():
     from gc_tui.editors.model import ModelEditor
 
     ed = ModelEditor(
-        current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: _models(), active="bad-model"
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: _models(),
+        active="bad-model",
     )
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -202,10 +232,15 @@ async def test_model_editor_synthetic_list_when_fetch_fails_with_active():
         rows = [str(w.render()) for w in _options(ed)]
         assert any("active-model" in r and "текущая" in r for r in rows)
         hints = [str(w.render()) for w in ed.query(".onb-hint")]
-        assert any("не удалось получить список — можно вписать вручную" in h for h in hints)
+        assert any(
+            "не удалось получить список — можно вписать вручную" in h
+            for h in hints
+        )
         assert ed.submit() == "active-model"  # submit по умолчанию → active
         ed.move(1)  # управление обычное — движение работает
-        assert ed.submit() == "active-model"  # список из одной строки — с неё и не уйти
+        assert (
+            ed.submit() == "active-model"
+        )  # список из одной строки — с неё и не уйти
 
 
 async def test_model_editor_no_list_no_active_shows_source_line():
@@ -213,17 +248,28 @@ async def test_model_editor_no_list_no_active_shows_source_line():
     новой унифицированной источник-строкой вместо старого MODEL_NO_LIST-хинта."""
     from gc_tui.editors.model import ModelEditor
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: None)
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: None,
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
         assert ed.query_one(Input)
         hints = [str(w.render()) for w in ed.query(".onb-hint")]
-        assert any("не удалось получить список — можно вписать вручную" in h for h in hints)
+        assert any(
+            "не удалось получить список — можно вписать вручную" in h
+            for h in hints
+        )
 
 
 def _many_models(n):
-    return [ModelInfo(id=f"model-{i:03d}", tool_capable=True) for i in range(n)]
+    return [
+        ModelInfo(id=f"model-{i:03d}", tool_capable=True) for i in range(n)
+    ]
 
 
 async def test_model_editor_shows_all_models_with_counter():
@@ -231,7 +277,13 @@ async def test_model_editor_shows_all_models_with_counter():
     показаны все, счётчик над списком — «N моделей»."""
     from gc_tui.editors.model import ModelEditor
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: _many_models(50))
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: _many_models(50),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -259,7 +311,9 @@ async def test_model_editor_active_beyond_cap_still_shown():
         await pilot.pause()
         rows = [str(w.render()) for w in _options(ed)]
         assert any("model-045" in r and "текущая" in r for r in rows)
-        assert ed.submit() == "model-045"  # курсор сразу на action, submit — active
+        assert (
+            ed.submit() == "model-045"
+        )  # курсор сразу на action, submit — active
 
 
 async def test_model_editor_calls_on_loaded_callback_after_fetch():
@@ -302,7 +356,9 @@ async def test_active_model_missing_from_server_list_is_still_offered():
     async with app.run_test() as pilot:
         await pilot.pause()
         rows = [str(w.render()) for w in _options(ed)]
-        assert any("gigacode_agent_v1.6_rc" in r for r in rows), f"действующая модель пропала из списка: {rows}"
+        assert any("gigacode_agent_v1.6_rc" in r for r in rows), (
+            f"действующая модель пропала из списка: {rows}"
+        )
         assert any("gigacode_agent_v1.6_rc" in r and "●" in r for r in rows), (
             "действующая модель не помечена как текущая"
         )
@@ -361,7 +417,13 @@ async def test_filter_narrows_without_cap():
     from gc_tui.editors.model import ModelEditor
 
     many = [ModelInfo(id=f"m-{i:02d}") for i in range(30)]
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: many)
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: many,
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -369,7 +431,9 @@ async def test_filter_narrows_without_cap():
         assert len(options) == 30  # все 30, строки «вручную» нет
         ed.query_one("#onb-model", Input).value = "m-2"
         await pilot.pause()
-        rows = [str(w.render()) for w in _options(ed) if "m-2" in str(w.render())]
+        rows = [
+            str(w.render()) for w in _options(ed) if "m-2" in str(w.render())
+        ]
         assert len(rows) == 10  # m-20..m-29
 
 
@@ -418,7 +482,9 @@ async def test_focus_stays_in_the_field_across_moves():
         ed.move(1)  # ▸ ушёл на модель
         await pilot.pause()
         assert field.has_focus
-        assert ed.query_one(f"#{ed._input_id}", Input) is field  # и поле то же самое
+        assert (
+            ed.query_one(f"#{ed._input_id}", Input) is field
+        )  # и поле то же самое
 
 
 async def test_model_warn_banner_shown_when_only_current_is_non_tool_capable():
@@ -439,10 +505,16 @@ async def test_model_warn_banner_shown_when_only_current_is_non_tool_capable():
     async with app.run_test() as pilot:
         await pilot.pause()
         rows = [str(w.render()) for w in _options(ed)]
-        assert any("bad-model" in r and "текущая" in r for r in rows)  # active == строка "current"
-        assert not any("good-model" in r and "⚠" in r for r in rows)  # остальные — без ⚠
+        assert any(
+            "bad-model" in r and "текущая" in r for r in rows
+        )  # active == строка "current"
+        assert not any(
+            "good-model" in r and "⚠" in r for r in rows
+        )  # остальные — без ⚠
         warns = [str(w.render()) for w in ed.query(".onb-warn")]
-        assert any(MODEL_WARN in w for w in warns)  # баннер всё равно смонтирован
+        assert any(
+            MODEL_WARN in w for w in warns
+        )  # баннер всё равно смонтирован
 
 
 async def test_filter_reselects_survivor_by_identity_across_index_shift():
@@ -450,7 +522,12 @@ async def test_filter_reselects_survivor_by_identity_across_index_shift():
     ▸ остаётся на НЕЙ, не на модели, занявшей её старый индекс (баг clamp по позиции)."""
     from gc_tui.editors.model import ModelEditor
 
-    models = [ModelInfo(id="alpha"), ModelInfo(id="keep-me"), ModelInfo(id="beta"), ModelInfo(id="gamma")]
+    models = [
+        ModelInfo(id="alpha"),
+        ModelInfo(id="keep-me"),
+        ModelInfo(id="beta"),
+        ModelInfo(id="gamma"),
+    ]
     ed = ModelEditor(
         current="gigacode",
         endpoint="http://x",
@@ -464,9 +541,13 @@ async def test_filter_reselects_survivor_by_identity_across_index_shift():
         await pilot.pause()
         ed.move(2)  # ▸ на keep-me (current, alpha, keep-me, …)
         assert ed.submit() == "keep-me"
-        ed.query_one("#onb-model", Input).value = "e"  # keep-me, beta остаются; alpha,gamma — нет
+        ed.query_one(
+            "#onb-model", Input
+        ).value = "e"  # keep-me, beta остаются; alpha,gamma — нет
         await pilot.pause()
-        assert ed.submit() == "keep-me"  # identity сохранён (clamp по позиции вернул бы beta)
+        assert (
+            ed.submit() == "keep-me"
+        )  # identity сохранён (clamp по позиции вернул бы beta)
         assert ed.submit() != "beta"
 
 
@@ -490,7 +571,9 @@ async def test_filter_moves_cursor_to_anchor_when_selection_filtered_out():
         assert ed.submit() == "glm-5.2-fp8"
         ed.query_one("#onb-model", Input).value = "gpt"  # исключает glm-*
         await pilot.pause()
-        assert ed.submit() != "openai/gpt-5.6-terra"  # не подменяет выбор по позиции
+        assert (
+            ed.submit() != "openai/gpt-5.6-terra"
+        )  # не подменяет выбор по позиции
         assert ed.submit() == "gigacode"  # первая видимая = якорь «текущая»
 
 
@@ -566,7 +649,13 @@ async def test_filter_no_match_falls_back_to_manual_entry():
     совпавшее ни с одной строкой И ЕСТЬ ручной ввод (§3.2.6)."""
     from gc_tui.editors.model import ModelEditor
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: _models3())
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: _models3(),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -578,7 +667,9 @@ async def test_filter_no_match_falls_back_to_manual_entry():
         assert field.has_focus  # фокус остался в поле
         hints = [str(w.render()) for w in ed.query(".onb-hint")]
         assert any("ничего не найдено" in h for h in hints)
-        assert ed.submit() == "zzz-nomatch"  # ▸ на manual → набранное и есть выбор
+        assert (
+            ed.submit() == "zzz-nomatch"
+        )  # ▸ на manual → набранное и есть выбор
 
 
 # --- композиция §3.1: поле само себе фильтр, список под ним в одной рамке ---
@@ -621,13 +712,17 @@ async def test_filtering_does_not_move_the_mark():
         ed.move(-1)  # ▸ на последнюю видимую строку
         assert ed.mark() == "a/two"  # пометить строку под курсором
         await pilot.pause()
-        assert ed.is_marked, "предусловие: пометка стоит на строке под курсором"
+        assert ed.is_marked, (
+            "предусловие: пометка стоит на строке под курсором"
+        )
         marked_before = ed._marked
         field.value = "b/"
         await pilot.pause()
         # `is_marked` — про строку ПОД КУРСОРОМ, а курсор фильтр уводит на другую строку.
         # Сама пометка при этом обязана уцелеть: она переезжает только явным действием.
-        assert ed._marked == marked_before, "фильтрация не должна снимать пометку"
+        assert ed._marked == marked_before, (
+            "фильтрация не должна снимать пометку"
+        )
 
 
 async def test_filtering_keeps_focus_and_text_in_field():
@@ -641,7 +736,9 @@ async def test_filtering_keeps_focus_and_text_in_field():
         before = len(_options(ed))
         inp.value = "b/"
         await pilot.pause()
-        assert len(_options(ed)) < before, "предусловие: печать отфильтровала список"
+        assert len(_options(ed)) < before, (
+            "предусловие: печать отфильтровала список"
+        )
         again = ed.query_one("#onb-model", Input)
         assert again is inp, "поле не должно пересоздаваться при фильтрации"
         assert again.value == "b/"
@@ -660,11 +757,17 @@ async def test_field_and_list_live_in_one_group():
         inp = ed.query_one(f"#{ed._input_id}", Input)
         assert inp.parent is group, "поле должно жить внутри группы"
         assert "group-field" in inp.classes  # воздух внутри рамки — на поле
-        assert "set-framed" not in inp.classes  # своей рамки у поля нет — она одна, на группе
+        assert (
+            "set-framed" not in inp.classes
+        )  # своей рамки у поля нет — она одна, на группе
         scroll = group.query_one(VerticalScroll)
         assert "dropdown-scroll" in scroll.classes
-        assert list(scroll.query(".onb-option")), "строки монтируются внутрь группы"
-        assert not list(group.query(".onb-hint")), "счётчик и статусы — снаружи рамки"
+        assert list(scroll.query(".onb-option")), (
+            "строки монтируются внутрь группы"
+        )
+        assert not list(group.query(".onb-hint")), (
+            "счётчик и статусы — снаружи рамки"
+        )
         assert not list(group.query(".onb-warn"))
 
 
@@ -693,7 +796,9 @@ async def test_reload_asks_the_server_again(tmp_path):
         models.append(_M("b/two"))  # сервер отдаёт уже другое
         ed.reload()
         await wait_until(
-            pilot, lambda: any("b/two" in r for r in _row_texts(ed)), "перечитанный список доехал до строк"
+            pilot,
+            lambda: any("b/two" in r for r in _row_texts(ed)),
+            "перечитанный список доехал до строк",
         )
 
 
@@ -706,10 +811,16 @@ async def test_reload_mounts_the_list_when_the_server_revives(tmp_path):
 
     models = []
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
-        assert not ed.has_models and not _row_texts(ed)  # предусловие: списка нет
+        assert not ed.has_models and not _row_texts(
+            ed
+        )  # предусловие: списка нет
         models.append(_M("a/one"))
         ed.reload()
-        await wait_until(pilot, lambda: bool(_row_texts(ed)), "список смонтировался после перечитывания")
+        await wait_until(
+            pilot,
+            lambda: bool(_row_texts(ed)),
+            "список смонтировался после перечитывания",
+        )
         ed.query_one(f"#{ed._input_id}-group")  # рамка-группа появилась
         assert any("a/one" in r for r in _row_texts(ed))
 
@@ -727,9 +838,13 @@ async def test_reload_keeps_the_mark(tmp_path):
         assert [r for r in _row_texts(ed) if "●" in r][0].endswith("a/one")
         models.append(_M("c/three"))
         ed.reload()
-        await wait_until(pilot, lambda: len(_row_texts(ed)) == 3, "список перечитан")
+        await wait_until(
+            pilot, lambda: len(_row_texts(ed)) == 3, "список перечитан"
+        )
         marked = [r for r in _row_texts(ed) if "●" in r]
-        assert len(marked) == 1 and "a/one" in marked[0], "● уехала с перечитыванием"
+        assert len(marked) == 1 and "a/one" in marked[0], (
+            "● уехала с перечитыванием"
+        )
 
 
 async def test_reload_keeps_the_typed_filter(tmp_path):
@@ -746,12 +861,16 @@ async def test_reload_keeps_the_typed_filter(tmp_path):
         assert len(_row_texts(ed)) == 1  # только b/two
         models.append(_M("b/three"))
         ed.reload()
-        await wait_until(pilot, lambda: len(_row_texts(ed)) == 2, "список перечитан")
+        await wait_until(
+            pilot, lambda: len(_row_texts(ed)) == 2, "список перечитан"
+        )
         assert not any("a/one" in r for r in _row_texts(ed)), "фильтр потерян"
         assert ed.query_one(f"#{ed._input_id}", Input).value == "b/"
 
 
-async def test_reload_keeps_what_was_typed_while_the_server_is_silent(tmp_path):
+async def test_reload_keeps_what_was_typed_while_the_server_is_silent(
+    tmp_path,
+):
     """Списка нет — в поле НЕ фильтр, а имя модели, набранное руками (`has_models`
     гасит `on_input_changed`). Правило донора «фильтр — то, что разошлось с
     baseline»: здесь baseline и есть само значение, значит фильтра нет, а набранное
@@ -767,7 +886,9 @@ async def test_reload_keeps_what_was_typed_while_the_server_is_silent(tmp_path):
         ed.reload()
         sel = f"#{ed._input_id}"
         await wait_until(
-            pilot, lambda: bool(ed.query(sel)) and ed.query(sel).first() is not field, "поле пересобрано перечитыванием"
+            pilot,
+            lambda: bool(ed.query(sel)) and ed.query(sel).first() is not field,
+            "поле пересобрано перечитыванием",
         )
         assert ed.query_one(sel, Input).value == "my-own-model"
 
@@ -784,11 +905,15 @@ async def test_a_stale_answer_does_not_remount_over_a_fresh_list(tmp_path):
         stale_gen = ed._gen  # поколение уже осевшей загрузки
         models.append(_M("b/two"))
         ed.reload()
-        await wait_until(pilot, lambda: len(_row_texts(ed)) == 2, "список перечитан")
+        await wait_until(
+            pilot, lambda: len(_row_texts(ed)) == 2, "список перечитан"
+        )
         await ed._handle_fetch_result([_M("stale/model")], stale_gen)
         await pilot.pause()
         rows = _row_texts(ed)
-        assert not any("stale" in r for r in rows), "протухший ответ перемонтировал список"
+        assert not any("stale" in r for r in rows), (
+            "протухший ответ перемонтировал список"
+        )
         assert any("b/two" in r for r in rows)
 
 
@@ -806,11 +931,15 @@ async def test_reload_keeps_the_row_under_the_cursor(tmp_path):
         assert ed.peek() == "b/two"  # предусловие: выбор сделан стрелкой
         models.append(_M("c/three"))
         ed.reload()
-        await wait_until(pilot, lambda: len(_row_texts(ed)) == 3, "список перечитан")
+        await wait_until(
+            pilot, lambda: len(_row_texts(ed)) == 3, "список перечитан"
+        )
         assert ed.peek() == "b/two", "выбор уехал на якорь"
 
 
-async def test_a_generation_going_stale_during_the_teardown_does_not_mount_twice(tmp_path):
+async def test_a_generation_going_stale_during_the_teardown_does_not_mount_twice(
+    tmp_path,
+):
     """Гейт поколения обязан стоять и ПОСЛЕ `await`. `call_from_thread` не кладёт
     колбэк в очередь виджета, а запускает отдельной корутиной: пока обработчик
     поколения N висит на `remove_children`, цикл свободен и успевает прокрутить
@@ -832,9 +961,13 @@ async def test_a_generation_going_stale_during_the_teardown_does_not_mount_twice
         # внук, и по нему «не смонтировал» было бы верно и у сломанной реализации.
         assert not ed.children, "протухший обработчик всё-таки собрал тело"
         ed.remove_children = original
-        await ed._handle_fetch_result([_M("c/three")], ed._gen)  # свежий — монтирует
+        await ed._handle_fetch_result(
+            [_M("c/three")], ed._gen
+        )  # свежий — монтирует
         await pilot.pause()
-        assert len(ed.query(f"#{ed._input_id}")) == 1, "тело собрано ровно один раз"
+        assert len(ed.query(f"#{ed._input_id}")) == 1, (
+            "тело собрано ровно один раз"
+        )
         assert any("c/three" in r for r in _row_texts(ed))
 
 
@@ -846,14 +979,19 @@ async def test_no_manual_row_in_the_list(tmp_path):
     from form_harness import mounted_model_editor
     from gc_core.model_picker import ModelInfo
 
-    models = [ModelInfo(id="a/one", tool_capable=True), ModelInfo(id="b/two", tool_capable=True)]
+    models = [
+        ModelInfo(id="a/one", tool_capable=True),
+        ModelInfo(id="b/two", tool_capable=True),
+    ]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         texts = _row_texts(ed)
         assert not any("вручную" in t for t in texts), texts
 
 
 @pytest.mark.asyncio
-async def test_typed_name_still_reaches_submit_without_the_manual_row(tmp_path):
+async def test_typed_name_still_reaches_submit_without_the_manual_row(
+    tmp_path,
+):
     """Вписанное в поле по-прежнему доезжает до сохранения — теперь без отдельной
     строки-посредника."""
     pytest.importorskip("textual")
@@ -861,7 +999,10 @@ async def test_typed_name_still_reaches_submit_without_the_manual_row(tmp_path):
     from gc_core.model_picker import ModelInfo
     from textual.widgets import Input
 
-    models = [ModelInfo(id="a/one", tool_capable=True), ModelInfo(id="b/two", tool_capable=True)]
+    models = [
+        ModelInfo(id="a/one", tool_capable=True),
+        ModelInfo(id="b/two", tool_capable=True),
+    ]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         ed.query_one("#onb-model", Input).value = "my/own-model"
         await pilot.pause()

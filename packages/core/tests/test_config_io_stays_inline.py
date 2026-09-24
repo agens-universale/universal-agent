@@ -36,7 +36,12 @@ CONFIG_IO_MODULES = [
 ]
 
 #: Имена, любое из которых означает уход работы с текущего потока.
-OFFLOADERS = {"to_thread", "run_in_executor", "run_abandonable", "run_coro_blocking"}
+OFFLOADERS = {
+    "to_thread",
+    "run_in_executor",
+    "run_abandonable",
+    "run_coro_blocking",
+}
 
 
 def _offload_calls(path) -> list[str]:
@@ -46,7 +51,11 @@ def _offload_calls(path) -> list[str]:
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
-        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
+        name = (
+            fn.attr
+            if isinstance(fn, ast.Attribute)
+            else getattr(fn, "id", None)
+        )
         if name in OFFLOADERS:
             found.append(f"{path.name}:{node.lineno}: {name}(...)")
     return found
@@ -55,7 +64,9 @@ def _offload_calls(path) -> list[str]:
 @pytest.mark.parametrize("rel", CONFIG_IO_MODULES)
 def test_config_module_does_not_offload_file_io(rel):
     path = _SRC / rel
-    assert path.is_file(), f"модуль переехал — поправьте CONFIG_IO_MODULES: {rel}"
+    assert path.is_file(), (
+        f"модуль переехал — поправьте CONFIG_IO_MODULES: {rel}"
+    )
 
     offenders = _offload_calls(path)
     assert offenders == [], (

@@ -50,7 +50,10 @@ async def test_voice_endpoint_editor_placeholders_and_password():
     ed = VoiceEndpointEditor(values={})
     app = _harness(ed)
     async with app.run_test():
-        assert ed.query_one("#voice-url", Input).placeholder == "https://…/v1/audio/transcriptions"
+        assert (
+            ed.query_one("#voice-url", Input).placeholder
+            == "https://…/v1/audio/transcriptions"
+        )
         assert ed.query_one("#voice-model", Input).placeholder == "whisper-1"
         assert ed.query_one("#voice-token", Input).password is True
         assert ed.query_one("#voice-url", Input).password is False
@@ -59,10 +62,19 @@ async def test_voice_endpoint_editor_placeholders_and_password():
 async def test_voice_endpoint_editor_prefills_values_from_outside():
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    ed = VoiceEndpointEditor(values={"url": "https://s.x/v1/audio/transcriptions", "token": "sk", "model": "wh"})
+    ed = VoiceEndpointEditor(
+        values={
+            "url": "https://s.x/v1/audio/transcriptions",
+            "token": "sk",
+            "model": "wh",
+        }
+    )
     app = _harness(ed)
     async with app.run_test():
-        assert ed.query_one("#voice-url", Input).value == "https://s.x/v1/audio/transcriptions"
+        assert (
+            ed.query_one("#voice-url", Input).value
+            == "https://s.x/v1/audio/transcriptions"
+        )
         assert ed.query_one("#voice-token", Input).value == "sk"
         assert ed.query_one("#voice-model", Input).value == "wh"
 
@@ -76,7 +88,9 @@ async def test_voice_endpoint_editor_language_field_only_when_asked():
     async with app.run_test():
         assert not ed.query("#voice-lang")
 
-    ed4 = VoiceEndpointEditor(values={"language": "en"}, fields=("url", "token", "model", "language"))
+    ed4 = VoiceEndpointEditor(
+        values={"language": "en"}, fields=("url", "token", "model", "language")
+    )
     app4 = _harness(ed4)
     async with app4.run_test():
         assert ed4.query_one("#voice-lang", Input).value == "en"
@@ -87,23 +101,42 @@ async def test_voice_endpoint_editor_language_field_only_when_asked():
 async def test_voice_endpoint_editor_values_are_stripped():
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    ed = VoiceEndpointEditor(values={}, fields=("url", "token", "model", "language"))
+    ed = VoiceEndpointEditor(
+        values={}, fields=("url", "token", "model", "language")
+    )
     app = _harness(ed)
     async with app.run_test():
-        ed.query_one("#voice-url", Input).value = "  https://s.x/v1/audio/transcriptions "
+        ed.query_one(
+            "#voice-url", Input
+        ).value = "  https://s.x/v1/audio/transcriptions "
         ed.query_one("#voice-token", Input).value = " sk "
-        assert ed.values() == {"url": "https://s.x/v1/audio/transcriptions", "token": "sk", "model": "", "language": ""}
+        assert ed.values() == {
+            "url": "https://s.x/v1/audio/transcriptions",
+            "token": "sk",
+            "model": "",
+            "language": "",
+        }
 
 
 async def test_voice_endpoint_editor_submit_returns_values():
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    ed = VoiceEndpointEditor(values={"url": "https://s.x/v1/audio/transcriptions", "token": "sk", "model": "wh"})
+    ed = VoiceEndpointEditor(
+        values={
+            "url": "https://s.x/v1/audio/transcriptions",
+            "token": "sk",
+            "model": "wh",
+        }
+    )
     app = _harness(ed)
     async with app.run_test():
         ok, values = ed.submit()
         assert ok is True
-        assert values == {"url": "https://s.x/v1/audio/transcriptions", "token": "sk", "model": "wh"}
+        assert values == {
+            "url": "https://s.x/v1/audio/transcriptions",
+            "token": "sk",
+            "model": "wh",
+        }
         assert not ed.query(".onb-warn")
 
 
@@ -130,7 +163,9 @@ async def test_voice_endpoint_editor_submit_requires_url():
     async with app.run_test():
         ok, values = ed.submit()
         assert ok is False and values is None
-        assert any("введите адрес" in str(w.render()) for w in ed.query(".onb-warn"))
+        assert any(
+            "введите адрес" in str(w.render()) for w in ed.query(".onb-warn")
+        )
 
 
 async def test_voice_endpoint_editor_submit_clears_stale_error():
@@ -142,7 +177,9 @@ async def test_voice_endpoint_editor_submit_clears_stale_error():
     app = _harness(ed)
     async with app.run_test() as pilot:
         assert ed.submit()[0] is False
-        ed.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        ed.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         ok, values = ed.submit()
         assert ok is True
         await pilot.pause()  # remove() отложенный — ждём применения
@@ -154,12 +191,18 @@ async def test_voice_endpoint_editor_token_placeholder_can_be_overridden():
     («пусто = не менять»), мастер — нет, и его placeholder не меняется."""
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    ed = VoiceEndpointEditor(values={}, placeholders={"token": "сохранён · пусто = не менять"})
+    ed = VoiceEndpointEditor(
+        values={}, placeholders={"token": "сохранён · пусто = не менять"}
+    )
     app = _harness(ed)
     async with app.run_test():
-        assert ed.query_one("#voice-token", Input).placeholder == "сохранён · пусто = не менять"
         assert (
-            ed.query_one("#voice-url", Input).placeholder == "https://…/v1/audio/transcriptions"
+            ed.query_one("#voice-token", Input).placeholder
+            == "сохранён · пусто = не менять"
+        )
+        assert (
+            ed.query_one("#voice-url", Input).placeholder
+            == "https://…/v1/audio/transcriptions"
         )  # прочие поля не тронуты
 
     plain = VoiceEndpointEditor(values={})
@@ -199,7 +242,9 @@ async def test_voice_endpoint_editor_readonly_token_is_not_masked():
     звёздочки спрятали бы ровно то, ради чего поле показано."""
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    ed = VoiceEndpointEditor(values={"token": "не требуется"}, readonly=("token",), autofocus=False)
+    ed = VoiceEndpointEditor(
+        values={"token": "не требуется"}, readonly=("token",), autofocus=False
+    )
     app = _harness(ed)
     async with app.run_test():
         assert ed.query_one("#voice-token", Input).password is False
@@ -207,7 +252,9 @@ async def test_voice_endpoint_editor_readonly_token_is_not_masked():
     secret = VoiceEndpointEditor(values={"token": "sk"}, autofocus=False)
     app2 = _harness(secret)
     async with app2.run_test():
-        assert secret.query_one("#voice-token", Input).password is True  # мастер не тронут
+        assert (
+            secret.query_one("#voice-token", Input).password is True
+        )  # мастер не тронут
 
 
 async def test_voice_endpoint_editor_focus_field_by_key():
@@ -215,7 +262,11 @@ async def test_voice_endpoint_editor_focus_field_by_key():
     любое своё поле, не только первое."""
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    ed = VoiceEndpointEditor(values={}, fields=("url", "token", "model", "language"), autofocus=False)
+    ed = VoiceEndpointEditor(
+        values={},
+        fields=("url", "token", "model", "language"),
+        autofocus=False,
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.focus_field("model")
@@ -248,7 +299,12 @@ def _lang_rows(ed):
 def _four(values=None, **kw):
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    return VoiceEndpointEditor(values=values or {}, fields=("url", "token", "model", "language"), autofocus=False, **kw)
+    return VoiceEndpointEditor(
+        values=values or {},
+        fields=("url", "token", "model", "language"),
+        autofocus=False,
+        **kw,
+    )
 
 
 async def test_lang_list_opens_with_hint_then_all_codes():
@@ -265,7 +321,9 @@ async def test_lang_list_opens_with_hint_then_all_codes():
         )
         rows = _lang_rows(ed)
         assert len(rows) == len(VOICE_LANGUAGES) == 100
-        assert rows[0] == "▸ ru    русский"  # ▸ на действующем коде (поле пусто → ru)
+        assert (
+            rows[0] == "▸ ru    русский"
+        )  # ▸ на действующем коде (поле пусто → ru)
         assert rows[3] == "  de    немецкий"
 
 
@@ -389,7 +447,20 @@ async def test_lang_list_carries_every_whisper_language():
     from gc_tui.editors.voice_endpoint import VOICE_LANGUAGES
 
     codes = [c for c, _ in VOICE_LANGUAGES]
-    assert codes[:12] == ["ru", "en", "uk", "de", "fr", "es", "it", "pt", "zh", "ja", "tr", "kk"]
+    assert codes[:12] == [
+        "ru",
+        "en",
+        "uk",
+        "de",
+        "fr",
+        "es",
+        "it",
+        "pt",
+        "zh",
+        "ja",
+        "tr",
+        "kk",
+    ]
     assert codes[12:] == sorted(codes[12:])
     assert len(codes) == len(set(codes))  # без дублей
     assert set(codes) == WHISPER_LANGUAGE_CODES  # ни пропаж, ни лишних
@@ -413,7 +484,9 @@ async def test_lang_list_rows_live_in_a_capped_scroll_frame():
         ed.lang_list.open(forced=True)
         scroll = ed.query_one(".voice-lang-scroll")
         assert isinstance(scroll, VerticalScroll)
-        assert "dropdown-scroll" in scroll.classes and "onb-dyn" in scroll.classes
+        assert (
+            "dropdown-scroll" in scroll.classes and "onb-dyn" in scroll.classes
+        )
         assert scroll.can_focus is False  # фокус остаётся в поле
         rows = list(ed.query(".voice-lang-row"))
         assert len(rows) == 100
@@ -429,10 +502,14 @@ async def test_lang_list_scroll_frame_goes_away_with_the_list():
         ed.lang_list.open(forced=True)
         ed.lang_list.close()
         await pilot.pause()
-        assert not ed.query(".voice-lang-scroll") and not ed.query(".voice-lang-row")
+        assert not ed.query(".voice-lang-scroll") and not ed.query(
+            ".voice-lang-row"
+        )
 
 
-async def test_lang_list_scrolls_the_highlighted_row_inside_the_frame(monkeypatch):
+async def test_lang_list_scrolls_the_highlighted_row_inside_the_frame(
+    monkeypatch,
+):
     """↑/↓ по 99 языкам подводят выделенную строку сами — внутри рамки-скролла
     (за курсором списка Textual не следит: фокус держит поле)."""
     from textual.widgets import Static
@@ -440,13 +517,19 @@ async def test_lang_list_scrolls_the_highlighted_row_inside_the_frame(monkeypatc
     seen = []
     original = Static.scroll_visible
     monkeypatch.setattr(
-        Static, "scroll_visible", lambda self, *a, **kw: (seen.append(self), original(self, *a, **kw))[1]
+        Static,
+        "scroll_visible",
+        lambda self, *a, **kw: (seen.append(self), original(self, *a, **kw))[
+            1
+        ],
     )
     ed = _four()
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.lang_list.open(forced=True)
-        ed.lang_list.apply_filter("йоруба")  # последний код списка — заведомо за фолдом
+        ed.lang_list.apply_filter(
+            "йоруба"
+        )  # последний код списка — заведомо за фолдом
         for _ in range(5):  # call_after_refresh — после layout-прохода
             await pilot.pause()
         rows = [w for w in ed.query(".voice-lang-row") if w.display]
@@ -460,7 +543,9 @@ async def test_lang_list_highlights_the_current_code():
     app = _harness(ed)
     async with app.run_test():
         ed.lang_list.open(forced=True)
-        assert [r for r in _lang_rows(ed) if r.startswith("▸")] == ["▸ de    немецкий"]
+        assert [r for r in _lang_rows(ed) if r.startswith("▸")] == [
+            "▸ de    немецкий"
+        ]
 
 
 async def test_lang_list_highlights_nothing_for_an_own_code():
@@ -512,10 +597,14 @@ async def test_lang_list_move_cycles_and_reports_that_it_ate_the_key():
         assert ed.lang_list.move(1) is False  # свёрнут — клавиша не наша
         ed.lang_list.open(forced=True)
         assert ed.lang_list.move(1) is True
-        assert [r for r in _lang_rows(ed) if r.startswith("▸")] == ["▸ en    английский"]
+        assert [r for r in _lang_rows(ed) if r.startswith("▸")] == [
+            "▸ en    английский"
+        ]
         ed.lang_list.move(-1)
         ed.lang_list.move(-1)
-        assert [r for r in _lang_rows(ed) if r.startswith("▸")] == ["▸ yue   кантонский"]
+        assert [r for r in _lang_rows(ed) if r.startswith("▸")] == [
+            "▸ yue   кантонский"
+        ]
 
 
 async def test_lang_list_pick_substitutes_and_collapses():
@@ -566,7 +655,9 @@ async def test_voice_list_shares_frame_with_its_field():
         # `.field-group > …` смотрят ровно на непосредственного родителя.
         assert field.parent is group
         assert "group-field" in field.classes  # воздух внутри рамки — на поле
-        assert "set-framed" not in field.classes  # рамка одна, её рисует группа
+        assert (
+            "set-framed" not in field.classes
+        )  # рамка одна, её рисует группа
         scroll = ed.query_one(".voice-lang-scroll")
         assert scroll.parent is group  # строки — в той же рамке
         hint = ed.query_one(".voice-lang-hint")
@@ -585,7 +676,9 @@ async def test_voice_fields_without_a_list_keep_their_own_frame():
             field = ed.query_one(wid, Input)
             assert "set-framed" in field.classes
             assert field.parent is ed
-        assert not ed.query("#voice-url-group") and not ed.query("#voice-token-group")
+        assert not ed.query("#voice-url-group") and not ed.query(
+            "#voice-token-group"
+        )
 
 
 async def test_lang_list_close_restores_the_pre_filter_code():
@@ -661,7 +754,9 @@ async def test_lang_list_own_code_becomes_the_baseline_too():
         ed.lang_list.open(forced=True)
         field.value = "zz"
         await pilot.pause()
-        assert ed.pick_language() is False  # подставлять нечего — сохранится введённое
+        assert (
+            ed.pick_language() is False
+        )  # подставлять нечего — сохранится введённое
         field.value = "zzz"
         await pilot.pause()
         ed.lang_list.close()
@@ -690,7 +785,9 @@ async def test_programmatic_write_leaves_the_cursor_inside_the_value():
         field.value = "англ"
         field.cursor_position = 4
         await pilot.pause()
-        assert ed.pick_language() is True  # второй путь записи — подстановка кода
+        assert (
+            ed.pick_language() is True
+        )  # второй путь записи — подстановка кода
         assert field.value == "en"
         assert field.cursor_position <= len("en")
 
@@ -709,7 +806,9 @@ async def test_lang_list_move_gives_the_key_back_when_nothing_matches():
         assert ed.lang_list.has_matches is False
 
 
-async def test_lang_list_scrolls_the_hint_when_no_row_is_highlighted(monkeypatch):
+async def test_lang_list_scrolls_the_hint_when_no_row_is_highlighted(
+    monkeypatch,
+):
     """Подсвеченной строки нет (свой код в поле) — подводим в видимую область ХИНТ:
     стрелки уже съедены списком, и раскрытие за фолдом выглядит как «клавиши умерли»."""
     from textual.widgets import Static
@@ -758,7 +857,9 @@ async def test_lang_list_reopen_for_typing_is_a_noop_when_already_open():
         before = list(ed.query(".voice-lang-row"))
         assert len(_lang_rows(ed)) == 100
         ed.lang_list.reopen_for_typing("de")
-        assert list(ed.query(".voice-lang-row")) == before  # те же виджеты, не задвоились
+        assert (
+            list(ed.query(".voice-lang-row")) == before
+        )  # те же виджеты, не задвоились
         assert len(_lang_rows(ed)) == 100  # фильтр "de" не применился
 
 
@@ -775,11 +876,15 @@ async def test_lang_list_reopen_for_typing_does_not_touch_value0():
     async with app.run_test() as pilot:
         ed.lang_list.open(forced=True)  # _value0 = "en"
         ed.lang_list.close()  # свернули, поле всё ещё "en"
-        ed.query_one("#voice-lang", Input).value = "нем"  # печать уже поменяла текст поля
+        ed.query_one(
+            "#voice-lang", Input
+        ).value = "нем"  # печать уже поменяла текст поля
         await pilot.pause()
         ed.lang_list.reopen_for_typing("нем")  # печать — НЕ новый вход на поле
         ed.lang_list.close()  # Esc после раскрытия-по-печати
-        assert ed.query_one("#voice-lang", Input).value == "en"  # прежний код, не "нем"
+        assert (
+            ed.query_one("#voice-lang", Input).value == "en"
+        )  # прежний код, не "нем"
 
 
 async def test_editor_typing_reopens_a_closed_list_when_the_field_has_focus():
@@ -864,7 +969,11 @@ def _cloud(values=None, *, fetch=None, **kw):
     vals = {"url": "https://s.x/v1/audio/transcriptions"}
     vals.update(values or {})
     return VoiceEndpointEditor(
-        values=vals, fields=("url", "token", "model", "language"), autofocus=False, fetch=fetch, **kw
+        values=vals,
+        fields=("url", "token", "model", "language"),
+        autofocus=False,
+        fetch=fetch,
+        **kw,
     )
 
 
@@ -883,9 +992,17 @@ def test_stt_models_first_keeps_only_speech_models_when_there_are_any():
     from gc_tui.editors.voice_endpoint import stt_models_first
 
     assert stt_models_first(
-        ["gpt-4o", "whisper-1", "Systran/faster-whisper-small", "gpt-4o-transcribe", "CodeChat"]
+        [
+            "gpt-4o",
+            "whisper-1",
+            "Systran/faster-whisper-small",
+            "gpt-4o-transcribe",
+            "CodeChat",
+        ]
     ) == ["whisper-1", "Systran/faster-whisper-small", "gpt-4o-transcribe"]
-    assert stt_models_first(["WHISPER-Large-V3"]) == ["WHISPER-Large-V3"]  # регистр не важен
+    assert stt_models_first(["WHISPER-Large-V3"]) == [
+        "WHISPER-Large-V3"
+    ]  # регистр не важен
 
 
 def test_stt_models_first_shows_everything_when_nothing_matches():
@@ -931,12 +1048,17 @@ async def test_model_list_loads_rows_into_a_capped_scroll_frame():
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
-        assert _model_rows(ed) == ["▸ whisper-large-v3-turbo", "  Systran/faster-whisper-small"]
+        assert _model_rows(ed) == [
+            "▸ whisper-large-v3-turbo",
+            "  Systran/faster-whisper-small",
+        ]
         assert _model_hint(ed) == (
             "модели · печать — фильтр/свой id · Enter — подставить · Esc — свернуть · Alt+↓ — перечитать список"
         )
         scroll = ed.query_one(".voice-model-scroll")
-        assert "dropdown-scroll" in scroll.classes and scroll.can_focus is False
+        assert (
+            "dropdown-scroll" in scroll.classes and scroll.can_focus is False
+        )
         assert all("voice-model-row" in w.classes for w in scroll.children)
 
 
@@ -952,7 +1074,10 @@ async def test_model_list_shares_frame_with_its_field():
         assert "field-group" in group.classes
         field = ed.query_one("#voice-model", Input)
         assert field.parent is group
-        assert "group-field" in field.classes and "set-framed" not in field.classes
+        assert (
+            "group-field" in field.classes
+            and "set-framed" not in field.classes
+        )
         scroll = ed.query_one(".voice-model-scroll")
         assert scroll.parent is group
         # Порядок внутри рамки: сначала поле, потом строки. Без этого mount(before=field)
@@ -1007,9 +1132,17 @@ async def test_model_list_failure_does_not_block_manual_entry():
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
-        assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
-        assert _model_hint(ed) == "не удалось получить список — можно вписать вручную"
-        assert ed.model_list.move(1) is False and ed.model_list.has_matches is False
+        assert await _settle(
+            pilot, lambda: _model_hint(ed) != "загружаю модели…"
+        )
+        assert (
+            _model_hint(ed)
+            == "не удалось получить список — можно вписать вручную"
+        )
+        assert (
+            ed.model_list.move(1) is False
+            and ed.model_list.has_matches is False
+        )
         assert ed.pick_in("model") is False
         assert ed.query_one("#voice-model", Input).value == "my-own-stt"
 
@@ -1019,7 +1152,9 @@ async def test_model_list_reports_an_empty_server_answer():
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
-        assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
+        assert await _settle(
+            pilot, lambda: _model_hint(ed) != "загружаю модели…"
+        )
         assert _model_hint(ed) == "сервер не вернул моделей"
         assert not ed.query(".voice-model-row")
 
@@ -1054,7 +1189,9 @@ async def test_model_list_asks_the_address_and_token_of_the_fields():
     полей, а пустое поле токена значит сохранённый (правило самого сохранения)."""
     seen = []
     ed = _cloud(
-        fetch=lambda url, token, verify, **kw: seen.append((url, token, verify)) or _STT,
+        fetch=lambda url, token, verify, **kw: (
+            seen.append((url, token, verify)) or _STT
+        ),
         saved_token="saved-secret",
         verify_ssl=False,
     )
@@ -1062,14 +1199,24 @@ async def test_model_list_asks_the_address_and_token_of_the_fields():
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: seen)
-        assert seen[-1] == ("https://s.x/v1/audio/transcriptions", "saved-secret", False)
+        assert seen[-1] == (
+            "https://s.x/v1/audio/transcriptions",
+            "saved-secret",
+            False,
+        )
         ed.model_list.close()
-        ed.query_one("#voice-url", Input).value = "https://other.x/v1/audio/transcriptions"
+        ed.query_one(
+            "#voice-url", Input
+        ).value = "https://other.x/v1/audio/transcriptions"
         ed.query_one("#voice-token", Input).value = "typed-now"
         await pilot.pause()
         ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: len(seen) > 1)
-        assert seen[-1] == ("https://other.x/v1/audio/transcriptions", "typed-now", False)
+        assert seen[-1] == (
+            "https://other.x/v1/audio/transcriptions",
+            "typed-now",
+            False,
+        )
 
 
 async def test_model_list_ignores_a_stale_answer():
@@ -1082,10 +1229,15 @@ async def test_model_list_ignores_a_stale_answer():
         assert await _settle(pilot, lambda: _model_rows(ed))
         stale_gen = ed.model_list._gen - 1
         ed.model_list._on_loaded(["ghost-model"], stale_gen, "")
-        assert _model_rows(ed) == ["▸ whisper-large-v3-turbo", "  Systran/faster-whisper-small"]
+        assert _model_rows(ed) == [
+            "▸ whisper-large-v3-turbo",
+            "  Systran/faster-whisper-small",
+        ]
         ed.model_list.close()
         await pilot.pause()
-        ed.model_list._on_loaded(["ghost-model"], stale_gen, "")  # список уже свёрнут
+        ed.model_list._on_loaded(
+            ["ghost-model"], stale_gen, ""
+        )  # список уже свёрнут
         assert not ed.query(".voice-model-row")
 
 
@@ -1101,7 +1253,10 @@ async def test_model_list_filters_by_typing_and_picks_into_the_field():
         await pilot.pause()
         assert _model_rows(ed) == ["▸ Systran/faster-whisper-small"]
         assert ed.pick_in("model") is True
-        assert ed.query_one("#voice-model", Input).value == "Systran/faster-whisper-small"
+        assert (
+            ed.query_one("#voice-model", Input).value
+            == "Systran/faster-whisper-small"
+        )
         assert ed.model_list.is_open is False
 
 
@@ -1113,7 +1268,10 @@ async def test_model_list_hint_is_honest_when_the_filter_matches_nothing():
         assert await _settle(pilot, lambda: _model_rows(ed))
         ed.model_list.apply_filter("no-such-model")
         assert _model_rows(ed) == []
-        assert _model_hint(ed) == "свой id · Enter — сохранить как есть · Esc — свернуть"
+        assert (
+            _model_hint(ed)
+            == "свой id · Enter — сохранить как есть · Esc — свернуть"
+        )
 
 
 async def test_model_list_reload_asks_the_server_again():
@@ -1123,8 +1281,13 @@ async def test_model_list_reload_asks_the_server_again():
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
-        assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
-        assert _model_hint(ed) == "не удалось получить список — можно вписать вручную"
+        assert await _settle(
+            pilot, lambda: _model_hint(ed) != "загружаю модели…"
+        )
+        assert (
+            _model_hint(ed)
+            == "не удалось получить список — можно вписать вручную"
+        )
         ed.model_list.reload()
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert _model_rows(ed)[0] == "▸ whisper-large-v3-turbo"
@@ -1148,18 +1311,26 @@ async def test_model_list_and_lang_list_do_not_share_widgets():
 async def test_model_list_highlights_the_current_model():
     """Вход на поле подсвечивает ДЕЙСТВУЮЩУЮ модель (канон языка), а не первую строку
     сервера — и показывает при этом весь список, а не отфильтрованный её id."""
-    ed = _cloud({"model": "Systran/faster-whisper-small"}, fetch=lambda url, token, verify, **kw: _STT)
+    ed = _cloud(
+        {"model": "Systran/faster-whisper-small"},
+        fetch=lambda url, token, verify, **kw: _STT,
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
         assert await _settle(pilot, lambda: _model_rows(ed))
-        assert _model_rows(ed) == ["  whisper-large-v3-turbo", "▸ Systran/faster-whisper-small"]
+        assert _model_rows(ed) == [
+            "  whisper-large-v3-turbo",
+            "▸ Systran/faster-whisper-small",
+        ]
 
 
 async def test_model_list_highlights_nothing_for_an_own_id():
     """В поле id, которого сервер не отдал: подсвеченной строки нет — Enter сразу после
     входа не имеет права молча подменить её первой строкой списка."""
-    ed = _cloud({"model": "my-own-stt"}, fetch=lambda url, token, verify, **kw: _STT)
+    ed = _cloud(
+        {"model": "my-own-stt"}, fetch=lambda url, token, verify, **kw: _STT
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
@@ -1173,7 +1344,9 @@ async def test_model_list_reload_keeps_the_pre_filter_baseline():
     """Ctrl+Space по РАСКРЫТОМУ списку — перечитывание, а не новый вход на поле: в поле
     сейчас лежит ФИЛЬТР, и делать его «значением до фильтра» нельзя — Esc вернул бы
     остаток фильтра, а доверчивый Enter записал бы его в конфиг как id модели."""
-    ed = _cloud({"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT)
+    ed = _cloud(
+        {"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         field = ed.query_one("#voice-model", Input)
@@ -1192,7 +1365,9 @@ async def test_model_list_reload_keeps_the_pre_filter_baseline():
 async def test_model_list_reload_keeps_the_typed_filter_in_sync():
     """После перечитывания список показывает то же, что и поле: иначе футер обещает
     «Enter — подставить», а подставлять нечего (в поле фильтр, в списке — всё подряд)."""
-    ed = _cloud({"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT)
+    ed = _cloud(
+        {"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         field = ed.query_one("#voice-model", Input)
@@ -1211,7 +1386,9 @@ async def test_model_list_reload_keeps_the_typed_filter_in_sync():
 async def test_model_list_reload_of_a_collapsed_list_shows_everything():
     """А вот по СВЁРНУТОМУ (после Esc) в поле лежит настоящий id, не фильтр: сужать по
     нему список нельзя — своей модели среди чужих может не быть вовсе."""
-    ed = _cloud({"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT)
+    ed = _cloud(
+        {"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: _STT
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
@@ -1228,12 +1405,20 @@ async def test_model_list_reload_without_typing_shows_everything():
     перечитывание показывает ВЕСЬ ответ сервера (иначе после неудачной первой попытки
     Ctrl+Space сузил бы список сохранённым id и показал бы пусто)."""
     answers = [None, _STT]
-    ed = _cloud({"model": "whisper-old"}, fetch=lambda url, token, verify, **kw: answers.pop(0))
+    ed = _cloud(
+        {"model": "whisper-old"},
+        fetch=lambda url, token, verify, **kw: answers.pop(0),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.model_list.open(forced=True)
-        assert await _settle(pilot, lambda: _model_hint(ed) != "загружаю модели…")
-        assert _model_hint(ed) == "не удалось получить список — можно вписать вручную"
+        assert await _settle(
+            pilot, lambda: _model_hint(ed) != "загружаю модели…"
+        )
+        assert (
+            _model_hint(ed)
+            == "не удалось получить список — можно вписать вручную"
+        )
         ed.model_list.reload()
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert len(_model_rows(ed)) == 2
@@ -1242,12 +1427,18 @@ async def test_model_list_reload_without_typing_shows_everything():
 @pytest.mark.parametrize(
     "list_attr, key, value",
     [
-        ("url_list", "url", "https://api.groq.com/openai/v1/audio/transcriptions"),
+        (
+            "url_list",
+            "url",
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+        ),
         ("model_list", "model", "whisper-1"),
         ("lang_list", "language", "ru"),
     ],
 )
-async def test_no_list_of_the_panel_opens_over_a_filled_field(list_attr, key, value):
+async def test_no_list_of_the_panel_opens_over_a_filled_field(
+    list_attr, key, value
+):
     """Правило раскрытия ОДНО на все три списка панели: сам — только на пустом поле,
     поверх значения — явная клавиша.
 
@@ -1258,8 +1449,13 @@ async def test_no_list_of_the_panel_opens_over_a_filled_field(list_attr, key, va
     from gc_core.config_modules.endpoint_presets import EndpointPreset
 
     presets = [
-        EndpointPreset(name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"),
-        EndpointPreset(name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"),
+        EndpointPreset(
+            name="Groq",
+            url="https://api.groq.com/openai/v1/audio/transcriptions",
+        ),
+        EndpointPreset(
+            name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"
+        ),
     ]
     ed = _cloud({key: value}, fetch=lambda *a, **kw: _STT, url_presets=presets)
     app = _harness(ed)
@@ -1276,18 +1472,30 @@ async def test_no_list_of_the_panel_opens_over_a_filled_field(list_attr, key, va
 @pytest.mark.parametrize(
     "list_attr, field_id, key, value",
     [
-        ("url_list", "voice-url", "url", "https://api.groq.com/openai/v1/audio/transcriptions"),
+        (
+            "url_list",
+            "voice-url",
+            "url",
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+        ),
         ("model_list", "voice-model", "model", "whisper-1"),
         ("lang_list", "voice-lang", "language", "ru"),
     ],
 )
-async def test_escape_over_a_filled_field_keeps_its_value(list_attr, field_id, key, value):
+async def test_escape_over_a_filled_field_keeps_its_value(
+    list_attr, field_id, key, value
+):
     """И закрытие ОДНО на все три: Esc убирает список, значение поля остаётся."""
     from gc_core.config_modules.endpoint_presets import EndpointPreset
 
     presets = [
-        EndpointPreset(name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"),
-        EndpointPreset(name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"),
+        EndpointPreset(
+            name="Groq",
+            url="https://api.groq.com/openai/v1/audio/transcriptions",
+        ),
+        EndpointPreset(
+            name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"
+        ),
     ]
     ed = _cloud({key: value}, fetch=lambda *a, **kw: _STT, url_presets=presets)
     app = _harness(ed)

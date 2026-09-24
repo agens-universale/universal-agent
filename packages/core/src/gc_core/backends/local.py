@@ -20,7 +20,11 @@ from gc_core.backends.protocol import (
     FsBackend,
 )
 from gc_core.backends.walk_util import WalkEntry, pruned_dir_predicate
-from gc_core.utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
+from gc_core.utils.file_text import (
+    encode_text_for_append,
+    encode_text_for_write,
+    read_text_for_edit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +79,9 @@ class LocalFsBackend(FsBackend):
     async def getsize(self, path: str) -> int:
         return os.path.getsize(path)
 
-    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict:
         st = os.stat(path, follow_symlinks=follow_symlinks)
         return {
             "size": st.st_size,
@@ -140,7 +146,9 @@ class LocalFsBackend(FsBackend):
         return digest.hexdigest()
 
     # --- write ---
-    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         # Allowlist + strict encode → atomic bytes write (no errors=replace).
         await self.write_bytes(path, encode_text_for_write(content, encoding))
 
@@ -158,7 +166,9 @@ class LocalFsBackend(FsBackend):
                 pass
             raise
 
-    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
         # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
         with open(path, "ab") as fd:
@@ -177,7 +187,9 @@ class LocalFsBackend(FsBackend):
         for name in sorted(os.listdir(path)):
             full = os.path.join(path, name)
             try:
-                st = os.lstat(full)  # lstat: symlink-to-dir counts as file (base parity)
+                st = os.lstat(
+                    full
+                )  # lstat: symlink-to-dir counts as file (base parity)
                 is_dir = stat_module.S_ISDIR(st.st_mode)
             except OSError:
                 is_dir = False
@@ -191,7 +203,9 @@ class LocalFsBackend(FsBackend):
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
         """``iter_walk_entries`` without sizes (dirs first, then files per level)."""
-        async for entry in self.iter_walk_entries(path, should_descend=should_descend):
+        async for entry in self.iter_walk_entries(
+            path, should_descend=should_descend
+        ):
             yield entry.rel, entry.is_dir
 
     async def iter_files(
@@ -205,12 +219,18 @@ class LocalFsBackend(FsBackend):
             dirnames.sort()
             filenames.sort()
             rel_dir = os.path.relpath(dirpath, path)
-            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+            prefix = (
+                "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+            )
             for f in filenames:
                 yield prefix + f
 
             if should_descend is not None:
-                dirnames[:] = [d for d in dirnames if should_descend(os.path.join(dirpath, d))]
+                dirnames[:] = [
+                    d
+                    for d in dirnames
+                    if should_descend(os.path.join(dirpath, d))
+                ]
 
     async def walk(self, path: str) -> list:
         return [_item async for _item in self.iter_walk(path)]
@@ -257,7 +277,9 @@ class LocalFsBackend(FsBackend):
             full = os.path.join(abs_dir, d.name)
             if should_descend is not None and not should_descend(full):
                 continue
-            async for _item in self._walk_level(full, prefix + d.name + "/", pruned, should_descend):
+            async for _item in self._walk_level(
+                full, prefix + d.name + "/", pruned, should_descend
+            ):
                 yield _item
 
     async def walk_entries(
@@ -269,7 +291,9 @@ class LocalFsBackend(FsBackend):
     ) -> list:
         return [
             _item
-            async for _item in self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+            async for _item in self.iter_walk_entries(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            )
         ]
 
     # --- path semantics ---
@@ -295,7 +319,11 @@ class LocalFsBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        merged_env = (
+            {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+            if env
+            else None
+        )
         return await _arun_bounded_process(
             command,
             shell=True,
@@ -316,7 +344,11 @@ class LocalFsBackend(FsBackend):
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> ExecResult:
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        merged_env = (
+            {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+            if env
+            else None
+        )
         return await _arun_bounded_process(
             [str(a) for a in argv],
             shell=False,
@@ -346,7 +378,13 @@ class LocalFsBackend(FsBackend):
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None, env: Optional[dict] = None) -> dict:
+    async def aspawn_background(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[dict] = None,
+    ) -> dict:
         """Запустить команду и НЕ ждать её: отдать pid сразу.
 
         Здесь нет ни труб, ни чтения, ни таймаута, и в этом весь смысл. Труба
@@ -363,7 +401,11 @@ class LocalFsBackend(FsBackend):
 
         from gc_core.utils.win_console import preserve_console_mode
 
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        merged_env = (
+            {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+            if env
+            else None
+        )
         # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
         # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
         # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
@@ -682,7 +724,11 @@ async def _arun_bounded_process(
     """Запустить процесс с ограниченным буфером, не занимая ни одного потока."""
     from gc_core.utils.win_console import preserve_console_mode
 
-    stdin_arg = asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL
+    stdin_arg = (
+        asyncio.subprocess.PIPE
+        if stdin_text is not None
+        else asyncio.subprocess.DEVNULL
+    )
     # Своя группа процессов. Без неё `proc.kill()` на таймауте убивал ТОЛЬКО
     # шелл: потомки `sh -c "a; b"` продолжали работать, унаследовав pipe'ы, и
     # переживали и таймаут, и отмену. С группой убиваем всю команду разом
@@ -746,14 +792,18 @@ async def _arun_bounded_process(
         # Потомок вышел — читателям пора дойти до EOF. Ждём ОГРАНИЧЕННО: EOF
         # наступает, когда трубу закрыл ПОСЛЕДНИЙ писатель, а фоновый внук с
         # унаследованным дескриптором может держать её сколько угодно долго.
-        await asyncio.wait({out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC)
+        await asyncio.wait(
+            {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
+        )
     except asyncio.CancelledError:
         # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup).
         cancelled = True
         await _astop_process(proc)
         raise
     finally:
-        _settle_drains(proc, out_sink, err_sink, (out_task, err_task), cancelled=cancelled)
+        _settle_drains(
+            proc, out_sink, err_sink, (out_task, err_task), cancelled=cancelled
+        )
 
     return ExecResult(
         return_code=return_code,
@@ -763,7 +813,9 @@ async def _arun_bounded_process(
     )
 
 
-def _settle_drains(proc, out_sink: "_Capture", err_sink: "_Capture", tasks, *, cancelled: bool) -> None:
+def _settle_drains(
+    proc, out_sink: "_Capture", err_sink: "_Capture", tasks, *, cancelled: bool
+) -> None:
     """Снять снимки вывода и решить судьбу дренажа: закрыть транспорт или дочитывать фоном."""
     # Публикуем захваченное к этому моменту: даже на отмене вызывающий
     # получает то, что команда успела напечатать.
@@ -852,7 +904,9 @@ def _dup_pipe_ends(proc) -> list:
     ends: list = []
     for stream_fd in (1, 2):
         try:
-            pipe = transport.get_pipe_transport(stream_fd).get_extra_info("pipe")
+            pipe = transport.get_pipe_transport(stream_fd).get_extra_info(
+                "pipe"
+            )
             ends.append(_dup_pipe_end(pipe))
         except Exception as exc:
             logger.warning(
@@ -874,7 +928,14 @@ def _dup_pipe_end(pipe):
         import _winapi
 
         current = _winapi.GetCurrentProcess()
-        return _winapi.DuplicateHandle(current, pipe.handle, current, 0, False, _winapi.DUPLICATE_SAME_ACCESS)
+        return _winapi.DuplicateHandle(
+            current,
+            pipe.handle,
+            current,
+            0,
+            False,
+            _winapi.DUPLICATE_SAME_ACCESS,
+        )
     copy = os.dup(pipe.fileno())
     # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
     # без этого первое же чтение из потока даёт `BlockingIOError`, мы
@@ -1073,7 +1134,11 @@ _CHILD_ENV_ALLOWLIST = frozenset(
 
 
 def _child_env_from_parent() -> Dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k in _CHILD_ENV_ALLOWLIST and isinstance(v, str)}
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if k in _CHILD_ENV_ALLOWLIST and isinstance(v, str)
+    }
 
 
 def _sanitize_env(env: Optional[Dict[str, Any]]) -> Dict[str, str]:

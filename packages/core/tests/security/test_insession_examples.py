@@ -69,14 +69,18 @@ def test_t6_judge_safe_does_not_write_store(tmp_path, monkeypatch):
         },
         permission_store=store,
         is_tui=True,
-        tui_confirm=lambda **_kw: (_ for _ in ()).throw(AssertionError("confirm must not run on judge-safe")),
+        tui_confirm=lambda **_kw: (_ for _ in ()).throw(
+            AssertionError("confirm must not run on judge-safe")
+        ),
     )
 
     def boom_confirm(*_a, **_k):
         raise AssertionError("request_confirm must not run on judge-safe")
 
     def boom_ask(*_a, **_k):
-        raise AssertionError("_ask_user_confirmation must not run on judge-safe")
+        raise AssertionError(
+            "_ask_user_confirmation must not run on judge-safe"
+        )
 
     monkeypatch.setattr(cp, "request_confirm", boom_confirm)
     monkeypatch.setattr(cm, "request_confirm", boom_confirm)

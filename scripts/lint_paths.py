@@ -33,7 +33,11 @@ def expand_paths(paths: list[str]) -> list[str]:
             check=True,
             capture_output=True,
         )
-        files.update(os.fsdecode(p) for p in result.stdout.split(b"\0") if p and Path(os.fsdecode(p)).is_file())
+        files.update(
+            os.fsdecode(p)
+            for p in result.stdout.split(b"\0")
+            if p and Path(os.fsdecode(p)).is_file()
+        )
     if not files:
         raise ValueError("No files to check in the supplied paths")
     return sorted(files)
@@ -47,7 +51,9 @@ def main(argv: list[str]) -> int:
     except (ValueError, OSError, subprocess.CalledProcessError) as exc:
         print(f"lint: {exc}", file=sys.stderr)
         return 1
-    return subprocess.call([*command, "--hook-stage", "manual", "--files", *files])
+    return subprocess.call(
+        [*command, "--hook-stage", "manual", "--files", *files]
+    )
 
 
 if __name__ == "__main__":

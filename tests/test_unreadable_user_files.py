@@ -100,13 +100,39 @@ def _cases() -> list[_Case]:
         return loader._read(Path(path))
 
     cases += [
-        _Case("config.load_config_ex", "config.yml", _BODY_YAML, _load_config_ex),
-        _Case("config_raw.read_document", "config.yml", _BODY_YAML, _read_document),
-        _Case("layers._safe_yaml_dict", "config.yml", _BODY_YAML, _safe_yaml_dict),
-        _Case("layers._readable_layer_document", "config.yml", _BODY_YAML, _readable_layer_document),
-        _Case("profiles.load_profile_document", "work.yml", _BODY_YAML, _load_profile_document),
-        _Case("registry_write._read", "config.yml", _BODY_YAML, _registry_read),
-        _Case("instructions.loader._read", "AGENTS.md", _BODY_TEXT, _instructions_read),
+        _Case(
+            "config.load_config_ex", "config.yml", _BODY_YAML, _load_config_ex
+        ),
+        _Case(
+            "config_raw.read_document",
+            "config.yml",
+            _BODY_YAML,
+            _read_document,
+        ),
+        _Case(
+            "layers._safe_yaml_dict", "config.yml", _BODY_YAML, _safe_yaml_dict
+        ),
+        _Case(
+            "layers._readable_layer_document",
+            "config.yml",
+            _BODY_YAML,
+            _readable_layer_document,
+        ),
+        _Case(
+            "profiles.load_profile_document",
+            "work.yml",
+            _BODY_YAML,
+            _load_profile_document,
+        ),
+        _Case(
+            "registry_write._read", "config.yml", _BODY_YAML, _registry_read
+        ),
+        _Case(
+            "instructions.loader._read",
+            "AGENTS.md",
+            _BODY_TEXT,
+            _instructions_read,
+        ),
     ]
 
     # --- синхронизация конфига по пакетному шаблону ---
@@ -126,7 +152,9 @@ def _cases() -> list[_Case]:
         return {"target": target}
 
     cases += [
-        _Case("config_sync.sync_config", "config.yml", _BODY_YAML, _sync_config),
+        _Case(
+            "config_sync.sync_config", "config.yml", _BODY_YAML, _sync_config
+        ),
         _Case(
             "config_sync.reset_config(шаблон)",
             "config.default.yml",
@@ -159,8 +187,19 @@ def _cases() -> list[_Case]:
 
     cases += [
         _Case("ocw.write_values", "config.yml", _BODY_YAML, _write_values),
-        _Case("ocw.ensure_pointer_anchor", "config.yml", _BODY_YAML, _ensure_pointer_anchor, setup=_template_setup),
-        _Case("ocw.ensure_section_anchor", "config.yml", _BODY_YAML, _ensure_section_anchor),
+        _Case(
+            "ocw.ensure_pointer_anchor",
+            "config.yml",
+            _BODY_YAML,
+            _ensure_pointer_anchor,
+            setup=_template_setup,
+        ),
+        _Case(
+            "ocw.ensure_section_anchor",
+            "config.yml",
+            _BODY_YAML,
+            _ensure_section_anchor,
+        ),
     ]
 
     # --- память проекта: эти файлы человек правит руками чаще прочих ---
@@ -180,9 +219,24 @@ def _cases() -> list[_Case]:
         return storage.append(Path(path), "новая заметка")
 
     cases += [
-        _Case("project_memory.storage.read", "memory.md", _BODY_TEXT, _memory_read),
-        _Case("project_memory.storage.stat", "memory.md", _BODY_TEXT, _memory_stat),
-        _Case("project_memory.storage.append", "memory.md", _BODY_TEXT, _memory_append),
+        _Case(
+            "project_memory.storage.read",
+            "memory.md",
+            _BODY_TEXT,
+            _memory_read,
+        ),
+        _Case(
+            "project_memory.storage.stat",
+            "memory.md",
+            _BODY_TEXT,
+            _memory_stat,
+        ),
+        _Case(
+            "project_memory.storage.append",
+            "memory.md",
+            _BODY_TEXT,
+            _memory_append,
+        ),
     ]
 
     # --- история ввода TUI ---
@@ -193,7 +247,14 @@ def _cases() -> list[_Case]:
         history.load()
         return history.size
 
-    cases.append(_Case("InputHistory.load", "input_history.jsonl", _BODY_JSON, _input_history_load))
+    cases.append(
+        _Case(
+            "InputHistory.load",
+            "input_history.jsonl",
+            _BODY_JSON,
+            _input_history_load,
+        )
+    )
 
     # --- экраны TUI: чтение идёт на КАЖДОМ проходе отрисовки меню ---
     def _target_snapshot(path, **_):
@@ -232,9 +293,27 @@ def _cases() -> list[_Case]:
         return session_lock.read_lock(str(path))
 
     cases += [
-        _Case("SettingsScreen._target_snapshot", "config.yml", _BODY_YAML, _target_snapshot, marks=("textual",)),
-        _Case("SettingsScreen._file_snapshot", "config.yml", _BODY_YAML, _file_snapshot, marks=("textual",)),
-        _Case("SettingsScreen._restore_snapshot", "config.yml", _BODY_YAML, _restore_snapshot, marks=("textual",)),
+        _Case(
+            "SettingsScreen._target_snapshot",
+            "config.yml",
+            _BODY_YAML,
+            _target_snapshot,
+            marks=("textual",),
+        ),
+        _Case(
+            "SettingsScreen._file_snapshot",
+            "config.yml",
+            _BODY_YAML,
+            _file_snapshot,
+            marks=("textual",),
+        ),
+        _Case(
+            "SettingsScreen._restore_snapshot",
+            "config.yml",
+            _BODY_YAML,
+            _restore_snapshot,
+            marks=("textual",),
+        ),
         _Case(
             "PostUpdateScreen._compute_needs_sync",
             "config.yml",
@@ -242,7 +321,9 @@ def _cases() -> list[_Case]:
             _post_update_needs_sync,
             marks=("textual",),
         ),
-        _Case("session_lock.read_lock", "session.lock", _BODY_JSON, _read_lock),
+        _Case(
+            "session_lock.read_lock", "session.lock", _BODY_JSON, _read_lock
+        ),
     ]
 
     # --- конфиги вне основного стека ---
@@ -251,14 +332,18 @@ def _cases() -> list[_Case]:
         from gc_core.config_modules.env_vars import EnvVars
         from gc_server.rest_api import server_config as server_config
 
-        monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=Path(path)))
+        monkeypatch.setattr(
+            env_vars, "env", EnvVars(server_config_path=Path(path))
+        )
         return server_config.load_server_config()
 
     def _voice_base_config(path, *, monkeypatch, **_):
         from gc_core import config as config_mod
         from gc_tui.voice_runtime import wire
 
-        monkeypatch.setattr(config_mod, "resolve_config_path", lambda _p: str(path))
+        monkeypatch.setattr(
+            config_mod, "resolve_config_path", lambda _p: str(path)
+        )
         return wire.base_config_raw()
 
     # Проводка рецептов живёт в СВОЁМ дистрибутиве: `recommended_mcp.runtime.wiring`,
@@ -270,7 +355,9 @@ def _cases() -> list[_Case]:
         from gc_core.config_modules import env_vars
         from recommended_mcp.runtime import wiring
 
-        monkeypatch.setattr(env_vars, "managed_config_path", lambda: Path(path))
+        monkeypatch.setattr(
+            env_vars, "managed_config_path", lambda: Path(path)
+        )
         return wiring.load_managed()
 
     def _read_snippet(path, **_):
@@ -279,17 +366,41 @@ def _cases() -> list[_Case]:
         return wiring.read_snippet(Path(path).parent)
 
     cases += [
-        _Case("server_config.load_server_config", "config_server.yml", _BODY_YAML, _server_config),
-        _Case("voice_runtime.wire.base_config_raw", "config.yml", _BODY_YAML, _voice_base_config),
-        _Case("recommended_mcp.runtime.wiring.load_managed", "config.local.yml", _BODY_YAML, _load_managed),
-        _Case("recommended_mcp.runtime.wiring.read_snippet", "agent_config.snippet.yml", _BODY_YAML, _read_snippet),
+        _Case(
+            "server_config.load_server_config",
+            "config_server.yml",
+            _BODY_YAML,
+            _server_config,
+        ),
+        _Case(
+            "voice_runtime.wire.base_config_raw",
+            "config.yml",
+            _BODY_YAML,
+            _voice_base_config,
+        ),
+        _Case(
+            "recommended_mcp.runtime.wiring.load_managed",
+            "config.local.yml",
+            _BODY_YAML,
+            _load_managed,
+        ),
+        _Case(
+            "recommended_mcp.runtime.wiring.read_snippet",
+            "agent_config.snippet.yml",
+            _BODY_YAML,
+            _read_snippet,
+        ),
     ]
 
     # --- определения кастомных сабагентов: файлы пишет человек ---
     def _discover_subagents(path, **_):
-        from gc_core.tools.subagents.custom.file_definitions import discover_subagent_definitions
+        from gc_core.tools.subagents.custom.file_definitions import (
+            discover_subagent_definitions,
+        )
 
-        return discover_subagent_definitions({"subagents_dir": str(Path(path).parent)}, builtin_names=())
+        return discover_subagent_definitions(
+            {"subagents_dir": str(Path(path).parent)}, builtin_names=()
+        )
 
     cases.append(
         _Case(
@@ -322,10 +433,30 @@ def _cases() -> list[_Case]:
         return command_moderation._load_prompt_file(Path(path))
 
     cases += [
-        _Case("summarize.load_prompt_template", "summary_prompt.md", _BODY_TEXT, _summary_prompt),
-        _Case("intent_scope._load_prompt_file", "scope_prompt.md", _BODY_TEXT, _intent_scope_prompt),
-        _Case("intent_guard._load_guard_prompt", "guard_prompt.md", _BODY_TEXT, _intent_guard_prompt),
-        _Case("command_moderation._load_prompt_file", "judge_prompt.md", _BODY_TEXT, _command_judge_prompt),
+        _Case(
+            "summarize.load_prompt_template",
+            "summary_prompt.md",
+            _BODY_TEXT,
+            _summary_prompt,
+        ),
+        _Case(
+            "intent_scope._load_prompt_file",
+            "scope_prompt.md",
+            _BODY_TEXT,
+            _intent_scope_prompt,
+        ),
+        _Case(
+            "intent_guard._load_guard_prompt",
+            "guard_prompt.md",
+            _BODY_TEXT,
+            _intent_guard_prompt,
+        ),
+        _Case(
+            "command_moderation._load_prompt_file",
+            "judge_prompt.md",
+            _BODY_TEXT,
+            _command_judge_prompt,
+        ),
     ]
 
     return cases

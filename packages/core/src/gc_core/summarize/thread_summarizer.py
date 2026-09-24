@@ -1,12 +1,22 @@
 from typing import Any, Dict, List
 
 from gc_core.config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
 from gc_core.intent_log import IntentRecord, serialize_for_meta
 from gc_core.message_format import dialog_history as dialog_history
-from gc_core.summarize import memory_suggestions, prompt_loading, summary_llm_steps, summary_message_body
+from gc_core.summarize import (
+    memory_suggestions,
+    prompt_loading,
+    summary_llm_steps,
+    summary_message_body,
+)
 from gc_core.summarize.llm import arequest_summary_text
-from gc_core.summarize.summary_logging import log_memory_patch_skipped_multi_batch, log_memory_patch_wm_unchanged
+from gc_core.summarize.summary_logging import (
+    log_memory_patch_skipped_multi_batch,
+    log_memory_patch_wm_unchanged,
+)
 from gc_core.summarize.summary_validation import (
     FALLBACK_SUMMARY,
     merge_repaired_summary,
@@ -49,23 +59,35 @@ class _SummaryLimits:
     """Лимиты суммаризации из ``summary_params`` с дефолтами."""
 
     def __init__(self, params: Dict[str, Any]) -> None:
-        self.last_steps_count = _int_param(params, "last_dialog_steps_count", 5)
+        self.last_steps_count = _int_param(
+            params, "last_dialog_steps_count", 5
+        )
         self.last_step_message_max_chars = _int_param(
-            params, "last_dialog_step_message_max_chars", _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+            params,
+            "last_dialog_step_message_max_chars",
+            _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
         )
         self.max_message_chars = _int_param(params, "max_message_chars", 50000)
-        self.max_dialogue_chars = _int_param(params, "max_dialogue_chars", 1000000)
-        self.max_accumulated_summary_chars = _int_param(params, "max_accumulated_summary_chars", 20000)
+        self.max_dialogue_chars = _int_param(
+            params, "max_dialogue_chars", 1000000
+        )
+        self.max_accumulated_summary_chars = _int_param(
+            params, "max_accumulated_summary_chars", 20000
+        )
         # Размер батча для инкрементальной суммаризации.
         # По умолчанию нормализуется в config.py как int(trigger * 1.4).
-        self.batch_chars_limit = _int_param(params, "incremental_batch_chars", 10**12)
+        self.batch_chars_limit = _int_param(
+            params, "incremental_batch_chars", 10**12
+        )
 
     @classmethod
     def from_params(cls, params: Dict[str, Any]) -> "_SummaryLimits":
         return cls(params)
 
 
-def _empty_history_result(trace: Dict[str, Any], logger: Any) -> Dict[str, Any]:
+def _empty_history_result(
+    trace: Dict[str, Any], logger: Any
+) -> Dict[str, Any]:
     if logger is not None:
         logger.info("summary_empty_history: no messages to summarize")
     summary_content = summary_message_body.build_dialog_summary_content(
@@ -93,7 +115,10 @@ def _empty_history_result(trace: Dict[str, Any], logger: Any) -> Dict[str, Any]:
 
 
 def _batch_user_prompt(
-    batch_index: int, summarizer_prefix: str, batch_history_text: str, accumulated_summary: str
+    batch_index: int,
+    summarizer_prefix: str,
+    batch_history_text: str,
+    accumulated_summary: str,
 ) -> str:
     if batch_index == 1:
         return (
@@ -148,7 +173,10 @@ class _BatchRun:
         self.strip_think = strip_think
 
     async def arun_batch(
-        self, batch_index: int, batch_turns: List[List[Dict[str, Any]]], accumulated_summary: str
+        self,
+        batch_index: int,
+        batch_turns: List[List[Dict[str, Any]]],
+        accumulated_summary: str,
     ) -> tuple:
         """→ (новая накопленная сводка, trace_batch)."""
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
@@ -166,7 +194,12 @@ class _BatchRun:
             len(batch),
             len(batch_history_text),
         )
-        user_prompt = _batch_user_prompt(batch_index, self.summarizer_prefix, batch_history_text, accumulated_summary)
+        user_prompt = _batch_user_prompt(
+            batch_index,
+            self.summarizer_prefix,
+            batch_history_text,
+            accumulated_summary,
+        )
         request_messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_prompt},
@@ -203,7 +236,14 @@ class _BatchRun:
         )
         is_valid, reason = validate_summary_text(text)
         if not is_valid:
-            text = await self._arepair(batch_index, text, reason, batch_history_text, accumulated_summary, trace_batch)
+            text = await self._arepair(
+                batch_index,
+                text,
+                reason,
+                batch_history_text,
+                accumulated_summary,
+                trace_batch,
+            )
         accumulated_summary = text
         if len(accumulated_summary) > self.max_accumulated_summary_chars:
             self.log.info(
@@ -213,12 +253,14 @@ class _BatchRun:
                 len(accumulated_summary),
                 self.max_accumulated_summary_chars,
             )
-            accumulated_summary = await summary_llm_steps.acompress_summary_text(
-                ctx=self.ctx,
-                state=self.state,
-                summary_text=accumulated_summary,
-                max_chars=self.max_accumulated_summary_chars,
-                max_tokens=self.max_tokens,
+            accumulated_summary = (
+                await summary_llm_steps.acompress_summary_text(
+                    ctx=self.ctx,
+                    state=self.state,
+                    summary_text=accumulated_summary,
+                    max_chars=self.max_accumulated_summary_chars,
+                    max_tokens=self.max_tokens,
+                )
             )
         return accumulated_summary, trace_batch
 
@@ -260,7 +302,9 @@ class _BatchRun:
             missing_tags=missing_tags,
             max_tokens=self.max_tokens,
         )
-        merged = merge_repaired_summary(invalid_text=text, repaired_text=repaired)
+        merged = merge_repaired_summary(
+            invalid_text=text, repaired_text=repaired
+        )
         merged_valid, _ = validate_summary_text(merged)
         repaired_valid, _ = validate_summary_text(repaired)
         if merged_valid:
@@ -297,7 +341,9 @@ class _BatchRun:
         return final_text
 
 
-async def _arun_patch_step(ctx: Any, state: Any, llm_result: Any, max_tokens: int | None) -> tuple:
+async def _arun_patch_step(
+    ctx: Any, state: Any, llm_result: Any, max_tokens: int | None
+) -> tuple:
     """Разбор дельт WM с одной попыткой починки формата.
 
     Шаг в шаг повторяет ``working_memory_gateway.parse_memory_deltas_with_repair``
@@ -315,22 +361,32 @@ async def _arun_patch_step(ctx: Any, state: Any, llm_result: Any, max_tokens: in
         min_chars_for_repair=100,
     ):
         # Починка формата дельт вторым вызовом LLM. Асинхронна, потому что зовёт LLM.
-        repaired_raw = await memory_suggestions.arequest_memory_deltas_format_repair(
-            ctx=ctx,
-            state=state,
-            raw_output=str(raw_output or ""),
-            max_tokens=max_tokens,
-            full_replace=True,
+        repaired_raw = (
+            await memory_suggestions.arequest_memory_deltas_format_repair(
+                ctx=ctx,
+                state=state,
+                raw_output=str(raw_output or ""),
+                max_tokens=max_tokens,
+                full_replace=True,
+            )
         )
         raw_used = str(repaired_raw or "")
         deltas, touched = parse_memory_deltas(raw_used, full_replace=True)
         repair_attempted = True
-    repair_success = repair_attempted and (bool(touched) or not deltas.is_empty())
+    repair_success = repair_attempted and (
+        bool(touched) or not deltas.is_empty()
+    )
     return deltas, touched, repair_attempted, repair_success, raw_used
 
 
 def _skip_memory_patch_multi_batch(
-    trace: Dict[str, Any], *, text: str, full_history_text: str, persistent_state_block: str, batches: int, logger: Any
+    trace: Dict[str, Any],
+    *,
+    text: str,
+    full_history_text: str,
+    persistent_state_block: str,
+    batches: int,
+    logger: Any,
 ) -> None:
     trace["memory_patch"] = {
         "executed": False,
@@ -397,7 +453,11 @@ async def _arun_single_batch_memory_patch(
             },
         },
     }
-    if logger is not None and not replace_touched and memory_replace_deltas.is_empty():
+    if (
+        logger is not None
+        and not replace_touched
+        and memory_replace_deltas.is_empty()
+    ):
         log_memory_patch_wm_unchanged(
             logger,
             batches=1,
@@ -488,7 +548,11 @@ async def asummarize_dialog_via_chat_completions(
     }
     if not full_history_messages:
         return _empty_history_result(trace, logger)
-    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
+    summary_params = (
+        cfg.get("summary_params")
+        if isinstance(cfg.get("summary_params"), dict)
+        else {}
+    )
     lim = _SummaryLimits.from_params(summary_params)
     last_steps_count = lim.last_steps_count
     last_step_message_max_chars = lim.last_step_message_max_chars
@@ -496,7 +560,10 @@ async def asummarize_dialog_via_chat_completions(
     max_dialogue_chars = lim.max_dialogue_chars
     max_accumulated_summary_chars = lim.max_accumulated_summary_chars
     batch_chars_limit = lim.batch_chars_limit
-    prompt_path = summary_params.get("chat_completions_summary_prompt_path") or prompt_loading.default_prompt_path()
+    prompt_path = (
+        summary_params.get("chat_completions_summary_prompt_path")
+        or prompt_loading.default_prompt_path()
+    )
     system_prompt = prompt_loading.load_prompt_template(str(prompt_path))
 
     history_for_summary = dialog_history.trim_history_to_max_dialogue_chars(
@@ -516,8 +583,14 @@ async def asummarize_dialog_via_chat_completions(
     )
     closed_records = list(user_intent_log or [])
     open_records = list(current_user_intent or [])
-    persistent_state_block = resolve_persistent_state_block(state, persistent_state_block)
-    summarizer_prefix = f"{persistent_state_block.strip()}\n\n" if persistent_state_block.strip() else ""
+    persistent_state_block = resolve_persistent_state_block(
+        state, persistent_state_block
+    )
+    summarizer_prefix = (
+        f"{persistent_state_block.strip()}\n\n"
+        if persistent_state_block.strip()
+        else ""
+    )
     batches = dialog_history.split_turns_into_char_batches(
         dialog_history.group_into_turns(history_for_summary),
         batch_chars_limit=batch_chars_limit,
@@ -550,7 +623,9 @@ async def asummarize_dialog_via_chat_completions(
     )
     accumulated_summary = ""
     for batch_index, batch_turns in enumerate(batches, start=1):
-        accumulated_summary, trace_batch = await run.arun_batch(batch_index, batch_turns, accumulated_summary)
+        accumulated_summary, trace_batch = await run.arun_batch(
+            batch_index, batch_turns, accumulated_summary
+        )
         trace["step1_batches"].append(trace_batch)
     text = accumulated_summary or FALLBACK_SUMMARY
 
@@ -560,7 +635,10 @@ async def asummarize_dialog_via_chat_completions(
     replace_touched: frozenset[str] = frozenset()
 
     if len(batches) <= 1:
-        memory_replace_deltas, replace_touched = await _arun_single_batch_memory_patch(
+        (
+            memory_replace_deltas,
+            replace_touched,
+        ) = await _arun_single_batch_memory_patch(
             ctx=ctx,
             state=state,
             text=text,
@@ -585,7 +663,8 @@ async def asummarize_dialog_via_chat_completions(
             len(batches),
             len(batches) <= 1,
             len(text),
-            len(memory_append_deltas.to_dict()) + len(memory_replace_deltas.to_dict()),
+            len(memory_append_deltas.to_dict())
+            + len(memory_replace_deltas.to_dict()),
         )
         logger.info("summary_final_raw_text=\n%s", text)
 

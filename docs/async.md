@@ -33,7 +33,9 @@ async with await AsyncAgent.create(config) as agent:
 
 ```python
 async with await AsyncAgent.create(config) as agent:
-    async for kind, text in agent.stream("объясни этот модуль", thread_id="t1"):
+    async for kind, text in agent.stream(
+        "объясни этот модуль", thread_id="t1"
+    ):
         if kind == "answer":
             print(text, end="", flush=True)
         elif kind == "think":
@@ -45,7 +47,9 @@ async with await AsyncAgent.create(config) as agent:
 Управление ходом снаружи:
 
 ```python
-agent.send({"role": "user", "content": "стоп, сначала линтер"})  # подкинуть в идущий ход
+agent.send(
+    {"role": "user", "content": "стоп, сначала линтер"}
+)  # подкинуть в идущий ход
 agent.stop()  # кооперативная остановка
 ```
 
@@ -67,7 +71,9 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context
 
 ctx = await acreate_run_context(config, on_stream_delta=my_sink)
-answer = await AgentExecutor(ctx).arun(["привет"], thread_id="t1", system="sdk")
+answer = await AgentExecutor(ctx).arun(
+    ["привет"], thread_id="t1", system="sdk"
+)
 ```
 
 Хвост здесь — забота вызывающего: после `arun` заберите его
@@ -336,7 +342,9 @@ from gc_core.backends.factory import resolve_os_backend
 backend = resolve_os_backend(config_dict)  # harbor: + environment=…, loop=…
 cache = ToolsCache(config_dict, os_backend=backend)
 a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
-a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)  # уже бесплатно
+a2 = await AsyncAgent.create(
+    cfg, tools_cache=cache, os_backend=backend
+)  # уже бесплатно
 ```
 
 Бэкенд кэшу передаётся ОБЯЗАТЕЛЬНО, если в конфиге есть MCP-сервер с

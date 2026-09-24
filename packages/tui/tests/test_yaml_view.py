@@ -4,12 +4,18 @@ from gc_tui.services.yaml_view import safe_yaml_dump, yaml_syntax_widget
 def test_safe_yaml_dump_tolerates_non_serializable_objects():
     # Подстраховка: если в снимок конфига попал pydantic-объект,
     # yaml.safe_dump бросает RepresenterError. safe_yaml_dump не падает.
-    from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig
+    from gc_core.config_modules.chat_completions import (
+        ChatCompletionsLlmConfig,
+    )
 
     cfg = {
         "a": 1,
         "flag": True,
-        "nested": {"obj": ChatCompletionsLlmConfig(max_tokens=8192, completion_kwargs={})},
+        "nested": {
+            "obj": ChatCompletionsLlmConfig(
+                max_tokens=8192, completion_kwargs={}
+            )
+        },
     }
     out = safe_yaml_dump(cfg)  # не должно бросать
     assert "a: 1" in out

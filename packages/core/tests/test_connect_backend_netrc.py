@@ -44,7 +44,9 @@ def test_explicit_authorization_survives_netrc(tmp_path, monkeypatch):
     original = NO_NETRC_SESSION._transport
     NO_NETRC_SESSION._transport = httpx.MockTransport(handler)
     try:
-        NO_NETRC_SESSION.post("http://example.com/v1", headers={"Authorization": "Bearer REAL"})
+        NO_NETRC_SESSION.post(
+            "http://example.com/v1", headers={"Authorization": "Bearer REAL"}
+        )
     finally:
         NO_NETRC_SESSION._transport = original
 
@@ -73,7 +75,11 @@ def test_httpx_does_not_read_netrc_implicitly(tmp_path, monkeypatch):
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json={})
 
-    with httpx.Client(transport=httpx.MockTransport(handler), trust_env=True) as c:
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), trust_env=True
+    ) as c:
         c.get("http://example.com/v1")
 
-    assert seen["auth"] is None, "httpx начал читать netrc сам — проверить ядро"
+    assert seen["auth"] is None, (
+        "httpx начал читать netrc сам — проверить ядро"
+    )

@@ -26,7 +26,9 @@ def test_limits_reach_flat_config_dict():
     from gc_core.config import flatten_app_config
     from gc_core.config_modules.root import AppConfig
 
-    app_cfg = AppConfig(agent={"session_token_limit": 12345, "max_tool_calls": 7})
+    app_cfg = AppConfig(
+        agent={"session_token_limit": 12345, "max_tool_calls": 7}
+    )
     flat = flatten_app_config(app_cfg)
     assert flat["session_token_limit"] == 12345
     assert flat["max_tool_calls"] == 7

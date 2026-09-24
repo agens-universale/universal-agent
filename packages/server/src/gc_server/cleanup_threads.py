@@ -135,7 +135,9 @@ def _default_threads_dir() -> str:
         load_server_config,
     )
 
-    return resolve_threads_dir(build_agent_config_for_server(load_server_config()))
+    return resolve_threads_dir(
+        build_agent_config_for_server(load_server_config())
+    )
 
 
 def main() -> int:
@@ -159,7 +161,9 @@ def main() -> int:
     у CLI и TUI. Поэтому cron надо ставить с CWD проекта либо передавать
     ``--threads-dir`` явно; выбранный путь печатается в выводе абсолютным.
     """
-    parser = argparse.ArgumentParser(description="Удалить треды старше заданного срока по updated_at.")
+    parser = argparse.ArgumentParser(
+        description="Удалить треды старше заданного срока по updated_at."
+    )
     parser.add_argument(
         "--threads-dir",
         default=None,
@@ -182,7 +186,11 @@ def main() -> int:
 
     # Абсолютный путь в любом случае: раньше в статистику уходил аргумент как
     # есть, и по строке «threads» нельзя было понять, какой каталог смотрели.
-    threads_dir = os.path.abspath(args.threads_dir) if args.threads_dir else _default_threads_dir()
+    threads_dir = (
+        os.path.abspath(args.threads_dir)
+        if args.threads_dir
+        else _default_threads_dir()
+    )
     stats = cleanup_threads(threads_dir, args.ttl_days, dry_run=args.dry_run)
     if stats.get("missing_dir"):
         print(f"[cleanup] threads_dir not found: {threads_dir}")

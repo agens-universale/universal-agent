@@ -88,11 +88,15 @@ async def fetch_validating_redirects(
     """
     current = start_url
     for _ in range(max_redirects + 1):
-        response = await session.get(current, headers=headers, timeout=timeout, follow_redirects=False)
+        response = await session.get(
+            current, headers=headers, timeout=timeout, follow_redirects=False
+        )
         next_abs = _next_hop(response, current)
         if next_abs is None:
             return response
-        decision = validate_url_policy(next_abs, allowed_schemes, url_blacklist)
+        decision = validate_url_policy(
+            next_abs, allowed_schemes, url_blacklist
+        )
         if not decision.allowed:
             raise RedirectBlocked(decision)
         current = next_abs
@@ -117,8 +121,12 @@ async def stream_validating_redirects(
     """
     current = start_url
     for _ in range(max_redirects + 1):
-        request = session.build_request("GET", current, headers=headers, timeout=timeout)
-        response = await session.send(request, stream=True, follow_redirects=False)
+        request = session.build_request(
+            "GET", current, headers=headers, timeout=timeout
+        )
+        response = await session.send(
+            request, stream=True, follow_redirects=False
+        )
         next_abs = _next_hop(response, current)
         if next_abs is None:
             try:
@@ -127,7 +135,9 @@ async def stream_validating_redirects(
                 await response.aclose()
             return
         await response.aclose()
-        decision = validate_url_policy(next_abs, allowed_schemes, url_blacklist)
+        decision = validate_url_policy(
+            next_abs, allowed_schemes, url_blacklist
+        )
         if not decision.allowed:
             raise RedirectBlocked(decision)
         current = next_abs

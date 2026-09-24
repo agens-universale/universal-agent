@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from gc_tui.services import terminal_caps
 from gc_tui.services.terminal_caps import supports_font_fallback
-from gc_tui.widgets.block_panel import COPY_GLYPH_RICH, COPY_GLYPH_SAFE, copy_glyph
+from gc_tui.widgets.block_panel import (
+    COPY_GLYPH_RICH,
+    COPY_GLYPH_SAFE,
+    copy_glyph,
+)
 
 
 def _windows_console(monkeypatch, **env):
@@ -34,7 +38,12 @@ def test_vscode_terminal_has_font_fallback(monkeypatch):
 
 def _posix(monkeypatch, **env):
     monkeypatch.setattr(terminal_caps, "_os_name", lambda: "posix")
-    for key in ("WT_SESSION", "TERM_PROGRAM", "WSL_DISTRO_NAME", "WSL_INTEROP"):
+    for key in (
+        "WT_SESSION",
+        "TERM_PROGRAM",
+        "WSL_DISTRO_NAME",
+        "WSL_INTEROP",
+    ):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -87,4 +96,6 @@ async def test_button_shows_glyph_for_current_terminal(tui_app_factory):
 
     app = tui_app_factory(BlockPanel.for_code("x = 1", "python", event_no=1))
     async with app.run_test(size=(60, 12)):
-        assert app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        assert (
+            app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        )

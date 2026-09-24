@@ -2,7 +2,11 @@
 
 import asyncio
 
-from gc_core.utils.async_http import aclose_clients, get_async_client, mounts_from_proxies
+from gc_core.utils.async_http import (
+    aclose_clients,
+    get_async_client,
+    mounts_from_proxies,
+)
 
 
 async def test_client_is_reused_within_one_loop():

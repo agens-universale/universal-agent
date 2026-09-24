@@ -38,7 +38,9 @@ def _check_id(frontmatter):
 def _check_description(frontmatter):
     description = frontmatter.get("description", "")
     if not isinstance(description, str):
-        return f"Description must be a string, got {type(description).__name__}"
+        return (
+            f"Description must be a string, got {type(description).__name__}"
+        )
     description = description.strip()
     if not description:
         return None
@@ -118,7 +120,12 @@ def validate_skill(skill_path):
     if "description" not in frontmatter:
         return False, "Missing 'description' in frontmatter"
 
-    for check in (_check_name, _check_id, _check_description, _check_compatibility):
+    for check in (
+        _check_name,
+        _check_id,
+        _check_description,
+        _check_compatibility,
+    ):
         error = check(frontmatter)
         if error is not None:
             return False, error

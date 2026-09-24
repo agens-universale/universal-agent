@@ -13,14 +13,14 @@ from pathlib import Path
 import pytest
 from gc_core.backends.local import LocalFsBackend
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="групп процессов нет на Windows")
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="групп процессов нет на Windows"
+)
 
 
 def _marker_script(marker: Path) -> str:
     """Потомок, который переживёт шелл и оставит след, если его не убили."""
-    return (
-        f"python3 -c \"import time,pathlib; time.sleep(2); pathlib.Path({str(marker)!r}).write_text('жив')\" & sleep 30"
-    )
+    return f"python3 -c \"import time,pathlib; time.sleep(2); pathlib.Path({str(marker)!r}).write_text('жив')\" & sleep 30"
 
 
 async def test_timeout_kills_the_child_too(tmp_path):
@@ -36,7 +36,9 @@ async def test_timeout_kills_the_child_too(tmp_path):
 async def test_cancellation_kills_the_child_too(tmp_path):
     marker = tmp_path / "survived.txt"
 
-    task = asyncio.create_task(LocalFsBackend().aexec(_marker_script(marker), timeout=30))
+    task = asyncio.create_task(
+        LocalFsBackend().aexec(_marker_script(marker), timeout=30)
+    )
     await asyncio.sleep(0.5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

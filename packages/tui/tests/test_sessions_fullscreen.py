@@ -9,7 +9,11 @@ from gc_core.thread_store import append_new_thread_messages
 
 def _seed(threads_dir, tid, prompt):
     append_new_thread_messages(
-        str(threads_dir), "cli", tid, [{"role": "user", "content": prompt, "id": f"m_{tid}"}], set()
+        str(threads_dir),
+        "cli",
+        tid,
+        [{"role": "user", "content": prompt, "id": f"m_{tid}"}],
+        set(),
     )
     (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
@@ -33,8 +37,12 @@ async def test_sessions_list_fills_height(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test(size=(100, 40)) as pilot:
-        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test(
+        size=(100, 40)
+    ) as pilot:
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
         await pilot.pause()
         from textual.containers import VerticalScroll
 
@@ -42,4 +50,6 @@ async def test_sessions_list_fills_height(tmp_path):
         # На терминале высотой 40 с только 3 короткими карточками список ДОЛЖЕН
         # растянуться на всю свободную высоту (≈ 40 минус шапка/фильтр/футер),
         # а не сжаться до высоты 3 карточек. Порог 30 надёжно различает.
-        assert lst.size.height >= 30, f"список не на всю высоту: {lst.size.height}"
+        assert lst.size.height >= 30, (
+            f"список не на всю высоту: {lst.size.height}"
+        )

@@ -57,10 +57,14 @@ def _cfg(**extra: Any) -> Dict[str, Any]:
     return cfg
 
 
-async def test_child_stop_list_still_applies_with_a_shared_cache(shared_discovery):
+async def test_child_stop_list_still_applies_with_a_shared_cache(
+    shared_discovery,
+):
     """Родитель видит MCP-тул, ребёнок с stop-списком — нет."""
     parent_tools, *_ = await tools_pkg.abuild_tools_data(_cfg())
-    child_tools, *_ = await tools_pkg.abuild_tools_data(_cfg(**{SUBAGENT_TOOLS_STOP_KEY: [_MCP_TOOL]}))
+    child_tools, *_ = await tools_pkg.abuild_tools_data(
+        _cfg(**{SUBAGENT_TOOLS_STOP_KEY: [_MCP_TOOL]})
+    )
 
     assert _MCP_TOOL in parent_tools, "родитель почему-то не получил MCP-тул"
     assert _MCP_TOOL not in child_tools, (
@@ -72,7 +76,9 @@ async def test_child_stop_list_still_applies_with_a_shared_cache(shared_discover
 async def test_child_allow_list_narrows_the_set(shared_discovery):
     """allow-список сужает набор ребёнка, не трогая родительский."""
     parent_tools, *_ = await tools_pkg.abuild_tools_data(_cfg())
-    child_tools, *_ = await tools_pkg.abuild_tools_data(_cfg(**{SUBAGENT_TOOLS_ALLOW_KEY: ["session_think"]}))
+    child_tools, *_ = await tools_pkg.abuild_tools_data(
+        _cfg(**{SUBAGENT_TOOLS_ALLOW_KEY: ["session_think"]})
+    )
 
     assert _MCP_TOOL in parent_tools
     assert _MCP_TOOL not in child_tools
@@ -95,16 +101,25 @@ def test_filter_runs_after_mcp_assembly():
 
     from gc_testkit.paths import REPO
 
-    src = (REPO / "packages/core/src/gc_core/tools/__init__.py").read_text(encoding="utf-8")
+    src = (REPO / "packages/core/src/gc_core/tools/__init__.py").read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(src)
-    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_finish_tools_data")
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_finish_tools_data"
+    )
 
     merge_line = None
     for node in ast.walk(fn):
         # `for k, v in mcp_tools_data.items(): tools_data[k] = v`
         if isinstance(node, ast.For) and isinstance(node.iter, ast.Call):
             src_obj = getattr(node.iter.func, "value", None)
-            if isinstance(src_obj, ast.Name) and src_obj.id == "mcp_tools_data":
+            if (
+                isinstance(src_obj, ast.Name)
+                and src_obj.id == "mcp_tools_data"
+            ):
                 merge_line = node.lineno
                 break
     assert merge_line is not None, "не нашёл подмешивание mcp_tools_data"
@@ -112,7 +127,9 @@ def test_filter_runs_after_mcp_assembly():
     filter_line = None
     for node in ast.walk(fn):
         if isinstance(node, ast.Call):
-            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            fname = getattr(node.func, "id", None) or getattr(
+                node.func, "attr", None
+            )
             if fname == "apply_subagent_tools_filter":
                 filter_line = node.lineno
                 break
@@ -137,14 +154,29 @@ def test_the_single_build_form_calls_the_shared_finish():
 
     from gc_testkit.paths import REPO
 
-    src = (REPO / "packages/core/src/gc_core/tools/__init__.py").read_text(encoding="utf-8")
+    src = (REPO / "packages/core/src/gc_core/tools/__init__.py").read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(src)
 
-    forms = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "build_tools_data"]
+    forms = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "build_tools_data"
+    ]
     assert forms == [], "вернулась синхронная сборка тулов"
 
-    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "abuild_tools_data")
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef)
+        and n.name == "abuild_tools_data"
+    )
     calls = {
-        getattr(c.func, "id", None) or getattr(c.func, "attr", None) for c in ast.walk(fn) if isinstance(c, ast.Call)
+        getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+        for c in ast.walk(fn)
+        if isinstance(c, ast.Call)
     }
-    assert "_finish_tools_data" in calls, "сборка собирает набор мимо общей досборки — фильтр субагента разъедется"
+    assert "_finish_tools_data" in calls, (
+        "сборка собирает набор мимо общей досборки — фильтр субагента разъедется"
+    )

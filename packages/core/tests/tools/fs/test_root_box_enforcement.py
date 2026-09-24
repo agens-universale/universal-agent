@@ -55,7 +55,9 @@ def test_write_to_file_allows_launch_root_and_extra_paths(tmp_path):
 
     inside = launch_root / "inside.txt"
     extra = extra_root / "artifact.txt"
-    tool = with_local_ctx(WriteToFile, config_dict=_config(launch_root, [extra_root]))
+    tool = with_local_ctx(
+        WriteToFile, config_dict=_config(launch_root, [extra_root])
+    )
 
     inside_result = json.loads(tool(path=str(inside), content="inside"))
     extra_result = json.loads(tool(path=str(extra), content="extra"))
@@ -111,7 +113,9 @@ def test_root_box_can_be_disabled_for_file_tools(tmp_path):
     outside = tmp_path / "outside.txt"
 
     result = json.loads(
-        with_local_ctx(WriteToFile, config_dict=_config(launch_root, enabled=False))(
+        with_local_ctx(
+            WriteToFile, config_dict=_config(launch_root, enabled=False)
+        )(
             path=str(outside),
             content="allowed",
         )

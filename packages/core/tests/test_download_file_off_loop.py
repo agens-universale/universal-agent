@@ -32,7 +32,11 @@ _SRC = REPO / "packages/core/src/gc_core/tools/exec/download_file.py"
 
 def _acall_node() -> ast.AsyncFunctionDef:
     tree = ast.parse(_SRC.read_text(encoding="utf-8"))
-    return next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acall")
+    return next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acall"
+    )
 
 
 def test_acall_writes_the_body_inline():
@@ -46,7 +50,9 @@ def test_acall_writes_the_body_inline():
     direct = [
         n
         for n in ast.walk(acall)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "_atomic_write"
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "_atomic_write"
     ]
     assert direct, "не нашёл прямого вызова self._atomic_write(…) в acall"
 
@@ -87,4 +93,6 @@ def test_network_path_stays_natively_async():
         and isinstance(n.value.func, ast.Attribute)
         and n.value.func.attr == "_http_get_bytes"
     ]
-    assert awaited_http, "скачивание тела больше не идёт через await _http_get_bytes"
+    assert awaited_http, (
+        "скачивание тела больше не идёт через await _http_get_bytes"
+    )

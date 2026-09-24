@@ -93,7 +93,11 @@ def _default_stream_factory(callback):
 class MicRecorder:
     """Один цикл записи: start → stop (PCM-байты) | cancel. Не переиспользуется."""
 
-    def __init__(self, stream_factory: Optional[Callable] = None, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        stream_factory: Optional[Callable] = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._stream_factory = stream_factory or _default_stream_factory
         self._clock = clock
         self._chunks: list[bytes] = []
@@ -119,7 +123,9 @@ class MicRecorder:
         self._chunks.append(data)
         self._pending.append(data)
         if status:
-            self._overflows += 1  # драйвер сообщил о потере звука — больше не молчим
+            self._overflows += (
+                1  # драйвер сообщил о потере звука — больше не молчим
+            )
 
     def analyse(self) -> None:
         """Пересчитать уровень и спектр по звуку, накопленному с прошлого кадра.

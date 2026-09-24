@@ -15,7 +15,9 @@ from gc_core.bundled_assets import bundled_root
 from gc_core.summarize.llm import arequest_auxiliary_completion_text
 from gc_core.usage.account import UsageAccount
 
-_PROMPT_PATH = os.path.join(str(bundled_root()), "prompts", "limit_trace_summary.md")
+_PROMPT_PATH = os.path.join(
+    str(bundled_root()), "prompts", "limit_trace_summary.md"
+)
 
 _REASON_LABELS = {
     "step_limit": "step limit",
@@ -35,7 +37,9 @@ def _load_limit_summary_prompt() -> str:
     with open(_PROMPT_PATH, encoding="utf-8") as fd:
         text = fd.read().strip()
     if not text:
-        raise ValueError(f"Limit trace summary prompt is empty: {_PROMPT_PATH}")
+        raise ValueError(
+            f"Limit trace summary prompt is empty: {_PROMPT_PATH}"
+        )
     _prompt_cache = text
     return text
 
@@ -46,13 +50,17 @@ def _tokens_spent(state: Any) -> Any:
         usage = getattr(state, "usage", None)
         if usage is None:
             return "?"
-        baseline = UsageAccount.from_meta(getattr(state, "run_start_usage_meta", None))
+        baseline = UsageAccount.from_meta(
+            getattr(state, "run_start_usage_meta", None)
+        )
         return usage.delta_from(baseline).totals()["total"]
     except Exception:
         return "?"
 
 
-def _build_message(state: Any, reason: str, config_dict: dict[str, Any]) -> str:
+def _build_message(
+    state: Any, reason: str, config_dict: dict[str, Any]
+) -> str:
     label = _REASON_LABELS.get(reason, reason)
     if reason == "step_limit":
         return f"Agent stopped: {label} ({state.steps}/{getattr(state, 'max_steps', '?')})."
@@ -137,14 +145,18 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
 
     raw_summary = ""
     if _should_enable(config_dict):
-        max_tokens = getattr(getattr(ctx, "auxiliary_llm", None), "max_tokens", None)
+        max_tokens = getattr(
+            getattr(ctx, "auxiliary_llm", None), "max_tokens", None
+        )
         if not isinstance(max_tokens, int) or max_tokens < 1:
             max_tokens = 24576
 
         try:
             prompt_template = _load_limit_summary_prompt()
             trace_text = _serialize_trace(state.messages)
-            user_content = prompt_template + "\n\n---\n## Agent trace\n\n" + trace_text
+            user_content = (
+                prompt_template + "\n\n---\n## Agent trace\n\n" + trace_text
+            )
             messages = [
                 {"role": "system", "content": "You are a trace summarizer."},
                 {"role": "user", "content": user_content},

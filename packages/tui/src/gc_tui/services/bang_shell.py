@@ -43,8 +43,12 @@ _TTY_FLAGS = frozenset({"-it", "-ti", "--interactive", "--tty"})
 _MSG_EMPTY = "пустая команда"
 _MSG_DISABLED = "bang-shell выключен"
 _MSG_BUSY = "дождитесь завершения предыдущей !"
-_MSG_INTERACTIVE = "интерактивные команды не поддерживаются — откройте внешний терминал"
-_MSG_PRIVILEGE = "привилегированные команды не поддерживаются — откройте внешний терминал"
+_MSG_INTERACTIVE = (
+    "интерактивные команды не поддерживаются — откройте внешний терминал"
+)
+_MSG_PRIVILEGE = (
+    "привилегированные команды не поддерживаются — откройте внешний терминал"
+)
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,9 @@ class BangShellSettings:
     max_output_lines: int = DEFAULT_MAX_OUTPUT_LINES
 
     @classmethod
-    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> BangShellSettings:
+    def from_mapping(
+        cls, data: Optional[Mapping[str, Any]]
+    ) -> BangShellSettings:
         if not data:
             return cls()
         timeout = data.get("timeout_sec", None)
@@ -69,8 +75,12 @@ class BangShellSettings:
         return cls(
             enabled=bool(data.get("enabled", True)),
             timeout_sec=timeout,
-            max_output_bytes=int(data.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)),
-            max_output_lines=int(data.get("max_output_lines", DEFAULT_MAX_OUTPUT_LINES)),
+            max_output_bytes=int(
+                data.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)
+            ),
+            max_output_lines=int(
+                data.get("max_output_lines", DEFAULT_MAX_OUTPUT_LINES)
+            ),
         )
 
 
@@ -85,7 +95,12 @@ class BangShellResult:
 
     @property
     def ok(self) -> bool:
-        return self.rejected is None and not self.cancelled and not self.timed_out and self.exit_code == 0
+        return (
+            self.rejected is None
+            and not self.cancelled
+            and not self.timed_out
+            and self.exit_code == 0
+        )
 
 
 def parse_body(text: str) -> Optional[str]:
@@ -158,7 +173,10 @@ def preflight(command: str) -> Optional[str]:
 
     for tok in tokens:
         base = os.path.basename(tok.rstrip("/\\"))
-        if base.lower() in _PRIVILEGE_TOKENS or tok.lower() in _PRIVILEGE_TOKENS:
+        if (
+            base.lower() in _PRIVILEGE_TOKENS
+            or tok.lower() in _PRIVILEGE_TOKENS
+        ):
             return _MSG_PRIVILEGE
 
     leading = _leading_command(tokens)
@@ -168,7 +186,9 @@ def preflight(command: str) -> Optional[str]:
     if leading.lower() in _INTERACTIVE_BINS:
         return _MSG_INTERACTIVE
 
-    if leading.lower() in _TTY_CONTAINER_CMDS and any(t in _TTY_FLAGS for t in tokens):
+    if leading.lower() in _TTY_CONTAINER_CMDS and any(
+        t in _TTY_FLAGS for t in tokens
+    ):
         return _MSG_INTERACTIVE
 
     return None
@@ -185,7 +205,12 @@ def _leading_command(tokens: list[str]) -> Optional[str]:
             while i < n and "=" in tokens[i] and not tokens[i].startswith("-"):
                 i += 1
             continue
-        if "=" in t and not t.startswith("-") and not t.startswith("/") and "/" not in t.split("=", 1)[0]:
+        if (
+            "=" in t
+            and not t.startswith("-")
+            and not t.startswith("/")
+            and "/" not in t.split("=", 1)[0]
+        ):
             i += 1
             continue
         break

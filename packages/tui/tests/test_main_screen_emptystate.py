@@ -33,12 +33,18 @@ async def test_status_column_beside_logo_does_not_wrap_at_threshold_width():
     async with TuiApp().run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
         for i in range(120):
-            scr._mount_trace_row(prefix="> ", content=f"строка {i}", kind_class="line-user-mark")
+            scr._mount_trace_row(
+                prefix="> ", content=f"строка {i}", kind_class="line-user-mark"
+            )
         await pilot.pause()
         trace = pilot.app.query_one("#trace")
-        assert trace.show_vertical_scrollbar is True  # иначе замер не про тот случай
+        assert (
+            trace.show_vertical_scrollbar is True
+        )  # иначе замер не про тот случай
 
-        card = scr._compose_card_lines(scr._last_mcp_card_line).plain.splitlines()
+        card = scr._compose_card_lines(
+            scr._last_mcp_card_line
+        ).plain.splitlines()
         need = max(len(line) for line in card)
         logo_w = max(len(line) for line in branding.LOGO.splitlines())
         width = logo_w + _MCP_COL_PAD + need + scr._BRAND_CHROME  # ровно порог
@@ -59,7 +65,9 @@ async def test_brand_block_persists_after_first_event():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._mount_trace_row(prefix="> ", content="привет", kind_class="line-user-mark")
+        scr._mount_trace_row(
+            prefix="> ", content="привет", kind_class="line-user-mark"
+        )
         await pilot.pause()
         logos = pilot.app.query(".brand-logo")
         assert len(logos) > 0
@@ -81,12 +89,18 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
 
     tid = "t1"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "...", "messages_count": 0}),
+        json.dumps(
+            {"thread_id": tid, "updated_at": "...", "messages_count": 0}
+        ),
         encoding="utf-8",
     )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
 
     async with app.run_test() as pilot:
         # Initial: empty-state — без [Esc] back/выход, без /stop, без /export.
@@ -139,7 +153,9 @@ async def test_brand_block_survives_switch_to_empty_state():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._mount_trace_row(prefix="> ", content="привет", kind_class="line-user-mark")
+        scr._mount_trace_row(
+            prefix="> ", content="привет", kind_class="line-user-mark"
+        )
         await pilot.pause()
         scr._switch_to_empty_state()
         await pilot.pause()
@@ -167,7 +183,11 @@ async def test_brand_block_shown_on_attach_existing_session(tmp_path):
             {
                 "type": "message",
                 "seq": 1,
-                "payload": {"id": "m1", "role": "user", "content": "старое сообщение"},
+                "payload": {
+                    "id": "m1",
+                    "role": "user",
+                    "content": "старое сообщение",
+                },
             }
         )
         + "\n",

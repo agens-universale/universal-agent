@@ -73,7 +73,9 @@ async def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     captured: dict[str, object] = {}
 
     async def _continue_work(**kwargs):
-        captured["current_user_requests"] = list(kwargs.get("current_user_requests") or [])
+        captured["current_user_requests"] = list(
+            kwargs.get("current_user_requests") or []
+        )
         return ValidationResult(
             ok=False,
             action="continue_work",
@@ -96,7 +98,10 @@ async def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
         # Форма у гейта одна и корутинная: синхронного имени у него больше
         # нет — оно ушло вместе с порталом.
         decision = await guard.aevaluate_turn_finish(
-            finish_handoff_arguments={"solution_type": "full_solution", "task_report": "bar"},
+            finish_handoff_arguments={
+                "solution_type": "full_solution",
+                "task_report": "bar",
+            },
         )
 
     assert decision.outcome == "reject"
@@ -104,7 +109,9 @@ async def test_subagent_gate_validates_assignment_not_orchestrator_cli_intent():
     assert decision.validation.action == "continue_work"
     from gc_testkit.intent_fixtures import intent_user_ask_texts_from_jsonl
 
-    requests = intent_user_ask_texts_from_jsonl(captured["current_user_requests"])
+    requests = intent_user_ask_texts_from_jsonl(
+        captured["current_user_requests"]
+    )
     assert requests == [assignment]
     assert "бухгалтерии" not in " ".join(captured["current_user_requests"])
     assert "continue_work" in decision.feedback_text.lower()

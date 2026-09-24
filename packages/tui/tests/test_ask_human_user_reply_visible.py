@@ -10,7 +10,9 @@ from gc_tui.services.trace_mapper import map_message
 # ---------- Unit-тесты Фикса A: mapper для ask_human function_call_output ----------
 
 
-def _ah_output_payload(*, response: str, call_id: str = "call_ah_1", mid: str = "ah_out_1") -> dict:
+def _ah_output_payload(
+    *, response: str, call_id: str = "call_ah_1", mid: str = "ah_out_1"
+) -> dict:
     """Минимальный payload function_call_output для ask_human в формате thread_store."""
     output = json.dumps(
         {
@@ -87,7 +89,10 @@ def test_ask_human_output_user_interrupted_mapped_to_system_meta():
         {
             "tool": "ask_human",
             "ok": False,
-            "error": {"type": "interrupted", "message": "Interaction interrupted by user."},
+            "error": {
+                "type": "interrupted",
+                "message": "Interaction interrupted by user.",
+            },
             "question": "Готовы продолжать?",
             "response": "(user interrupted)",
         },
@@ -142,7 +147,11 @@ def test_ask_human_output_read_error_mapped_to_system_meta():
 
 
 def _ah_output_payload_chat_completions(
-    *, response: str, ok: bool = True, call_id: str = "call_cc_1", mid: str = "ah_cc_1"
+    *,
+    response: str,
+    ok: bool = True,
+    call_id: str = "call_cc_1",
+    mid: str = "ah_cc_1",
 ) -> dict:
     """Реальный chat_completions формат function_call_output для ask_human:
     верхний `name=None` (отсутствует), идентификатор тула — в JSON-output-е."""
@@ -189,7 +198,9 @@ def test_ask_human_output_chat_completions_format_empty_response():
 
 def test_ask_human_output_chat_completions_format_ok_false():
     """chat_completions-payload + ok=False (cancel/interrupt) → kind='system'."""
-    msg = _ah_output_payload_chat_completions(response="(user interrupted)", ok=False)
+    msg = _ah_output_payload_chat_completions(
+        response="(user interrupted)", ok=False
+    )
     ev = map_message(msg, no=12, ts="2026-05-28T10:00:00+00:00")
     assert ev is not None
     assert ev.kind == "system"
@@ -220,7 +231,9 @@ class _FakeRunner:
         self.submitted.append(text)
 
 
-def _write_thread(tmp_path: Path, *, thread_id: str, records: list[dict]) -> Path:
+def _write_thread(
+    tmp_path: Path, *, thread_id: str, records: list[dict]
+) -> Path:
     """Записать persisted-тред в формате thread_store (jsonl)."""
     threads = tmp_path / "threads"
     threads.mkdir(exist_ok=True)
@@ -320,7 +333,9 @@ async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
         # Meta-строка отрендерилась как обычный TraceRow с меткой.
         from gc_tui.widgets.trace_row import TraceRow
 
-        trace_text = " ".join(f"{w._prefix}{w._content}" for w in screen.query(TraceRow))
+        trace_text = " ".join(
+            f"{w._prefix}{w._content}" for w in screen.query(TraceRow)
+        )
         assert "спрашивал" in trace_text
         assert "без ответа" in trace_text
 
@@ -329,7 +344,9 @@ async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
 async def test_live_submit_mounts_pending_user_reply(tmp_path):
     """В live-ask_human submit Enter-ом монтирует pending user-реплику,
     сразу снимает баннер и показывает thinking-индикатор."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         # Подготовка: создаём задачу + банер + fake runner.
@@ -337,7 +354,9 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
         (tmp_path / "threads").mkdir(exist_ok=True)
         screen._active_task_id = thread_id
         app.tui_state.active_task_id = thread_id
-        screen._store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+        screen._store = FileTaskStore(
+            threads_dir=str(tmp_path / "threads"), system="cli"
+        )
         runner = _FakeRunner()
         app.active_runner = runner
         # Mount banner через прямой вызов (как сделал бы _render_event для kind=ask_human).
@@ -381,7 +400,9 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
         from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
         indicators = list(screen.query(ThinkingIndicator))
-        assert indicators, "thinking-индикатор должен появиться сразу после ответа"
+        assert indicators, (
+            "thinking-индикатор должен появиться сразу после ответа"
+        )
         assert not indicators[0].has_class("hidden")
         assert indicators[0]._state == "thinking"
 
@@ -391,14 +412,18 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
     """После submit-а в live-ask_human приходит function_call_output (с тем же
     response-текстом) → pending переводится в normal через _pending_wire_match,
     дубля user-реплики нет, banner снят."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         thread_id = "ahlive00000000000000000000000002"
         (tmp_path / "threads").mkdir(exist_ok=True)
         screen._active_task_id = thread_id
         app.tui_state.active_task_id = thread_id
-        screen._store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+        screen._store = FileTaskStore(
+            threads_dir=str(tmp_path / "threads"), system="cli"
+        )
         runner = _FakeRunner()
         app.active_runner = runner
         # Banner + submit.
@@ -420,7 +445,9 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
 
         inp = screen.query_one("#cmdinput", CommandTextArea)
         inp.text = "go"
-        await screen.on_command_text_area_submitted(CommandTextArea.Submitted(value="go"))
+        await screen.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="go")
+        )
         await pilot.pause()
         # Симулируем приход output-а через тот же путь, что и polling.
         ev_out = map_message(
@@ -437,5 +464,7 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
         from gc_tui.widgets.user_reply import UserReplyContainer
 
         replies = list(screen.query(UserReplyContainer))
-        assert len(replies) == 1, f"должна быть ровно 1 user-реплика, получили {len(replies)}"
+        assert len(replies) == 1, (
+            f"должна быть ровно 1 user-реплика, получили {len(replies)}"
+        )
         assert replies[0]._state == "normal"

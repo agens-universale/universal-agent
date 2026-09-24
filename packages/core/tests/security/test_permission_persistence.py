@@ -8,7 +8,9 @@ def test_confirm_rules_round_trips_through_meta():
     shared.confirm_rules["write:/x"] = True
     block = serialize_shared_block(shared)
     assert block["confirm_rules"] == {"write:/x": True}
-    restored = ThreadMetaMapper.shared_from_meta({"shared": block, "state_schema_version": "v2"})
+    restored = ThreadMetaMapper.shared_from_meta(
+        {"shared": block, "state_schema_version": "v2"}
+    )
     assert restored.confirm_rules == {"write:/x": True}
 
 

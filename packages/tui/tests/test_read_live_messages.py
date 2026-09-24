@@ -12,7 +12,14 @@ def _write(d, name, payloads):
         for i, p in enumerate(payloads, 1):
             f.write(
                 json.dumps(
-                    {"type": "message", "thread_id": _TID, "system": "cli", "seq": i, "ts": "t", "payload": p},
+                    {
+                        "type": "message",
+                        "thread_id": _TID,
+                        "system": "cli",
+                        "seq": i,
+                        "ts": "t",
+                        "payload": p,
+                    },
                     ensure_ascii=False,
                 )
                 + "\n"
@@ -21,11 +28,18 @@ def _write(d, name, payloads):
 
 def test_reads_live_payloads(tmp_path):
     # архив игнорируется; берём только live
-    _write(tmp_path, f"data_cli_{_TID}__pre_summary__20260101_000000.jsonl", [{"role": "user", "content": "архив"}])
+    _write(
+        tmp_path,
+        f"data_cli_{_TID}__pre_summary__20260101_000000.jsonl",
+        [{"role": "user", "content": "архив"}],
+    )
     _write(
         tmp_path,
         f"data_cli_{_TID}.jsonl",
-        [{"role": "user", "content": "живой-1"}, {"role": "assistant", "content": "живой-2"}],
+        [
+            {"role": "user", "content": "живой-1"},
+            {"role": "assistant", "content": "живой-2"},
+        ],
     )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     msgs = store.read_live_messages(_TID)

@@ -25,7 +25,9 @@ async def test_consume_pending_prefix_injects_delivery(tmp_path, monkeypatch):
         _as_coro(lambda skill_id, reg: f"DELIVERY[{skill_id}]"),
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.app.tui_state.pending_skill_id = "qa-req-validation"
@@ -40,7 +42,9 @@ async def test_consume_pending_prefix_passthrough_without_skill(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.app.tui_state.pending_skill_id = None
@@ -50,7 +54,9 @@ async def test_consume_pending_prefix_passthrough_without_skill(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
+async def test_cmd_use_skill_during_run_injects_delivery(
+    tmp_path, monkeypatch
+):
     """Во время run'а: /skill <id> шлёт add_message с инжектнутой доставкой."""
     pytest.importorskip("textual")
     from gc_core.tools.skills import registry as sreg
@@ -81,12 +87,16 @@ async def test_cmd_use_skill_during_run_injects_delivery(tmp_path, monkeypatch):
         def add_message(self, m):
             added.append(m)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]
-        await scr._handle_command("skill coder сначала запусти что-нибудь")  # стартует run (inline)
+        await scr._handle_command(
+            "skill coder сначала запусти что-нибудь"
+        )  # стартует run (inline)
         for _ in range(60):
             r = scr.app.active_runner
             if r is not None and r.is_running():
@@ -131,7 +141,9 @@ async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen

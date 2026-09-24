@@ -32,7 +32,9 @@ async def test_unconfigured_app_shows_onboarding(tmp_path):
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert isinstance(app.screen, OnboardingScreen), f"Expected OnboardingScreen, got {type(app.screen).__name__}"
+        assert isinstance(app.screen, OnboardingScreen), (
+            f"Expected OnboardingScreen, got {type(app.screen).__name__}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +86,9 @@ async def test_review_mode_shows_onboarding_review_all(tmp_path):
     async with app.run_test() as pilot:
         await pilot.pause()
         scr = app.screen
-        assert isinstance(scr, OnboardingScreen), f"Expected OnboardingScreen, got {type(scr).__name__}"
+        assert isinstance(scr, OnboardingScreen), (
+            f"Expected OnboardingScreen, got {type(scr).__name__}"
+        )
         assert scr._review_all is True, "review mode must set review_all=True"
 
 
@@ -113,10 +117,15 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cfg_mod,
         "load_config_ex",
-        lambda p=None, **kw: (dict(configured), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+        lambda p=None, **kw: (
+            dict(configured),
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
-    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t"))
+    monkeypatch.setattr(
+        ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
+    )
 
     unconf = {
         "completions_url": "http://your-backend:PORT/v1/chat/completions",
@@ -132,7 +141,9 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         assert isinstance(app.screen, OnboardingScreen)
         app._finish_onboarding()  # финал онбординга
         await pilot.pause()
-        assert isinstance(app.screen, TraceScreen)  # перешли на главный без краха
+        assert isinstance(
+            app.screen, TraceScreen
+        )  # перешли на главный без краха
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +153,9 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_finish_onboarding_review_switches_to_main(tmp_path, monkeypatch):
+async def test_finish_onboarding_review_switches_to_main(
+    tmp_path, monkeypatch
+):
     """review-режим (--init-config) на финале ТОЖЕ стартует агента (TraceScreen),
     а не self.exit() — как первый запуск. Esc остаётся путём «выйти не сохраняя»."""
     from gc_core import config as cfg_mod
@@ -161,12 +174,19 @@ async def test_finish_onboarding_review_switches_to_main(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cfg_mod,
         "load_config_ex",
-        lambda p=None, **kw: (dict(configured), ProfileMeta(active_name=None, ref=None, mtime_set={})),
+        lambda p=None, **kw: (
+            dict(configured),
+            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
-    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t"))
+    monkeypatch.setattr(
+        ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
+    )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=dict(configured))
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config=dict(configured)
+    )
     app._onboarding_mode = "review"
     app._onboarding_config_path = str(tmp_path / "config.yml")
 
@@ -177,7 +197,9 @@ async def test_finish_onboarding_review_switches_to_main(tmp_path, monkeypatch):
         app.exit = lambda *a, **k: exited.append(True)
         app._finish_onboarding()  # финал review-онбординга
         await pilot.pause()
-        assert isinstance(app.screen, TraceScreen)  # стартовал агент, а не выход
+        assert isinstance(
+            app.screen, TraceScreen
+        )  # стартовал агент, а не выход
         assert exited == []  # self.exit() НЕ вызван
 
 
@@ -211,10 +233,14 @@ async def test_onboarding_is_modal_for_help_and_notices(tmp_path):
         assert isinstance(app.screen, OnboardingScreen)
         await pilot.press("f1")
         await pilot.pause()
-        assert isinstance(app.screen, OnboardingScreen), "F1 открыл справку поверх мастера"
+        assert isinstance(app.screen, OnboardingScreen), (
+            "F1 открыл справку поверх мастера"
+        )
         await pilot.press("f4")
         await pilot.pause()
-        assert isinstance(app.screen, OnboardingScreen), "F4 открыл /notices поверх мастера"
+        assert isinstance(app.screen, OnboardingScreen), (
+            "F4 открыл /notices поверх мастера"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +343,9 @@ async def test_onboarding_has_no_degradation_message_by_default(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_finish_onboarding_survives_a_config_that_stopped_loading(tmp_path, monkeypatch):
+async def test_finish_onboarding_survives_a_config_that_stopped_loading(
+    tmp_path, monkeypatch
+):
     """Финал онбординга перечитывает конфиг — и обязан делать это ЗА ГЕЙТОМ, тем же,
     что держит окно на битом config.yml (`reload_config_if_changed`): причина в
     `/notices`, окно на прежней базе.
@@ -333,7 +361,9 @@ async def test_finish_onboarding_survives_a_config_that_stopped_loading(tmp_path
 
     monkeypatch.chdir(tmp_path)
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text("backend: [this is not, valid: yaml:", encoding="utf-8")
+    cfg_file.write_text(
+        "backend: [this is not, valid: yaml:", encoding="utf-8"
+    )
     cfg = {
         "completions_url": "http://your-backend:PORT/v1/chat/completions",
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
@@ -350,6 +380,8 @@ async def test_finish_onboarding_survives_a_config_that_stopped_loading(tmp_path
         app._finish_onboarding()  # финал на сломавшемся файле
         await pilot.pause()
 
-        assert isinstance(app.screen, TraceScreen)  # человек на главном, а не в трейсбеке
+        assert isinstance(
+            app.screen, TraceScreen
+        )  # человек на главном, а не в трейсбеке
         codes = [n.code for n in collect_runtime_notices()]
         assert "config_reload_failed" in codes, codes

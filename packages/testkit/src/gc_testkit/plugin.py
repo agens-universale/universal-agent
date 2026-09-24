@@ -104,7 +104,9 @@ def _suite_root(rootpath) -> Path | None:
     rootpath = Path(rootpath).resolve()
     if _declares_gc_core(rootpath):
         return rootpath
-    if rootpath.parent.name == "packages" and _declares_gc_core(rootpath.parent.parent):
+    if rootpath.parent.name == "packages" and _declares_gc_core(
+        rootpath.parent.parent
+    ):
         return rootpath.parent.parent
     return None
 
@@ -226,8 +228,12 @@ def preload_minimal_tools_package() -> None:
         "gc_core.tools.session.stored_outputs.tool_call_outputs_store",
         _STORE_SRC,
     )
-    wrapping_mod = types.ModuleType("gc_core.tools.session.stored_outputs.wrapping")
-    wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: tool_res
+    wrapping_mod = types.ModuleType(
+        "gc_core.tools.session.stored_outputs.wrapping"
+    )
+    wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: (
+        tool_res
+    )
     sys.modules["gc_core.tools.session.stored_outputs.wrapping"] = wrapping_mod
 
     skills_pkg = types.ModuleType(_MOD_TOOLS_SKILLS)
@@ -262,7 +268,9 @@ def _real_tools_loaded() -> bool:
         and callable(getattr(tools, "abuild_tools_data", None))
         and _MOD_TOOLS_MCP in sys.modules
         and _MOD_TOOLS_SKILLS in sys.modules
-        and isinstance(getattr(sys.modules.get(_MOD_TOOLS_SKILLS), "__path__", None), list)
+        and isinstance(
+            getattr(sys.modules.get(_MOD_TOOLS_SKILLS), "__path__", None), list
+        )
         and len(sys.modules[_MOD_TOOLS_SKILLS].__path__) > 0
     )
 

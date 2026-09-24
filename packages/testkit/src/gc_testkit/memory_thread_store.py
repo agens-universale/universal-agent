@@ -26,7 +26,11 @@ from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from gc_core.thread_store_base import ThreadStoreBase
-from gc_core.thread_store_types import MessageKey, SubagentTraceRecord, ThreadState
+from gc_core.thread_store_types import (
+    MessageKey,
+    SubagentTraceRecord,
+    ThreadState,
+)
 
 
 class MemoryThreadStore(ThreadStoreBase):
@@ -61,9 +65,13 @@ class MemoryThreadStore(ThreadStoreBase):
 
     # --- чтение ------------------------------------------------------------
 
-    def load_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    def load_messages(
+        self, system_id: str, thread_id: str
+    ) -> List[Dict[str, Any]]:
         self._hit("load_messages")
-        return self._payloads(self._messages.get(self._key(system_id, thread_id), []))
+        return self._payloads(
+            self._messages.get(self._key(system_id, thread_id), [])
+        )
 
     def load_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
         self._hit("load_thread_state")
@@ -84,7 +92,9 @@ class MemoryThreadStore(ThreadStoreBase):
 
     def load_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
         self._hit("load_meta")
-        return copy.deepcopy(self._meta.get(self._key(system_id, thread_id), {}))
+        return copy.deepcopy(
+            self._meta.get(self._key(system_id, thread_id), {})
+        )
 
     # --- запись ------------------------------------------------------------
 
@@ -106,7 +116,11 @@ class MemoryThreadStore(ThreadStoreBase):
         # (``ThreadSession.known_message_keys``) и снимает снимок ДО вызова,
         # чтобы по разнице понять, что дописать в свою ``history_messages``.
         # Защитная копия молча задвоила бы историю на следующем батче.
-        known = known_keys if known_keys is not None else {make_message_key(m) for m in self._payloads(bucket)}
+        known = (
+            known_keys
+            if known_keys is not None
+            else {make_message_key(m) for m in self._payloads(bucket)}
+        )
 
         seq = start_seq
         written = 0
@@ -123,11 +137,15 @@ class MemoryThreadStore(ThreadStoreBase):
             written += 1
         return written
 
-    def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+    def save_meta(
+        self, system_id: str, thread_id: str, meta: Dict[str, Any]
+    ) -> None:
         self._hit("save_meta")
         # Штамп записи — обязанность ХРАНИЛИЩА, а не вызывающего, и он один
         # на все реализации: ``ThreadStoreBase.stamp_meta``.
-        self._meta[self._key(system_id, thread_id)] = self.stamp_meta(copy.deepcopy(meta))
+        self._meta[self._key(system_id, thread_id)] = self.stamp_meta(
+            copy.deepcopy(meta)
+        )
 
     def patch_runtime_flag(
         self,
@@ -140,16 +158,22 @@ class MemoryThreadStore(ThreadStoreBase):
     ) -> None:
         self._hit("patch_runtime_flag")
         key = self._key(system_id, thread_id)
-        meta = self.apply_runtime_flag(self._meta.setdefault(key, {}), flag, active=active)
+        meta = self.apply_runtime_flag(
+            self._meta.setdefault(key, {}), flag, active=active
+        )
         self._meta[key] = self.stamp_meta(meta)
 
-    def update_runtime_meta(self, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
+    def update_runtime_meta(
+        self, system_id: str, thread_id: str, patch: Dict[str, Any]
+    ) -> None:
         self._hit("update_runtime_meta")
         key = self._key(system_id, thread_id)
         meta = self.merge_runtime_meta(self._meta.setdefault(key, {}), patch)
         self._meta[key] = self.stamp_meta(meta)
 
-    def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
+    def discard_message(
+        self, system_id: str, thread_id: str, message_id: str
+    ) -> bool:
         self._hit("discard_message")
         bucket = self._messages.get(self._key(system_id, thread_id), [])
         for i, envelope in enumerate(bucket):
@@ -184,7 +208,9 @@ class MemoryThreadStore(ThreadStoreBase):
         синхронное — ядро приходит сюда адаптером, по синхронному имени.
         """
         self._hit("_restore_subagent_trace")
-        self._traces[self._key(system_id, thread_id)] = [dict(r) for r in records]
+        self._traces[self._key(system_id, thread_id)] = [
+            dict(r) for r in records
+        ]
 
     def append_subagent_trace(
         self,
@@ -212,9 +238,13 @@ class MemoryThreadStore(ThreadStoreBase):
         trace.append(record)
         return copy.deepcopy(record)
 
-    def read_subagent_trace(self, system_id: str, thread_id: str) -> List[SubagentTraceRecord]:
+    def read_subagent_trace(
+        self, system_id: str, thread_id: str
+    ) -> List[SubagentTraceRecord]:
         self._hit("read_subagent_trace")
-        return copy.deepcopy(self._traces.get(self._key(system_id, thread_id), []))
+        return copy.deepcopy(
+            self._traces.get(self._key(system_id, thread_id), [])
+        )
 
 
 __all__ = ["MemoryThreadStore"]

@@ -66,7 +66,11 @@ def _start(flow: Generator) -> tuple[bool, Any]:
 _GUARD_SLOTS = threading.BoundedSemaphore(32)
 
 
-async def _off_loop(fn: Callable[..., Any], *args: Any, on_abandoned: Callable[[], None] | None = None) -> Any:
+async def _off_loop(
+    fn: Callable[..., Any],
+    *args: Any,
+    on_abandoned: Callable[[], None] | None = None,
+) -> Any:
     """Исполнить блокирующую часть гварда вне loop — на своём потоке.
 
     Не ``asyncio.to_thread``: его пул общий и небольшой, и тело гварда встало
@@ -147,7 +151,12 @@ class OffLoop:
 
     __slots__ = ("args", "fn", "on_interrupt")
 
-    def __init__(self, fn: Callable[..., Any], *args: Any, on_interrupt: Any = _NO_INTERRUPT) -> None:
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        on_interrupt: Any = _NO_INTERRUPT,
+    ) -> None:
         self.fn = fn
         self.args = args
         self.on_interrupt = on_interrupt
@@ -172,7 +181,9 @@ class _Failed:
 _INITIAL = object()
 
 
-async def _await_off_loop(request: OffLoop, *, on_abandoned: Callable[[], None]) -> Any:
+async def _await_off_loop(
+    request: OffLoop, *, on_abandoned: Callable[[], None]
+) -> Any:
     """Дождаться блокирующего вызова; для ожидания человека — с перехватом Ctrl+C.
 
     Перехват НАРОЧНО узкий и временный: он живёт только пока ждут человека и
@@ -200,11 +211,15 @@ async def _await_off_loop(request: OffLoop, *, on_abandoned: Callable[[], None])
     interrupted = loop.create_future()
 
     def _on_sigint() -> None:
-        loop.call_soon_threadsafe(lambda: interrupted.done() or interrupted.set_result(True))
+        loop.call_soon_threadsafe(
+            lambda: interrupted.done() or interrupted.set_result(True)
+        )
 
     try:
         with intercept_sigint(_on_sigint):
-            done, _ = await asyncio.wait({task, interrupted}, return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait(
+                {task, interrupted}, return_when=asyncio.FIRST_COMPLETED
+            )
             if task in done:
                 return task.result()
             task.cancel()  # человека ждать больше не нужно
@@ -219,7 +234,9 @@ async def _aserve_request(flow: Generator, request: Any) -> Any:
     try:
         if isinstance(request, AwaitOnCaller):
             return await request.make_coro()
-        return await _await_off_loop(request, on_abandoned=lambda: _close_quietly(flow))
+        return await _await_off_loop(
+            request, on_abandoned=lambda: _close_quietly(flow)
+        )
     except asyncio.CancelledError:
         # Отмену в тело НЕ бросаем: его `except Exception` её не
         # поймает, но проглотить её могло бы чужое `except
@@ -230,7 +247,9 @@ async def _aserve_request(flow: Generator, request: Any) -> Any:
         return _Failed(exc)
 
 
-async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
+async def _drive_async(
+    flow: Generator, first: Any = _INITIAL
+) -> tuple[bool, Any]:
     """Крутить тело, обслуживая его запросы, до точки вызова тула или конца.
 
     Возвращает ``(нужен_ли_вызов_тула, результат)``.
@@ -238,7 +257,9 @@ async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, An
     outcome: Any = first
     while True:
         try:
-            request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            request = (
+                next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            )
         except StopIteration as stop:
             return False, stop.value
         if isinstance(request, (AwaitOnCaller, OffLoop)):
@@ -254,7 +275,9 @@ def _drive_sync(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
     outcome: Any = first
     while True:
         try:
-            request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            request = (
+                next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            )
         except StopIteration as stop:
             return False, stop.value
         if isinstance(request, (AwaitOnCaller, OffLoop)):
@@ -343,7 +366,9 @@ def dual_wrap(
             # через его запросы (`AwaitOnCaller`, `OffLoop`), см. канал выше.
             if body_may_block:
                 try:
-                    needs_call, early = await _off_loop(_start, gen, on_abandoned=lambda: _close_quietly(gen))
+                    needs_call, early = await _off_loop(
+                        _start, gen, on_abandoned=lambda: _close_quietly(gen)
+                    )
                 except asyncio.CancelledError:
                     # Вызывающего сняли, пока тело работало в своём потоке.
                     # Поток мы не остановим — он в блокирующем вызове, и

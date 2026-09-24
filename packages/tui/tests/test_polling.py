@@ -5,7 +5,16 @@ import json
 import pytest
 
 
-def _write_message(threads_dir, system, tid, seq, role, content, updated="2026-05-20T10:00:00+00:00", extra_meta=None):
+def _write_message(
+    threads_dir,
+    system,
+    tid,
+    seq,
+    role,
+    content,
+    updated="2026-05-20T10:00:00+00:00",
+    extra_meta=None,
+):
     data = threads_dir / f"data_{system}_{tid}.jsonl"
     with open(data, "a", encoding="utf-8") as f:
         f.write(
@@ -13,7 +22,11 @@ def _write_message(threads_dir, system, tid, seq, role, content, updated="2026-0
                 {
                     "type": "message",
                     "seq": seq,
-                    "payload": {"id": f"m{seq}", "role": role, "content": content},
+                    "payload": {
+                        "id": f"m{seq}",
+                        "role": role,
+                        "content": content,
+                    },
                 }
             )
             + "\n"
@@ -70,7 +83,11 @@ async def test_polling_stream_reset_reloads_full(tmp_path):
                 {
                     "type": "message",
                     "seq": 1,
-                    "payload": {"id": "s1", "role": "assistant", "content": "после-сжатия"},
+                    "payload": {
+                        "id": "s1",
+                        "role": "assistant",
+                        "content": "после-сжатия",
+                    },
                 }
             )
             + "\n"
@@ -114,7 +131,11 @@ async def test_polling_stream_reset_keeps_brand_header(tmp_path):
                 {
                     "type": "message",
                     "seq": 1,
-                    "payload": {"id": "s1", "role": "assistant", "content": "после-сжатия"},
+                    "payload": {
+                        "id": "s1",
+                        "role": "assistant",
+                        "content": "после-сжатия",
+                    },
                 }
             )
             + "\n"

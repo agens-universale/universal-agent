@@ -50,7 +50,9 @@ def test_unknown_top_level_key_is_dropped_and_call_proceeds():
 
 
 def test_several_unknown_keys_are_dropped():
-    args = _validate({"command": "ls", "description": "why", "reason": "because"})
+    args = _validate(
+        {"command": "ls", "description": "why", "reason": "because"}
+    )
     assert args == {"command": "ls"}
 
 
@@ -110,7 +112,10 @@ def test_annotate_json_object_puts_note_first():
 
 def test_annotate_plain_text_prefixes_note():
     raw = annotate_output_with_dropped_arguments("done", ["description"])
-    assert raw == "Field description was dropped because it is not in the tool schema.\ndone"
+    assert (
+        raw
+        == "Field description was dropped because it is not in the tool schema.\ndone"
+    )
 
 
 def test_apply_tool_output_mentions_dropped_fields():
@@ -121,7 +126,9 @@ def test_apply_tool_output_mentions_dropped_fields():
         # Контракт тула в ветке — `acall`; синхронного входа нет ни у одного
         # настоящего тула, и двойник обязан повторять форму, а не прошлую.
         async def acall(self, command: str, timeout: int | None = None) -> str:
-            return json.dumps({"ok": True, "command": command, "timeout": timeout})
+            return json.dumps(
+                {"ok": True, "command": command, "timeout": timeout}
+            )
 
     tools = {
         "exec_command": {
@@ -141,7 +148,9 @@ def test_apply_tool_output_mentions_dropped_fields():
     assert payload["ok"] is True
     assert payload["command"] == "ls"
     assert payload["timeout"] == 3
-    assert payload["dropped_arguments"] == ("Field description was dropped because it is not in the tool schema.")
+    assert payload["dropped_arguments"] == (
+        "Field description was dropped because it is not in the tool schema."
+    )
 
 
 def test_open_schema_still_drops_extra_keys():

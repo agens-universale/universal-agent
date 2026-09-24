@@ -205,7 +205,11 @@ def _no_network_update_check(monkeypatch):
     monkeypatch.setattr(
         check_mod,
         "check_for_update",
-        lambda source, **k: CheckResult("current", getattr(source, "commit", None), "установлена последняя версия"),
+        lambda source, **k: CheckResult(
+            "current",
+            getattr(source, "commit", None),
+            "установлена последняя версия",
+        ),
     )
 
 

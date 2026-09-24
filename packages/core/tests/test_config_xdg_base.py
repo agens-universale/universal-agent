@@ -82,7 +82,9 @@ def test_xdg_config_path_none_when_missing(env_with_config_dir):
     assert _xdg_config_path() is None
 
 
-def test_xdg_base_used_when_no_explicit_config(env_with_config_dir, fake_pkg_default, isolated_cwd):
+def test_xdg_base_used_when_no_explicit_config(
+    env_with_config_dir, fake_pkg_default, isolated_cwd
+):
     from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
@@ -91,7 +93,9 @@ def test_xdg_base_used_when_no_explicit_config(env_with_config_dir, fake_pkg_def
     assert cfg["max_steps"] == 111
 
 
-def test_explicit_config_wins_over_xdg(env_with_config_dir, fake_pkg_default, isolated_cwd, tmp_path):
+def test_explicit_config_wins_over_xdg(
+    env_with_config_dir, fake_pkg_default, isolated_cwd, tmp_path
+):
     from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
@@ -102,7 +106,9 @@ def test_explicit_config_wins_over_xdg(env_with_config_dir, fake_pkg_default, is
     assert cfg["max_steps"] == 333
 
 
-def test_falls_back_to_package_when_no_xdg_file(env_with_config_dir, fake_pkg_default, isolated_cwd):
+def test_falls_back_to_package_when_no_xdg_file(
+    env_with_config_dir, fake_pkg_default, isolated_cwd
+):
     from gc_core.config import load_config
 
     # gc_config_dir is set but no config.yml inside -> tier 2 skipped.
@@ -111,7 +117,9 @@ def test_falls_back_to_package_when_no_xdg_file(env_with_config_dir, fake_pkg_de
     assert cfg["max_steps"] == 222
 
 
-def test_no_env_override_uses_package_default(monkeypatch, fake_pkg_default, isolated_cwd, tmp_path):
+def test_no_env_override_uses_package_default(
+    monkeypatch, fake_pkg_default, isolated_cwd, tmp_path
+):
     """No discoverable XDG config.yml -> back-compat: package default base.
 
     gc_config_dir points at an empty tmp dir (no config.yml) so the lookup is
@@ -137,23 +145,31 @@ def test_no_env_override_uses_package_default(monkeypatch, fake_pkg_default, iso
     assert cfg["model"] == "PkgModel"
 
 
-def test_project_local_merges_over_xdg_base(env_with_config_dir, fake_pkg_default, isolated_cwd):
+def test_project_local_merges_over_xdg_base(
+    env_with_config_dir, fake_pkg_default, isolated_cwd
+):
     from gc_core.config import load_config
 
     (env_with_config_dir / "config.yml").write_text(_XDG_CFG, encoding="utf-8")
     gc_dir = isolated_cwd / ".gc"
     gc_dir.mkdir()
-    (gc_dir / "config.yml").write_text("agent:\n  max_steps: 999\n", encoding="utf-8")
+    (gc_dir / "config.yml").write_text(
+        "agent:\n  max_steps: 999\n", encoding="utf-8"
+    )
     cfg = load_config()
     # project-local deep-merged on top of the XDG base (not the package).
     assert cfg["max_steps"] == 999
     assert cfg["model"] == "XdgModel"
 
 
-def test_relative_paths_resolve_from_xdg_dir(env_with_config_dir, fake_pkg_default, isolated_cwd):
+def test_relative_paths_resolve_from_xdg_dir(
+    env_with_config_dir, fake_pkg_default, isolated_cwd
+):
     from gc_core.config import load_config
 
-    (env_with_config_dir / "config.yml").write_text(_XDG_CFG + "paths:\n  agent_md_path: foo.md\n", encoding="utf-8")
+    (env_with_config_dir / "config.yml").write_text(
+        _XDG_CFG + "paths:\n  agent_md_path: foo.md\n", encoding="utf-8"
+    )
     cfg = load_config()
     # config_dir == winning base dir (the xdg dir), like --config semantics.
     assert cfg["agent_md_path"] == str(env_with_config_dir / "foo.md")

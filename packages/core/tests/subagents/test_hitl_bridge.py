@@ -7,7 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    child_progress_enabled,
+)
 from gc_testkit.helpers.tool_ctx import CallableTool
 
 
@@ -25,7 +28,9 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
 
 class TestChildCtxCopiesTuiConfirm:
     @pytest.mark.asyncio
-    async def test_build_child_ctx_copies_tui_confirm_and_tool_name(self, tmp_path):
+    async def test_build_child_ctx_copies_tui_confirm_and_tool_name(
+        self, tmp_path
+    ):
         from gc_core.states import SharedStateData, State
         from gc_core.tools.subagents.runner import SubagentRunner
 
@@ -82,7 +87,9 @@ class TestChildCtxCopiesTuiConfirm:
         child = await runner._build_child_ctx(tool_name="subagent_worker")
         assert child.tui_confirm is confirm
         assert child.subagent_tool_name == "subagent_worker"
-        assert getattr(child, "permission_store", None) is parent.permission_store
+        assert (
+            getattr(child, "permission_store", None) is parent.permission_store
+        )
         assert getattr(child, "ask_human", None) is ask_port
 
 
@@ -119,7 +126,9 @@ class TestAskHumanEmit:
             logger=None,
         )
         assert not child_progress_enabled(ctx)
-        tool = CallableTool(AskHuman(ctx=ctx, state=SimpleNamespace(steps=1, max_steps=10)))
+        tool = CallableTool(
+            AskHuman(ctx=ctx, state=SimpleNamespace(steps=1, max_steps=10))
+        )
         answers = iter(["a", ""])
         monkeypatch.setattr("builtins.input", lambda: next(answers))
         tool(question="Parent ask?")

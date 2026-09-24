@@ -38,7 +38,9 @@ def _coerce_tool_usage_notice_counters(value: Any) -> dict[str, int]:
     return out
 
 
-def hydrate_tool_usage_notice_state(state: Any, meta: dict[str, Any] | None) -> None:
+def hydrate_tool_usage_notice_state(
+    state: Any, meta: dict[str, Any] | None
+) -> None:
     """Восстановить поля State и meta-only ключи из thread/child meta."""
     session = meta if isinstance(meta, dict) else {}
     raw_hash = session.get(META_PROJECT_MEMORY_CONTENT_HASH)
@@ -47,25 +49,37 @@ def hydrate_tool_usage_notice_state(state: Any, meta: dict[str, Any] | None) -> 
     else:
         state.project_memory_content_hash = None
 
-    counters = _coerce_tool_usage_notice_counters(session.get(META_TOOL_USAGE_NOTICE_CNT))
+    counters = _coerce_tool_usage_notice_counters(
+        session.get(META_TOOL_USAGE_NOTICE_CNT)
+    )
     if not counters and META_MEMORY_NOTICE_CNT in session:
-        legacy = _coerce_non_negative_int(session.get(META_MEMORY_NOTICE_CNT, 0))
+        legacy = _coerce_non_negative_int(
+            session.get(META_MEMORY_NOTICE_CNT, 0)
+        )
         if legacy > 0:
             counters = {"session_memory": legacy}
     state.tool_usage_notice_cnt = counters
     # Счётчик протухания чек-листа: без переноса через meta задача из серии
     # коротких ходов никогда не докатывается до напоминания (State — per-run).
-    state.todo_reminder_cnt = _coerce_non_negative_int(session.get(META_TODO_REMINDER_CNT, 0))
+    state.todo_reminder_cnt = _coerce_non_negative_int(
+        session.get(META_TODO_REMINDER_CNT, 0)
+    )
 
 
 def persist_tool_usage_notice_state(state: Any, meta: dict[str, Any]) -> None:
     """Записать поля State в session meta (in-memory thread_session.meta / child_meta)."""
-    meta[META_PROJECT_MEMORY_CONTENT_HASH] = getattr(state, "project_memory_content_hash", None)
+    meta[META_PROJECT_MEMORY_CONTENT_HASH] = getattr(
+        state, "project_memory_content_hash", None
+    )
     raw_counters = getattr(state, "tool_usage_notice_cnt", None)
     meta[META_TOOL_USAGE_NOTICE_CNT] = (
-        _coerce_tool_usage_notice_counters(raw_counters) if isinstance(raw_counters, dict) else {}
+        _coerce_tool_usage_notice_counters(raw_counters)
+        if isinstance(raw_counters, dict)
+        else {}
     )
-    meta[META_TODO_REMINDER_CNT] = _coerce_non_negative_int(getattr(state, "todo_reminder_cnt", 0))
+    meta[META_TODO_REMINDER_CNT] = _coerce_non_negative_int(
+        getattr(state, "todo_reminder_cnt", 0)
+    )
 
 
 def merge_tool_usage_notice_meta_to_base(

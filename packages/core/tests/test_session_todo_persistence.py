@@ -1,4 +1,7 @@
-from gc_core.persistence.schema import normalize_session_todo, serialize_shared_block
+from gc_core.persistence.schema import (
+    normalize_session_todo,
+    serialize_shared_block,
+)
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import SharedStateData
 from gc_testkit import run_coro
@@ -22,7 +25,9 @@ def test_normalize_drops_invalid_items():
         "not a dict",
         {"status": "pending"},  # нет content
     ]
-    assert normalize_session_todo(raw) == [{"content": "ok", "status": "pending"}]
+    assert normalize_session_todo(raw) == [
+        {"content": "ok", "status": "pending"}
+    ]
 
 
 def test_normalize_non_list_is_empty():
@@ -72,10 +77,14 @@ def test_session_todo_survives_compaction_via_post_run_heal():
         max_steps=100,
         system_prompt_id="v1",
         use_server_subagents=False,
-        shared=SharedStateData(session_todo=list(ITEMS), working_memory={"state": "прогресс"}),
+        shared=SharedStateData(
+            session_todo=list(ITEMS), working_memory={"state": "прогресс"}
+        ),
     )
     # Как compaction оставляет meta на диске: shared урезан до 2 полей.
-    truncated_meta = {"shared": {"working_memory": {"state": "прогресс"}, "notes_md": ""}}
+    truncated_meta = {
+        "shared": {"working_memory": {"state": "прогресс"}, "notes_md": ""}
+    }
 
     healed = ThreadMetaMapper.merge_state_into_meta(truncated_meta, state)
 
@@ -111,7 +120,9 @@ def test_session_todo_survives_compaction_payload():
             session_todo=list(ITEMS),
         ),
     )
-    ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
+    ctx = types.SimpleNamespace(
+        config_dict={"summary_params": {}}, logger=None
+    )
     captured: dict = {}
 
     async def _fake_summarize(**_kw):
@@ -131,8 +142,14 @@ def test_session_todo_survives_compaction_payload():
         patch("gc_core.summarize.compaction.log_summary_raw_text"),
         patch("gc_core.summarize.compaction.log_summary_message_body"),
         patch("gc_core.summarize.compaction.log_compaction_completed"),
-        patch("gc_core.summarize.compaction.asummarize_dialog_via_chat_completions", _fake_summarize),
-        patch("gc_core.summarize.compaction.apply_summary_state_patch", lambda **_kw: "body"),
+        patch(
+            "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
+            _fake_summarize,
+        ),
+        patch(
+            "gc_core.summarize.compaction.apply_summary_state_patch",
+            lambda **_kw: "body",
+        ),
     ):
         run_coro(
             arun_summary_compaction(

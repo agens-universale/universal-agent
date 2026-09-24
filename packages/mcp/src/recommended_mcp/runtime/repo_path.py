@@ -27,13 +27,19 @@ from pathlib import Path
 #: а ensure_repo_on_sys_path клал чужие каталоги ВПЕРЕДИ site-packages.
 #: До этого маркером был `recommended_mcp/` в корне — он перестал работать,
 #: когда рецепты уехали в packages/mcp.
-_GC_CORE_NAME = re.compile(r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', re.MULTILINE)
+# До bootstrap импорт gc_core невозможен; копию проверяет test_repo_root_marker.
+# pylint: disable=duplicate-code
+_GC_CORE_NAME = re.compile(
+    r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', re.MULTILINE
+)
 
 
 def _declares_gc_core(candidate: Path) -> bool:
     """Лежит ли в `candidate` наш `packages/core/pyproject.toml`."""
     try:
-        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(encoding="utf-8")
+        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
     except (OSError, UnicodeDecodeError):
         return False
     return _GC_CORE_NAME.search(text) is not None
@@ -56,6 +62,9 @@ def repo_root_from(start: Path) -> Path | None:
         if (parent / "src" / "mcp_runtime").is_dir():
             return parent
     return None
+
+
+# pylint: enable=duplicate-code
 
 
 @lru_cache(maxsize=1)

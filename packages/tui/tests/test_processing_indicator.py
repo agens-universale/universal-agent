@@ -30,7 +30,11 @@ async def test_running_after_answer_shows_processing(tmp_path):
 
     tid = "proc0000000000000000000000000001a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

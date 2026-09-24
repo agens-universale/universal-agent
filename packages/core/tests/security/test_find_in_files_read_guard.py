@@ -30,11 +30,15 @@ def _cfg(root):
 
 
 def _assert_no_denied_leak(raw: str, data: dict) -> None:
-    assert MARKER not in raw, "содержимое запрещённого файла утекло в ответ тула"
+    assert MARKER not in raw, (
+        "содержимое запрещённого файла утекло в ответ тула"
+    )
     files = [m.get("file", "") for m in data.get("matches", [])]
     denied_names = (".env", "server.pem", "id.key")
     for denied in denied_names:
-        assert not any(f.endswith(denied) for f in files), f"{denied} попал в matches"
+        assert not any(f.endswith(denied) for f in files), (
+            f"{denied} попал в matches"
+        )
     for m in data.get("matches", []):
         for field in ("line_content", "context"):
             assert MARKER not in (m.get(field) or "")
@@ -45,19 +49,29 @@ def _assert_no_denied_leak(raw: str, data: dict) -> None:
 
 @pytest.fixture
 def tree(tmp_path):
-    (tmp_path / "app.py").write_text("TOKEN = os.environ['SECRET']\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text(
+        "TOKEN = os.environ['SECRET']\n", encoding="utf-8"
+    )
     (tmp_path / ".env").write_text(f"SECRET={MARKER}\n", encoding="utf-8")
-    (tmp_path / "server.pem").write_text(f"PRIVATE {MARKER}\n", encoding="utf-8")
+    (tmp_path / "server.pem").write_text(
+        f"PRIVATE {MARKER}\n", encoding="utf-8"
+    )
     (tmp_path / "id.key").write_text(f"KEY {MARKER}\n", encoding="utf-8")
     return tmp_path
 
 
-@pytest.mark.parametrize("has_grep", [False, True], ids=["python-path", "native-grep"])
+@pytest.mark.parametrize(
+    "has_grep", [False, True], ids=["python-path", "native-grep"]
+)
 def test_denied_files_never_reach_the_payload(tree, monkeypatch, has_grep):
     tool = with_local_ctx(FindInFiles, config_dict=_cfg(tree))
-    monkeypatch.setattr(type(tool._backend), "has_grep", has_grep, raising=False)
+    monkeypatch.setattr(
+        type(tool._backend), "has_grep", has_grep, raising=False
+    )
 
-    raw = tool(path=str(tree), pattern="SECRET|PRIVATE|KEY", query_mode="python-re")
+    raw = tool(
+        path=str(tree), pattern="SECRET|PRIVATE|KEY", query_mode="python-re"
+    )
     data = json.loads(raw)
 
     _assert_no_denied_leak(raw, data)
@@ -65,10 +79,16 @@ def test_denied_files_never_reach_the_payload(tree, monkeypatch, has_grep):
         assert data.get("search_backend") == "grep"
 
 
-@pytest.mark.parametrize("has_grep", [False, True], ids=["python-path", "native-grep"])
-def test_denied_files_text_mode_never_reach_the_payload(tree, monkeypatch, has_grep):
+@pytest.mark.parametrize(
+    "has_grep", [False, True], ids=["python-path", "native-grep"]
+)
+def test_denied_files_text_mode_never_reach_the_payload(
+    tree, monkeypatch, has_grep
+):
     tool = with_local_ctx(FindInFiles, config_dict=_cfg(tree))
-    monkeypatch.setattr(type(tool._backend), "has_grep", has_grep, raising=False)
+    monkeypatch.setattr(
+        type(tool._backend), "has_grep", has_grep, raising=False
+    )
 
     raw = tool(path=str(tree), pattern="KEY", query_mode="text")
     data = json.loads(raw)
@@ -78,7 +98,9 @@ def test_denied_files_text_mode_never_reach_the_payload(tree, monkeypatch, has_g
         assert data.get("search_backend") == "grep"
 
 
-def test_native_denied_hits_first_allowed_still_visible_or_incomplete(tmp_path, monkeypatch):
+def test_native_denied_hits_first_allowed_still_visible_or_incomplete(
+    tmp_path, monkeypatch
+):
     """Первые hits из .env; разрешённый тоже матчится — в matches или scan неполный."""
     (tmp_path / ".env").write_text(
         "\n".join(f"KEY={MARKER}_{i}" for i in range(8)) + "\n",
@@ -128,9 +150,13 @@ def test_native_only_denied_matches_scan_complete(tmp_path, monkeypatch):
 def test_allowed_file_still_found(tree):
     """Гвард не должен глушить обычный поиск."""
     data = json.loads(
-        with_local_ctx(FindInFiles, config_dict=_cfg(tree))(path=str(tree), pattern="SECRET", query_mode="python-re")
+        with_local_ctx(FindInFiles, config_dict=_cfg(tree))(
+            path=str(tree), pattern="SECRET", query_mode="python-re"
+        )
     )
-    assert any(m.get("file", "").endswith("app.py") for m in data.get("matches", []))
+    assert any(
+        m.get("file", "").endswith("app.py") for m in data.get("matches", [])
+    )
 
 
 def test_native_fs_search_has_no_read_guard_import():

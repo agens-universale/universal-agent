@@ -39,20 +39,30 @@ class AuthConnector:
         self.plugin_version = plugin_version
         self.device_code = device_code
         self.device_code_hex = (
-            device_code_hex if device_code_hex else hashlib.sha256(self.device_code.encode("utf-8")).hexdigest()
+            device_code_hex
+            if device_code_hex
+            else hashlib.sha256(self.device_code.encode("utf-8")).hexdigest()
         )
         self.login = login
 
     @staticmethod
-    def get_auth_url(url, verify, config_proxy: Optional[str] = None) -> Optional[str]:
+    def get_auth_url(
+        url, verify, config_proxy: Optional[str] = None
+    ) -> Optional[str]:
         proxies = resolve_proxies(config_proxy, os.environ, url)
-        resp = _NO_NETRC_SESSION.get(url, timeout=10, verify=verify, proxies=proxies)
+        resp = _NO_NETRC_SESSION.get(
+            url, timeout=10, verify=verify, proxies=proxies
+        )
         if resp.status_code != 401:
-            raise AuthEntryPointError(f"Incorrect status code from entry point: {resp.status_code}")
+            raise AuthEntryPointError(
+                f"Incorrect status code from entry point: {resp.status_code}"
+            )
 
         auth_url = resp.headers.get("X-Authorization-Url", None)
         if auth_url is None:
-            raise AuthEntryPointError("Auth url is incorrect. Check entry point")
+            raise AuthEntryPointError(
+                "Auth url is incorrect. Check entry point"
+            )
         return auth_url
 
     @staticmethod

@@ -1,9 +1,14 @@
-from gc_core.utils.chat_completions_stream import assemble_streamed_completion, iter_sse_data_lines
+from gc_core.utils.chat_completions_stream import (
+    assemble_streamed_completion,
+    iter_sse_data_lines,
+)
 
 
 def _deltas(lines):
     out = []
-    assemble_streamed_completion(iter_sse_data_lines(lines), on_delta=lambda k, t: out.append((k, t)))
+    assemble_streamed_completion(
+        iter_sse_data_lines(lines), on_delta=lambda k, t: out.append((k, t))
+    )
     return out
 
 
@@ -52,7 +57,9 @@ def test_reasoning_content_still_think_and_message_content_verbatim():
         "data: [DONE]",
     ]
     out = []
-    res = assemble_streamed_completion(iter_sse_data_lines(lines), on_delta=lambda k, t: out.append((k, t)))
+    res = assemble_streamed_completion(
+        iter_sse_data_lines(lines), on_delta=lambda k, t: out.append((k, t))
+    )
     assert ("think", "rc") in out
     assert ("think", "x") in out
     assert ("answer", "Y") in out
@@ -66,4 +73,7 @@ def test_plain_content_no_think_all_answer():
         "data: [DONE]",
     ]
     d = _deltas(lines)
-    assert [(k, t) for k, t in d] == [("answer", "Просто "), ("answer", "ответ.")]
+    assert [(k, t) for k, t in d] == [
+        ("answer", "Просто "),
+        ("answer", "ответ."),
+    ]

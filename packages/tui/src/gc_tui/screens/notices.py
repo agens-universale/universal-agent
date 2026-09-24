@@ -35,7 +35,10 @@ def _glyph(level: str) -> str:
 def _notice_text(n: Notice) -> Text:
     """Одно уведомление: цветной глиф + текст с выделенными тех. именами."""
     t = Text()
-    t.append(_glyph(n.level) + " ", style=_WARN_STYLE if n.level == "warning" else _INFO_STYLE)
+    t.append(
+        _glyph(n.level) + " ",
+        style=_WARN_STYLE if n.level == "warning" else _INFO_STYLE,
+    )
     t.append(n.message)
     if n.highlights:
         t.highlight_words(n.highlights, style=_NAME_STYLE)
@@ -83,7 +86,9 @@ class NoticesScreen(Screen):
 
     def _render_notices(self) -> None:
         notices = self._load_notices()
-        self.query_one("#header-left", Static).update(self._header_text(notices))
+        self.query_one("#header-left", Static).update(
+            self._header_text(notices)
+        )
         trace = self.query_one("#trace", VerticalScroll)
         trace.remove_children()
         if not notices:

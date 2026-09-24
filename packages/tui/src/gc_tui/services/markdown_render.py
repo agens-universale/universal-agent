@@ -107,7 +107,11 @@ def segment_answer(text: str) -> list[Block]:
             segs.append(Block("code-block", "\n".join(chunk), lang_tag))
             i = j + 1
             continue
-        if "|" in ln and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
+        if (
+            "|" in ln
+            and i + 1 < len(lines)
+            and _is_table_separator(lines[i + 1])
+        ):
             _flush()
             headers = _split_table_row(ln)
             ncols = len(headers)
@@ -115,9 +119,13 @@ def segment_answer(text: str) -> list[Block]:
             rows: list[list[str]] = []
             j = i + 2
             while j < len(lines) and "|" in lines[j] and lines[j].strip():
-                rows.append((_split_table_row(lines[j]) + [""] * ncols)[:ncols])
+                rows.append(
+                    (_split_table_row(lines[j]) + [""] * ncols)[:ncols]
+                )
                 j += 1
-            segs.append(Block("table", headers=headers, rows=rows, aligns=aligns))
+            segs.append(
+                Block("table", headers=headers, rows=rows, aligns=aligns)
+            )
             i = j
             continue
         prose.append(ln)
@@ -192,7 +200,9 @@ def render_prose(text: str) -> Text:
     return out
 
 
-def build_markdown_table(headers: list[str], rows: list[list[str]], aligns: list[str]) -> Table:
+def build_markdown_table(
+    headers: list[str], rows: list[list[str]], aligns: list[str]
+) -> Table:
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
     заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
     здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,
@@ -201,7 +211,13 @@ def build_markdown_table(headers: list[str], rows: list[list[str]], aligns: list
     from rich.table import Table
     from rich.text import Text as _Text
 
-    table = Table(box=_box.SQUARE, border_style=_DEEP_DIM, show_header=True, expand=False, pad_edge=True)
+    table = Table(
+        box=_box.SQUARE,
+        border_style=_DEEP_DIM,
+        show_header=True,
+        expand=False,
+        pad_edge=True,
+    )
     for h, a in zip(headers, aligns):
         table.add_column(h, justify=a, header_style=f"{_ACC} bold")
     for row in rows:
@@ -214,7 +230,9 @@ def build_markdown_table(headers: list[str], rows: list[list[str]], aligns: list
     return table
 
 
-def table_block_to_markdown(headers: list[str], rows: list[list[str]], aligns: list[str]) -> str:
+def table_block_to_markdown(
+    headers: list[str], rows: list[list[str]], aligns: list[str]
+) -> str:
     """Реконструировать валидный markdown таблицы из Block (для clipboard).
 
     left → ``---`` (GFM-дефолт). ``|`` в ячейке → ``\\|`` для вставки в редактор.

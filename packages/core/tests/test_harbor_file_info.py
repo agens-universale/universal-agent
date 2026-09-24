@@ -50,13 +50,19 @@ def _strip(env: dict) -> dict:
 def _compare(content: str, **call_kwargs):
     """Write a real temp file (base) and a fake backend on a virtual path
     (harbor) with the same content; compare."""
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".txt", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".txt", delete=False
+    ) as f:
         f.write(content.encode("utf-8"))
         tmp = f.name
     try:
         os.chmod(tmp, 0o644)
         base_env = json.loads(_base_tool()(path=tmp, **call_kwargs))
-        harbor_env = json.loads(_harbor_tool({"/work/f.txt": content})(path="/work/f.txt", **call_kwargs))
+        harbor_env = json.loads(
+            _harbor_tool({"/work/f.txt": content})(
+                path="/work/f.txt", **call_kwargs
+            )
+        )
         return _strip(base_env), _strip(harbor_env)
     finally:
         os.unlink(tmp)
@@ -91,14 +97,18 @@ def test_text_file_include_hash():
 def test_text_file_include_line_count():
     """Line count must match."""
     content = "line1\nline2\nline3\n"
-    base, harbor = _compare(content, include_hash=True, include_line_count=True)
+    base, harbor = _compare(
+        content, include_hash=True, include_line_count=True
+    )
     assert base == harbor, f"MISMATCH:\nbase={base}\nharbor={harbor}"
 
 
 def test_binary_file_with_hash():
     """Binary content (nul byte): hash_mode='bytes', permissions must match."""
     content_bytes = b"BIN\x00DATA\xff"
-    with tempfile.NamedTemporaryFile(mode="wb", suffix=".bin", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".bin", delete=False
+    ) as f:
         f.write(content_bytes)
         tmp = f.name
     try:
@@ -110,12 +120,23 @@ def test_binary_file_with_hash():
         # The base uses self._backend.sha256_bytes (raw bytes, LocalFsBackend).
         # We only compare non-hash binary fields here since FakeBackend can't faithfully
         # reproduce raw-bytes hash for non-UTF-8 content (latin-1 round-trip differs).
-        harbor_env = json.loads(_harbor_tool({"/work/blob.bin": content_str})(path="/work/blob.bin", include_hash=True))
+        harbor_env = json.loads(
+            _harbor_tool({"/work/blob.bin": content_str})(
+                path="/work/blob.bin", include_hash=True
+            )
+        )
         base_strip = _strip(base_env)
         harbor_strip = _strip(harbor_env)
         # permissions and classification must match; sha256 may differ for binary due to
         # encoding mismatch in FakeBackend (latin-1 content, utf-8 encode)
-        for field in ("permissions", "is_binary", "exists", "is_file", "type", "hash_mode"):
+        for field in (
+            "permissions",
+            "is_binary",
+            "exists",
+            "is_file",
+            "type",
+            "hash_mode",
+        ):
             assert base_strip[field] == harbor_strip[field], (
                 f"Field {field!r} mismatch: base={base_strip[field]!r}, harbor={harbor_strip[field]!r}"
             )
@@ -138,7 +159,9 @@ def test_permissions_are_symbolic_not_octal():
     base, harbor = _compare(content)
     # base must be symbolic
     assert isinstance(base["permissions"], str)
-    assert len(base["permissions"]) == 9, f"base permissions={base['permissions']!r}"
+    assert len(base["permissions"]) == 9, (
+        f"base permissions={base['permissions']!r}"
+    )
     # harbor must match base exactly (not '644')
     assert harbor["permissions"] == base["permissions"], (
         f"permissions mismatch: base={base['permissions']!r}, harbor={harbor['permissions']!r}"

@@ -14,7 +14,9 @@ async def test_enter_returns_trimmed_value(tmp_path):
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(RenameScreen(current="старый"), lambda v: result.update(v=v))
+            self.push_screen(
+                RenameScreen(current="старый"), lambda v: result.update(v=v)
+            )
 
     async with _A().run_test() as pilot:
         inp = pilot.app.screen.query_one("#rename-input", Input)
@@ -35,7 +37,9 @@ async def test_escape_returns_none(tmp_path):
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(RenameScreen(current="x"), lambda v: result.update(v=v))
+            self.push_screen(
+                RenameScreen(current="x"), lambda v: result.update(v=v)
+            )
 
     async with _A().run_test() as pilot:
         await pilot.press("escape")

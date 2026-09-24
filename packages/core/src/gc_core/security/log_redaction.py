@@ -31,7 +31,9 @@ SENSITIVE_KEY_SUBSTRINGS = (
 # "token" как отдельное слово-компонент, НО не "tokens"-множественное
 # (prompt_tokens / completion_tokens / max_tokens — счётчики/лимиты, не секреты).
 # Ловит: token, auth_token, access_token, refresh_token, token_id, x-token.
-SENSITIVE_KEY_PATTERNS = (re.compile(r"(?:^|[_\-])token(?:$|[_\-])", re.IGNORECASE),)
+SENSITIVE_KEY_PATTERNS = (
+    re.compile(r"(?:^|[_\-])token(?:$|[_\-])", re.IGNORECASE),
+)
 
 # Заякоренные паттерны популярных секретов (низкий false-positive; без энтропийных).
 SECRET_VALUE_PATTERNS = (
@@ -71,13 +73,19 @@ class Redactor:
         extra_keys: Iterable[str] = (),
         extra_patterns: Iterable[str] = (),
     ) -> None:
-        self._key_substrings = tuple(SENSITIVE_KEY_SUBSTRINGS) + tuple(str(k).lower() for k in (extra_keys or ()))
+        self._key_substrings = tuple(SENSITIVE_KEY_SUBSTRINGS) + tuple(
+            str(k).lower() for k in (extra_keys or ())
+        )
         compiled = [re.compile(p) for p in SECRET_VALUE_PATTERNS]
         for p in extra_patterns or ():
             try:
                 compiled.append(re.compile(str(p)))
             except re.error as exc:
-                _logger.warning("log_redaction: invalid extra pattern %r skipped: %s", p, exc)
+                _logger.warning(
+                    "log_redaction: invalid extra pattern %r skipped: %s",
+                    p,
+                    exc,
+                )
         self._patterns = tuple(compiled)
 
     def _is_sensitive_key(self, key: Any) -> bool:
@@ -117,4 +125,10 @@ def build_redactor(redact_cfg: dict | None) -> Redactor | None:
     )
 
 
-__all__ = ["MASK", "SECRET_VALUE_PATTERNS", "SENSITIVE_KEY_SUBSTRINGS", "Redactor", "build_redactor"]
+__all__ = [
+    "MASK",
+    "SECRET_VALUE_PATTERNS",
+    "SENSITIVE_KEY_SUBSTRINGS",
+    "Redactor",
+    "build_redactor",
+]

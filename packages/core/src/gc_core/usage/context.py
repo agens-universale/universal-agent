@@ -30,7 +30,9 @@ class UsageContext:
     backend_mode: str | None = None
 
 
-_usage_ctx: ContextVar[Optional[UsageContext]] = ContextVar("usage_ctx", default=None)
+_usage_ctx: ContextVar[Optional[UsageContext]] = ContextVar(
+    "usage_ctx", default=None
+)
 
 
 def current_usage_context() -> Optional[UsageContext]:
@@ -51,7 +53,11 @@ def usage_scope(
     if account is None:
         yield
         return
-    token = _usage_ctx.set(UsageContext(account=account, category=category, backend_mode=backend_mode))
+    token = _usage_ctx.set(
+        UsageContext(
+            account=account, category=category, backend_mode=backend_mode
+        )
+    )
     try:
         yield
     finally:
@@ -104,7 +110,9 @@ class _OrphanAccount:
     def __init__(self) -> None:
         self.account = UsageAccount()
 
-    def add_record(self, raw_usage: Any, endpoint_url: str | None = None) -> None:
+    def add_record(
+        self, raw_usage: Any, endpoint_url: str | None = None
+    ) -> None:
         parsed = normalize_usage(raw_usage)
         if parsed is None:
             self.account.add_missing(CATEGORY_UNCATEGORIZED)

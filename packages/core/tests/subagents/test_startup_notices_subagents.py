@@ -41,7 +41,11 @@ class TestAbsence:
 
 class TestEachProblemSurfaces:
     def test_broken_file(self, tmp_path):
-        _write(tmp_path, "broken.md", "---\nname: subagent_x\ndiscription: опечатка\n---\nРоль.\n")
+        _write(
+            tmp_path,
+            "broken.md",
+            "---\nname: subagent_x\ndiscription: опечатка\n---\nРоль.\n",
+        )
         cfg = {"subagents_dir": str(tmp_path)}
         assert "subagent_definition_invalid" in _codes(cfg)
         msg = _msg(cfg, "subagent_definition_invalid")
@@ -66,7 +70,10 @@ class TestEachProblemSurfaces:
 
     def test_unknown_name_in_list(self, tmp_path):
         _write(tmp_path, "a.md", _valid("alpha"))
-        cfg = {"subagents_dir": str(tmp_path), "use_local_subagents": ["typo_name"]}
+        cfg = {
+            "subagents_dir": str(tmp_path),
+            "use_local_subagents": ["typo_name"],
+        }
         msg = _msg(cfg, "use_local_subagents_unknown")
         assert "subagent_typo_name" in msg
 
@@ -83,15 +90,23 @@ class TestEachProblemSurfaces:
 
     def test_required_tools_ban_ignored(self, tmp_path):
         _write(
-            tmp_path, "a.md", "---\nname: subagent_alpha\ndescription: Альфа.\nstop_tools: [turn_finish]\n---\nРоль.\n"
+            tmp_path,
+            "a.md",
+            "---\nname: subagent_alpha\ndescription: Альфа.\nstop_tools: [turn_finish]\n---\nРоль.\n",
         )
-        msg = _msg({"subagents_dir": str(tmp_path)}, "subagent_required_tools_kept")
+        msg = _msg(
+            {"subagents_dir": str(tmp_path)}, "subagent_required_tools_kept"
+        )
         assert "turn_finish" in msg
 
 
 class TestAllAtOnce:
     def test_four_problems_give_four_notices(self, tmp_path):
-        _write(tmp_path, "broken.md", "---\nname: subagent_x\ndiscription: опечатка\n---\nРоль.\n")
+        _write(
+            tmp_path,
+            "broken.md",
+            "---\nname: subagent_x\ndiscription: опечатка\n---\nРоль.\n",
+        )
         _write(tmp_path, "collide.md", _valid("worker"))
         for n in ("alpha", "beta", "gamma"):
             _write(tmp_path, f"{n}.md", _valid(n))
@@ -118,8 +133,16 @@ class TestResilience:
         def _boom(*_a, **_kw):
             raise RuntimeError("дискавери сломался")
 
-        monkeypatch.setattr("gc_core.tools.subagents.registry.resolve_subagent_definitions", _boom)
-        assert mod.collect_startup_notices({"subagents_dir": str(tmp_path)}, set(), None, is_tui=True) == []
+        monkeypatch.setattr(
+            "gc_core.tools.subagents.registry.resolve_subagent_definitions",
+            _boom,
+        )
+        assert (
+            mod.collect_startup_notices(
+                {"subagents_dir": str(tmp_path)}, set(), None, is_tui=True
+            )
+            == []
+        )
 
     def test_discovery_is_memoized_not_repeated(self, tmp_path):
         # Коллектор зовёт дискавери на старте; повтор не должен читать диск снова.
@@ -127,6 +150,8 @@ class TestResilience:
         cfg = {"subagents_dir": str(tmp_path)}
         _notices(cfg)
         (tmp_path / "b.md").write_text(_valid("beta"), encoding="utf-8")
-        from gc_core.tools.subagents.registry import resolve_subagent_definitions
+        from gc_core.tools.subagents.registry import (
+            resolve_subagent_definitions,
+        )
 
         assert list(resolve_subagent_definitions(cfg)) == ["subagent_alpha"]

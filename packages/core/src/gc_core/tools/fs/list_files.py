@@ -5,7 +5,10 @@ from typing import Any, Dict, List, Optional
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
+from gc_core.security.path_policy import (
+    _extract_config_dict,
+    resolve_tool_context,
+)
 from gc_core.security.read_guard import (
     ReadGuardViolation,
     _resolve_skills_root,
@@ -60,7 +63,9 @@ class ListFiles(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": ("Absolute path of the directory to list. Must be an existing directory."),
+                        "description": (
+                            "Absolute path of the directory to list. Must be an existing directory."
+                        ),
                     },
                     "glob": {
                         "type": "string",
@@ -179,7 +184,9 @@ Examples:
         `extra_allowed` — программные exceptions (например, путь до skills).
         """
         context = resolve_tool_context(self)
-        config_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
+        config_dict = _extract_config_dict(
+            self, getattr(context, "ctx", None), {}
+        )
         cfg = parse_read_guard_config(config_dict)
         if not cfg.enabled:
             return None, None, None
@@ -209,7 +216,9 @@ Examples:
         )
 
         # Input validation
-        arg_error = self._validate_list_args(path, glob, max_depth, max_entries)
+        arg_error = self._validate_list_args(
+            path, glob, max_depth, max_entries
+        )
         if arg_error is not None:
             return _result(ok=False, error=arg_error)
 
@@ -257,7 +266,9 @@ Examples:
         }
 
     @staticmethod
-    def _read_guard_pass(filepath: str, rg_cfg, rg_root, rg_extra=None) -> bool:
+    def _read_guard_pass(
+        filepath: str, rg_cfg, rg_root, rg_extra=None
+    ) -> bool:
         """True если entry разрешён read_guard'ом (или guard отключён)."""
         if rg_cfg is None:
             return True
@@ -287,11 +298,16 @@ Examples:
     ):
         """List only immediate children of the directory."""
         entries = await self._listdir_checked(root_path)
-        for name, is_dir in entries:  # backend.listdir already returns sorted (name, is_dir)
+        for (
+            name,
+            is_dir,
+        ) in entries:  # backend.listdir already returns sorted (name, is_dir)
             if is_agent_hidden(name):
                 continue
             filepath = self._backend.join(root_path, name)
-            if not self._passes_file_matcher(file_matcher, filepath, root_path):
+            if not self._passes_file_matcher(
+                file_matcher, filepath, root_path
+            ):
                 continue
             # Per-entry read_guard: пропускаем entries которые резолвятся
             # в denied paths (включая symlink escape наружу launch_root).
@@ -303,7 +319,9 @@ Examples:
 
         return False
 
-    def _validate_list_args(self, path, glob, max_depth, max_entries) -> Optional[Dict[str, Any]]:
+    def _validate_list_args(
+        self, path, glob, max_depth, max_entries
+    ) -> Optional[Dict[str, Any]]:
         """Ошибка invalid_argument для acall или None, если аргументы корректны."""
         if not isinstance(path, str):
             return {"type": "invalid_argument", "field": "path"}
@@ -315,13 +333,19 @@ Examples:
             }
         if glob is not None and not isinstance(glob, str):
             return {"type": "invalid_argument", "field": "glob"}
-        if max_depth is not None and (not isinstance(max_depth, int) or max_depth < 0):
+        if max_depth is not None and (
+            not isinstance(max_depth, int) or max_depth < 0
+        ):
             return {"type": "invalid_argument", "field": "max_depth"}
-        if max_entries is not None and (not isinstance(max_entries, int) or max_entries < 1):
+        if max_entries is not None and (
+            not isinstance(max_entries, int) or max_entries < 1
+        ):
             return {"type": "invalid_argument", "field": "max_entries"}
         return None
 
-    async def _aenumerate(self, path: str, *, file_matcher, max_depth: int, max_entries, rg) -> tuple:
+    async def _aenumerate(
+        self, path: str, *, file_matcher, max_depth: int, max_entries, rg
+    ) -> tuple:
         """(entries, hit_limit, error): перечисление через backend с маппингом исключений в error-dict."""
         rg_cfg, rg_root, rg_extra = rg
         result: List[Dict[str, Any]] = []
@@ -353,12 +377,28 @@ Examples:
         except WalkOutputTooLargeError as e:
             return result, False, {"type": "walk_too_large", "message": str(e)}
         except PermissionError as e:
-            return result, False, {"type": "permission_denied", "message": str(e)}
+            return (
+                result,
+                False,
+                {"type": "permission_denied", "message": str(e)},
+            )
         except Exception as e:
-            return result, False, {"type": "unexpected_error", "message": str(e)}
+            return (
+                result,
+                False,
+                {"type": "unexpected_error", "message": str(e)},
+            )
         return result, hit_limit, None
 
-    def _may_descend(self, abs_path: str, root_path: str, max_depth, rg_cfg, rg_root, rg_extra) -> bool:
+    def _may_descend(
+        self,
+        abs_path: str,
+        root_path: str,
+        max_depth,
+        rg_cfg,
+        rg_root,
+        rg_extra,
+    ) -> bool:
         if is_agent_hidden(os.path.basename(abs_path)):
             return False
         if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):
@@ -375,12 +415,18 @@ Examples:
         except WalkOutputTooLargeError:
             raise  # domain envelope (walk_too_large) is built by the caller
         except PermissionError:
-            raise PermissionError(f"Permission denied: cannot list contents of '{root_path}'")
+            raise PermissionError(
+                f"Permission denied: cannot list contents of '{root_path}'"
+            )
         except Exception as e:
-            raise RuntimeError(f"Failed to list directory '{root_path}': {e!s}")
+            raise RuntimeError(
+                f"Failed to list directory '{root_path}': {e!s}"
+            )
 
     @staticmethod
-    def _passes_file_matcher(file_matcher, filepath: str, root_path: str) -> bool:
+    def _passes_file_matcher(
+        file_matcher, filepath: str, root_path: str
+    ) -> bool:
         if file_matcher is None:
             return True
         return bool(file_matcher(os.path.relpath(filepath, root_path)))
@@ -400,14 +446,20 @@ Examples:
         """Walk (max_depth>=1) via backend.iter_walk (os.walk on local)."""
 
         def _should_descend(abs_path: str) -> bool:
-            return self._may_descend(abs_path, root_path, max_depth, rg_cfg, rg_root, rg_extra)
+            return self._may_descend(
+                abs_path, root_path, max_depth, rg_cfg, rg_root, rg_extra
+            )
 
         try:
-            walk_iter = self._backend.iter_walk(root_path, should_descend=_should_descend)
+            walk_iter = self._backend.iter_walk(
+                root_path, should_descend=_should_descend
+            )
         except FileNotFoundError:
             raise
         except OSError as e:
-            raise RuntimeError(f"Failed to walk directory '{root_path}': {e}") from e
+            raise RuntimeError(
+                f"Failed to walk directory '{root_path}': {e}"
+            ) from e
 
         yielder = LoopYielder()
         async for rel, is_d in walk_iter:
@@ -415,7 +467,9 @@ Examples:
             # `cooperative`. Метод стал корутиной ради этой строки —
             # единственный вызывающий и так `acall`.
             await yielder.tick()
-            if is_agent_hidden(os.path.basename(rel)) or not _matches(file_matcher, rel):
+            if is_agent_hidden(os.path.basename(rel)) or not _matches(
+                file_matcher, rel
+            ):
                 continue
             abs_path = self._backend.join(root_path, rel)
             if not self._read_guard_pass(abs_path, rg_cfg, rg_root, rg_extra):

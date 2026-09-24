@@ -6,7 +6,9 @@ async def test_skills_cache_invalidated_on_run_end(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"}).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "old"}]  # «старый» снимок
         scr._was_running = True  # был прогон
@@ -22,7 +24,9 @@ async def test_skills_cache_kept_while_idle(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"}).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "old"}]
         scr._was_running = False  # прогона не было

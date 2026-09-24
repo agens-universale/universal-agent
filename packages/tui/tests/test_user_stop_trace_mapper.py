@@ -14,7 +14,11 @@ def test_cancelled_by_user_looks_like_error():
             "ok": False,
             "status": "cancelled_by_user",
             "message": "Tool was interrupted by user stop.",
-            "error": {"code": "cancelled_by_user", "message": "x", "retryable": True},
+            "error": {
+                "code": "cancelled_by_user",
+                "message": "x",
+                "retryable": True,
+            },
         }
     )
     assert _looks_like_error(out) is True

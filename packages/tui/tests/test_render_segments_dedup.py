@@ -14,8 +14,14 @@ _DUP = "m_dup"
 def _seg_archived():
     return {
         "index": 0,
-        "messages": [{"payload": {"role": "user", "content": "A", "id": _DUP}}],
-        "compacted_by": {"ts": "", "messages_in_segment": 72, "synthesis": "СИНТЕЗ"},
+        "messages": [
+            {"payload": {"role": "user", "content": "A", "id": _DUP}}
+        ],
+        "compacted_by": {
+            "ts": "",
+            "messages_in_segment": 72,
+            "synthesis": "СИНТЕЗ",
+        },
     }
 
 
@@ -23,14 +29,22 @@ def _seg_live():
     return {
         "index": 1,
         "messages": [
-            {"payload": {"role": "user", "content": "A", "id": _DUP}},  # preserved-дубль
+            {
+                "payload": {"role": "user", "content": "A", "id": _DUP}
+            },  # preserved-дубль
             {
                 "payload": {
                     "id": "a1",
                     "type": "message",
                     "role": "assistant",
                     "status": "completed",
-                    "content": [{"type": "output_text", "text": "ответ", "annotations": []}],
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "ответ",
+                            "annotations": [],
+                        }
+                    ],
                 }
             },
         ],
@@ -44,7 +58,9 @@ async def test_main_render_segments_dedupes_preserved_reply(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.user_reply import UserReplyContainer
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._render_segments([_seg_archived(), _seg_live()])
@@ -59,9 +75,17 @@ def _seg_user(idx, content, mid, n_compacted):
     """Сегмент с одной уникальной user-репликой; n_compacted=None → live (без маркера)."""
     return {
         "index": idx,
-        "messages": [{"payload": {"role": "user", "content": content, "id": mid}}],
+        "messages": [
+            {"payload": {"role": "user", "content": content, "id": mid}}
+        ],
         "compacted_by": (
-            {"ts": "", "messages_in_segment": n_compacted, "synthesis": f"S{idx}"} if n_compacted else None
+            {
+                "ts": "",
+                "messages_in_segment": n_compacted,
+                "synthesis": f"S{idx}",
+            }
+            if n_compacted
+            else None
         ),
     }
 
@@ -74,7 +98,9 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.user_reply import UserReplyContainer
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         # 3 сегмента (= 2 компакции): OLD до #1, MID между #1 и #2, LIVE после #2.
@@ -105,7 +131,10 @@ async def test_readonly_render_segments_dedupes_preserved_reply():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_segments_readonly(self.query_one("#t", VerticalScroll), [_seg_archived(), _seg_live()])
+            render_segments_readonly(
+                self.query_one("#t", VerticalScroll),
+                [_seg_archived(), _seg_live()],
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen

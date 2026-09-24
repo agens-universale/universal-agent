@@ -2,7 +2,7 @@
 #
 # Формат понимают и pre-commit, и prek — prek быстрее и не требует Python.
 # Установка: `uv sync && uv run pre-commit install`
-# (или `uvx prek install`). Подробности — docs/code-quality.md.
+# (или `uvx prek install`). Подробности — CONTRIBUTING.md.
 #
 # Все хуки `repo: local` + `language: system` и запускаются через
 # `uv run --group lint …`: версии инструментов берутся из uv.lock, а за самими

@@ -25,7 +25,9 @@ def _state() -> State:
     )
 
 
-def _rule(step_count: int = 10, message: str = "unused tool notice") -> ToolUsageNoticeRule:
+def _rule(
+    step_count: int = 10, message: str = "unused tool notice"
+) -> ToolUsageNoticeRule:
     return ToolUsageNoticeRule(
         tool_name="session_memory",
         step_messages_count=step_count,
@@ -36,7 +38,9 @@ def _rule(step_count: int = 10, message: str = "unused tool notice") -> ToolUsag
 def test_tool_usage_notice_increments_without_tool_call():
     state = _state()
     rules = [_rule(10)]
-    update_tool_usage_notice_after_persist(state, [{"role": "assistant", "content": "ok"}], rules)
+    update_tool_usage_notice_after_persist(
+        state, [{"role": "assistant", "content": "ok"}], rules
+    )
     assert state.tool_usage_notice_cnt["session_memory"] == 1
     update_tool_usage_notice_after_persist(state, [], rules)
     assert state.tool_usage_notice_cnt["session_memory"] == 2
@@ -48,7 +52,13 @@ def test_tool_usage_notice_resets_on_tool_batch():
     rules = [_rule(10)]
     update_tool_usage_notice_after_persist(
         state,
-        [{"type": "function_call", "name": "session_memory", "arguments": "{}"}],
+        [
+            {
+                "type": "function_call",
+                "name": "session_memory",
+                "arguments": "{}",
+            }
+        ],
         rules,
     )
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 0
@@ -58,7 +68,9 @@ def test_tool_usage_notice_resets_after_explicit_reset():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 10}
     rules = [_rule(10)]
-    update_tool_usage_notice_after_persist(state, [], rules, reset_tool_names={"session_memory"})
+    update_tool_usage_notice_after_persist(
+        state, [], rules, reset_tool_names={"session_memory"}
+    )
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 0
 
 
@@ -79,7 +91,13 @@ def test_tool_usage_notice_resets_only_matching_tool_in_batch():
     ]
     update_tool_usage_notice_after_persist(
         state,
-        [{"type": "function_call", "name": "session_memory", "arguments": "{}"}],
+        [
+            {
+                "type": "function_call",
+                "name": "session_memory",
+                "arguments": "{}",
+            }
+        ],
         rules,
     )
     assert state.tool_usage_notice_cnt["session_memory"] == 0
@@ -108,15 +126,21 @@ def test_collect_tool_usage_notice_resets_only_emitted_tool():
 
 
 def test_batch_used_tool_detects_function_call():
-    assert batch_used_tool([{"type": "function_call", "name": "session_memory"}], "session_memory")
-    assert not batch_used_tool([{"type": "function_call", "name": "fs_read_file"}], "session_memory")
+    assert batch_used_tool(
+        [{"type": "function_call", "name": "session_memory"}], "session_memory"
+    )
+    assert not batch_used_tool(
+        [{"type": "function_call", "name": "fs_read_file"}], "session_memory"
+    )
 
 
 def test_collect_tool_usage_notices_respects_threshold_and_stop_tools():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 10}
     rules = [_rule(10, "You have not used session memory for some steps.")]
-    texts = collect_tool_usage_notices(state, rules, registers={"state": "note"})
+    texts = collect_tool_usage_notices(
+        state, rules, registers={"state": "note"}
+    )
     assert texts == ["You have not used session memory for some steps."]
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 0
 
@@ -157,4 +181,6 @@ def test_get_thread_memory_registers_reads_working_memory():
     shared = SimpleNamespace(
         working_memory={"state": "progress"},
     )
-    assert get_thread_memory_registers_from_shared(shared) == {"state": "progress"}
+    assert get_thread_memory_registers_from_shared(shared) == {
+        "state": "progress"
+    }

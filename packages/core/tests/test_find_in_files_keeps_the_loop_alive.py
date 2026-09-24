@@ -58,7 +58,9 @@ def _probe(monkeypatch):
 
     monkeypatch.setattr(LoopYielder, "tick", _tick)
     monkeypatch.setattr(fif.FindInFiles, "_open_decode_text", _open)
-    monkeypatch.setattr(fif.FindInFiles, "_try_native_grep_directory", _no_native)
+    monkeypatch.setattr(
+        fif.FindInFiles, "_try_native_grep_directory", _no_native
+    )
     return opened, yields_during_content, threads
 
 
@@ -71,14 +73,18 @@ async def test_inline_scan_yields_the_loop_between_files(tmp_path, _probe):
     opened, yields, threads = _probe
     root = _tree(tmp_path)
 
-    raw = await fif.FindInFiles(ctx=local_ctx()).acall(path=str(root), pattern="такого-текста-нет", limit=300)
+    raw = await fif.FindInFiles(ctx=local_ctx()).acall(
+        path=str(root), pattern="такого-текста-нет", limit=300
+    )
 
     assert '"search_backend": "python"' in raw, "проверяли не тот путь"
     assert len(opened) >= 100, f"разбор не состоялся: открыто {len(opened)}"
     assert yields, "за весь разбор loop не получил управление ни разу"
 
 
-async def test_parallel_branch_also_yields_the_loop(tmp_path, monkeypatch, _probe):
+async def test_parallel_branch_also_yields_the_loop(
+    tmp_path, monkeypatch, _probe
+):
     """Редкая ветка (от 20 000 кандидатов): несколько разборщиков, но не потоки.
 
     Потоки отсюда ушли вместе с синхронной формой файлового порта: чтение
@@ -97,10 +103,14 @@ async def test_parallel_branch_also_yields_the_loop(tmp_path, monkeypatch, _prob
     monkeypatch.setattr(
         fif,
         "parse_find_in_files_config",
-        lambda *a, **kw: orig(*a, **kw).model_copy(update={"content_workers_threshold": 1}),
+        lambda *a, **kw: orig(*a, **kw).model_copy(
+            update={"content_workers_threshold": 1}
+        ),
     )
 
-    raw = await fif.FindInFiles(ctx=local_ctx()).acall(path=str(root), pattern="такого-текста-нет", limit=300)
+    raw = await fif.FindInFiles(ctx=local_ctx()).acall(
+        path=str(root), pattern="такого-текста-нет", limit=300
+    )
 
     assert '"search_backend": "python"' in raw
     assert len(opened) >= 100
@@ -117,7 +127,9 @@ def test_the_python_path_opens_no_thread_pool_of_its_own():
     """
     src = pathlib.Path(fif.__file__).read_text(encoding="utf-8")
     used = {
-        node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+        node.func.attr
+        if isinstance(node.func, ast.Attribute)
+        else getattr(node.func, "id", "")
         for node in ast.walk(ast.parse(src))
         if isinstance(node, ast.Call)
     }

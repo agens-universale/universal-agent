@@ -75,7 +75,9 @@ def test_resolve_uses_sidecar_records():
     assert "disk.py" in detail["call"]["arguments"]
     assert detail["result"]["output"] == "from-disk"
     assert resolve_nested_tool_detail("c_disk", sidecar_records=None) is None
-    assert resolve_nested_tool_detail("missing", sidecar_records=records) is None
+    assert (
+        resolve_nested_tool_detail("missing", sidecar_records=records) is None
+    )
 
 
 def _write_parent_and_sidecar(tmp_path: Path, tid: str) -> None:
@@ -165,7 +167,9 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
     tid = "nested_detail"
     _write_parent_and_sidecar(tmp_path, tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         assert scr.attach_active_task(tid, is_resume=True) is True
@@ -174,7 +178,10 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
         nested = scr._nested_tool_rows.get("call_child_9")
         assert nested is not None
         # nested отсутствует в parent _task_events
-        assert not any(ev.call_id == "call_child_9" and ev.kind == "call" for ev in scr._task_events)
+        assert not any(
+            ev.call_id == "call_child_9" and ev.kind == "call"
+            for ev in scr._task_events
+        )
 
         click = events.Click(
             widget=nested,
@@ -194,7 +201,9 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
         assert isinstance(pilot.app.screen, ToolCallDetailScreen)
         header = str(pilot.app.screen.query_one("#header").render())
         assert "fs_read_file" in header
-        body = "\n".join(str(s.render()) for s in pilot.app.screen.query("Static"))
+        body = "\n".join(
+            str(s.render()) for s in pilot.app.screen.query("Static")
+        )
         assert "nested.py" in body or "path" in body
         assert "print(1)" in body
 
@@ -280,6 +289,8 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
         await pilot.pause(0.2)
 
         assert isinstance(pilot.app.screen, ToolCallDetailScreen)
-        body = "\n".join(str(s.render()) for s in pilot.app.screen.query("Static"))
+        body = "\n".join(
+            str(s.render()) for s in pilot.app.screen.query("Static")
+        )
         assert "pwd" in body
         assert "/tmp" in body

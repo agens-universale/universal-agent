@@ -68,7 +68,9 @@ def attach_status_to_prompt_vars(
     if isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop:
         return
     try:
-        prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(cwd, config_dict=config_dict)
+        prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(
+            cwd, config_dict=config_dict
+        )
     except Exception:  # pragma: no cover — memory must never break metadata
         return
 

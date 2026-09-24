@@ -77,7 +77,9 @@ def should_bypass_proxies(url: str, no_proxy: str | None) -> bool:
     host_with_port = hostname
     if parsed.port:
         host_with_port += f":{parsed.port}"
-    return any(_host_matches(hostname, host_with_port, entry) for entry in entries)
+    return any(
+        _host_matches(hostname, host_with_port, entry) for entry in entries
+    )
 
 
 __all__ = ["should_bypass_proxies"]

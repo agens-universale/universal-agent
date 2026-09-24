@@ -86,12 +86,18 @@ class InputHistory:
             self._project_dir.mkdir(parents=True, exist_ok=True)
             with self._file.open("a", encoding="utf-8") as f:
                 ts = datetime.now(UTC).isoformat()
-                f.write(json.dumps({"ts": ts, "text": text}, ensure_ascii=False) + "\n")
+                f.write(
+                    json.dumps({"ts": ts, "text": text}, ensure_ascii=False)
+                    + "\n"
+                )
         except OSError:
             pass
 
         self._appends_since_rewrite += 1
-        if len(self._entries) > self.MAX_ENTRIES and self._appends_since_rewrite >= self.REWRITE_EVERY:
+        if (
+            len(self._entries) > self.MAX_ENTRIES
+            and self._appends_since_rewrite >= self.REWRITE_EVERY
+        ):
             self._rewrite_tail()
 
     def _rewrite_tail(self) -> None:
@@ -102,7 +108,12 @@ class InputHistory:
             with tmp.open("w", encoding="utf-8") as f:
                 ts = datetime.now(UTC).isoformat()
                 for text in self._entries:
-                    f.write(json.dumps({"ts": ts, "text": text}, ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(
+                            {"ts": ts, "text": text}, ensure_ascii=False
+                        )
+                        + "\n"
+                    )
             atomic_replace(tmp, self._file)
             self._appends_since_rewrite = 0
         except OSError:

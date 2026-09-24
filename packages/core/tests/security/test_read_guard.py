@@ -56,13 +56,17 @@ def test_inside_launch_root_allowed(lab, cfg_default):
 
 
 def test_relative_path_resolves_against_launch_root(lab, cfg_default):
-    result = check_read_path_allowed("./sub/file.txt", launch_root=lab, cfg=cfg_default)
+    result = check_read_path_allowed(
+        "./sub/file.txt", launch_root=lab, cfg=cfg_default
+    )
     assert result.endswith("/sub/file.txt")
 
 
 def test_outside_launch_root_blocked(lab, cfg_default):
     with pytest.raises(ReadGuardViolation) as exc:
-        check_read_path_allowed("/etc/passwd", launch_root=lab, cfg=cfg_default)
+        check_read_path_allowed(
+            "/etc/passwd", launch_root=lab, cfg=cfg_default
+        )
     assert exc.value.error["type"] == "read_guard_violation"
     assert "allowed_read_roots" in exc.value.error["matched_rule"]
 
@@ -133,7 +137,9 @@ def test_wildcard_root_denied_still_blocks(lab):
         denied_read_paths=["/etc/ssl/private"],
     )
     with pytest.raises(ReadGuardViolation):
-        check_read_path_allowed("/etc/ssl/private/foo.key", launch_root=lab, cfg=cfg)
+        check_read_path_allowed(
+            "/etc/ssl/private/foo.key", launch_root=lab, cfg=cfg
+        )
 
 
 def test_extra_allowed_read_root(lab, tmp_path):
@@ -185,7 +191,9 @@ def test_parse_default_disabled_when_read_guard_block_absent():
     parsed = parse_read_guard_config({"command_moderation": {"mode": "deny"}})
     assert parsed.enabled is False
 
-    parsed = parse_read_guard_config({"read_guard": {"mode": "deny"}})  # без enabled
+    parsed = parse_read_guard_config(
+        {"read_guard": {"mode": "deny"}}
+    )  # без enabled
     assert parsed.enabled is False
 
     parsed = parse_read_guard_config({"read_guard": {"enabled": True}})
@@ -222,11 +230,15 @@ def test_extra_allowed_paths_bypasses_denied_and_roots(tmp_path):
     cfg = ReadGuardConfig(
         enabled=True,
         mode="deny",
-        allowed_read_roots=[str(lab)],  # skills вне lab — без override блокировались бы
+        allowed_read_roots=[
+            str(lab)
+        ],  # skills вне lab — без override блокировались бы
         allowed_read_paths=[],
         denied_read_paths=[str(skills.parent)],  # явный deny на родителя
         denied_file_patterns=[],
-        denied_extensions=[".md"],  # .md тоже блокировался бы denied_extensions
+        denied_extensions=[
+            ".md"
+        ],  # .md тоже блокировался бы denied_extensions
     )
 
     # Без extra_allowed — блокируется.
@@ -257,4 +269,6 @@ def test_resolve_skills_root_default_and_custom(tmp_path):
 
     # С явным skills_data_path → возвращается он.
     custom = str(tmp_path / "my_skills")
-    assert _resolve_skills_root({"skills_data_path": custom}) == os.path.abspath(custom)
+    assert _resolve_skills_root(
+        {"skills_data_path": custom}
+    ) == os.path.abspath(custom)

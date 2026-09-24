@@ -48,7 +48,13 @@ def _import_probe(code: str) -> str:
     """Выполнить `code` в чистом интерпретаторе с тем же sys.path и вернуть stdout."""
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
-    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=120)
+    res = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
     assert res.returncode == 0, res.stderr
     return res.stdout.strip()
 

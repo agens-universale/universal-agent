@@ -22,7 +22,11 @@ from gc_core.security import (
 def _guard_body(module) -> ast.FunctionDef:
     """Тело гарда — генератор `_flow`, который исполняет драйвер `dual_wrap`."""
     tree = ast.parse(pathlib.Path(module.__file__).read_text(encoding="utf-8"))
-    return next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_flow")
+    return next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_flow"
+    )
 
 
 def _direct_confirm_calls(module) -> list:
@@ -35,7 +39,8 @@ def _direct_confirm_calls(module) -> list:
     return [
         n.lineno
         for n in ast.walk(_guard_body(module))
-        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "request_confirm"
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", None) == "request_confirm"
     ]
 
 
@@ -51,17 +56,28 @@ def test_guard_bodies_never_call_confirm_inline():
 
 def test_write_guard_helper_is_not_called_inline_either():
     """`_ask_user_confirmation_for_write` — та же блокировка под другим именем."""
-    tree = ast.parse(pathlib.Path(path_policy.__file__).read_text(encoding="utf-8"))
-    flow = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_flow")
+    tree = ast.parse(
+        pathlib.Path(path_policy.__file__).read_text(encoding="utf-8")
+    )
+    flow = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_flow"
+    )
     inline = [
         n.lineno
         for n in ast.walk(flow)
-        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_ask_user_confirmation_for_write"
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", None) == "_ask_user_confirmation_for_write"
     ]
-    assert inline == [], f"вызов инлайн на строках {inline}: ожидание уйдёт на loop"
+    assert inline == [], (
+        f"вызов инлайн на строках {inline}: ожидание уйдёт на loop"
+    )
 
 
-async def test_download_file_guard_carries_the_abandoned_mark(tmp_path, monkeypatch):
+async def test_download_file_guard_carries_the_abandoned_mark(
+    tmp_path, monkeypatch
+):
     """Гард загрузчика едет тем же маршрутом, что остальные пять, — с меткой «брошен».
 
     Он зовётся не декоратором, а прямо из `acall`, и ехал через
@@ -99,7 +115,9 @@ async def test_download_file_guard_carries_the_abandoned_mark(tmp_path, monkeypa
         },
     )
 
-    task = asyncio.ensure_future(tool.acall(url="https://example.com/report.pdf", filename="report.pdf"))
+    task = asyncio.ensure_future(
+        tool.acall(url="https://example.com/report.pdf", filename="report.pdf")
+    )
     assert await asyncio.to_thread(entered.wait, 5), "гард так и не начался"
     task.cancel()  # Ctrl+C: вызов брошен
     with pytest.raises(asyncio.CancelledError):

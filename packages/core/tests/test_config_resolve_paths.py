@@ -25,7 +25,9 @@ def test_default_config_path_is_normalized():
     assert p.endswith("config.default.yml")
 
 
-def test_resolve_paths_threads_default_under_state_projects_slug(isolated_env, tmp_path):
+def test_resolve_paths_threads_default_under_state_projects_slug(
+    isolated_env, tmp_path
+):
     cfg = AppConfig()
     resolve_paths(cfg, str(tmp_path))
     threads_path = Path(cfg.paths.threads_data_path)
@@ -33,7 +35,9 @@ def test_resolve_paths_threads_default_under_state_projects_slug(isolated_env, t
     assert threads_path == tmp_path / "projects" / project_slug() / "threads"
 
 
-def test_resolve_paths_logs_default_under_state_projects_slug(isolated_env, tmp_path):
+def test_resolve_paths_logs_default_under_state_projects_slug(
+    isolated_env, tmp_path
+):
     cfg = AppConfig()
     resolve_paths(cfg, str(tmp_path))
     logs_path = Path(cfg.paths.logs_dump_dir)
@@ -54,7 +58,9 @@ def test_explicit_logs_absolute_used_as_is(isolated_env, tmp_path):
     assert Path(cfg.paths.logs_dump_dir) == explicit
 
 
-def test_explicit_threads_relative_resolves_from_config_dir(isolated_env, tmp_path):
+def test_explicit_threads_relative_resolves_from_config_dir(
+    isolated_env, tmp_path
+):
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()
     cfg = AppConfig(paths={"threads_data_path": "rel/threads"})

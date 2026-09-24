@@ -11,8 +11,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx
 import pytest
 
-from gc_core.tools.connect_mcp.stream_client import _make_httpx_factory, _make_stream_http_client
-from gc_core.utils.async_http import aclose_clients, build_ssl_context, get_async_client
+from gc_core.tools.connect_mcp.stream_client import (
+    _make_httpx_factory,
+    _make_stream_http_client,
+)
+from gc_core.utils.async_http import (
+    aclose_clients,
+    build_ssl_context,
+    get_async_client,
+)
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 
 
@@ -57,7 +64,12 @@ def tls_files(tmp_path_factory):
 def https_server(root, *, require_client=False):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            body = json.dumps({"client_cert": bool(self.connection.getpeercert()), "data": [{"id": "test"}]}).encode()
+            body = json.dumps(
+                {
+                    "client_cert": bool(self.connection.getpeercert()),
+                    "data": [{"id": "test"}],
+                }
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -74,7 +86,11 @@ def https_server(root, *, require_client=False):
         ctx.verify_mode = ssl.CERT_REQUIRED
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.01},
+        daemon=True,
+    )
     thread.start()
     try:
         yield f"https://localhost:{server.server_port}"
@@ -95,14 +111,20 @@ def make_client(kind, verify, cert, url):
 
 @pytest.mark.parametrize("kind", ["model", "mcp-sse", "mcp-stream"])
 @pytest.mark.parametrize("verify_mode", ["ca", "off"])
-async def test_client_certificate_survives_each_verification_mode(tls_files, kind, verify_mode):
+async def test_client_certificate_survives_each_verification_mode(
+    tls_files, kind, verify_mode
+):
     cfg = {
-        "verify-ssl": str(tls_files / "trusted.pem") if verify_mode == "ca" else False,
+        "verify-ssl": str(tls_files / "trusted.pem")
+        if verify_mode == "ca"
+        else False,
         "client-cert": str(tls_files / "trusted.pem"),
         "client-key": str(tls_files / "trusted.key"),
     }
     with https_server(tls_files, require_client=True) as url:
-        client = make_client(kind, get_verify_ssl(cfg), get_client_cert(cfg), url)
+        client = make_client(
+            kind, get_verify_ssl(cfg), get_client_cert(cfg), url
+        )
         try:
             response = await client.get(url, timeout=2)
             assert response.status_code == 200
@@ -113,16 +135,24 @@ async def test_client_certificate_survives_each_verification_mode(tls_files, kin
 
 
 @pytest.mark.parametrize("kind", ["model", "mcp-sse", "mcp-stream"])
-async def test_custom_ca_keeps_chain_and_hostname_verification(tls_files, kind):
+async def test_custom_ca_keeps_chain_and_hostname_verification(
+    tls_files, kind
+):
     with https_server(tls_files) as url:
         good = make_client(kind, str(tls_files / "trusted.pem"), None, url)
         bad = make_client(kind, str(tls_files / "other.pem"), None, url)
         try:
             assert (await good.get(url, timeout=2)).status_code == 200
-            with pytest.raises(httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"):
+            with pytest.raises(
+                httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"
+            ):
                 await bad.get(url, timeout=2)
-            with pytest.raises(httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"):
-                await good.get(url.replace("localhost", "127.0.0.1"), timeout=2)
+            with pytest.raises(
+                httpx.ConnectError, match="CERTIFICATE_VERIFY_FAILED"
+            ):
+                await good.get(
+                    url.replace("localhost", "127.0.0.1"), timeout=2
+                )
         finally:
             await good.aclose()
             await bad.aclose()
@@ -135,12 +165,18 @@ def test_sync_probe_accepts_configured_ca(tls_files):
     with https_server(tls_files) as url:
         for get in (_requests_get_ex, _urllib_get_ex):
             assert get(url, {}, str(tls_files / "trusted.pem")).status == 200
-            rejected = get(url.replace("localhost", "127.0.0.1"), {}, str(tls_files / "trusted.pem"))
+            rejected = get(
+                url.replace("localhost", "127.0.0.1"),
+                {},
+                str(tls_files / "trusted.pem"),
+            )
             assert rejected.status is None
             assert "CERTIFICATE_VERIFY_FAILED" in rejected.network_error
 
 
-def test_ca_paths_expand_without_disabling_verification(tls_files, monkeypatch):
+def test_ca_paths_expand_without_disabling_verification(
+    tls_files, monkeypatch
+):
     monkeypatch.setenv("GC_TEST_TLS_DIR", str(tls_files))
     ctx = build_ssl_context("$GC_TEST_TLS_DIR/trusted.pem")
     assert ctx.check_hostname is True
@@ -154,7 +190,9 @@ def test_missing_ca_fails_without_insecure_fallback(tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["model", "mcp-sse", "mcp-stream"])
-async def test_proxy_uses_the_same_tls_context_as_direct_client(tls_files, monkeypatch, kind):
+async def test_proxy_uses_the_same_tls_context_as_direct_client(
+    tls_files, monkeypatch, kind
+):
     proxy = "http://proxy.example:3128"
     url = "https://mcp.example/mcp"
     monkeypatch.setenv("HTTPS_PROXY", proxy)
@@ -171,9 +209,15 @@ async def test_proxy_uses_the_same_tls_context_as_direct_client(tls_files, monke
         ctx = client._transport._pool._ssl_context
         assert ctx.check_hostname
         assert ctx.verify_mode == ssl.CERT_REQUIRED
-        transports = [transport for transport in client._mounts.values() if transport is not None]
+        transports = [
+            transport
+            for transport in client._mounts.values()
+            if transport is not None
+        ]
         assert transports
-        assert all(transport._pool._ssl_context is ctx for transport in transports)
+        assert all(
+            transport._pool._ssl_context is ctx for transport in transports
+        )
     finally:
         await client.aclose()
         await aclose_clients()

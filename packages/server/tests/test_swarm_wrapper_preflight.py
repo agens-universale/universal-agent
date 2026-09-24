@@ -21,10 +21,18 @@ from pathlib import Path
 
 import pytest
 
-WRAPPER = Path(__file__).resolve().parents[1] / "src" / "gc_server" / "swarm" / "run-cli-in-sandbox.sh"
+WRAPPER = (
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "gc_server"
+    / "swarm"
+    / "run-cli-in-sandbox.sh"
+)
 
 
-pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="обёртка — bash-скрипт")
+pytestmark = pytest.mark.skipif(
+    shutil.which("bash") is None, reason="обёртка — bash-скрипт"
+)
 
 
 def _run(tmp_path, **overrides):
@@ -50,7 +58,11 @@ def _run(tmp_path, **overrides):
         text=True,
     )
     completion_path = tmp_path / "threads" / "swarm_g_t1" / "completion.json"
-    completion = json.loads(completion_path.read_text(encoding="utf-8")) if completion_path.exists() else None
+    completion = (
+        json.loads(completion_path.read_text(encoding="utf-8"))
+        if completion_path.exists()
+        else None
+    )
     return proc, completion
 
 
@@ -63,7 +75,9 @@ def test_missing_cli_in_path_names_the_command_and_the_cure(tmp_path):
     )
 
     assert proc.returncode == 127
-    assert completion is not None, "completion.json обязан появиться и в этом случае"
+    assert completion is not None, (
+        "completion.json обязан появиться и в этом случае"
+    )
     assert completion["exit_code"] == 127
     assert completion["error_type"] == "wrapper_setup_error"
     message = completion["error_message"]
@@ -71,7 +85,9 @@ def test_missing_cli_in_path_names_the_command_and_the_cure(tmp_path):
     assert "PATH" in message
     assert "cli_venv_root" in message
     # То же самое обязано быть видно в stderr.log прогона, а не только в JSON.
-    stderr_log = (tmp_path / "threads" / "swarm_g_t1" / "stderr.log").read_text()
+    stderr_log = (
+        tmp_path / "threads" / "swarm_g_t1" / "stderr.log"
+    ).read_text()
     assert "gc-cli-not-installed" in stderr_log
 
 

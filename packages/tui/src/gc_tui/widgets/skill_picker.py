@@ -23,7 +23,9 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
     Навигация (`set_filter` / `move_selection`), `compose` и `_rebuild` — общие
     с `ArgPicker`, в `PaletteRowsMixin`."""
 
-    DEFAULT_CSS = ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    DEFAULT_CSS = (
+        ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    )
 
     def __init__(
         self,
@@ -41,7 +43,10 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         FLOW-ребёнок в старой раскладке упирался в max-height-клэмп длинного списка
         и прятался за скроллом (регрессия воздуха .palette-keys, коммит c0622c9a).
         Докнутый контейнер вне скролла держит hint видимым при открытии всегда."""
-        return Vertical(Static(_HINT, classes="palette-hint palette-keys", markup=False), classes="palette-footer")
+        return Vertical(
+            Static(_HINT, classes="palette-hint palette-keys", markup=False),
+            classes="palette-footer",
+        )
 
     def _format_row(self, skill: dict) -> str:
         return f" {skill.get('id', '?')}"

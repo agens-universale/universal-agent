@@ -115,12 +115,24 @@ def test_coalesce_consecutive_assistant_tool_calls_merges_parallel_batch():
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
+            ],
         },
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"id": "b", "type": "function", "function": {"name": "y", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "id": "b",
+                    "type": "function",
+                    "function": {"name": "y", "arguments": "{}"},
+                }
+            ],
         },
         {"role": "tool", "tool_call_id": "a", "content": "1"},
         {"role": "tool", "tool_call_id": "b", "content": "2"},
@@ -138,7 +150,13 @@ def test_coalesce_merges_leading_assistant_text_before_tool_calls():
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"id": "a", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "id": "a",
+                    "type": "function",
+                    "function": {"name": "x", "arguments": "{}"},
+                }
+            ],
         },
         {"role": "tool", "tool_call_id": "a", "content": "ok"},
     ]
@@ -207,18 +225,34 @@ def test_prepare_chat_completion_messages_for_api_parallel_planner_shape():
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                }
+            ],
         },
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}}],
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "s", "arguments": "{}"},
+                }
+            ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "r1"},
         {"role": "tool", "tool_call_id": "c2", "content": "r2"},
     ]
     prepared = prepare_chat_completion_messages_for_api(messages)
-    assistants = [m for m in prepared if m.get("role") == "assistant" and m.get("tool_calls")]
+    assistants = [
+        m
+        for m in prepared
+        if m.get("role") == "assistant" and m.get("tool_calls")
+    ]
     assert len(assistants) == 1
     assert len(assistants[0]["tool_calls"]) == 2
 
@@ -230,7 +264,11 @@ def test_inject_assistant_after_tool_followed_by_user_inserts_synthetic_ack():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
@@ -252,8 +290,16 @@ def test_inject_assistant_handles_multiple_tool_messages_in_series():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
-                {"id": "c2", "type": "function", "function": {"name": "s", "arguments": "{}"}},
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "s", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "r1"},
@@ -274,7 +320,11 @@ def test_inject_assistant_inert_when_tool_followed_by_assistant():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
@@ -283,7 +333,12 @@ def test_inject_assistant_inert_when_tool_followed_by_assistant():
     ]
     out = inject_assistant_after_orphan_tool_outputs(messages)
     assert len(out) == 4  # без вставок
-    assert [m["role"] for m in out] == ["assistant", "tool", "assistant", "user"]
+    assert [m["role"] for m in out] == [
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
 
 
 def test_inject_assistant_inert_on_empty_or_no_tool_messages():
@@ -319,7 +374,11 @@ def test_inject_assistant_before_system_after_tool():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "m", "arguments": "{}"}},
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "m", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "ok"},
@@ -344,14 +403,22 @@ def test_prepare_chat_completion_messages_repairs_stop_corrupted_history():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c1", "type": "function", "function": {"name": "long_memory", "arguments": "{}"}},
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "long_memory", "arguments": "{}"},
+                },
             ],
         },
         {
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "c1", "content": "memory data"},
@@ -364,4 +431,6 @@ def test_prepare_chat_completion_messages_repairs_stop_corrupted_history():
     # После tool серии должен быть assistant (ack), потом user
     assert "assistant" in roles
     user_idx = roles.index("user", 1)  # пропускаем первый user
-    assert roles[user_idx - 1] == "assistant"  # перед последним user — assistant
+    assert (
+        roles[user_idx - 1] == "assistant"
+    )  # перед последним user — assistant

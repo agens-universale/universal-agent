@@ -106,7 +106,9 @@ ctx = await acreate_run_context(cfg, thread_store=MyStore())
 ```python
 from gc_core.agent_executor import AgentExecutor
 
-executor = AgentExecutor(ctx)  # берёт хранилище из ctx, отдельно передавать не нужно
+executor = AgentExecutor(
+    ctx
+)  # берёт хранилище из ctx, отдельно передавать не нужно
 ```
 
 ### 4. Сессия треда — если работаете с историей мимо агента
@@ -160,18 +162,31 @@ class MyThreadStore:
     def load_meta(self, system_id, thread_id) -> dict: ...
 
     # запись
-    def append_messages(self, system_id, thread_id, messages, *, known_keys=None, start_seq=0) -> int: ...
+    def append_messages(
+        self, system_id, thread_id, messages, *, known_keys=None, start_seq=0
+    ) -> int: ...
     def save_meta(self, system_id, thread_id, meta) -> None: ...
-    def patch_runtime_flag(self, system_id, thread_id, flag, *, active, session_meta=None) -> None: ...
+    def patch_runtime_flag(
+        self, system_id, thread_id, flag, *, active, session_meta=None
+    ) -> None: ...
     def update_runtime_meta(self, system_id, thread_id, patch) -> None: ...
     def discard_message(self, system_id, thread_id, message_id) -> bool: ...
     def reset(self, system_id, thread_id) -> list[str]: ...
 
     # трассы субагентов
     def append_subagent_trace(
-        self, system_id, thread_id, *, parent_call_id, child_run_id, kind, payload
+        self,
+        system_id,
+        thread_id,
+        *,
+        parent_call_id,
+        child_run_id,
+        kind,
+        payload,
     ) -> SubagentTraceRecord: ...
-    def read_subagent_trace(self, system_id, thread_id) -> list[SubagentTraceRecord]: ...
+    def read_subagent_trace(
+        self, system_id, thread_id
+    ) -> list[SubagentTraceRecord]: ...
 ```
 
 Образцы: `FileThreadStore` (185 строк) и `MemoryThreadStore` (233 строки).
@@ -253,7 +268,9 @@ meta наружу дословно — незнакомые ключи хран�
 ```python
 class RedisThreadStore:
     async def aload_messages(self, system_id, thread_id): ...
-    async def aload_thread_state(self, system_id, thread_id) -> ThreadState: ...
+    async def aload_thread_state(
+        self, system_id, thread_id
+    ) -> ThreadState: ...
 
     # ...остальные девять с приставкой a
 

@@ -32,7 +32,9 @@ from importlib.util import find_spec
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SNAPSHOT_FILES = sorted((REPO / "packages/tui/tests").glob("test_snapshot_*.py"))
+SNAPSHOT_FILES = sorted(
+    (REPO / "packages/tui/tests").glob("test_snapshot_*.py")
+)
 
 #: Имя модуля плагина — ровно то, которым его зовёт importorskip.
 PLUGIN_MODULE = "pytest_textual_snapshot"
@@ -55,7 +57,9 @@ def test_plugin_is_declared_in_test_group():
     """
     root = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     group = root["dependency-groups"]["test"]
-    pinned = [d for d in group if isinstance(d, str) and d.startswith(PLUGIN_DIST)]
+    pinned = [
+        d for d in group if isinstance(d, str) and d.startswith(PLUGIN_DIST)
+    ]
     assert pinned, f"{PLUGIN_DIST} пропал из [dependency-groups] test: {group}"
 
 
@@ -65,10 +69,17 @@ def test_plugin_module_name_matches_importorskip():
     Опечатка в `importorskip` вернула бы ровно исходную дыру: тесты снова
     пропускались бы молча, а манифест выглядел бы здоровым.
     """
-    assert find_spec(PLUGIN_MODULE) is not None, f"{PLUGIN_DIST} не установлен — снапшот-эталоны никто не проверяет"
+    assert find_spec(PLUGIN_MODULE) is not None, (
+        f"{PLUGIN_DIST} не установлен — снапшот-эталоны никто не проверяет"
+    )
     called = set()
     for path in SNAPSHOT_FILES:
-        called |= set(re.findall(r'importorskip\(\s*"([\w.]+)"', path.read_text(encoding="utf-8")))
+        called |= set(
+            re.findall(
+                r'importorskip\(\s*"([\w.]+)"',
+                path.read_text(encoding="utf-8"),
+            )
+        )
     assert PLUGIN_MODULE in called, sorted(called)
     assert called <= {PLUGIN_MODULE, "textual"}, (
         f"неизвестное имя в importorskip — оно может тихо гасить весь модуль: {sorted(called)}"
@@ -82,7 +93,12 @@ def test_snapshot_modules_collect_every_test():
     срабатывает на уровне МОДУЛЯ, и любая его причина (нет плагина, нет textual,
     опечатка в имени) выносит весь файл из прогона одинаково незаметно.
     """
-    expected = sum(len(re.findall(r"^def (test_\w+)", p.read_text(encoding="utf-8"), re.M)) for p in SNAPSHOT_FILES)
+    expected = sum(
+        len(
+            re.findall(r"^def (test_\w+)", p.read_text(encoding="utf-8"), re.M)
+        )
+        for p in SNAPSHOT_FILES
+    )
     assert expected >= 16, expected
     proc = subprocess.run(
         [
@@ -103,8 +119,12 @@ def test_snapshot_modules_collect_every_test():
     # rc=5 — «no tests collected»: ровно то, что происходило одиннадцать дней,
     # только тогда снапшот-модули были частью большого прогона и их молчание
     # тонуло в чужих зелёных точках.
-    assert proc.returncode == 0, f"сбор снапшот-модулей упал (rc={proc.returncode})\n{out[-3000:]}"
-    collected = [line for line in proc.stdout.splitlines() if "::test_" in line]
+    assert proc.returncode == 0, (
+        f"сбор снапшот-модулей упал (rc={proc.returncode})\n{out[-3000:]}"
+    )
+    collected = [
+        line for line in proc.stdout.splitlines() if "::test_" in line
+    ]
     assert len(collected) == expected, (
         f"собрано {len(collected)} из {expected} — модули пропускаются молча\n{out[-3000:]}"
     )
@@ -131,7 +151,8 @@ def test_drift_list_can_only_shrink():
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
-        "_tui_conftest_probe", REPO / "packages" / "tui" / "tests" / "conftest.py"
+        "_tui_conftest_probe",
+        REPO / "packages" / "tui" / "tests" / "conftest.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

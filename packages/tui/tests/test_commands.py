@@ -1,6 +1,11 @@
 """Реестр команд: метаданные, lookup, closest-match (§4)."""
 
-from gc_tui.commands import Command, CommandRegistry, build_default_registry, closest_command
+from gc_tui.commands import (
+    Command,
+    CommandRegistry,
+    build_default_registry,
+    closest_command,
+)
 
 
 def test_register_and_lookup():
@@ -19,7 +24,14 @@ def test_register_and_lookup():
 
 def test_alias_resolves_to_canonical():
     reg = CommandRegistry()
-    reg.register(Command(name="tasks", aliases=("history",), args="[-r]", description="список задач"))
+    reg.register(
+        Command(
+            name="tasks",
+            aliases=("history",),
+            args="[-r]",
+            description="список задач",
+        )
+    )
     cmd = reg.lookup("history")
     assert cmd is not None and cmd.name == "tasks"
 
@@ -37,7 +49,17 @@ def test_closest_match_none_for_far_input():
 
 def test_default_registry_includes_core_commands():
     reg = build_default_registry()
-    for n in ["sessions", "stop", "skills", "skill", "status", "export", "help", "quit", "view"]:
+    for n in [
+        "sessions",
+        "stop",
+        "skills",
+        "skill",
+        "status",
+        "export",
+        "help",
+        "quit",
+        "view",
+    ]:
         assert reg.lookup(n) is not None, f"missing /{n}"
 
 
@@ -91,7 +113,10 @@ def test_skill_descriptions_use_navyk_not_skill_word():
 
 def test_init_description_is_analysis_and_generation():
     reg = build_default_registry()
-    assert reg.lookup("init").description == "Анализ проекта и генерация AGENTS.md"
+    assert (
+        reg.lookup("init").description
+        == "Анализ проекта и генерация AGENTS.md"
+    )
 
 
 def test_sessions_command_has_no_aliases():
@@ -108,7 +133,9 @@ def test_sessions_description_has_no_picker_word():
 
 def test_list_commands_returns_canonical_only():
     reg = CommandRegistry()
-    reg.register(Command(name="tasks", aliases=("history",), args="", description=""))
+    reg.register(
+        Command(name="tasks", aliases=("history",), args="", description="")
+    )
     reg.register(Command(name="stop", aliases=(), args="", description=""))
     names = [c.name for c in reg.list_commands()]
     assert names == ["tasks", "stop"]  # порядок регистрации, без aliases
@@ -215,10 +242,14 @@ def test_settings_command_description_lists_all_sections():
     (проверка по литералу уже проморгала «Режимы работы» и «Профили»)."""
     from gc_tui.screens.settings import SECTIONS
 
-    description = build_default_registry().lookup("settings").description.lower()
+    description = (
+        build_default_registry().lookup("settings").description.lower()
+    )
     for section in SECTIONS:
         head = section.lower().split()[0].split("-")[0]
-        assert head in description, f"секция «{section}» не названа в: {description}"
+        assert head in description, (
+            f"секция «{section}» не названа в: {description}"
+        )
 
 
 def test_compact_command_registered_with_alias():

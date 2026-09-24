@@ -99,7 +99,8 @@ class DiffStore:
         self._ensure_dir()
         tmp = self.index_path.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
             encoding="utf-8",
         )
         atomic_replace(tmp, self.index_path)
@@ -207,7 +208,9 @@ class DiffStore:
             return UndoResult(ok=False, reason="not_in_index")
 
         status = entry.get("status")
-        if status == STATUS_CREATED and not entry.get("baseline_exists", False):
+        if status == STATUS_CREATED and not entry.get(
+            "baseline_exists", False
+        ):
             # Новый файл без baseline → undo = удалить с диска и из index.
             disk = self._disk_path(key)
             if disk.is_file() or disk.is_symlink():
@@ -244,7 +247,9 @@ class DiffStore:
             if isinstance(meta, dict)
         ]
 
-    def _cleanup_stale(self, index: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    def _cleanup_stale(
+        self, index: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
         """Убрать записи, где ожидается ``.orig``, но файла нет.
 
         ``created`` без ``baseline_exists`` — валидно без ``.orig``.
@@ -257,7 +262,10 @@ class DiffStore:
                 continue
             status = meta.get("status")
             baseline = bool(meta.get("baseline_exists", False))
-            needs_orig = baseline or status in (STATUS_MODIFIED, STATUS_DELETED)
+            needs_orig = baseline or status in (
+                STATUS_MODIFIED,
+                STATUS_DELETED,
+            )
             if needs_orig and not self._orig_path(key).is_file():
                 changed = True
                 continue
@@ -284,7 +292,9 @@ class DiffStore:
             if len(orig_files) <= self.cache_max_orig:
                 return
             # 1) clean first (disk == .orig), oldest-first
-            victim = self._find_clean_victim(orig_files, index, protect_key=protect_key)
+            victim = self._find_clean_victim(
+                orig_files, index, protect_key=protect_key
+            )
             if victim is None:
                 # oldest dirty, но не protect_key
                 victim = self._oldest_evictable(orig_files, index, protect_key)
@@ -329,7 +339,9 @@ class DiffStore:
                 continue
         return None
 
-    def _evict_orig(self, orig: Path, index: dict[str, dict[str, Any]]) -> None:
+    def _evict_orig(
+        self, orig: Path, index: dict[str, dict[str, Any]]
+    ) -> None:
         key_by_orig = {self._orig_path(k): k for k in index}
         key = key_by_orig.get(orig)
         try:

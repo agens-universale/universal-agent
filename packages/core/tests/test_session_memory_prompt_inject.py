@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from gc_core.summarize.prompt_loading import default_prompt_path, load_memory_patch_replace_prompt, load_prompt_template
+from gc_core.summarize.prompt_loading import (
+    default_prompt_path,
+    load_memory_patch_replace_prompt,
+    load_prompt_template,
+)
 from gc_core.summarize.working_memory_gateway import (
     MEMORY_PATCH_WM_REGISTERS_PLACEHOLDER,
     REGISTER_ORDER,

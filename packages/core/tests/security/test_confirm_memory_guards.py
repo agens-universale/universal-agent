@@ -75,13 +75,21 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
 
     # Second call — same path, run-cache must prevent re-prompt
     res2 = tool.write(path=outside)
-    assert json.loads(res2)["ok"] is False, "Second call should still be blocked"
-    assert calls["n"] == 1, "tui_confirm must NOT be called again (run-cache hit)"
+    assert json.loads(res2)["ok"] is False, (
+        "Second call should still be blocked"
+    )
+    assert calls["n"] == 1, (
+        "tui_confirm must NOT be called again (run-cache hit)"
+    )
 
     # Instructive message check
     err_msg = captured["err"]["message"]
-    assert "Do NOT retry" in err_msg, f"Expected 'Do NOT retry' in: {err_msg!r}"
-    assert "ask the user" in err_msg, f"Expected 'ask the user' in: {err_msg!r}"
+    assert "Do NOT retry" in err_msg, (
+        f"Expected 'Do NOT retry' in: {err_msg!r}"
+    )
+    assert "ask the user" in err_msg, (
+        f"Expected 'ask the user' in: {err_msg!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +145,12 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
     assert err.get("type") == "url_blocked_by_policy_cancelled_by_user"
     # Instructive message check
     err_msg = err.get("message", "")
-    assert "Do NOT retry" in err_msg, f"Expected 'Do NOT retry' in: {err_msg!r}"
-    assert "ask the user" in err_msg, f"Expected 'ask the user' in: {err_msg!r}"
+    assert "Do NOT retry" in err_msg, (
+        f"Expected 'Do NOT retry' in: {err_msg!r}"
+    )
+    assert "ask the user" in err_msg, (
+        f"Expected 'ask the user' in: {err_msg!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +215,9 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
+def test_command_moderation_decline_caches_and_instructs(
+    monkeypatch, tmp_path
+):
     """command_moderation ask, judge unavailable: decline кэшируется; сообщение инструктивно."""
     from gc_core.config_modules import env_vars
     from gc_core.security.command_moderation import moderate_command_execution
@@ -251,7 +265,9 @@ def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
 
     res2 = tool.run(command=cmd)
     assert json.loads(res2)["ok"] is False
-    assert calls["n"] == n_after_first, "Second identical command must use cache"
+    assert calls["n"] == n_after_first, (
+        "Second identical command must use cache"
+    )
 
     # Запрет на обход едет отдельным полем guidance (make_block_error), а reason
     # остаётся причиной отказа: раньше одна и та же формулировка лежала в одном
@@ -259,8 +275,12 @@ def test_command_moderation_decline_caches_and_instructs(monkeypatch, tmp_path):
     err = captured.get("err", {})
     assert err.get("reason") == "User declined the command."
     guidance = err.get("guidance", "")
-    assert "Do NOT retry" in guidance, f"Expected 'Do NOT retry' in guidance: {guidance!r}"
-    assert "Do NOT retry" not in err.get("reason", ""), "дубль в reason вернулся"
+    assert "Do NOT retry" in guidance, (
+        f"Expected 'Do NOT retry' in guidance: {guidance!r}"
+    )
+    assert "Do NOT retry" not in err.get("reason", ""), (
+        "дубль в reason вернулся"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +308,9 @@ def test_command_guard_decline_caches(monkeypatch, tmp_path):
     class _Tool:
         _ctx = ctx
 
-        @enforce_command_guard(payload_arg="command", tool_name="execute_command")
+        @enforce_command_guard(
+            payload_arg="command", tool_name="execute_command"
+        )
         def run(self, command):
             return json.dumps({"ok": True})
 
@@ -302,8 +324,12 @@ def test_command_guard_decline_caches(monkeypatch, tmp_path):
     res1 = tool.run(command=cmd)
     assert json.loads(res1)["ok"] is False
     n_after_first = calls["n"]
-    assert n_after_first >= 1, "Should have prompted for instructions-touching command"
+    assert n_after_first >= 1, (
+        "Should have prompted for instructions-touching command"
+    )
 
     res2 = tool.run(command=cmd)
     assert json.loads(res2)["ok"] is False
-    assert calls["n"] == n_after_first, "Second call must use cache, no re-prompt"
+    assert calls["n"] == n_after_first, (
+        "Second call must use cache, no re-prompt"
+    )

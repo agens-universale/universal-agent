@@ -62,10 +62,14 @@ class TestCreateInstanceError:
 
         with patch.object(runner_module, "get_subagent_class") as mock_cls:
             cls = MagicMock()
-            cls.create_instance = AsyncMock(side_effect=ConnectionError("LLM unreachable"))
+            cls.create_instance = AsyncMock(
+                side_effect=ConnectionError("LLM unreachable")
+            )
             mock_cls.return_value = cls
 
-            result = await runner.arun("subagent_worker", {"task": "test"}, MagicMock())
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, MagicMock()
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -82,7 +86,9 @@ class TestCreateInstanceError:
             cls.create_instance = AsyncMock(side_effect=ValueError("bad args"))
             mock_cls.return_value = cls
 
-            result = await runner.arun("subagent_worker", {"task": "test"}, MagicMock())
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, MagicMock()
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -112,7 +118,9 @@ class TestBuildChildCtxError:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", side_effect=ImportError("no module")):
+        with patch.object(
+            runner, "_build_child_ctx", side_effect=ImportError("no module")
+        ):
             result = await runner.arun(
                 "subagent_worker",
                 {"task": "test"},
@@ -130,10 +138,16 @@ class TestRunAgentError:
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        run_agent_func = MagicMock(side_effect=RuntimeError("LLM backend down"))
+        run_agent_func = MagicMock(
+            side_effect=RuntimeError("LLM backend down")
+        )
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = await runner.arun("subagent_worker", {"task": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, run_agent_func
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -146,8 +160,12 @@ class TestRunAgentError:
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         run_agent_func = MagicMock(side_effect=Exception("fail"))
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = await runner.arun("subagent_worker", {"task": "test"}, run_agent_func)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, run_agent_func
+            )
 
         payload = json.loads(result)
         assert payload["meta"]["tool_name"] == "subagent_worker"

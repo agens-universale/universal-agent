@@ -43,7 +43,9 @@ def _command(tmp_path, ticks) -> str:
     child = tmp_path / "child.py"
     child.write_text(_CHILD, encoding="utf-8")
     argv = [sys.executable, str(child), str(ticks)]
-    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    return (
+        subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    )
 
 
 def test_background_works_through_the_tui_wrapper(tmp_path):
@@ -51,11 +53,15 @@ def test_background_works_through_the_tui_wrapper(tmp_path):
     project = tmp_path / "proj"
     project.mkdir()
     ticks = tmp_path / "ticks.log"
-    tool = with_local_ctx(ExecuteCommand, config_dict={"launch_root": str(project)})
+    tool = with_local_ctx(
+        ExecuteCommand, config_dict={"launch_root": str(project)}
+    )
     ctx = tool._ctx
     ctx.os_backend = TrackingFsBackend(ctx.os_backend, ctx)
 
-    res = json.loads(tool(command=_command(tmp_path, ticks), run_in_background=True))
+    res = json.loads(
+        tool(command=_command(tmp_path, ticks), run_in_background=True)
+    )
 
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, res
@@ -68,7 +74,9 @@ def test_background_works_through_the_tui_wrapper(tmp_path):
         if text.count("tick") >= 6:
             break
         time.sleep(0.1)
-    assert text.count("tick") == 6, f"через обёртку потомок не отработал: {text!r}"
+    assert text.count("tick") == 6, (
+        f"через обёртку потомок не отработал: {text!r}"
+    )
 
 
 def test_wrapper_reports_the_inner_capability(tmp_path):

@@ -9,12 +9,17 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
-from gc_core.security.path_policy import audit_policy_decision, resolve_tool_context
+from gc_core.security.path_policy import (
+    audit_policy_decision,
+    resolve_tool_context,
+)
 
 
 @dataclass(frozen=True)
 class UrlPolicyConfig:
-    allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
+    allowed_schemes: list[str] = field(
+        default_factory=lambda: ["http", "https"]
+    )
     url_blacklist: list[str] = field(default_factory=list)
 
 
@@ -51,7 +56,9 @@ def parse_and_validate_url(url: str) -> ParsedUrlResult:
 
 
 def is_scheme_allowed(scheme: str, allowed_schemes: list[str]) -> bool:
-    normalized_allowed = {item.strip().lower() for item in allowed_schemes if item}
+    normalized_allowed = {
+        item.strip().lower() for item in allowed_schemes if item
+    }
     return scheme.strip().lower() in normalized_allowed
 
 
@@ -193,7 +200,9 @@ def enforce_url_policy(
                 context,
                 tool_name=_tool_name(func, args),
                 decision="blocked",
-                reason_code="policy_deny" if mode == "deny" else "policy_ask_cancelled",
+                reason_code="policy_deny"
+                if mode == "deny"
+                else "policy_ask_cancelled",
                 error_type=error.get("type"),
             )
             if blocked_result_factory is not None:

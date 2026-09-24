@@ -21,7 +21,9 @@ def test_format_shows_answer_only():
 
 
 def test_format_strips_inline_think_from_answer():
-    block = format_stream_block(answer="<think>анализирую\nсмотрю agents/</think>Это проект.")
+    block = format_stream_block(
+        answer="<think>анализирую\nсмотрю agents/</think>Это проект."
+    )
     assert block == "Это проект."
     assert "<think>" not in block
     assert "анализирую" not in block
@@ -45,7 +47,9 @@ def test_push_reset_clears_buffers():
 
 def test_format_unclosed_think_stripped():
     # Unclosed <think> still streaming → stripped, empty answer remainder.
-    assert format_stream_block(answer="<think>анализирую\nсмотрю agents/") == ""
+    assert (
+        format_stream_block(answer="<think>анализирую\nсмотрю agents/") == ""
+    )
 
 
 def test_sink_progress_units_counts_all_chars():
@@ -91,7 +95,10 @@ def test_reasoning_line_short_unchanged():
 def test_reasoning_line_collapses_newlines():
     from gc_tui.services.stream_sink import format_reasoning_line
 
-    assert format_reasoning_line(think="строю план\nчитаю README") == "⠇ строю план читаю README"
+    assert (
+        format_reasoning_line(think="строю план\nчитаю README")
+        == "⠇ строю план читаю README"
+    )
 
 
 def test_reasoning_line_truncates_with_ellipsis():
@@ -107,7 +114,10 @@ def test_reasoning_line_truncates_on_word_boundary():
 
     # last 12 chars of "alpha beta gamma delta" = " gamma delta"; drop leading
     # partial word → start at the word boundary → "gamma delta"
-    assert format_reasoning_line(think="alpha beta gamma delta", tail_len=12) == "⠇ …gamma delta"
+    assert (
+        format_reasoning_line(think="alpha beta gamma delta", tail_len=12)
+        == "⠇ …gamma delta"
+    )
 
 
 def test_reasoning_line_empty():

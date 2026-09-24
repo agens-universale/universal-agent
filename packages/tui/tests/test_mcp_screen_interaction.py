@@ -7,9 +7,16 @@ SNAP = {
         "status": "connected",
         "reason": None,
         "description": "Read office docs",
-        "tools": [{"name": "mcp_office_read_file", "description": "Читает документ"}],
+        "tools": [
+            {"name": "mcp_office_read_file", "description": "Читает документ"}
+        ],
     },
-    "computer": {"status": "failed", "reason": "команда не найдена", "description": "GUI control", "tools": []},
+    "computer": {
+        "status": "failed",
+        "reason": "команда не найдена",
+        "description": "GUI control",
+        "tools": [],
+    },
 }
 
 
@@ -17,7 +24,9 @@ async def _open(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+    )
     scr = McpScreen(config={}, tools_snapshot=dict(SNAP))
     return app, scr
 
@@ -118,7 +127,9 @@ async def test_keys_on_empty_screen_do_not_crash(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+    )
     scr = McpScreen(config={}, tools_snapshot={})
     async with app.run_test() as pilot:
         await app.push_screen(scr)

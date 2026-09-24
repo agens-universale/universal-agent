@@ -4,9 +4,18 @@
 def test_presets_match_spec_table():
     from gc_tui.toggles import PRESETS
 
-    assert PRESETS["low"] == {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}
-    assert PRESETS["medium"] == {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}
-    assert PRESETS["high"] == {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}
+    assert PRESETS["low"] == {
+        "tui.finish_gate_mode": "off",
+        "tui.text_answer_mode": "allow",
+    }
+    assert PRESETS["medium"] == {
+        "tui.finish_gate_mode": "smart",
+        "tui.text_answer_mode": "judge",
+    }
+    assert PRESETS["high"] == {
+        "tui.finish_gate_mode": "on",
+        "tui.text_answer_mode": "deny",
+    }
 
 
 def test_presets_do_not_intersect():
@@ -20,11 +29,31 @@ def test_presets_do_not_intersect():
 def test_resolve_preset_names_and_custom():
     from gc_tui.toggles import PRESET_CUSTOM, resolve_preset
 
-    assert resolve_preset({"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}) == "low"
-    assert resolve_preset({"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}) == "medium"
-    assert resolve_preset({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}) == "high"
+    assert (
+        resolve_preset(
+            {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}
+        )
+        == "low"
+    )
+    assert (
+        resolve_preset(
+            {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}
+        )
+        == "medium"
+    )
+    assert (
+        resolve_preset(
+            {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}
+        )
+        == "high"
+    )
     # нестандартная пара → custom
-    assert resolve_preset({"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}) == PRESET_CUSTOM
+    assert (
+        resolve_preset(
+            {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+        )
+        == PRESET_CUSTOM
+    )
 
 
 def test_resolve_rigor_state_reads_effective_pair():

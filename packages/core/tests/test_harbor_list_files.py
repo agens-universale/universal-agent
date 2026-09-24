@@ -141,16 +141,22 @@ def _compare_results(base_raw: str, harbor_raw: str, case_id: str):
     # top-level non-path fields must match
     assert b["ok"] == h["ok"], f"{case_id}: ok mismatch"
     assert b["max_depth"] == h["max_depth"], f"{case_id}: max_depth mismatch"
-    assert b["max_entries"] == h["max_entries"], f"{case_id}: max_entries mismatch"
+    assert b["max_entries"] == h["max_entries"], (
+        f"{case_id}: max_entries mismatch"
+    )
     assert b["truncated"] == h["truncated"], f"{case_id}: truncated mismatch"
     assert b["count"] == h["count"], f"{case_id}: count mismatch"
     assert b.get("glob") == h.get("glob"), f"{case_id}: glob mismatch"
 
     # error shape (type key) must match; messages may differ (different paths)
     b_err, h_err = b.get("error"), h.get("error")
-    assert (b_err is None) == (h_err is None), f"{case_id}: error presence mismatch"
+    assert (b_err is None) == (h_err is None), (
+        f"{case_id}: error presence mismatch"
+    )
     if b_err and h_err:
-        assert b_err.get("type") == h_err.get("type"), f"{case_id}: error.type mismatch"
+        assert b_err.get("type") == h_err.get("type"), (
+            f"{case_id}: error.type mismatch"
+        )
 
     # entries: same count, same type/is_hidden per slot (order preserved)
     b_entries = b.get("entries", [])
@@ -161,7 +167,9 @@ def _compare_results(base_raw: str, harbor_raw: str, case_id: str):
         f"harbor entries: {[e.get('path', '?') for e in h_entries]}"
     )
     for i, (be, he) in enumerate(zip(b_entries, h_entries)):
-        assert be["type"] == he["type"], f"{case_id}: entry[{i}] type mismatch: {be['type']!r} vs {he['type']!r}"
+        assert be["type"] == he["type"], (
+            f"{case_id}: entry[{i}] type mismatch: {be['type']!r} vs {he['type']!r}"
+        )
         assert be["is_hidden"] == he["is_hidden"], (
             f"{case_id}: entry[{i}] is_hidden mismatch: {be['is_hidden']} vs {he['is_hidden']}"
         )
@@ -186,7 +194,9 @@ def _compare_results_with_relpath(
 
     assert b["ok"] == h["ok"], f"{case_id}: ok mismatch"
     assert b["max_depth"] == h["max_depth"], f"{case_id}: max_depth mismatch"
-    assert b["max_entries"] == h["max_entries"], f"{case_id}: max_entries mismatch"
+    assert b["max_entries"] == h["max_entries"], (
+        f"{case_id}: max_entries mismatch"
+    )
     assert b["truncated"] == h["truncated"], f"{case_id}: truncated mismatch"
     assert b["count"] == h["count"], f"{case_id}: count mismatch"
 
@@ -207,7 +217,9 @@ def _compare_results_with_relpath(
             f"harbor order: {[e['path'].replace(harbor_root, '').lstrip('/') for e in h_entries]}"
         )
         assert be["type"] == he["type"], f"{case_id}: entry[{i}] type mismatch"
-        assert be["is_hidden"] == he["is_hidden"], f"{case_id}: entry[{i}] is_hidden mismatch"
+        assert be["is_hidden"] == he["is_hidden"], (
+            f"{case_id}: entry[{i}] is_hidden mismatch"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -261,13 +273,21 @@ def test_glob_with_slash_no_max_depth_returns_empty(tmp_path):
     _compare_results(base_raw, harbor_raw, "glob_slash_no_depth")
 
     b = json.loads(base_raw)
-    assert b["max_depth"] == 0, f"no auto-raise: depth must stay 0, got {b['max_depth']}"
-    assert "max_depth_auto" not in b, "auto-raise was removed; field must be absent"
+    assert b["max_depth"] == 0, (
+        f"no auto-raise: depth must stay 0, got {b['max_depth']}"
+    )
+    assert "max_depth_auto" not in b, (
+        "auto-raise was removed; field must be absent"
+    )
     # '**/*.py' at depth 0 matches only root-level .py files (a.py); it cannot
     # reach sub/c.py. Confirm that sub/c.py is NOT in the flat result.
     root_py = {e["path"] for e in b["entries"]}
-    assert any(p.endswith("a.py") for p in root_py), "root a.py should match '**/*.py' at depth 0"
-    assert not any("c.py" in p for p in root_py), "sub/c.py must NOT be found at depth 0"
+    assert any(p.endswith("a.py") for p in root_py), (
+        "root a.py should match '**/*.py' at depth 0"
+    )
+    assert not any("c.py" in p for p in root_py), (
+        "sub/c.py must NOT be found at depth 0"
+    )
 
 
 def test_glob_with_slash_and_explicit_max_depth_returns_matches(tmp_path):
@@ -371,7 +391,9 @@ def test_branching_max_entries_truncation(tmp_path):
     """
     _make_branching_tree(tmp_path)
     base_raw = _base()(path=str(tmp_path), max_depth=10, max_entries=5)
-    harbor_raw = _harbor_branching()(path=_BRANCHING_ROOT, max_depth=10, max_entries=5)
+    harbor_raw = _harbor_branching()(
+        path=_BRANCHING_ROOT, max_depth=10, max_entries=5
+    )
     _compare_results_with_relpath(
         base_raw,
         str(tmp_path),
@@ -388,7 +410,9 @@ def test_not_a_directory(tmp_path):
     base_raw = _base()(path=str(f))
 
     # fake-backed: /work/a.py is a file in FakeBackend
-    t = bind_os_backend(ListFiles.__new__(ListFiles), FakeBackend({"/work/a.py": "x"}))
+    t = bind_os_backend(
+        ListFiles.__new__(ListFiles), FakeBackend({"/work/a.py": "x"})
+    )
     harbor_raw = t(path="/work/a.py")
     _compare_results(base_raw, harbor_raw, "not_a_directory")
 

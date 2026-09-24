@@ -25,13 +25,18 @@ def test_t8_config_command_moderation_and_write_guard_are_separate_fields():
     from gc_core.config_modules.security import SecurityConfig
 
     cfg = SecurityConfig()
-    assert hasattr(cfg, "command_moderation"), "SecurityConfig must have command_moderation"
+    assert hasattr(cfg, "command_moderation"), (
+        "SecurityConfig must have command_moderation"
+    )
     assert hasattr(cfg, "write_guard"), "SecurityConfig must have write_guard"
     # They are distinct objects (not nested or aliased).
     assert cfg.command_moderation is not cfg.write_guard
     # Changing one does not affect the other.
     cfg.command_moderation.mode = "ask"
-    assert cfg.write_guard.mode != "ask" or cfg.write_guard.mode == cfg.write_guard.mode
+    assert (
+        cfg.write_guard.mode != "ask"
+        or cfg.write_guard.mode == cfg.write_guard.mode
+    )
     # Independent mode fields.
     assert cfg.command_moderation.mode in {"allow", "ask", "deny"}
     assert cfg.write_guard.mode in {"allow", "ask", "deny"}
@@ -43,11 +48,15 @@ def test_t8_config_command_moderation_and_write_guard_are_separate_fields():
 def test_t9_judge_prompt_has_insession_examples_section():
     """command_judge_system.md contains insession_examples documentation."""
     text = PROMPT_PATH.read_text(encoding="utf-8")
-    assert "insession_examples" in text, "prompt must document insession_examples"
+    assert "insession_examples" in text, (
+        "prompt must document insession_examples"
+    )
     assert "allowed" in text
     assert "denied" in text
     assert "session_denied" in text
-    assert "hard safety rules" in text or "Priority when signals conflict" in text
+    assert (
+        "hard safety rules" in text or "Priority when signals conflict" in text
+    )
 
 
 # ── T11c: CLI latin+cyrillic ─────────────────────────────────────────────────
@@ -82,7 +91,11 @@ def _run_prompt(fake_stdin, answer: str) -> str:
     fake_stdin.write(answer + "\n")
     fake_stdin.seek(0)
     with mock.patch.object(sys, "stderr", new=io.StringIO()):
-        return prompt_user_confirmation_choice(title="Test", fields=[("Tool", "exec_command")], question="Разрешить?")
+        return prompt_user_confirmation_choice(
+            title="Test",
+            fields=[("Tool", "exec_command")],
+            question="Разрешить?",
+        )
 
 
 @pytest.mark.parametrize(
@@ -116,7 +129,9 @@ def test_t11c_cli_rejects_legacy_words(fake_tty):
     assert _run_prompt(fake_tty, "yes") == "deny_remember"
     assert _run_prompt(fake_tty, "no") == "deny_remember"
     assert _run_prompt(fake_tty, "once") == "deny_remember"
-    assert _run_prompt(fake_tty, "s") == "deny_remember"  # old session key removed
+    assert (
+        _run_prompt(fake_tty, "s") == "deny_remember"
+    )  # old session key removed
 
 
 def test_t11c_cli_eof_returns_deny_remember(fake_tty):
@@ -127,7 +142,9 @@ def test_t11c_cli_eof_returns_deny_remember(fake_tty):
     fake_tty.write("")  # empty → input() raises EOFError
     fake_tty.seek(0)
     with mock.patch.object(sys, "stderr", new=io.StringIO()):
-        result = prompt_user_confirmation_choice(title="T", fields=[], question="Q?")
+        result = prompt_user_confirmation_choice(
+            title="T", fields=[], question="Q?"
+        )
     assert result == "deny_remember"
 
 
@@ -140,7 +157,9 @@ def test_t11c_cli_keyboard_interrupt_returns_deny_once(fake_tty, monkeypatch):
 
     monkeypatch.setattr("builtins.input", _raise_interrupt)
     with mock.patch.object(sys, "stderr", new=io.StringIO()):
-        result = prompt_user_confirmation_choice(title="T", fields=[], question="Q?")
+        result = prompt_user_confirmation_choice(
+            title="T", fields=[], question="Q?"
+        )
     assert result == "deny_once"
 
 
@@ -151,7 +170,9 @@ def test_t11c_cli_nontty_returns_deny_once(monkeypatch):
     monkeypatch.setattr(sys, "stdin", fake_stdin)
     from gc_core.security.path_policy import prompt_user_confirmation_choice
 
-    result = prompt_user_confirmation_choice(title="T", fields=[], question="Q?")
+    result = prompt_user_confirmation_choice(
+        title="T", fields=[], question="Q?"
+    )
     assert result == "deny_once"
 
 
@@ -197,7 +218,9 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
 
     captured = {}
 
-    def fake_request_confirm(*, title, question, fields, ctx, decision_key=None):
+    def fake_request_confirm(
+        *, title, question, fields, ctx, decision_key=None
+    ):
         captured["fields"] = fields
         captured["question"] = question
         captured["decision_key"] = decision_key
@@ -229,7 +252,9 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
     assert captured["decision_key"] == f"command:{long_cmd}"
     assert "exec_command" in captured["question"]
 
-    py_ctx = ModerationContext(tool_name="exec_python", launch_root="/tmp", mode="ask")
+    py_ctx = ModerationContext(
+        tool_name="exec_python", launch_root="/tmp", mode="ask"
+    )
     _ask_user_confirmation("print(1)", py_ctx, decision, ctx=None)
     assert captured["fields"][0][0] == "Код"
 

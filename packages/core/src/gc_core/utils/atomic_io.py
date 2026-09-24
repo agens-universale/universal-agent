@@ -17,7 +17,9 @@ import time
 _TRANSIENT_WINERRORS = (5, 32)
 
 
-def atomic_replace(src, dst, *, attempts: int = 5, base_delay: float = 0.01) -> None:
+def atomic_replace(
+    src, dst, *, attempts: int = 5, base_delay: float = 0.01
+) -> None:
     for attempt in range(1, attempts + 1):
         try:
             os.replace(src, dst)

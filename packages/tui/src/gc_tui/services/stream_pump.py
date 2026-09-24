@@ -10,12 +10,19 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-STREAM_REFRESH_MS = 350  # потолок коалесценса событийной перерисовки текста стрима
+STREAM_REFRESH_MS = (
+    350  # потолок коалесценса событийной перерисовки текста стрима
+)
 
 
 class StreamPump:
     def __init__(
-        self, sink: Any, signal: Callable[[], None], *, throttle_s: float, clock: Callable[[], float] = time.monotonic
+        self,
+        sink: Any,
+        signal: Callable[[], None],
+        *,
+        throttle_s: float,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._sink = sink
         self._signal = signal

@@ -42,16 +42,26 @@ async def test_all_segments_raw_plus_markers(tmp_path):
 
     threads = tmp_path / "threads"
     threads.mkdir()
-    _write(threads, f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl", [{"role": "user", "content": "сег0"}])
+    _write(
+        threads,
+        f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl",
+        [{"role": "user", "content": "сег0"}],
+    )
     _write(
         threads,
         f"data_cli_{_TID}__pre_summary__20260603_110000.jsonl",
-        [{"role": "user", "content": _sum("С1")}, {"role": "user", "content": "сег1"}],
+        [
+            {"role": "user", "content": _sum("С1")},
+            {"role": "user", "content": "сег1"},
+        ],
     )
     _write(
         threads,
         f"data_cli_{_TID}.jsonl",
-        [{"role": "user", "content": _sum("С2")}, {"role": "user", "content": "сег2"}],
+        [
+            {"role": "user", "content": _sum("С2")},
+            {"role": "user", "content": "сег2"},
+        ],
     )
 
     app = TuiApp(threads_dir=str(threads), system="cli", config={"model": "M"})
@@ -60,7 +70,11 @@ async def test_all_segments_raw_plus_markers(tmp_path):
         screen.attach_active_task(_TID)
         await pilot.pause()
         # 2 маркера сжатий (#1, #2).
-        markers = [w for w in screen.query(SummaryMarker) if w.has_class("summary-marker")]
+        markers = [
+            w
+            for w in screen.query(SummaryMarker)
+            if w.has_class("summary-marker")
+        ]
         assert len(markers) == 2
         # сырьём — ВСЕ сегменты (сег0, сег1, сег2); полный трейс, маркеры между ними.
         texts = [r._text for r in screen.query(UserReplyContainer)]

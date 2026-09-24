@@ -62,7 +62,9 @@ async def test_probe_runs_off_the_loop_thread(probe_threads, call):
     await call(backend)
 
     assert probe_threads, "проба не вызвана — проверяли не тот путь"
-    assert loop_thread not in probe_threads, f"проба исполнилась на loop-потоке: {probe_threads}"
+    assert loop_thread not in probe_threads, (
+        f"проба исполнилась на loop-потоке: {probe_threads}"
+    )
 
 
 async def test_write_still_reaches_the_inner_backend(probe_threads):

@@ -7,9 +7,21 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
-from gc_core.tools.subagents.progress import brief_args_summary, parse_tool_result_status
+from gc_core.tools.subagents.progress import (
+    brief_args_summary,
+    parse_tool_result_status,
+)
 
 from gc_tui.models import TraceEvent
 
@@ -135,7 +147,11 @@ def plan_sidecar_nested_actions(
                             kind="mount_nested_prose",
                             parent_call_id=pid,
                             prose=prose.strip(),
-                            tool_call_id=(str(payload["call_id"]) if isinstance(payload.get("call_id"), str) else None),
+                            tool_call_id=(
+                                str(payload["call_id"])
+                                if isinstance(payload.get("call_id"), str)
+                                else None
+                            ),
                         )
                     )
             elif kind == "user":
@@ -232,7 +248,9 @@ def apply_sidecar_nested_actions(
                 )
 
 
-def detail_from_sidecar_records(records: Sequence[Dict[str, Any]], call_id: str) -> Optional[Dict[str, Any]]:
+def detail_from_sidecar_records(
+    records: Sequence[Dict[str, Any]], call_id: str
+) -> Optional[Dict[str, Any]]:
     """Собрать call/result pair по child call_id из sidecar records."""
     if not call_id:
         return None
@@ -271,7 +289,9 @@ def resolve_nested_tool_detail(
     return detail_from_sidecar_records(sidecar_records, call_id)
 
 
-def trace_events_from_nested_detail(call_id: str, detail: Dict[str, Any]) -> Tuple[TraceEvent, Optional[TraceEvent]]:
+def trace_events_from_nested_detail(
+    call_id: str, detail: Dict[str, Any]
+) -> Tuple[TraceEvent, Optional[TraceEvent]]:
     """Синтетические TraceEvent для ToolCallDetailScreen."""
     call_payload = detail.get("call")
     if not isinstance(call_payload, dict):
@@ -282,7 +302,9 @@ def trace_events_from_nested_detail(call_id: str, detail: Dict[str, Any]) -> Tup
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=brief_args_summary(call_payload.get("arguments"), tool_name=name or None),
+        summary=brief_args_summary(
+            call_payload.get("arguments"), tool_name=name or None
+        ),
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,

@@ -3,15 +3,22 @@
 from typing import Any, Dict, List, Optional
 
 from gc_core.config_modules.merge import deep_merge
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
 from gc_core.message_projection import project_text_for_model
-from gc_core.utils.llm_chat_client import arequest_chat_completion_text, log_llm_prompt_and_result
+from gc_core.utils.llm_chat_client import (
+    arequest_chat_completion_text,
+    log_llm_prompt_and_result,
+)
 
 
 def _require_auxiliary_llm(ctx: Any) -> Any:
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     if auxiliary_llm is None:
-        raise RuntimeError("RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context.")
+        raise RuntimeError(
+            "RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context."
+        )
     return auxiliary_llm
 
 
@@ -24,7 +31,9 @@ def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
     auxiliary_llm = _require_auxiliary_llm(ctx)
     completion_kwargs = getattr(auxiliary_llm, "completion_kwargs", None)
     if not isinstance(completion_kwargs, dict):
-        raise RuntimeError("RunContext.auxiliary_llm.completion_kwargs must be a dict")
+        raise RuntimeError(
+            "RunContext.auxiliary_llm.completion_kwargs must be a dict"
+        )
     return dict(completion_kwargs)
 
 
@@ -35,7 +44,9 @@ def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
     Читает ``auxiliary_llm_params.judge_max_tokens`` / YAML
     ``chat_completions.auxiliary_llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
     """
-    from gc_core.config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
+    from gc_core.config_modules.chat_completions import (
+        DEFAULT_JUDGE_MAX_TOKENS,
+    )
 
     auxiliary_llm = _require_auxiliary_llm(ctx)
     value = getattr(auxiliary_llm, "judge_max_tokens", None)
@@ -76,7 +87,9 @@ async def arequest_auxiliary_completion_text(
         payload_overrides=payload_overrides,
     )
     if log_prompt:
-        active_logger = logger if logger is not None else getattr(ctx, "logger", None)
+        active_logger = (
+            logger if logger is not None else getattr(ctx, "logger", None)
+        )
         log_llm_prompt_and_result(
             logger=active_logger,
             label=request_label,
@@ -106,12 +119,16 @@ async def arequest_summary_text(
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     default_max_tokens = getattr(auxiliary_llm, "max_tokens", None)
     if not isinstance(default_max_tokens, int) or default_max_tokens < 1:
-        raise RuntimeError("RunContext.auxiliary_llm.max_tokens must be a positive int")
+        raise RuntimeError(
+            "RunContext.auxiliary_llm.max_tokens must be a positive int"
+        )
     return await arequest_auxiliary_completion_text(
         ctx=ctx,
         state=state,
         messages=messages,
-        max_tokens=max_tokens if max_tokens is not None else default_max_tokens,
+        max_tokens=max_tokens
+        if max_tokens is not None
+        else default_max_tokens,
         request_label=request_label,
         consumer=consumer,
         payload_overrides=effective_overrides,

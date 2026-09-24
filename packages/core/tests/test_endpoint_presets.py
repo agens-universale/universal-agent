@@ -44,7 +44,9 @@ def test_default_presets_are_not_materialized_into_the_template():
             name = path.name
             text = path.read_text(encoding="utf-8")
             assert f"\n{key}:" not in text, f"{name}: блок {key} развёрнут"
-            assert f"# {key}:" in text, f"{name}: нет закомментированного образца {key}"
+            assert f"# {key}:" in text, (
+                f"{name}: нет закомментированного образца {key}"
+            )
 
 
 def test_from_config_missing_key_gives_default():
@@ -52,14 +54,22 @@ def test_from_config_missing_key_gives_default():
 
 
 def test_from_config_reads_user_list():
-    cfg = {"endpoint_presets": [{"name": "My", "url": "http://x/v1/chat/completions"}]}
+    cfg = {
+        "endpoint_presets": [
+            {"name": "My", "url": "http://x/v1/chat/completions"}
+        ]
+    }
     out = endpoint_presets_from_config(cfg)
-    assert out == [EndpointPreset(name="My", url="http://x/v1/chat/completions")]
+    assert out == [
+        EndpointPreset(name="My", url="http://x/v1/chat/completions")
+    ]
 
 
 def test_from_config_invalid_entries_fall_back_to_default():
     # сырой dict из TUI-тестов/легаси может быть не валидирован схемой
-    assert endpoint_presets_from_config({"endpoint_presets": "garbage"}) == list(DEFAULT_ENDPOINT_PRESETS)
+    assert endpoint_presets_from_config(
+        {"endpoint_presets": "garbage"}
+    ) == list(DEFAULT_ENDPOINT_PRESETS)
 
 
 def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
@@ -75,5 +85,9 @@ def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
     )
     config_dict = cfgmod.load_config(str(conf))
 
-    assert config_dict["endpoint_presets"] == [{"name": "My", "url": "http://x/v1/chat/completions"}]
-    assert endpoint_presets_from_config(config_dict) == [EndpointPreset(name="My", url="http://x/v1/chat/completions")]
+    assert config_dict["endpoint_presets"] == [
+        {"name": "My", "url": "http://x/v1/chat/completions"}
+    ]
+    assert endpoint_presets_from_config(config_dict) == [
+        EndpointPreset(name="My", url="http://x/v1/chat/completions")
+    ]

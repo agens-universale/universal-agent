@@ -97,7 +97,9 @@ def _split_frontmatter(path: str, text: str) -> Tuple[str, str]:
     """
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        raise SubagentDefinitionError(path, "файл должен начинаться с YAML-frontmatter ('---')")
+        raise SubagentDefinitionError(
+            path, "файл должен начинаться с YAML-frontmatter ('---')"
+        )
 
     fm_lines: List[str] = []
     idx = 1
@@ -113,7 +115,9 @@ def _split_frontmatter(path: str, text: str) -> Tuple[str, str]:
 def _require_name(path: str, meta: Dict[str, Any]) -> str:
     name = str(meta.get("name") or "").strip()
     if not name:
-        raise SubagentDefinitionError(path, "обязательное поле 'name' отсутствует или пусто")
+        raise SubagentDefinitionError(
+            path, "обязательное поле 'name' отсутствует или пусто"
+        )
     if not NAME_RE.match(name):
         raise SubagentDefinitionError(
             path,
@@ -131,7 +135,9 @@ def _require_name(path: str, meta: Dict[str, Any]) -> str:
 def _require_description(path: str, meta: Dict[str, Any]) -> str:
     description = str(meta.get("description") or "").strip()
     if not description:
-        raise SubagentDefinitionError(path, "обязательное поле 'description' отсутствует или пусто")
+        raise SubagentDefinitionError(
+            path, "обязательное поле 'description' отсутствует или пусто"
+        )
     if len(description) > MAX_DESCRIPTION_LEN:
         raise SubagentDefinitionError(
             path,
@@ -141,13 +147,17 @@ def _require_description(path: str, meta: Dict[str, Any]) -> str:
     return description
 
 
-def _parse_list_key(path: str, meta: Dict[str, Any], key: str) -> Optional[Tuple[str, ...]]:
+def _parse_list_key(
+    path: str, meta: Dict[str, Any], key: str
+) -> Optional[Tuple[str, ...]]:
     """Список имён из ключа frontmatter; None — ключа нет или он null."""
     raw = meta.get(key)
     if raw is None:
         return None
     if not isinstance(raw, list):
-        raise SubagentDefinitionError(path, f"'{key}' должен быть списком строк")
+        raise SubagentDefinitionError(
+            path, f"'{key}' должен быть списком строк"
+        )
     return _normalize_names(raw)
 
 
@@ -158,17 +168,24 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
     try:
         meta = yaml.safe_load(fm_text)
     except yaml.YAMLError as exc:
-        raise SubagentDefinitionError(path, f"frontmatter не разбирается как YAML: {exc}") from exc
+        raise SubagentDefinitionError(
+            path, f"frontmatter не разбирается как YAML: {exc}"
+        ) from exc
     if meta is None:
         meta = {}
     if not isinstance(meta, dict):
-        raise SubagentDefinitionError(path, "frontmatter должен быть отображением ключ-значение")
+        raise SubagentDefinitionError(
+            path, "frontmatter должен быть отображением ключ-значение"
+        )
 
     unknown = sorted(str(key) for key in meta if str(key) not in _ALLOWED_KEYS)
     if unknown:
         raise SubagentDefinitionError(
             path,
-            "неизвестные ключи frontmatter: " + ", ".join(unknown) + "; допустимы: " + ", ".join(sorted(_ALLOWED_KEYS)),
+            "неизвестные ключи frontmatter: "
+            + ", ".join(unknown)
+            + "; допустимы: "
+            + ", ".join(sorted(_ALLOWED_KEYS)),
         )
 
     name = _require_name(path, meta)
@@ -176,7 +193,9 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
 
     role = body.strip()
     if not role:
-        raise SubagentDefinitionError(path, "тело файла пусто — сабагент без роли бессмысленен")
+        raise SubagentDefinitionError(
+            path, "тело файла пусто — сабагент без роли бессмысленен"
+        )
 
     parsed = {key: _parse_list_key(path, meta, key) for key in _LIST_KEYS}
 
@@ -281,7 +300,10 @@ def discover_subagent_definitions(
             # весь старт агента, хотя обещание модуля — «битый файл не лишает
             # оператора остальных».
             definition = parse_subagent_file(path, read_user_text(path))
-        except (OSError, ValueError) as exc:  # ValueError ⊇ SubagentDefinitionError
+        except (
+            OSError,
+            ValueError,
+        ) as exc:  # ValueError ⊇ SubagentDefinitionError
             _warn(
                 logger,
                 "subagent_definition_invalid error=%s",

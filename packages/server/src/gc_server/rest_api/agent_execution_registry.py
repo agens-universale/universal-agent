@@ -134,7 +134,9 @@ class AgentRunRegistry:
         with self._lock:
             return self._get_status_locked(key)
 
-    def get_status_snapshot(self, *, system: str, task_id: str) -> tuple[Optional[float], Optional[ActiveRun]]:
+    def get_status_snapshot(
+        self, *, system: str, task_id: str
+    ) -> tuple[Optional[float], Optional[ActiveRun]]:
         """Статус задачи для клиента одним снимком: (с каких пор строится контекст, прогон).
 
         Первое — время брони, если контекст задачи сейчас строится, иначе None.
@@ -171,7 +173,9 @@ class AgentRunRegistry:
             run = self._runs.get(key)
             if (run is not None and not run.done) or key in self._reservations:
                 return False
-            self._reservations[key] = _Reservation(done=asyncio.Event(), taken_at=time.time())
+            self._reservations[key] = _Reservation(
+                done=asyncio.Event(), taken_at=time.time()
+            )
             return True
 
     def release_reservation(self, *, system: str, task_id: str) -> None:
@@ -267,7 +271,9 @@ class AgentRunRegistry:
                             tail = _take_tail(executor)
                             # С этой строки хвост — только здесь.
                             in_flight = tail
-                            stopped = run_ref is not None and run_ref.stop_requested
+                            stopped = (
+                                run_ref is not None and run_ref.stop_requested
+                            )
                             replay = bool(tail) and not stopped
                             if run_ref is not None:
                                 # Конец хода — активность прогона, а при хвосте
@@ -281,7 +287,9 @@ class AgentRunRegistry:
                                     # хвостовой ход идёт по тому же треду и
                                     # отвечает с учётом всего, что было до него.
                                     run_ref.result = result
-                                    run_ref.finished_at = run_ref.last_activity_at
+                                    run_ref.finished_at = (
+                                        run_ref.last_activity_at
+                                    )
                             if not replay:
                                 dropped, ending = tail, "stopped"
                         if not replay:
@@ -289,7 +297,9 @@ class AgentRunRegistry:
                         # Доигрываем хвост отдельным ходом того же исполнителя
                         # по тому же треду: на следующий старт сервер строит
                         # НОВЫЙ исполнитель, и оставленное в этом пропало бы.
-                        from gc_core.agent_executor import undelivered_as_arun_args
+                        from gc_core.agent_executor import (
+                            undelivered_as_arun_args,
+                        )
 
                         messages, run_kwargs = undelivered_as_arun_args(tail)
                 except asyncio.CancelledError:
@@ -352,7 +362,9 @@ class AgentRunRegistry:
                     release_run_logger(getattr(ctx, "logger", None))
 
             # Таска, а не поток: эндпоинт уже на loop, а ядро больше не блокирует.
-            t = asyncio.get_running_loop().create_task(_runner(), name=f"agent-run:{key}")
+            t = asyncio.get_running_loop().create_task(
+                _runner(), name=f"agent-run:{key}"
+            )
             run_ref = ActiveRun(
                 key=key,
                 system=system,

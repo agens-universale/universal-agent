@@ -74,7 +74,11 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
-    from gc_testkit import LoopPulse, assert_loop_was_free, quiet_gc_for_loop_timing
+    from gc_testkit import (
+        LoopPulse,
+        assert_loop_was_free,
+        quiet_gc_for_loop_timing,
+    )
 
     # Сборщик глушится на окне замера: замерено зондом, что в полном наборе в
     # это окно попадает до 872 мс пауз stop-the-world при собственной работе
@@ -90,7 +94,9 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
                 answer = await agent.run("поспи 0.3 секунды", thread_id="t1")
 
     assert answer
-    assert len(pulse.gaps) > 10, f"хартбит почти не тикал: {len(pulse.gaps)} тиков"
+    assert len(pulse.gaps) > 10, (
+        f"хартбит почти не тикал: {len(pulse.gaps)} тиков"
+    )
     # Два пропуска, а не один по умолчанию. У хода два куска без уступки —
     # от начала `run` до первого `await` и хвост после последнего, — и
     # файловое хранилище тредов пишет и читает в них инлайн, как и задумано
@@ -134,7 +140,9 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
         b = await AsyncAgent.create(cfg_b)
         started = time.monotonic()
         async with a, b:
-            r1, r2 = await asyncio.gather(a.run("поспи", thread_id="t1"), b.run("поспи", thread_id="t2"))
+            r1, r2 = await asyncio.gather(
+                a.run("поспи", thread_id="t1"), b.run("поспи", thread_id="t2")
+            )
         pair = time.monotonic() - started
 
     assert r1 and r2
@@ -186,7 +194,9 @@ print(json.dumps(leaked))
     env = dict(os.environ)
     src_dirs = [str(d) for d in package_src_dirs()]
     if src_dirs:
-        env["PYTHONPATH"] = os.pathsep.join(src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+        env["PYTHONPATH"] = os.pathsep.join(
+            src_dirs + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+        )
 
     out = subprocess.run(
         [sys.executable, "-c", script],

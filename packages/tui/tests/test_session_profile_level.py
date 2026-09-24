@@ -14,7 +14,10 @@ import yaml
 pytest.importorskip("textual")
 
 from gc_core.config import load_config_ex
-from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
+from gc_core.runtime_notices import (
+    clear_runtime_notices,
+    collect_runtime_notices,
+)
 from gc_tui.app import TuiApp
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.session_settings import SESSION_KEYS, read_breaker_from_meta
@@ -47,15 +50,22 @@ def _app_with_base(tmp_path: Path) -> TuiApp:
     base = tmp_path / "config.yml"
     _write_yaml(base, _MINIMAL_BASE)
     cfg, _meta = load_config_ex(str(base))
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
     return app
 
 
-def _write_work_profile(tmp_path: Path, url: str = "http://work/v1/chat/completions") -> Path:
+def _write_work_profile(
+    tmp_path: Path, url: str = "http://work/v1/chat/completions"
+) -> Path:
     return _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": url, "token": ""}}, "slots": {"default": "flash"}},
+        {
+            "models": {"flash": {"url": url, "token": ""}},
+            "slots": {"default": "flash"},
+        },
     )
 
 
@@ -71,7 +81,11 @@ def test_level_registered_in_session_keys():
 async def test_level_restored_on_attach(tmp_path):
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     store.update_tui_meta("t-level", {"session_settings": {"level": "max"}})
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M", "level": "default"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M", "level": "default"},
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-level")
         await pilot.pause(0.1)
@@ -82,7 +96,11 @@ async def test_level_restored_on_attach(tmp_path):
 
 
 def test_level_change_does_not_invalidate_runner(tmp_path):
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M", "level": "default"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M", "level": "default"},
+    )
     calls = {"n": 0}
     app.invalidate_runner = lambda: calls.__setitem__("n", calls["n"] + 1)
     app.apply_session_override("level", "light")
@@ -90,7 +108,11 @@ def test_level_change_does_not_invalidate_runner(tmp_path):
 
 
 def test_level_provider_reflects_session_override_without_rebuild(tmp_path):
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M", "level": "default"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M", "level": "default"},
+    )
     assert app._level_provider() == "default"
     app.set_session_override("level", "max")
     assert app._level_provider() == "max"  # без пересборки executor
@@ -144,7 +166,12 @@ def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
     _write_yaml(
         tmp_path / "profiles" / "work.yml",
         {
-            "models": {"flash": {"url": "http://work/v1/chat/completions", "token": ""}},
+            "models": {
+                "flash": {
+                    "url": "http://work/v1/chat/completions",
+                    "token": "",
+                }
+            },
             "slots": {"default": "flash"},
             "level": "max",
         },
@@ -155,7 +182,9 @@ def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
     app.set_session_override("level", "light")
     app.switch_session_profile("work")
     assert app.effective_config()["level"] == "light"
-    assert "flash" in app.effective_config()["models"]  # прочее из профиля пришло
+    assert (
+        "flash" in app.effective_config()["models"]
+    )  # прочее из профиля пришло
 
     # 2) сессия позже профиля — ложится сверху
     app.set_session_override("level", "default")
@@ -214,7 +243,9 @@ def test_reload_config_refreshes_stale_profile_cache(tmp_path):
 # --- за базовым указателем («выбор, не снимок», §3.3) ------------------------------
 
 
-def test_reload_config_if_changed_picks_up_edit_of_session_selected_profile(tmp_path):
+def test_reload_config_if_changed_picks_up_edit_of_session_selected_profile(
+    tmp_path,
+):
     """Репро ревьюера: база `profile: ""`, сессия выбрала `work` (базовый указатель
     её не называет). Правка work.yml на диске обязана всплыть на ближайшей
     перечитке (reload_config_if_changed — существующий тикер), а не остаться
@@ -222,13 +253,21 @@ def test_reload_config_if_changed_picks_up_edit_of_session_selected_profile(tmp_
     _write_work_profile(tmp_path, url="http://work/v1/chat/completions")
     app = _app_with_base(tmp_path)
     app.switch_session_profile("work")
-    assert app.effective_config()["models"]["flash"]["url"] == "http://work/v1/chat/completions"
+    assert (
+        app.effective_config()["models"]["flash"]["url"]
+        == "http://work/v1/chat/completions"
+    )
 
     work_path = tmp_path / "profiles" / "work.yml"
     _write_yaml(
         work_path,
         {
-            "models": {"flash": {"url": "http://work-v2/v1/chat/completions", "token": ""}},
+            "models": {
+                "flash": {
+                    "url": "http://work-v2/v1/chat/completions",
+                    "token": "",
+                }
+            },
             "slots": {"default": "flash"},
         },
     )
@@ -236,10 +275,15 @@ def test_reload_config_if_changed_picks_up_edit_of_session_selected_profile(tmp_
 
     app.reload_config_if_changed()
 
-    assert app.effective_config()["models"]["flash"]["url"] == "http://work-v2/v1/chat/completions"
+    assert (
+        app.effective_config()["models"]["flash"]["url"]
+        == "http://work-v2/v1/chat/completions"
+    )
 
 
-def test_reload_config_if_changed_sanitizes_session_profile_broken_by_edit(tmp_path):
+def test_reload_config_if_changed_sanitizes_session_profile_broken_by_edit(
+    tmp_path,
+):
     """Тот же сценарий, но правка ЛОМАЕТ файл (а не просто меняет значение):
     ближайшая перечитка обязана дойти до sanitize_session_profile (снять оверрайд +
     notice), а не тихо проглотить ошибку где-то по пути."""
@@ -250,7 +294,9 @@ def test_reload_config_if_changed_sanitizes_session_profile_broken_by_edit(tmp_p
     assert "flash" in app.effective_config()["models"]
 
     work_path = tmp_path / "profiles" / "work.yml"
-    work_path.write_text("models: [this is not, valid: yaml:", encoding="utf-8")
+    work_path.write_text(
+        "models: [this is not, valid: yaml:", encoding="utf-8"
+    )
     _bump_mtime(work_path)
 
     app.reload_config_if_changed()
@@ -275,15 +321,21 @@ def test_profile_remerge_notices_once_on_race_and_falls_back(tmp_path):
     # перечитка) — прямой вызов _profile_remerge с изменившимся содержимым,
     # но старым кэш-ключом, эмулирует гонку "испортилось между кадрами".
     work_path = tmp_path / "profiles" / "work.yml"
-    app._session_profile_cache = None  # форсируем реальный поход в load_config_ex
+    app._session_profile_cache = (
+        None  # форсируем реальный поход в load_config_ex
+    )
     work_path.write_text("models: [broken", encoding="utf-8")
 
     cfg1 = app._profile_remerge("work")
-    assert cfg1 == app._config  # фоллбэк — прежняя (базовая) рабочая конфигурация
+    assert (
+        cfg1 == app._config
+    )  # фоллбэк — прежняя (базовая) рабочая конфигурация
     codes = [n.code for n in collect_runtime_notices()]
     assert codes.count("session_profile_remerge_failed") == 1
 
-    cfg2 = app._profile_remerge("work")  # тот же (испорченный) ключ — кэш, БЕЗ повторного notice
+    cfg2 = app._profile_remerge(
+        "work"
+    )  # тот же (испорченный) ключ — кэш, БЕЗ повторного notice
     assert cfg2 == app._config
     codes_after = [n.code for n in collect_runtime_notices()]
     assert codes_after.count("session_profile_remerge_failed") == 1
@@ -304,7 +356,11 @@ def test_sanitize_drops_stale_session_profile_with_notice(tmp_path):
     assert "profile" not in app._session_overrides
     codes = [n.code for n in collect_runtime_notices()]
     assert "session_profile_stale" in codes
-    msg = next(n.message for n in collect_runtime_notices() if n.code == "session_profile_stale")
+    msg = next(
+        n.message
+        for n in collect_runtime_notices()
+        if n.code == "session_profile_stale"
+    )
     assert "ghost" in msg
     assert calls["n"] == 1
 
@@ -316,8 +372,12 @@ async def test_attach_sanitizes_stale_session_profile(tmp_path):
     _write_yaml(base, _MINIMAL_BASE)
     cfg, _meta = load_config_ex(str(base))
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    store.update_tui_meta("t-stale", {"session_settings": {"profile": "ghost"}})
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    store.update_tui_meta(
+        "t-stale", {"session_settings": {"profile": "ghost"}}
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-stale")
@@ -327,7 +387,9 @@ async def test_attach_sanitizes_stale_session_profile(tmp_path):
         assert "session_profile_stale" in codes
 
 
-def test_reload_config_if_changed_keeps_base_when_config_profile_pointer_broken(tmp_path):
+def test_reload_config_if_changed_keeps_base_when_config_profile_pointer_broken(
+    tmp_path,
+):
     """Ветка «выбран конфигом» (§9.4): исчезнувший/невалидный указатель В ФАЙЛЕ
     базового конфига — существующий канон reload_config_if_changed (config_reload_failed,
     прежняя база), НЕ санация сессии — это разные ветки одной спеки."""
@@ -342,14 +404,20 @@ def test_reload_config_if_changed_keeps_base_when_config_profile_pointer_broken(
     app.reload_config_if_changed()
 
     assert app._config == good_config
-    assert [n.code for n in collect_runtime_notices()] == ["config_reload_failed"]
+    assert [n.code for n in collect_runtime_notices()] == [
+        "config_reload_failed"
+    ]
 
 
 # --- 6. Предохранитель: персист/restore/сброс по mtime и по смене профиля ----------
 
 
 def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-breaker"
     app._circuit_breaker.trip("flash", "недоступна")
     app.persist_circuit_breaker()
@@ -358,7 +426,11 @@ def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
     snapshot = read_breaker_from_meta(store.get_task_meta("t-breaker"))
     assert snapshot.get("flash") == "недоступна"
 
-    app2 = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app2 = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app2.load_circuit_breaker(snapshot)
     assert app2._circuit_breaker.is_open("flash") is True
 
@@ -366,7 +438,11 @@ def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
 def test_run_completion_persists_circuit_breaker(tmp_path):
     """Проводка: `_on_runner_complete` персистит предохранитель — трипы во время
     рана обязаны пережить пересборку executor следующего хода."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-run"
 
     class _Exec:
@@ -396,7 +472,11 @@ def test_run_failure_persists_circuit_breaker(tmp_path):
     """Ран упал (бэкенд лёг) — путь `_emit_error`, а не `_on_runner_complete`.
     Трип обязан пережить падение: иначе следующий ход снова ломится в мёртвый
     алиас, и §8 не работает ровно там, где нужен."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-fail"
 
     class _Exec:
@@ -426,7 +506,11 @@ def test_run_persists_circuit_breaker_even_after_runner_replaced(tmp_path):
     """Ctrl+C: `_stop_and_replace_runner` обнуляет `active_runner`, и проверка
     владельца в колбэке отсекает UI-поля чужого раннера. Предохранитель под неё
     попадать не должен — объект один на приложение, трипы уже случились."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-stop"
 
     class _Exec:
@@ -458,7 +542,11 @@ def test_breaker_persist_is_marshalled_to_ui_thread(tmp_path):
     туда же на спаде is_running (статус треда, session overrides). Запись прямо
     с воркер-потока теряет одну из правок и может оставить обрезанный файл —
     мост на UI-поток обязателен, как у остальных колбэков раннера."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-thread"
     marshalled = []
 
@@ -512,13 +600,19 @@ def test_switch_session_profile_resets_breaker(tmp_path):
     assert app._circuit_breaker.is_open("flash") is False
 
 
-def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(tmp_path):
+def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
+    tmp_path,
+):
     """Important-1: attach нового треда НЕ подменяет объект предохранителя —
     прогретый executor держит ссылку на ТОТ ЖЕ объект. Иначе трипы рана уходят в
     осиротевший breaker, а persist_circuit_breaker пишет пустой новый (§8)."""
     from gc_core.model_router import ModelRouter
 
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-2"
 
     # executor-router собран с текущим breaker — как _build_real_executor (circuit_breaker=self._circuit_breaker)
@@ -556,7 +650,9 @@ async def test_footer_model_name_survives_open_active_alias(tmp_path):
         "slots": {"default": "flash"},
         "level": "default",
     }
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         app._circuit_breaker.trip("flash", "5xx")
@@ -573,7 +669,9 @@ async def test_footer_model_name_hides_unset_sentinel(tmp_path):
         "backend_api_mode": "chat_completions",
         "model": onboarding.MODEL_SENTINEL,
     }
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         assert scr._footer_model_name() != onboarding.MODEL_SENTINEL
@@ -588,7 +686,9 @@ async def test_status_survives_open_active_alias(tmp_path):
         "slots": {"default": "flash"},
         "level": "default",
     }
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         app._circuit_breaker.trip("flash", "5xx")
@@ -600,7 +700,11 @@ async def test_status_survives_open_active_alias(tmp_path):
 async def test_new_session_thread_gets_fresh_breaker(tmp_path):
     """Новая сессия (другой тред без персистированного предохранителя) не
     наследует трипы окна (§8: «сброс — новая сессия»)."""
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config={"model": "M"},
+    )
     app.tui_state.active_task_id = "t-old"
     app._circuit_breaker.trip("flash", "недоступна")
     async with app.run_test() as pilot:
@@ -627,7 +731,11 @@ def test_boot_frozen_diff_notice_on_profile_switch(tmp_path):
     assert app.effective_config()["threads_data_path"] == threads_override
     codes = [n.code for n in collect_runtime_notices()]
     assert "boot_frozen_pending" in codes
-    msg = next(n.message for n in collect_runtime_notices() if n.code == "boot_frozen_pending")
+    msg = next(
+        n.message
+        for n in collect_runtime_notices()
+        if n.code == "boot_frozen_pending"
+    )
     assert "paths.threads_data_path" in msg
     assert "следующего запуска" in msg
 
@@ -674,24 +782,40 @@ def test_project_profile_activation_notice(tmp_path, monkeypatch):
     _write_yaml(base, _MINIMAL_BASE)
     _write_yaml(
         project_dir / ".gc" / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://proj/v1/chat/completions", "token": ""}}, "slots": {"default": "flash"}},
+        {
+            "models": {
+                "flash": {
+                    "url": "http://proj/v1/chat/completions",
+                    "token": "",
+                }
+            },
+            "slots": {"default": "flash"},
+        },
     )
     cfg, _meta = load_config_ex(str(base))
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
 
     app.switch_session_profile("work")
 
     codes = [n.code for n in collect_runtime_notices()]
     assert "project_profile_activated" in codes
-    msg = next(n.message for n in collect_runtime_notices() if n.code == "project_profile_activated")
+    msg = next(
+        n.message
+        for n in collect_runtime_notices()
+        if n.code == "project_profile_activated"
+    )
     assert "work" in msg and "proj/v1" in msg
 
 
 # --- 9. Смена ИСТОЧНИКА активного профиля под ногами (спека §3.1/§14) --------------
 
 
-def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkeypatch):
+def test_notice_when_project_namesake_takes_over_active_profile(
+    tmp_path, monkeypatch
+):
     """`git pull` принёс `.gc/profiles/work.yml` — активный профиль того же имени
     молча переехал бы с базового корня на проектный, сменив модели, адреса и
     токены. Имя в футере при этом не меняется, и заметить подмену не по чему.
@@ -710,13 +834,20 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     base_profile = _write_yaml(
         tmp_path / "profiles" / "work.yml",
         {
-            "models": {"flash": {"url": "http://base-root/v1/chat/completions", "token": ""}},
+            "models": {
+                "flash": {
+                    "url": "http://base-root/v1/chat/completions",
+                    "token": "",
+                }
+            },
             "slots": {"default": "flash"},
         },
     )
 
     cfg, _meta = load_config_ex(str(base))
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
     assert app.active_profile_ref().root_kind == "base"
 
@@ -724,7 +855,12 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     proj_profile = _write_yaml(
         project_dir / ".gc" / "profiles" / "work.yml",
         {
-            "models": {"flash": {"url": "http://project-root/v1/chat/completions", "token": ""}},
+            "models": {
+                "flash": {
+                    "url": "http://project-root/v1/chat/completions",
+                    "token": "",
+                }
+            },
             "slots": {"default": "flash"},
         },
     )
@@ -733,14 +869,18 @@ def test_notice_when_project_namesake_takes_over_active_profile(tmp_path, monkey
     assert app.active_profile_ref().root_kind == "project"
     notices = collect_runtime_notices()
     match = [n for n in notices if n.code == "profile_source_changed"]
-    assert match, f"нет notice о смене источника профиля; коды: {[n.code for n in notices]}"
+    assert match, (
+        f"нет notice о смене источника профиля; коды: {[n.code for n in notices]}"
+    )
     msg = match[0].message
     assert "work" in msg
     assert str(proj_profile) in msg  # куда переехал
     assert str(base_profile) in msg  # откуда
 
 
-def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch):
+def test_no_source_notice_when_profile_file_merely_edited(
+    tmp_path, monkeypatch
+):
     """Обратная половина: правка того же файла — не смена источника. Без неё
     notice сыпался бы на каждое сохранение профиля из /settings и его перестали
     бы читать."""
@@ -753,24 +893,42 @@ def test_no_source_notice_when_profile_file_merely_edited(tmp_path, monkeypatch)
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
     profile = _write_yaml(
         tmp_path / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://one/v1/chat/completions", "token": ""}}, "slots": {"default": "flash"}},
+        {
+            "models": {
+                "flash": {"url": "http://one/v1/chat/completions", "token": ""}
+            },
+            "slots": {"default": "flash"},
+        },
     )
 
     cfg, _meta = load_config_ex(str(base))
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
 
     _write_yaml(
         profile,
-        {"models": {"flash": {"url": "http://two/v1/chat/completions", "token": ""}}, "slots": {"default": "flash"}},
+        {
+            "models": {
+                "flash": {"url": "http://two/v1/chat/completions", "token": ""}
+            },
+            "slots": {"default": "flash"},
+        },
     )
     _bump_mtime(profile)
     app.reload_config_if_changed()
 
-    assert [n for n in collect_runtime_notices() if n.code == "profile_source_changed"] == []
+    assert [
+        n
+        for n in collect_runtime_notices()
+        if n.code == "profile_source_changed"
+    ] == []
 
 
-def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeypatch):
+def test_no_source_notice_when_the_profile_name_itself_changed(
+    tmp_path, monkeypatch
+):
     """Третья ветка: сменилось само ИМЯ активного профиля — файл, разумеется,
     другой, но это осознанное переключение, и о нём говорят свои каналы
     (`project_profile_activated`, `profile_switch_deferred`). Notice «профиль
@@ -787,14 +945,22 @@ def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeyp
 
     base = tmp_path / "config.yml"
     _write_yaml(base, {**_MINIMAL_BASE, "profile": "work"})
-    for name, url in (("work", "http://work/v1/chat/completions"), ("home", "http://home/v1/chat/completions")):
+    for name, url in (
+        ("work", "http://work/v1/chat/completions"),
+        ("home", "http://home/v1/chat/completions"),
+    ):
         _write_yaml(
             tmp_path / "profiles" / f"{name}.yml",
-            {"models": {"flash": {"url": url, "token": ""}}, "slots": {"default": "flash"}},
+            {
+                "models": {"flash": {"url": url, "token": ""}},
+                "slots": {"default": "flash"},
+            },
         )
 
     cfg, _meta = load_config_ex(str(base))
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
     assert app.active_profile_ref().name == "work"
 
@@ -805,7 +971,9 @@ def test_no_source_notice_when_the_profile_name_itself_changed(tmp_path, monkeyp
 
     assert app.active_profile_ref().name == "home"
     codes = [n.code for n in collect_runtime_notices()]
-    assert "profile_source_changed" not in codes, f"смена имени профиля — не смена источника; коды: {codes}"
+    assert "profile_source_changed" not in codes, (
+        f"смена имени профиля — не смена источника; коды: {codes}"
+    )
 
 
 def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
@@ -816,13 +984,18 @@ def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
     идущая другим поводом (attach треда, перечитка), не должна менять
     `effective_config`."""
     app = _app_with_base(tmp_path)
-    _write_yaml(tmp_path / "profiles" / "work.yml", {"strip_tags_projection": {"tags": ["scratchpad"]}})
+    _write_yaml(
+        tmp_path / "profiles" / "work.yml",
+        {"strip_tags_projection": {"tags": ["scratchpad"]}},
+    )
     app.set_session_override("profile", "work")
     before = dict(app.effective_config().get("strip_tags_projection") or {})
 
     app.sanitize_session_profile()
 
-    assert "profile" in app._session_overrides  # профиль здоров — санация не сняла
+    assert (
+        "profile" in app._session_overrides
+    )  # профиль здоров — санация не сняла
     after = dict(app.effective_config().get("strip_tags_projection") or {})
     assert after == before
 
@@ -830,13 +1003,20 @@ def test_sanitize_does_not_apply_the_probed_profile_to_the_process(tmp_path):
 # --- 10. Гейт сессионного выбора: несобираемый профиль отклоняется на месте --------
 
 
-def _write_unreadable_profile(tmp_path: Path, name: str = "broken-enc") -> Path:
+def _write_unreadable_profile(
+    tmp_path: Path, name: str = "broken-enc"
+) -> Path:
     """Профиль в UTF-16: файл на месте, в списке пикера есть, а прочитать нельзя
     (живой смок владельца)."""
     path = tmp_path / "profiles" / f"{name}.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        yaml.safe_dump({"models": {"gc": {"url": "http://y", "token": ""}}, "slots": {"default": "gc"}}),
+        yaml.safe_dump(
+            {
+                "models": {"gc": {"url": "http://y", "token": ""}},
+                "slots": {"default": "gc"},
+            }
+        ),
         encoding="utf-16",
     )
     return path
@@ -849,7 +1029,9 @@ def _meta_overrides(tmp_path: Path, task_id: str) -> dict:
     return read_from_meta(store.get_task_meta(task_id))
 
 
-def test_switch_session_profile_refuses_a_profile_that_does_not_assemble(tmp_path):
+def test_switch_session_profile_refuses_a_profile_that_does_not_assemble(
+    tmp_path,
+):
     """Выбор профиля, с которым конфиг не собирается, обязан быть отклонён
     вызывающему исключением: тихий фоллбэк `_profile_remerge` оставлял имя в
     футере и в мете треда, а работала при этом база — витрина называла профиль,
@@ -869,7 +1051,9 @@ def test_switch_session_profile_refuses_a_profile_that_does_not_assemble(tmp_pat
 def test_switch_session_profile_refuses_invalid_yaml_profile(tmp_path):
     """Тот же класс, другой способ сломать файл: неразбираемый YAML."""
     _write_yaml(tmp_path / "profiles" / "ok.yml", {"models": {}})
-    (tmp_path / "profiles" / "bad.yml").write_text("models: [broken", encoding="utf-8")
+    (tmp_path / "profiles" / "bad.yml").write_text(
+        "models: [broken", encoding="utf-8"
+    )
     app = _app_with_base(tmp_path)
     app.tui_state.active_task_id = "t-yaml"
 
@@ -884,7 +1068,10 @@ def test_switch_session_profile_refuses_profile_with_dangling_slot(tmp_path):
     """Файл читается и разбирается, а конфиг всё равно не собирается: `slots.default`
     указывает на алиас, которого нет в merged-словаре models. Гейт судит по сборке,
     а не по читаемости файла."""
-    _write_yaml(tmp_path / "profiles" / "dangling.yml", {"slots": {"default": "nosuch"}})
+    _write_yaml(
+        tmp_path / "profiles" / "dangling.yml",
+        {"slots": {"default": "nosuch"}},
+    )
     app = _app_with_base(tmp_path)
     app.tui_state.active_task_id = "t-slot"
 
@@ -907,7 +1094,9 @@ def test_switch_session_profile_still_applies_a_healthy_profile(tmp_path):
     assert "flash" in app.effective_config()["models"]
 
 
-def test_session_profile_removal_works_even_when_current_choice_is_broken(tmp_path):
+def test_session_profile_removal_works_even_when_current_choice_is_broken(
+    tmp_path,
+):
     """Снятие профиля — дверь наружу: она обязана открываться и тогда, когда в
     сессии лежит негодное имя (его положила прежняя версия, до гейта). Судить
     снятие по сборке снимаемого профиля значило бы запереть человека внутри."""
@@ -934,11 +1123,16 @@ def test_session_profile_removal_does_not_probe_at_all(tmp_path):
     assert app._session_overrides["profile"] == ""
 
 
-def test_switch_session_profile_gate_probes_without_applying_to_process(tmp_path):
+def test_switch_session_profile_gate_probes_without_applying_to_process(
+    tmp_path,
+):
     """Проба гейта не применяет профиль к процессу — иначе сорвавшийся персист
     (каталог тредов недоступен) оставлял бы процесс с чужим
     `strip_tags_projection`, которого нет ни в сессии, ни в мете."""
-    _write_yaml(tmp_path / "profiles" / "work.yml", {"strip_tags_projection": {"tags": ["scratchpad"]}})
+    _write_yaml(
+        tmp_path / "profiles" / "work.yml",
+        {"strip_tags_projection": {"tags": ["scratchpad"]}},
+    )
     app = _app_with_base(tmp_path)
 
     def _no_disk() -> None:
@@ -965,7 +1159,9 @@ def test_profile_broken_after_the_choice_still_degrades_to_the_base(tmp_path):
     app = _app_with_base(tmp_path)
     app.switch_session_profile("work")
 
-    (tmp_path / "profiles" / "work.yml").write_text("models: [broken", encoding="utf-8")
+    (tmp_path / "profiles" / "work.yml").write_text(
+        "models: [broken", encoding="utf-8"
+    )
     app._session_profile_cache = None
 
     assert app._profile_remerge("work") == app._config
@@ -973,7 +1169,9 @@ def test_profile_broken_after_the_choice_still_degrades_to_the_base(tmp_path):
     assert "session_profile_remerge_failed" in codes
 
 
-def test_sanitize_drops_an_unreadable_session_profile_naming_the_reason(tmp_path):
+def test_sanitize_drops_an_unreadable_session_profile_naming_the_reason(
+    tmp_path,
+):
     """Санация снимает не только ПРОПАВШИЙ профиль, но и нечитаемый — и говорит,
     почему: «не найден» посылало искать файл, который лежит на месте."""
     clear_runtime_notices()
@@ -984,7 +1182,11 @@ def test_sanitize_drops_an_unreadable_session_profile_naming_the_reason(tmp_path
     app.sanitize_session_profile()
 
     assert "profile" not in app._session_overrides
-    msg = next(n.message for n in collect_runtime_notices() if n.code == "session_profile_stale")
+    msg = next(
+        n.message
+        for n in collect_runtime_notices()
+        if n.code == "session_profile_stale"
+    )
     assert "broken-enc" in msg and str(path) in msg
 
 
@@ -999,8 +1201,12 @@ async def test_attach_sanitizes_an_unreadable_session_profile(tmp_path):
     _write_unreadable_profile(tmp_path)
     cfg, _meta = load_config_ex(str(base))
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    store.update_tui_meta("t-broken", {"session_settings": {"profile": "broken-enc"}})
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    store.update_tui_meta(
+        "t-broken", {"session_settings": {"profile": "broken-enc"}}
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base))
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-broken")

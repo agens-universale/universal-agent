@@ -33,7 +33,11 @@ class FileSearchSession:
     Лок не держится ни во время сборки и поиска, ни во время `on_result`: колбэк экрана
     ждёт UI-поток, а UI-поток зовёт `want` и `close`."""
 
-    def __init__(self, index: PathIndex, on_result: Callable[[str, list[str], bool], None]) -> None:
+    def __init__(
+        self,
+        index: PathIndex,
+        on_result: Callable[[str, list[str], bool], None],
+    ) -> None:
         self.index = index
         self._on_result = on_result
         self._cond = threading.Condition()
@@ -41,7 +45,9 @@ class FileSearchSession:
         self._busy = False  # запрос снят, с ним ещё не закончили
         self._closed = False
         self._exited = False
-        threading.Thread(target=self._run, name="file-search", daemon=True).start()
+        threading.Thread(
+            target=self._run, name="file-search", daemon=True
+        ).start()
 
     def want(self, query: str) -> None:
         """Посчитать query — поверх ещё не взятого прежнего запроса. Не блокирует."""
@@ -62,7 +68,12 @@ class FileSearchSession:
         отброшено из-за закрытия), либо поток вышел; False — вышел таймаут. Не из
         UI-потока: поток может ждать его внутри `on_result`."""
         with self._cond:
-            return self._cond.wait_for(lambda: (self._pending is None and not self._busy) or self._exited, timeout)
+            return self._cond.wait_for(
+                lambda: (
+                    (self._pending is None and not self._busy) or self._exited
+                ),
+                timeout,
+            )
 
     def _run(self) -> None:
         try:
@@ -81,7 +92,9 @@ class FileSearchSession:
                     with self._cond:
                         if self._closed:
                             return  # закрыли во время сборки — не фильтруем
-                        if self._pending is not None:  # пока собирали, ввод ушёл дальше
+                        if (
+                            self._pending is not None
+                        ):  # пока собирали, ввод ушёл дальше
                             query, self._pending = self._pending, None
                     entries = self.index.search(query)
                     truncated = self.index.truncated
@@ -89,7 +102,12 @@ class FileSearchSession:
                     # Наружу нельзя: умерший поток оставил бы последний запрос без
                     # результата, а Enter — ждать его вечно. Запрос уже снят из ячейки,
                     # так что на один `want` — одна попытка сборки, без горячего цикла.
-                    _log.warning("file search failed: root=%s query=%r", self.index.root, query, exc_info=True)
+                    _log.warning(
+                        "file search failed: root=%s query=%r",
+                        self.index.root,
+                        query,
+                        exc_info=True,
+                    )
                     entries, truncated = [], False
                 with self._cond:
                     if self._closed:

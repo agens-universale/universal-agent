@@ -15,7 +15,9 @@ from typing import AbstractSet, Iterable, Optional
 
 # Nested dir basenames never descended into (start path itself is always kept).
 # Not configurable — removing names from YAML must not re-enable these trees.
-HARD_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({"venv", "__pycache__", "node_modules", ".git"})
+HARD_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset(
+    {"venv", "__pycache__", "node_modules", ".git"}
+)
 
 # Nested directories whose basename starts with '.' are never descended into.
 # Not configurable (start path still kept).

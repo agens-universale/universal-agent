@@ -77,7 +77,9 @@ def make_ctx_state(*, history: list[dict] | None = None):
     state = SimpleNamespace(
         state_id="proj-int-state",
         x_target=None,
-        messages=copy.deepcopy(history if history is not None else dirty_canonical_history()),
+        messages=copy.deepcopy(
+            history if history is not None else dirty_canonical_history()
+        ),
         tools=[],
         default_model="test-model",
         usage=None,
@@ -126,5 +128,7 @@ def capture_outbound(monkeypatch):
             payload,
         )
 
-    monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", fake_policy)
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", fake_policy
+    )
     return captured

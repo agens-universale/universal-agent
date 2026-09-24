@@ -11,8 +11,12 @@ import gc
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     history_exceeds_summary_trigger,
@@ -31,7 +35,9 @@ if TYPE_CHECKING:
     from gc_core.thread_store import ThreadSession
 
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
-_FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
+_FUNCTION_OUTPUT_TYPES = frozenset(
+    {"function_call_output", "tool_call_output"}
+)
 
 # Страховка pre_run: в штате хватает 1 прохода; лимит на случай «лапши», которая после сжатия всё ещё выше порога.
 _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
@@ -89,8 +95,14 @@ async def areset_stale_summarizing_flag(thread_session) -> None:
         return
     ts = thread_session
     disk = await ts.port.aload_meta(ts.system_id, ts.thread_id) or {}
-    rt = (ts.meta.get("runtime") or {}) if isinstance(ts.meta.get("runtime"), dict) else {}
-    disk_rt = disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
+    rt = (
+        (ts.meta.get("runtime") or {})
+        if isinstance(ts.meta.get("runtime"), dict)
+        else {}
+    )
+    disk_rt = (
+        disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
+    )
     if rt.get("summarizing") or disk_rt.get("summarizing"):
         await _aset_runtime_flag(ts, "summarizing", False)
 
@@ -128,7 +140,9 @@ def filter_messages_not_in_state(
     """
     if not batch:
         return []
-    known = {make_message_key(m) for m in state_messages if isinstance(m, dict)}
+    known = {
+        make_message_key(m) for m in state_messages if isinstance(m, dict)
+    }
     out: list[dict] = []
     for msg in batch:
         if not isinstance(msg, dict):
@@ -141,7 +155,9 @@ def filter_messages_not_in_state(
     return out
 
 
-def remove_exact_suffix_if_matches(messages: list[dict], suffix: list[dict]) -> bool:
+def remove_exact_suffix_if_matches(
+    messages: list[dict], suffix: list[dict]
+) -> bool:
     """
     Если ``messages`` заканчивается на последовательность ``suffix``, удалить этот суффикс
     только с хвоста (совпадение по списку и поэлементному ``==``). Иначе не менять историю.
@@ -165,7 +181,8 @@ def _preserved_user_ask_batch(
         incoming = [
             m
             for m in current_messages
-            if isinstance(m, dict) and make_message_key(m) not in message_keys_already_persisted
+            if isinstance(m, dict)
+            and make_message_key(m) not in message_keys_already_persisted
         ]
         scoped_messages = incoming if incoming else [current_messages[-1]]
     last = scoped_messages[-1]
@@ -183,13 +200,23 @@ def _preserved_user_ask_batch(
     return out
 
 
-def _preserved_function_output_batch(current_messages: list[dict], state_messages: list[dict]) -> list[dict]:
-    outputs = [m for m in current_messages if isinstance(m, dict) and m.get("type") in _FUNCTION_OUTPUT_TYPES]
+def _preserved_function_output_batch(
+    current_messages: list[dict], state_messages: list[dict]
+) -> list[dict]:
+    outputs = [
+        m
+        for m in current_messages
+        if isinstance(m, dict) and m.get("type") in _FUNCTION_OUTPUT_TYPES
+    ]
     batches: list[dict] = []
     seen_calls: set[str] = set()
     for output in outputs:
         call_id_raw = output.get("call_id")
-        if not isinstance(call_id_raw, str) or not call_id_raw or call_id_raw in seen_calls:
+        if (
+            not isinstance(call_id_raw, str)
+            or not call_id_raw
+            or call_id_raw in seen_calls
+        ):
             continue
         call_msg = find_function_call_for_id(
             call_id_raw,
@@ -225,9 +252,13 @@ def build_preserved_batch(
     if not current_messages:
         return []
     if mode == "user_ask":
-        return _preserved_user_ask_batch(current_messages, message_keys_already_persisted)
+        return _preserved_user_ask_batch(
+            current_messages, message_keys_already_persisted
+        )
     if mode == "function_call_output":
-        return _preserved_function_output_batch(current_messages, state_messages)
+        return _preserved_function_output_batch(
+            current_messages, state_messages
+        )
     return []
 
 
@@ -249,7 +280,11 @@ def find_function_call_for_id(
 
 def _find_function_call_in(seq, call_id: str) -> dict | None:
     for m in seq:
-        if isinstance(m, dict) and m.get("type") in _FUNCTION_CALL_TYPES and m.get("call_id") == call_id:
+        if (
+            isinstance(m, dict)
+            and m.get("type") in _FUNCTION_CALL_TYPES
+            and m.get("call_id") == call_id
+        ):
             return m
     return None
 
@@ -275,7 +310,9 @@ class RunSummaryCoordinator:
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
-        self._proj_tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+        self._proj_tags = projection_tags_from_config(
+            getattr(ctx, "config_dict", None)
+        )
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -289,10 +326,14 @@ class RunSummaryCoordinator:
             self._ctx,
             trigger_reason=str(event.get("trigger_reason") or ""),
             trace_data=event.get("summary_trace", {}),
-            newly_summarized_message_id=str(event.get("newly_summarized_message_id") or ""),
+            newly_summarized_message_id=str(
+                event.get("newly_summarized_message_id") or ""
+            ),
         )
 
-    async def apre_run_compact_if_needed(self, *, trigger_reason: str = "pre_run") -> None:
+    async def apre_run_compact_if_needed(
+        self, *, trigger_reason: str = "pre_run"
+    ) -> None:
         """Догнать историю до порога перед стартом run'а.
 
         Единственная форма: сетевой шаг внутри ``arun_summary_compaction``
@@ -301,7 +342,10 @@ class RunSummaryCoordinator:
         """
         logger = self._logger
         state = self._state
-        if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
+        if (
+            state.backend_api_mode != "chat_completions"
+            or self._summary_trigger_chars <= 0
+        ):
             return
         rounds = 0
         try:
@@ -315,7 +359,9 @@ class RunSummaryCoordinator:
                 if rounds > _PRE_RUN_SUMMARY_MAX_ROUNDS:
                     log_pre_run_max_rounds(
                         logger,
-                        thread_id=getattr(self._thread_session, "thread_id", None),
+                        thread_id=getattr(
+                            self._thread_session, "thread_id", None
+                        ),
                         max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
                     )
                     break
@@ -336,13 +382,16 @@ class RunSummaryCoordinator:
                 logger,
                 SummaryCompactionLog(
                     trigger_reason=trigger_reason,
-                    thread_id=getattr(self._thread_session, "thread_id", None) or getattr(state, "thread_id", None),
+                    thread_id=getattr(self._thread_session, "thread_id", None)
+                    or getattr(state, "thread_id", None),
                     is_cli_mode=self._is_cli_mode,
                 ),
                 summarize_exc,
             )
 
-    async def aforce_compact_once(self, *, trigger_reason: str = "manual") -> None:
+    async def aforce_compact_once(
+        self, *, trigger_reason: str = "manual"
+    ) -> None:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
         Та же машинерия, что и автосжатие; персист через on_summary_applied.
 
@@ -373,7 +422,10 @@ class RunSummaryCoordinator:
         корутинную функцию цикл ждёт нативно, без потока из пула.
         """
         state = self._state
-        if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
+        if (
+            state.backend_api_mode != "chat_completions"
+            or self._summary_trigger_chars <= 0
+        ):
             return
         if not history_exceeds_summary_trigger(
             state=state,
@@ -467,7 +519,8 @@ class RunSummaryCoordinator:
                 logger,
                 SummaryCompactionLog(
                     trigger_reason="turn_end",
-                    thread_id=getattr(self._thread_session, "thread_id", None) or getattr(state, "thread_id", None),
+                    thread_id=getattr(self._thread_session, "thread_id", None)
+                    or getattr(state, "thread_id", None),
                     is_cli_mode=self._is_cli_mode,
                 ),
                 summarize_exc,

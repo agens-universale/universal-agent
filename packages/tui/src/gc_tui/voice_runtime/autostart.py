@@ -26,7 +26,12 @@ from gc_tui.voice_runtime.leases import (
     release,
 )
 from gc_tui.voice_runtime.paths import voice_pids_dir
-from gc_tui.voice_runtime.service import build_run_spec, port_alive, preheat, service_url
+from gc_tui.voice_runtime.service import (
+    build_run_spec,
+    port_alive,
+    preheat,
+    service_url,
+)
 from gc_tui.voice_runtime.state import load_state
 
 SERVICE_NAME = "speaches"
@@ -63,7 +68,10 @@ def _preheat_bg(state) -> None:
 
 
 def ensure_voice_service(
-    config_dict: dict[str, Any], *, supervisor_factory=RunSupervisor, preheat_async: bool = True
+    config_dict: dict[str, Any],
+    *,
+    supervisor_factory=RunSupervisor,
+    preheat_async: bool = True,
 ) -> bool:
     """Поднять локальный voice-сервис, если он установлен и сконфигурирован.
 
@@ -87,7 +95,9 @@ def ensure_voice_service(
         # иначе плашка соврёт про реально живой сервис (поймано живой приёмкой:
         # строка режима — по факту — уже показывала «запущен», а плашка — «не
         # запустился»).
-        if not wait_daemon_url_ready(service_url(state), timeout=_VOICE_READY_TIMEOUT_SEC) and not port_alive(state):
+        if not wait_daemon_url_ready(
+            service_url(state), timeout=_VOICE_READY_TIMEOUT_SEC
+        ) and not port_alive(state):
             return False
     acquire(os.getpid())
     if preheat_async:

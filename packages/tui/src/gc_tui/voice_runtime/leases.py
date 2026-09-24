@@ -50,7 +50,11 @@ def _windows_start_key(pid: int) -> str | None:
     try:
         created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
         if not k32.GetProcessTimes(
-            handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
         ):
             return None
         return f"{created.dwHighDateTime}:{created.dwLowDateTime}"

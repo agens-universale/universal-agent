@@ -73,7 +73,9 @@ _RAW = [
 
 
 def test_filter_passthrough_without_block():
-    assert reg._apply_tools_whitelist("srv", {"transport": "stdio"}, _RAW) == _RAW
+    assert (
+        reg._apply_tools_whitelist("srv", {"transport": "stdio"}, _RAW) == _RAW
+    )
 
 
 def test_filter_passthrough_when_disabled():
@@ -162,7 +164,11 @@ def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     from gc_testkit import run_coro
 
     calls = []
-    monkeypatch.setattr(mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never")
-    out = run_coro(tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={}))
+    monkeypatch.setattr(
+        mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
+    )
+    out = run_coro(
+        tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={})
+    )
     assert "mcp_srv_delete" in out
     assert calls == []

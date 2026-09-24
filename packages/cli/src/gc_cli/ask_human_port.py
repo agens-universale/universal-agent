@@ -32,7 +32,11 @@ import threading
 from typing import Any, Callable
 
 from gc_core.utils.sigint_waits import intercept_sigint
-from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd, take_answer
+from gc_core.utils.stdin_lines import (
+    discard_unread,
+    pollable_stdin_fd,
+    take_answer,
+)
 
 #: Шаг опроса. Человек печатает секундами, 50 мс незаметны, а loop свободен.
 #: Опрос сохранён СОЗНАТЕЛЬНО, а не по инерции: на Windows Proactor-loop может

@@ -106,7 +106,13 @@ def status_cheap(config_dict: dict) -> VoiceStatus:
             mode=mode,
             available_version=_available_update(st),
         )
-    return VoiceStatus(installed=False, service_alive=False, port=None, model=None, mode="cloud" if url else "off")
+    return VoiceStatus(
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud" if url else "off",
+    )
 
 
 def probe_alive() -> bool | None:
@@ -154,7 +160,9 @@ def update_local(config: dict, echo=print) -> bool:
     Порт и модель берём прежние: их выбирал человек, и смена версии движка — не повод
     молча вернуть дефолты."""
     from gc_tui.voice_runtime.autostart import ensure_voice_service
-    from gc_tui.voice_runtime.cli import _stop_service  # приватная, как в remove_local ниже
+    from gc_tui.voice_runtime.cli import (
+        _stop_service,
+    )  # приватная, как в remove_local ниже
     from gc_tui.voice_runtime.install import VoiceInstallError, install
 
     state = _load_state()
@@ -165,7 +173,12 @@ def update_local(config: dict, echo=print) -> bool:
         echo("[voice] сервис остановлен на время обновления")
     updated = True
     try:
-        install(port=state.port, model=state.model, base_raw=base_config_raw(), echo=echo)
+        install(
+            port=state.port,
+            model=state.model,
+            base_raw=base_config_raw(),
+            echo=echo,
+        )
     except VoiceInstallError as exc:
         echo(f"[voice] ошибка обновления: {exc}")
         updated = False
@@ -176,9 +189,13 @@ def update_local(config: dict, echo=print) -> bool:
             # человека без голоса до перезапуска gc-ua, хотя рабочая версия никуда не
             # девалась. Сессия у него уже открыта — поднимаем сами. Про установку и
             # про подъём говорим порознь: это разные новости.
-            echo("[voice] поднимаю сервис заново (холодный старт — до полутора минут)")
+            echo(
+                "[voice] поднимаю сервис заново (холодный старт — до полутора минут)"
+            )
             if not ensure_voice_service(config):
-                echo("[voice] сервис не поднялся — запустится при следующем старте gc-ua")
+                echo(
+                    "[voice] сервис не поднялся — запустится при следующем старте gc-ua"
+                )
     return updated
 
 
@@ -205,7 +222,9 @@ def local_language(config_dict: dict | None = None) -> str:
     managed = _managed_language("")
     if managed:
         return managed
-    return str(((config_dict or {}).get("voice") or {}).get("language") or "ru")
+    return str(
+        ((config_dict or {}).get("voice") or {}).get("language") or "ru"
+    )
 
 
 def set_local_language(language: str) -> bool:
@@ -228,14 +247,21 @@ def switch_to_local(echo=print, config: dict | None = None) -> bool:
     return True
 
 
-def wire_cloud(config_path, url: str, token: str, model: str, language: str = "ru") -> None:
+def wire_cloud(
+    config_path, url: str, token: str, model: str, language: str = "ru"
+) -> None:
     """Свой endpoint: поля — в юзерский config.yml, managed-слой отключить
     только после успешной записи (провал записи не должен ломать рабочий local)."""
     from gc_core.config import _default_config_path, validate_config_text
 
     missing = _write_values(
         config_path,
-        {"voice.url": url, "voice.token": token, "voice.model": model, "voice.language": language},
+        {
+            "voice.url": url,
+            "voice.token": token,
+            "voice.model": model,
+            "voice.language": language,
+        },
         template_path=_default_config_path(),
         validate=validate_config_text,
     )
@@ -244,7 +270,9 @@ def wire_cloud(config_path, url: str, token: str, model: str, language: str = "r
     _unwire_managed()
 
 
-def list_models(url: str, token: str, verify=True, config_proxy: str | None = None) -> list[str] | None:
+def list_models(
+    url: str, token: str, verify=True, config_proxy: str | None = None
+) -> list[str] | None:
     """id моделей сервера по адресу STT-endpoint или None — список не получен.
 
     Корень API у аудио-методов тот же, что у chat (`api_base` стрижёт
@@ -255,12 +283,22 @@ def list_models(url: str, token: str, verify=True, config_proxy: str | None = No
     сообщения для человека."""
     from gc_core.model_picker import fetch_models
 
-    models = fetch_models(url, f"Bearer {token}" if token else None, verify=verify, config_proxy=config_proxy)
+    models = fetch_models(
+        url,
+        f"Bearer {token}" if token else None,
+        verify=verify,
+        config_proxy=config_proxy,
+    )
     return None if models is None else [m.id for m in models]
 
 
 def probe_endpoint(
-    url: str, token: str, model: str, timeout: int = 10, config_proxy: str | None = None, verify=True
+    url: str,
+    token: str,
+    model: str,
+    timeout: int = 10,
+    config_proxy: str | None = None,
+    verify=True,
 ) -> ProbeResult:
     """POST 0.2 c тишины на endpoint — «жив ли STT» (тот же приём, что прогрев).
 
@@ -281,7 +319,11 @@ def probe_endpoint(
         ms = int((time.monotonic() - t0) * 1000)
         if getattr(resp, "status_code", 0) == 200:
             return ProbeResult(ok=True, latency_ms=ms, error=None)
-        return ProbeResult(ok=False, latency_ms=ms, error=f"HTTP {getattr(resp, 'status_code', '?')}")
+        return ProbeResult(
+            ok=False,
+            latency_ms=ms,
+            error=f"HTTP {getattr(resp, 'status_code', '?')}",
+        )
 
     try:
         return with_system_trust_retry(_do)

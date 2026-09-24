@@ -8,11 +8,16 @@ from gc_core.model_picker import ModelInfo
 def _io(answers):
     it = iter(answers)
     out = []
-    return wz.WizardIO(reader=lambda p, secret: next(it), printer=out.append), out
+    return wz.WizardIO(
+        reader=lambda p, secret: next(it), printer=out.append
+    ), out
 
 
 def _models():
-    return [ModelInfo("qwen/qwen3-8b", tool_capable=True), ModelInfo("qwen/qwen3-235b", tool_capable=True)]
+    return [
+        ModelInfo("qwen/qwen3-8b", tool_capable=True),
+        ModelInfo("qwen/qwen3-235b", tool_capable=True),
+    ]
 
 
 def test_question_is_asked_with_the_words_of_the_tui():
@@ -53,7 +58,10 @@ def test_level_choice_is_confirmed_and_silent_on_skip():
 
 
 def test_assigned_level_is_shown_as_current():
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {"light": "fast"}}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {"light": "fast"},
+    }
     io, out = _io(["y", "", ""])
     wz._collect_levels(io, cfg, {}, _models())
     assert any("сейчас: qwen/qwen3-8b  (имя записи «fast»)" in m for m in out)

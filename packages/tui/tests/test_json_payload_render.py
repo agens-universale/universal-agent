@@ -30,9 +30,13 @@ from gc_tui.services import json_payload as json_payload_module
 from gc_tui.services.json_payload import render_payload, unfold_payload
 
 _FIXTURES = Path(__file__).parent / "fixtures"
-STORED_TRUNCATED = (_FIXTURES / "stored_tool_output_truncated.json").read_text(encoding="utf-8")
+STORED_TRUNCATED = (_FIXTURES / "stored_tool_output_truncated.json").read_text(
+    encoding="utf-8"
+)
 INTENT_LOG = (_FIXTURES / "intent_log_nested.json").read_text(encoding="utf-8")
-FS_READ_MULTILINE = (_FIXTURES / "fs_read_file_multiline.json").read_text(encoding="utf-8")
+FS_READ_MULTILINE = (_FIXTURES / "fs_read_file_multiline.json").read_text(
+    encoding="utf-8"
+)
 
 _BACKSLASH_N = chr(92) + "n"  # литеральные два символа \n (не перевод строки)
 
@@ -51,7 +55,9 @@ def _plain_text(widget) -> str:
             return content.plain
         return str(content)
 
-    children = list(getattr(widget, "_pending_children", []) or widget.children)
+    children = list(
+        getattr(widget, "_pending_children", []) or widget.children
+    )
     if not children:
         return _one(widget)
     # "": каждая часть несёт свои переносы; склейка через "\n" вставляла бы
@@ -84,9 +90,18 @@ def test_unfold_truncated_readfile_markdown_content():
     """Кейс со скриншота: stored_tool_output, content = JSON read_file-конверта
     с markdown-текстом, обрезанный посреди текста. После починки — dict, а
     markdown внутри — строка с реальными переносами (для multiline-блока)."""
-    md = "# SPEC.md — Унифицированный CLI\n\n## 1. Objective\nОбъединить `chat.py`,\n" * 40
+    md = (
+        "# SPEC.md — Унифицированный CLI\n\n## 1. Objective\nОбъединить `chat.py`,\n"
+        * 40
+    )
     inner = json.dumps(
-        {"tool": "fs_read_file", "ok": True, "path": "D:\\dev\\SPEC.md", "content": md}, ensure_ascii=False
+        {
+            "tool": "fs_read_file",
+            "ok": True,
+            "path": "D:\\dev\\SPEC.md",
+            "content": md,
+        },
+        ensure_ascii=False,
     )
     envelope = {
         "type": "stored_tool_output",
@@ -168,7 +183,9 @@ def test_render_nested_json_expanded():
     w = render_payload(INTENT_LOG)
     text = _plain_text(w)
     assert '"turn"' in text  # ключ вложенного dict — как обычный JSON-ключ
-    assert chr(92) + '"turn' not in text  # не осталось экранированной формы \"turn
+    assert (
+        chr(92) + '"turn' not in text
+    )  # не осталось экранированной формы \"turn
     assert _BACKSLASH_N not in text
 
 
@@ -197,7 +214,9 @@ def test_render_no_false_token_match_without_quote_boundary(monkeypatch):
     """Literal-текст, содержащий подстроку токен-плейсхолдера БЕЗ окружающих
     кавычек, не должен ложно матчиться на своей строке каркаса и путать
     реальный multiline-блок (фикс: матч только целой закавыченной формы)."""
-    fixed_uuid = uuid.UUID(int=0)  # .hex[:8] -> "00000000", детерминируем токен
+    fixed_uuid = uuid.UUID(
+        int=0
+    )  # .hex[:8] -> "00000000", детерминируем токен
     monkeypatch.setattr(json_payload_module.uuid, "uuid4", lambda: fixed_uuid)
 
     data = {

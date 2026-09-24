@@ -3,16 +3,17 @@
 from gc_core import app_version
 
 GIT_PINNED = '{"url": "https://github.com/pypa/sampleproject", "vcs_info": {"vcs": "git", "commit_id": "621e497", "requested_revision": "main"}}'
-GIT_DEFAULT = (
-    '{"url": "https://gitverse.ru/gigacode-ai/universal-agent", "vcs_info": {"vcs": "git", "commit_id": "a1b2c3d"}}'
-)
+GIT_DEFAULT = '{"url": "https://gitverse.ru/gigacode-ai/universal-agent", "vcs_info": {"vcs": "git", "commit_id": "a1b2c3d"}}'
 EDITABLE = '{"url": "file:///D:/dev/sber/background-agent", "dir_info": {"editable": true}}'
 
 
 def test_install_source_git_pinned():
     src = app_version.install_source(_read=lambda: GIT_PINNED)
     assert src == app_version.InstallSource(
-        url="https://github.com/pypa/sampleproject", ref="main", commit="621e497", editable=False
+        url="https://github.com/pypa/sampleproject",
+        ref="main",
+        commit="621e497",
+        editable=False,
     )
 
 
@@ -139,7 +140,9 @@ def test_update_keeps_mcp_executables_for_leaf_profiles():
 
     for dist in ("gc-cli", "gc-tui", "gc-server"):
         cmd = _cmd(dist)
-        assert "--with-executables-from" in cmd, f"{dist}: обновление потеряет gc-mcp/gc-mcp-install из PATH"
+        assert "--with-executables-from" in cmd, (
+            f"{dist}: обновление потеряет gc-mcp/gc-mcp-install из PATH"
+        )
         assert cmd[cmd.index("--with-executables-from") + 1] == "gc-mcp", dist
 
     # Отрицательный контроль: у этих трёх флаг не нужен и был бы ложью. Мета
@@ -158,6 +161,10 @@ def test_install_hint_keeps_mcp_executables_for_leaf_profiles():
     онбординга ставить менеджер отдельным инструментом.
     """
     for dist in ("gc-cli", "gc-tui", "gc-server"):
-        assert "--with-executables-from gc-mcp" in app_version.install_hint(dist), dist
+        assert "--with-executables-from gc-mcp" in app_version.install_hint(
+            dist
+        ), dist
     for dist in ("gc-ua", "gc-mcp", "gc-core"):
-        assert "--with-executables-from" not in app_version.install_hint(dist), dist
+        assert "--with-executables-from" not in app_version.install_hint(
+            dist
+        ), dist

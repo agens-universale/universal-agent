@@ -58,7 +58,9 @@ class FileViewerScreen(Screen):
         Binding("up", "line_up", "строка вверх", show=False, priority=True),
         Binding("down", "line_down", "строка вниз", show=False, priority=True),
         Binding("pageup", "page_up", "стр. вверх", show=False, priority=True),
-        Binding("pagedown", "page_down", "стр. вниз", show=False, priority=True),
+        Binding(
+            "pagedown", "page_down", "стр. вниз", show=False, priority=True
+        ),
     ]
 
     def __init__(
@@ -186,7 +188,9 @@ class FileViewerScreen(Screen):
         except Exception:
             h = 0
         if h <= 0:
-            return self._page if self._page > 0 else DEFAULT_PAGE_LINES_FALLBACK
+            return (
+                self._page if self._page > 0 else DEFAULT_PAGE_LINES_FALLBACK
+            )
         return max(PAGE_LINES_MIN, min(PAGE_LINES_MAX, h))
 
     def _sync_page_from_layout(self) -> None:

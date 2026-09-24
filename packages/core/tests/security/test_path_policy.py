@@ -54,7 +54,9 @@ def test_check_write_path_blocks_outside_root(tmp_path):
     launch_root.mkdir()
 
     with pytest.raises(WriteGuardViolation) as exc:
-        check_write_path_allowed(str(tmp_path / "outside.txt"), str(launch_root))
+        check_write_path_allowed(
+            str(tmp_path / "outside.txt"), str(launch_root)
+        )
 
     assert exc.value.error["type"] == "write_guard_violation"
     assert exc.value.error["launch_root"] == str(launch_root)
@@ -73,8 +75,12 @@ def test_check_write_path_blocks_symlink_escape(tmp_path):
 
 
 def test_is_within_root_supports_case_insensitive_comparison():
-    assert is_within_root("/PROJECT/src/file.py", "/project", case_insensitive=True)
-    assert not is_within_root("/PROJECT/src/file.py", "/project", case_insensitive=False)
+    assert is_within_root(
+        "/PROJECT/src/file.py", "/project", case_insensitive=True
+    )
+    assert not is_within_root(
+        "/PROJECT/src/file.py", "/project", case_insensitive=False
+    )
 
 
 def test_enforce_write_guard_returns_structured_error(tmp_path):
@@ -89,7 +95,9 @@ def test_enforce_write_guard_returns_structured_error(tmp_path):
     def write(path: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "path": path})
 
-    result = json.loads(write(str(tmp_path / "outside.txt"), config_dict=config_dict))
+    result = json.loads(
+        write(str(tmp_path / "outside.txt"), config_dict=config_dict)
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "write_guard_violation"
@@ -144,7 +152,9 @@ def test_enforce_write_guard_uses_explicit_logger_when_provided(tmp_path):
     assert '"reason_code": "policy_deny"' in logger.messages[-1]
 
 
-def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(tmp_path):
+def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(
+    tmp_path,
+):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     explicit_logger = _Logger()
@@ -176,7 +186,9 @@ def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(tmp_pat
 
 def test_audit_policy_decision_absent_trace_adds_no_key():
     logger = _Logger()
-    context = SimpleNamespace(logger=logger, ctx=SimpleNamespace(config_dict={}))
+    context = SimpleNamespace(
+        logger=logger, ctx=SimpleNamespace(config_dict={})
+    )
 
     audit_policy_decision(
         context,

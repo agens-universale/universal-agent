@@ -8,13 +8,17 @@ from gc_core import onboarding
 def _io(reads):
     it = iter(reads)
     printed = []
-    io = wz.WizardIO(reader=lambda p, s: next(it, ""), printer=lambda m: printed.append(m))
+    io = wz.WizardIO(
+        reader=lambda p, s: next(it, ""), printer=lambda m: printed.append(m)
+    )
     return io, printed
 
 
 def test_valid_endpoint_url_accepts_http_https():
     assert wz._valid_endpoint_url("https://host/v1/chat/completions")
-    assert wz._valid_endpoint_url("http://46.243.227.147:15000/v1/chat/completions")
+    assert wz._valid_endpoint_url(
+        "http://46.243.227.147:15000/v1/chat/completions"
+    )
 
 
 def test_valid_endpoint_url_rejects_malformed():
@@ -43,7 +47,10 @@ def test_invalid_endpoint_reprompts_until_valid():
         ]
     )  # валидный
     values = wz.collect_fields(io, cfg, review_all=False)
-    assert values["completions_url"] == "https://46.243.227.147:15000/v1/chat/completions"
+    assert (
+        values["completions_url"]
+        == "https://46.243.227.147:15000/v1/chat/completions"
+    )
     assert any("не похоже на URL" in l for l in printed)
 
 
@@ -69,7 +76,9 @@ def test_review_all_hides_current_for_placeholder_endpoint(monkeypatch):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    io, printed = _io(["", "3", ""])  # endpoint skip · auth «3» · model ручной skip
+    io, printed = _io(
+        ["", "3", ""]
+    )  # endpoint skip · auth «3» · model ручной skip
     wz.collect_fields(io, cfg, review_all=True)
     assert not any("[текущее" in l for l in printed)
 
@@ -82,7 +91,9 @@ def test_endpoint_prompt_uses_flat_indent_ascii_marker():
         "model": "m",
     }
     prompts = []
-    io = wz.WizardIO(reader=lambda p, s: prompts.append(p) or "", printer=lambda m: None)
+    io = wz.WizardIO(
+        reader=lambda p, s: prompts.append(p) or "", printer=lambda m: None
+    )
     wz.collect_fields(io, cfg, review_all=False)
     assert "  > " in prompts  # endpoint: плоский 2-отступ + '>'
     assert not any("›" in p for p in prompts)  # старый маркер убран везде
@@ -94,7 +105,9 @@ def test_fetch_models_does_not_dial_the_placeholder_endpoint():
     «список не получен». Шаг обязан вести себя как на чистой установке — без адреса."""
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
     }
     dialed = []
 
@@ -112,7 +125,10 @@ def test_fetch_models_preserves_custom_ca_path():
     from unittest.mock import Mock
 
     fetch = Mock(return_value=[])
-    cfg = {"completions_url": "https://model.example/v1/chat/completions", "use_ssl": "/corp/root.pem"}
+    cfg = {
+        "completions_url": "https://model.example/v1/chat/completions",
+        "use_ssl": "/corp/root.pem",
+    }
     assert wz._fetch_models(cfg, {}, fetch) == []
     assert fetch.call_args.kwargs["verify"] == "/corp/root.pem"
 
@@ -125,12 +141,16 @@ def test_model_step_on_placeholder_endpoint_offers_manual_input():
 
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
     }
     io, printed = _io(["gpt-5.6-terra"])
     values = {}
-    wz._collect_model(io, cfg, values, fetch=lambda *a, **k: [ModelInfo(id="glm")])
+    wz._collect_model(
+        io, cfg, values, fetch=lambda *a, **k: [ModelInfo(id="glm")]
+    )
     assert any(_of.MODEL_NO_LIST in line for line in printed)
     assert values["model"] == "gpt-5.6-terra"
 
@@ -147,7 +167,9 @@ def test_review_all_shows_current_for_real_endpoint(monkeypatch):
     }
     io, printed = _io(["", "3", ""])
     wz.collect_fields(io, cfg, review_all=True)
-    assert any("[текущее: https://real/v1/chat/completions]" in l for l in printed)
+    assert any(
+        "[текущее: https://real/v1/chat/completions]" in l for l in printed
+    )
 
 
 def test_review_all_does_not_show_placeholder_as_current(monkeypatch):
@@ -161,12 +183,20 @@ def test_review_all_does_not_show_placeholder_as_current(monkeypatch):
     cfg = {
         "backend_api_mode": "chat_completions",
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "models": {
-            "own": {"model": "x", "url": "https://own/v1/chat/completions", "authorization_header": "Bearer own"}
+            "own": {
+                "model": "x",
+                "url": "https://own/v1/chat/completions",
+                "authorization_header": "Bearer own",
+            }
         },
     }
-    assert "completions_url" not in onboarding.pending_field_keys(cfg)  # стенд верен
+    assert "completions_url" not in onboarding.pending_field_keys(
+        cfg
+    )  # стенд верен
     io, printed = _io(["", "3", ""])
     wz.collect_fields(io, cfg, review_all=True)
     assert not any("текущее" in line for line in printed), printed

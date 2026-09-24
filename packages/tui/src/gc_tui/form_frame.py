@@ -66,7 +66,9 @@ def cap_frame_height(screen, scroll_id: str) -> None:
         scroll = screen.query_one(scroll_id)
     except NoMatches:
         return
-    chrome = sum(child.region.height for child in root.children if child is not scroll)
+    chrome = sum(
+        child.region.height for child in root.children if child is not scroll
+    )
     if chrome <= 0:
         return
     margin = scroll.styles.margin
@@ -176,7 +178,9 @@ def _reveal_widget(widget, frame: int) -> None:
     уходила навсегда, если её такт опередил применение mount'а."""
     if widget.is_mounted:
         widget.scroll_visible(animate=False)
-    if (not widget.is_mounted or _again(frame, widget)) and frame + 1 < _MAX_FRAMES:
+    if (
+        not widget.is_mounted or _again(frame, widget)
+    ) and frame + 1 < _MAX_FRAMES:
         _step(widget.app, _reveal_widget, widget, frame + 1)
 
 

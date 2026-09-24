@@ -39,7 +39,9 @@ def sanitize_messages_for_chat_completions(
     for message in messages:
         if not isinstance(message, dict):
             continue
-        if message.get("type") != "function_call" or _has_valid_json_arguments(message):
+        if message.get("type") != "function_call" or _has_valid_json_arguments(
+            message
+        ):
             sanitized.append(message)
             continue
         if callable(invalid_tool_call_factory):
@@ -123,7 +125,9 @@ def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
     return item
 
 
-def get_output_list(dct, logger_override=None, *, persist_reasoning_content=False):
+def get_output_list(
+    dct, logger_override=None, *, persist_reasoning_content=False
+):
     """Transforms chat completion 'choices' into a standardized response 'output' list.
 
     ``reasoning_content`` копируется в канон только при ``persist_reasoning_content``.
@@ -183,7 +187,13 @@ def get_output_list(dct, logger_override=None, *, persist_reasoning_content=Fals
 
 
 def _accept_choice_finish_reason(
-    dct, fr, logger_override, *, has_content: bool, has_tool_calls: bool, has_reasoning: bool
+    dct,
+    fr,
+    logger_override,
+    *,
+    has_content: bool,
+    has_tool_calls: bool,
+    has_reasoning: bool,
 ) -> bool:
     """Решение по finish_reason choice; спорные finish_reason — в лог.
 
@@ -225,7 +235,13 @@ def _accept_choice_finish_reason(
     return True
 
 
-def _message_text_and_reasoning(content, reasoning_text, *, has_tools: bool, persist_reasoning_content: bool):
+def _message_text_and_reasoning(
+    content,
+    reasoning_text,
+    *,
+    has_tools: bool,
+    persist_reasoning_content: bool,
+):
     """→ (text message-item канона либо None — message не эмитим, его reasoning_content)."""
     item_reasoning = reasoning_text if persist_reasoning_content else None
     if has_tools:
@@ -239,7 +255,9 @@ def _message_text_and_reasoning(content, reasoning_text, *, has_tools: bool, per
         return text_out, item_reasoning
     if content:
         # Think + проза при strip — только проза; think-only content — as-is.
-        text_out = _canon_content_text(content, persist_reasoning=persist_reasoning_content)
+        text_out = _canon_content_text(
+            content, persist_reasoning=persist_reasoning_content
+        )
         return text_out, item_reasoning
     if reasoning_text is None:
         return None, item_reasoning
@@ -251,7 +269,9 @@ def _message_text_and_reasoning(content, reasoning_text, *, has_tools: bool, per
     return f"<think>{body}</think>", None
 
 
-def _message_text_with_tools(content, *, item_reasoning, persist_reasoning_content: bool):
+def _message_text_with_tools(
+    content, *, item_reasoning, persist_reasoning_content: bool
+):
     """Text message-item хода с tool_calls либо None (message не эмитим)."""
     if persist_reasoning_content:
         if content is None and item_reasoning is None:
@@ -281,7 +301,13 @@ def _function_call_item(tool_call_dict) -> dict:
     }
 
 
-def output_chat_completion_to_response(dct, logger_override=None, log_context=None, *, persist_reasoning_content=False):
+def output_chat_completion_to_response(
+    dct,
+    logger_override=None,
+    log_context=None,
+    *,
+    persist_reasoning_content=False,
+):
     """Converts a chat completion response dict to a model response format."""
     dct_output = deepcopy(dct)
     dct_output["id"] = dct_output.get("id", get_md5_hash(dct_output))

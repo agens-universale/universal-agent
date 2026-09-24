@@ -65,7 +65,17 @@ def test_file_store_list_tasks_reads_core_meta(tmp_path):
 def test_file_store_list_tasks_reads_token_usage(tmp_path):
     """list_tasks() прокидывает meta.token_usage в TaskSummary."""
     threads_dir = str(tmp_path)
-    usage = {"by_category": {"main": {"input": 100, "output": 20, "cached": 0, "calls": 1, "missing_usage_calls": 0}}}
+    usage = {
+        "by_category": {
+            "main": {
+                "input": 100,
+                "output": 20,
+                "cached": 0,
+                "calls": 1,
+                "missing_usage_calls": 0,
+            }
+        }
+    }
     save_thread_meta(
         threads_dir,
         _SYSTEM,
@@ -163,7 +173,9 @@ def test_file_store_epoch_fallback_to_last_summarized_at(tmp_path):
 
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
     # Создаём пустой data-файл
-    (tmp_path / f"data_{_SYSTEM}_{_TID}.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / f"data_{_SYSTEM}_{_TID}.jsonl").write_text(
+        "", encoding="utf-8"
+    )
 
     _, cursor = store.read_all_events(_TID)
     assert cursor.storage_epoch == "2026-06-04T10:00:00+00:00"

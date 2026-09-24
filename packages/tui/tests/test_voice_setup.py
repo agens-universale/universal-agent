@@ -13,8 +13,18 @@ from gc_tui.voice_runtime.state import SPEACHES_PIN, VoiceState
 
 # Версия — ОТ пина, а не литералом: иначе бамп пина превращал бы «установлен и свеж» в
 # «устарел», и падали бы тесты, к обновлению отношения не имеющие.
-ST = VoiceState(version=SPEACHES_PIN, root="/x", port=8735, model="Systran/faster-whisper-small")
-ST_OLD = VoiceState(version="v0.0.1-old", root="/x", port=8735, model="Systran/faster-whisper-small")
+ST = VoiceState(
+    version=SPEACHES_PIN,
+    root="/x",
+    port=8735,
+    model="Systran/faster-whisper-small",
+)
+ST_OLD = VoiceState(
+    version="v0.0.1-old",
+    root="/x",
+    port=8735,
+    model="Systran/faster-whisper-small",
+)
 
 
 def _cfg(url=""):
@@ -24,9 +34,15 @@ def _cfg(url=""):
 def test_status_local(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
-    s = vs.status_snapshot(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions"))
+    s = vs.status_snapshot(
+        _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+    )
     assert s == vs.VoiceStatus(
-        installed=True, service_alive=True, port=8735, model="Systran/faster-whisper-small", mode="local"
+        installed=True,
+        service_alive=True,
+        port=8735,
+        model="Systran/faster-whisper-small",
+        mode="local",
     )
 
 
@@ -48,10 +64,17 @@ def test_status_carries_the_available_version(monkeypatch):
     по ОДНОМУ значению, а не пересчитывать каждый по-своему."""
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
     monkeypatch.setattr(vs, "_load_state", lambda: ST_OLD)
-    s = vs.status_snapshot(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions"))
+    s = vs.status_snapshot(
+        _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+    )
     assert s.available_version == SPEACHES_PIN
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
-    assert vs.status_snapshot(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions")).available_version is None
+    assert (
+        vs.status_snapshot(
+            _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+        ).available_version
+        is None
+    )
 
 
 def test_status_cloud(monkeypatch):
@@ -77,7 +100,9 @@ def test_install_local_feeds_base_config_to_conflict_check(monkeypatch):
     перекрывает настроенный человеком voice.url. Предупреждение обязано доходить и
     из мастера, и из /settings — там выбор и делается, а не в CLI."""
     seen = {}
-    base = {"voice": {"url": "https://api.groq.com/openai/v1/audio/transcriptions"}}
+    base = {
+        "voice": {"url": "https://api.groq.com/openai/v1/audio/transcriptions"}
+    }
     monkeypatch.setattr(vs, "base_config_raw", lambda: base)
 
     def fake_install(base_raw=None, echo=print):
@@ -92,8 +117,12 @@ def test_install_local_feeds_base_config_to_conflict_check(monkeypatch):
 def test_switch_to_local_installs_only_when_missing(monkeypatch):
     calls = []
     monkeypatch.setattr(vs, "_load_state", lambda: None)
-    monkeypatch.setattr(vs, "install_local", lambda echo=print: calls.append("install") or True)
-    monkeypatch.setattr(vs, "_wire_local", lambda config=None: calls.append("wire"))
+    monkeypatch.setattr(
+        vs, "install_local", lambda echo=print: calls.append("install") or True
+    )
+    monkeypatch.setattr(
+        vs, "_wire_local", lambda config=None: calls.append("wire")
+    )
     assert vs.switch_to_local() is True
     assert calls == ["install"]  # install сам wire'ит
 
@@ -106,7 +135,11 @@ def test_switch_to_local_installs_only_when_missing(monkeypatch):
 def _catch_wire(monkeypatch):
     wired = {}
     monkeypatch.setattr(
-        vs, "wire_voice", lambda port, model, language="ru": wired.update(port=port, model=model, language=language)
+        vs,
+        "wire_voice",
+        lambda port, model, language="ru": wired.update(
+            port=port, model=model, language=language
+        ),
     )
     return wired
 
@@ -118,7 +151,11 @@ def test_wire_local_keeps_language_from_managed(monkeypatch):
     monkeypatch.setattr(vs, "_managed_language", lambda default="ru": "en")
     wired = _catch_wire(monkeypatch)
     vs._wire_local()
-    assert wired == {"port": 8735, "model": "Systran/faster-whisper-small", "language": "en"}
+    assert wired == {
+        "port": 8735,
+        "model": "Systran/faster-whisper-small",
+        "language": "en",
+    }
 
 
 def test_local_language_falls_back_to_effective_config(monkeypatch):
@@ -144,11 +181,25 @@ def test_switch_to_local_carries_language_through_the_cloud_trip(monkeypatch):
     assert wired["language"] == "en"
 
     written = {}
-    monkeypatch.setattr(vs, "_write_values", lambda path, values, **kw: written.update(values) or [])
-    monkeypatch.setattr(vs, "_managed_language", lambda default="ru": "")  # unwire снёс секцию
+    monkeypatch.setattr(
+        vs,
+        "_write_values",
+        lambda path, values, **kw: written.update(values) or [],
+    )
+    monkeypatch.setattr(
+        vs, "_managed_language", lambda default="ru": ""
+    )  # unwire снёс секцию
     monkeypatch.setattr(vs, "_unwire_managed", lambda: True)
-    vs.wire_cloud("cfg.yml", "https://x/v1/audio/transcriptions", "sk", "wh", language="en")
-    resolved = {"voice": {"language": written["voice.language"]}}  # так его видит load_config
+    vs.wire_cloud(
+        "cfg.yml",
+        "https://x/v1/audio/transcriptions",
+        "sk",
+        "wh",
+        language="en",
+    )
+    resolved = {
+        "voice": {"language": written["voice.language"]}
+    }  # так его видит load_config
     vs.switch_to_local(config=resolved)
     assert wired["language"] == "en"
 
@@ -159,9 +210,15 @@ def test_set_local_language_rewires_managed_with_state_values(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     wired = _catch_wire(monkeypatch)
     assert vs.set_local_language("en") is True
-    assert wired == {"port": 8735, "model": "Systran/faster-whisper-small", "language": "en"}
+    assert wired == {
+        "port": 8735,
+        "model": "Systran/faster-whisper-small",
+        "language": "en",
+    }
     assert vs.set_local_language("") is True
-    assert wired["language"] == "ru"  # пустое поле — дефолт схемы, а не пустой язык
+    assert (
+        wired["language"] == "ru"
+    )  # пустое поле — дефолт схемы, а не пустой язык
 
 
 def test_local_language_reads_managed_layer(monkeypatch):
@@ -187,8 +244,15 @@ def test_wire_cloud_unwires_managed_and_writes_config(monkeypatch, tmp_path):
         return []
 
     monkeypatch.setattr(vs, "_write_values", fake_write)
-    monkeypatch.setattr(vs, "_unwire_managed", lambda: calls.append("unwire") or True)
-    vs.wire_cloud(tmp_path / "config.yml", "https://x/v1/audio/transcriptions", "sk", "wh-1")
+    monkeypatch.setattr(
+        vs, "_unwire_managed", lambda: calls.append("unwire") or True
+    )
+    vs.wire_cloud(
+        tmp_path / "config.yml",
+        "https://x/v1/audio/transcriptions",
+        "sk",
+        "wh-1",
+    )
     assert calls == ["write", "unwire"]  # запись раньше отключения managed
     assert written == {
         "voice.url": "https://x/v1/audio/transcriptions",
@@ -200,10 +264,19 @@ def test_wire_cloud_unwires_managed_and_writes_config(monkeypatch, tmp_path):
 
 def test_wire_cloud_raises_on_missing(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(vs, "_write_values", lambda path, values, **kw: ["voice.url"])
-    monkeypatch.setattr(vs, "_unwire_managed", lambda: calls.append("unwire") or True)
+    monkeypatch.setattr(
+        vs, "_write_values", lambda path, values, **kw: ["voice.url"]
+    )
+    monkeypatch.setattr(
+        vs, "_unwire_managed", lambda: calls.append("unwire") or True
+    )
     with pytest.raises(ValueError):
-        vs.wire_cloud(tmp_path / "config.yml", "https://x/v1/audio/transcriptions", "sk", "wh-1")
+        vs.wire_cloud(
+            tmp_path / "config.yml",
+            "https://x/v1/audio/transcriptions",
+            "sk",
+            "wh-1",
+        )
     assert "unwire" not in calls  # провал записи managed не трогает
 
 
@@ -233,7 +306,9 @@ def test_probe_respects_verify_ssl(monkeypatch):
         status_code = 200
 
     monkeypatch.setattr(vs, "_post", lambda url, **kw: seen.update(kw) or R())
-    vs.probe_endpoint("https://corp/v1/audio/transcriptions", "t", "m", verify="/ca.pem")
+    vs.probe_endpoint(
+        "https://corp/v1/audio/transcriptions", "t", "m", verify="/ca.pem"
+    )
     assert seen["verify"] == "/ca.pem"
 
 
@@ -248,13 +323,28 @@ def test_wire_cloud_writes_language(monkeypatch, tmp_path):
     """Язык распознавания — часть облачной настройки (правится в /settings);
     дефолт схемы `ru`, чтобы не переписывать смысл конфига молча."""
     written = {}
-    monkeypatch.setattr(vs, "_write_values", lambda path, values, **kw: written.update(values) or [])
+    monkeypatch.setattr(
+        vs,
+        "_write_values",
+        lambda path, values, **kw: written.update(values) or [],
+    )
     monkeypatch.setattr(vs, "_unwire_managed", lambda: True)
-    vs.wire_cloud(tmp_path / "config.yml", "https://x/v1/audio/transcriptions", "sk", "wh-1", language="en")
+    vs.wire_cloud(
+        tmp_path / "config.yml",
+        "https://x/v1/audio/transcriptions",
+        "sk",
+        "wh-1",
+        language="en",
+    )
     assert written["voice.language"] == "en"
 
     written.clear()
-    vs.wire_cloud(tmp_path / "config.yml", "https://x/v1/audio/transcriptions", "sk", "wh-1")
+    vs.wire_cloud(
+        tmp_path / "config.yml",
+        "https://x/v1/audio/transcriptions",
+        "sk",
+        "wh-1",
+    )
     assert written["voice.language"] == "ru"
 
 
@@ -271,9 +361,13 @@ def _stub_model_transport(monkeypatch, handler):
 
     def _requests_get_ex(url, headers, verify, *, config_proxy=None):
         try:
-            return mp.HttpReply(status=200, payload=handler(url, headers, verify))
+            return mp.HttpReply(
+                status=200, payload=handler(url, headers, verify)
+            )
         except OSError as exc:  # сеть недоступна
-            return mp.HttpReply(status=None, payload=None, network_error=str(exc))
+            return mp.HttpReply(
+                status=None, payload=None, network_error=str(exc)
+            )
         except Exception:  # сервер ответил не тем
             return mp.HttpReply(status=404, payload=None)
 
@@ -300,7 +394,9 @@ def test_list_models_sends_bearer_and_returns_ids(monkeypatch):
         return {"data": [{"id": "whisper-1"}, {"id": "gpt-4o"}]}
 
     _stub_model_transport(monkeypatch, _get)
-    got = vs.list_models("https://x/v1/audio/transcriptions", "sk", verify=False)
+    got = vs.list_models(
+        "https://x/v1/audio/transcriptions", "sk", verify=False
+    )
     assert got == ["whisper-1", "gpt-4o"]  # фильтр релевантности — уже в UI
     assert seen[-1] == ("https://x/v1/models", "Bearer sk", False)
 
@@ -318,7 +414,12 @@ def test_list_models_tells_failure_from_an_empty_answer(monkeypatch):
     _stub_model_transport(monkeypatch, _down)
     assert vs.list_models("https://x/v1/audio/transcriptions", "sk") is None
 
-    _stub_model_transport(monkeypatch, lambda url, headers, verify: {"data": []} if url.endswith("/models") else {})
+    _stub_model_transport(
+        monkeypatch,
+        lambda url, headers, verify: (
+            {"data": []} if url.endswith("/models") else {}
+        ),
+    )
     assert vs.list_models("https://x/v1/audio/transcriptions", "sk") == []
 
 
@@ -335,13 +436,17 @@ def test_status_cheap_never_touches_the_network(monkeypatch, tmp_path):
 
     monkeypatch.setattr(socket, "create_connection", _boom)
     monkeypatch.setattr(vs, "_load_state", lambda: None)
-    s = vs.status_cheap({"voice": {"url": "https://s.x/v1/audio/transcriptions"}})
+    s = vs.status_cheap(
+        {"voice": {"url": "https://s.x/v1/audio/transcriptions"}}
+    )
     assert s.mode == "cloud" and s.installed is False
 
     state = type("St", (), {"port": 8735, "model": "m", "version": "v0.8.3"})()
     monkeypatch.setattr(vs, "_load_state", lambda: state)
     monkeypatch.setattr(vs, "_available_update", lambda st: None)
-    s = vs.status_cheap({"voice": {"url": "https://s.x/v1/audio/transcriptions"}})
+    s = vs.status_cheap(
+        {"voice": {"url": "https://s.x/v1/audio/transcriptions"}}
+    )
     assert s.installed is True
     assert s.service_alive is None  # живость не мерялась — её приносит воркер
 
@@ -383,7 +488,9 @@ def _update_stubs(monkeypatch, *, install_raises=None):
     monkeypatch.setattr(vs, "base_config_raw", lambda: "")
     monkeypatch.setattr("gc_tui.voice_runtime.cli._stop_service", _stop)
     monkeypatch.setattr("gc_tui.voice_runtime.install.install", _install)
-    monkeypatch.setattr("gc_tui.voice_runtime.autostart.ensure_voice_service", _ensure)
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.autostart.ensure_voice_service", _ensure
+    )
     return log
 
 
@@ -396,10 +503,14 @@ def test_failed_update_puts_the_service_back(monkeypatch):
     from gc_tui.voice_runtime.install import VoiceInstallError
 
     said = []
-    log = _update_stubs(monkeypatch, install_raises=VoiceInstallError("сеть недоступна"))
+    log = _update_stubs(
+        monkeypatch, install_raises=VoiceInstallError("сеть недоступна")
+    )
     assert vs.update_local(_cfg(), echo=said.append) is False
     assert log == {"stopped": 1, "installed": 1, "ensured": 1}
-    assert any("сеть недоступна" in s for s in said), "причину провала обязаны назвать"
+    assert any("сеть недоступна" in s for s in said), (
+        "причину провала обязаны назвать"
+    )
 
 
 def test_successful_update_starts_the_service_once(monkeypatch):

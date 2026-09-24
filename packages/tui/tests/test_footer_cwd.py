@@ -15,7 +15,12 @@ async def test_footer_shows_session_cwd(tmp_path):
     tid = "t1"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 1}
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-05-22T12:00:00+00:00",
+                "messages_count": 1,
+            }
         ),
         encoding="utf-8",
     )
@@ -32,10 +37,14 @@ async def test_footer_shows_session_cwd(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.2)
-        right = str(pilot.app.screen.query_one("#footer-right", Static).render())
+        right = str(
+            pilot.app.screen.query_one("#footer-right", Static).render()
+        )
         # footer-right показывает модель (gc-ua убрано; cwd — в header-right).
         assert "M" in right

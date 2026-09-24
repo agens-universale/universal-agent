@@ -30,7 +30,9 @@ class StripTagsProjectionConfig(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
-def normalize_strip_tags_projection_config(cfg: StripTagsProjectionConfig) -> None:
+def normalize_strip_tags_projection_config(
+    cfg: StripTagsProjectionConfig,
+) -> None:
     """warn+drop invalid; снять ``<>``; dedupe case-insensitive; ``think`` валиден."""
     raw = list(cfg.tags or [])
     cleaned: list[str] = []
@@ -81,16 +83,22 @@ def persist_reasoning_content_from_config(config: object) -> bool:
 def _clean_tag_name(item: object) -> str | None:
     """Очищенное имя тега или ``None`` (с warning), если запись невалидна."""
     if not isinstance(item, str):
-        _logger.warning("strip_tags_projection.tags: non-string entry %r dropped", item)
+        _logger.warning(
+            "strip_tags_projection.tags: non-string entry %r dropped", item
+        )
         return None
     name = item.strip()
     if name.startswith("<") and name.endswith(">") and len(name) >= 2:
         name = name[1:-1].strip()
     if not name:
-        _logger.warning("strip_tags_projection.tags: empty/whitespace tag dropped")
+        _logger.warning(
+            "strip_tags_projection.tags: empty/whitespace tag dropped"
+        )
         return None
     if _is_invalid_tag_name(name):
-        _logger.warning("strip_tags_projection.tags: invalid tag %r dropped", item)
+        _logger.warning(
+            "strip_tags_projection.tags: invalid tag %r dropped", item
+        )
         return None
     return name
 

@@ -34,7 +34,9 @@ def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
     def sync_call_from_thread(fn):
         return fn()
 
-    monkeypatch.setattr(app, "call_from_thread", sync_call_from_thread, raising=False)
+    monkeypatch.setattr(
+        app, "call_from_thread", sync_call_from_thread, raising=False
+    )
 
     assert app._present_confirm("Title", "Question?", [("Path", "/x")]) is True
     assert calls == [("Title", "Question?", [("Path", "/x")])]
@@ -46,7 +48,9 @@ def test_present_confirm_returns_false_without_trace_screen(monkeypatch):
 
     app = TuiApp()
     monkeypatch.setattr(app, "_main_screen", lambda: None, raising=False)
-    monkeypatch.setattr(app, "call_from_thread", lambda fn: fn(), raising=False)
+    monkeypatch.setattr(
+        app, "call_from_thread", lambda fn: fn(), raising=False
+    )
     assert app._present_confirm("t", "q?", []) is False
 
 
@@ -54,7 +58,11 @@ def test_tui_confirm_denies_without_wait_when_present_fails():
     """Present fail → wait не вызывается, сразу deny."""
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(
+            stop_run=lambda: None, add_message=lambda m: None
+        )
+    )
     waited = {"n": 0}
     orig_wait = runner._confirm_event.wait
 
@@ -71,11 +79,17 @@ def test_tui_confirm_denies_without_wait_when_present_fails():
 def test_tui_confirm_waits_only_after_mounted_ack():
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(
+            stop_run=lambda: None, add_message=lambda m: None
+        )
+    )
     result: list[str] = []
 
     def present(_t, _q, _f) -> bool:
-        threading.Timer(0.05, lambda: runner.submit_confirm_reply("allow_once")).start()
+        threading.Timer(
+            0.05, lambda: runner.submit_confirm_reply("allow_once")
+        ).start()
         return True
 
     confirm = runner.make_tui_confirm(present)
@@ -94,7 +108,11 @@ def test_tui_confirm_timeout_auto_deny():
     """O11: нет ответа за timeout → deny_once, поток не висит вечно."""
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(
+            stop_run=lambda: None, add_message=lambda m: None
+        )
+    )
     result: list[str] = []
     confirm = runner.make_tui_confirm(lambda *_a: True, timeout_sec=0.05)
 
@@ -112,7 +130,11 @@ def test_tui_confirm_stop_requested_denies_without_full_wait():
     """stop_requested во время wait → deny_once быстрее полного timeout."""
     from gc_tui.services.agent_runner import AgentRunner
 
-    runner = AgentRunner(executor=types.SimpleNamespace(stop_run=lambda: None, add_message=lambda m: None))
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(
+            stop_run=lambda: None, add_message=lambda m: None
+        )
+    )
     result: list[str] = []
     confirm = runner.make_tui_confirm(lambda *_a: True, timeout_sec=30.0)
 
@@ -161,7 +183,10 @@ def test_tui_without_tui_confirm_denies_not_cli_input(monkeypatch):
     # CLI fallback lives in path_policy; confirm_port imports it lazily.
     monkeypatch.setattr(pp, "prompt_user_confirmation_choice", boom)
     ctx = types.SimpleNamespace(is_tui=True, tui_confirm=None, config_dict={})
-    assert cp.request_confirm(title="t", question="q?", fields=[], ctx=ctx) is False
+    assert (
+        cp.request_confirm(title="t", question="q?", fields=[], ctx=ctx)
+        is False
+    )
     assert prompted["n"] == 0
 
 
@@ -182,8 +207,14 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
         return '{"ok": true}'
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     class _State:
@@ -217,7 +248,9 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
             _State(),
             ctx,
             run_agent_func=None,
-            persist_messages_callback=lambda msgs: persisted.append(list(msgs)),
+            persist_messages_callback=lambda msgs: persisted.append(
+                list(msgs)
+            ),
         )
     )
     assert order == ["session_memory", "exec_python"]

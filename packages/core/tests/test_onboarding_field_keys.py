@@ -6,10 +6,15 @@ from gc_core import onboarding
 def test_stock_defaults_pending_endpoint_and_token_not_model():
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
-    assert onboarding.pending_field_keys(cfg) == {"completions_url", "Authorization"}
+    assert onboarding.pending_field_keys(cfg) == {
+        "completions_url",
+        "Authorization",
+    }
 
 
 def test_all_set_returns_empty():
@@ -24,7 +29,9 @@ def test_all_set_returns_empty():
 def test_agent_auth_covers_token():
     cfg = {
         "completions_url": "https://x/v1",
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "m",
         "agent_auth": {"auth_endpoint": "https://auth"},
     }

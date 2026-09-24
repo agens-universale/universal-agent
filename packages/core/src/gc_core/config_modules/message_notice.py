@@ -20,7 +20,9 @@ class ToolUsageNoticeRule(BaseModel):
     notice_message: str
 
 
-def normalize_tool_usage_notice_rules(rules: list[ToolUsageNoticeRule]) -> list[ToolUsageNoticeRule]:
+def normalize_tool_usage_notice_rules(
+    rules: list[ToolUsageNoticeRule],
+) -> list[ToolUsageNoticeRule]:
     normalized: list[ToolUsageNoticeRule] = []
     for rule in rules:
         step_count = rule.step_messages_count
@@ -74,18 +76,32 @@ def tool_usage_notice_rules_from_config_dict(
 
 
 def _stopped_tools(config_dict: dict[str, Any] | None) -> set[str]:
-    stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
+    stop = (
+        config_dict.get("stop_tools")
+        if isinstance(config_dict, dict)
+        else None
+    )
     if not isinstance(stop, list):
         return set()
-    return {str(item).strip() for item in stop if isinstance(item, str) and item.strip()}
+    return {
+        str(item).strip()
+        for item in stop
+        if isinstance(item, str) and item.strip()
+    }
 
 
 def active_tool_usage_notice_rules(
     config_dict: dict[str, Any] | None,
 ) -> list[ToolUsageNoticeRule]:
     stopped = _stopped_tools(config_dict)
-    return [rule for rule in tool_usage_notice_rules_from_config_dict(config_dict) if rule.tool_name not in stopped]
+    return [
+        rule
+        for rule in tool_usage_notice_rules_from_config_dict(config_dict)
+        if rule.tool_name not in stopped
+    ]
 
 
-def tool_usage_notice_policy_enabled(config_dict: dict[str, Any] | None) -> bool:
+def tool_usage_notice_policy_enabled(
+    config_dict: dict[str, Any] | None,
+) -> bool:
     return bool(active_tool_usage_notice_rules(config_dict))

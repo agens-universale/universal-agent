@@ -63,11 +63,15 @@ class TodoLine:
     content: Text
 
 
-def _build_lines(items: list, *, header_label: str, indent: str, subagent: bool) -> list[TodoLine]:
+def _build_lines(
+    items: list, *, header_label: str, indent: str, subagent: bool
+) -> list[TodoLine]:
     rows = [
         i
         for i in items or []
-        if isinstance(i, dict) and str(i.get("content") or "").strip() and i.get("status") in _GLYPHS
+        if isinstance(i, dict)
+        and str(i.get("content") or "").strip()
+        and i.get("status") in _GLYPHS
     ]
     done = sum(1 for i in rows if i["status"] == "completed")
     header_style = _HEADER_STYLES[1 if subagent else 0]
@@ -75,13 +79,18 @@ def _build_lines(items: list, *, header_label: str, indent: str, subagent: bool)
         return [
             TodoLine(
                 prefix=Text(indent),
-                content=Text(f"session_todo   {header_label} очищен", style=header_style),
+                content=Text(
+                    f"session_todo   {header_label} очищен", style=header_style
+                ),
             )
         ]
     lines = [
         TodoLine(
             prefix=Text(indent),
-            content=Text(f"session_todo   {header_label} {done}/{len(rows)}", style=header_style),
+            content=Text(
+                f"session_todo   {header_label} {done}/{len(rows)}",
+                style=header_style,
+            ),
         )
     ]
     styles = _PALETTES[1 if subagent else 0]
@@ -101,15 +110,23 @@ def _build_lines(items: list, *, header_label: str, indent: str, subagent: bool)
 
 def build_main_todo_lines(items: list, *, indent: str = "") -> list[TodoLine]:
     """Основной чек-лист (§2) построчно; indent — базовый отступ трейса."""
-    return _build_lines(items, header_label="чек-лист", indent=indent, subagent=False)
+    return _build_lines(
+        items, header_label="чек-лист", indent=indent, subagent=False
+    )
 
 
-def build_subagent_todo_lines(items: list, *, indent: str = "") -> list[TodoLine]:
+def build_subagent_todo_lines(
+    items: list, *, indent: str = ""
+) -> list[TodoLine]:
     """Чек-лист субагента (§3) построчно; indent — nested-отступ блока."""
-    return _build_lines(items, header_label="чек-лист субагента", indent=indent, subagent=True)
+    return _build_lines(
+        items, header_label="чек-лист субагента", indent=indent, subagent=True
+    )
 
 
-def build_todo_rows(items: list, *, subagent: bool, indent: str = "", event_no: int = 0) -> list:
+def build_todo_rows(
+    items: list, *, subagent: bool, indent: str = "", event_no: int = 0
+) -> list:
     """Строки чек-листа как ``TraceRow`` — внутренности блока (см. build_todo_block).
 
     Строки не фокусируемы: выделение живёт на блоке целиком, иначе чек-лист из
@@ -133,7 +150,9 @@ def build_todo_rows(items: list, *, subagent: bool, indent: str = "", event_no: 
     ]
 
 
-def build_todo_block(items: list, *, subagent: bool, indent: str = "", event_no: int = 0):
+def build_todo_block(
+    items: list, *, subagent: bool, indent: str = "", event_no: int = 0
+):
     """Готовый виджет чек-листа для монтирования — общий для всех каналов.
 
     Каналы (живой основной, read-only основной, живой субагентский,
@@ -142,6 +161,8 @@ def build_todo_block(items: list, *, subagent: bool, indent: str = "", event_no:
     """
     from gc_tui.widgets.todo_block import TodoBlock
 
-    rows = build_todo_rows(items, subagent=subagent, indent=indent, event_no=event_no)
+    rows = build_todo_rows(
+        items, subagent=subagent, indent=indent, event_no=event_no
+    )
     classes = TODO_BLOCK_NESTED_CLASS if subagent else TODO_BLOCK_CLASS
     return TodoBlock(rows, event_no=event_no, classes=classes)

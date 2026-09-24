@@ -34,7 +34,9 @@ def _write_task(tmp_path, tid, n_messages):
         )
         for i in range(1, n_messages + 1)
     ]
-    (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 @pytest.mark.asyncio
@@ -44,7 +46,9 @@ async def test_summarizing_falling_edge_records_baseline(tmp_path):
 
     tid = "base0000000000000000000000000001a"
     _write_task(tmp_path, tid, n_messages=2)  # после сжатия в live 2 сообщения
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -63,7 +67,9 @@ async def test_no_record_without_falling_edge(tmp_path):
 
     tid = "base0000000000000000000000000002a"
     _write_task(tmp_path, tid, n_messages=2)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)

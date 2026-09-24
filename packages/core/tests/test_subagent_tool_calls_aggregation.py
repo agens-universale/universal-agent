@@ -9,7 +9,9 @@ from types import SimpleNamespace
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
-def _runner(parent_tool_calls: int = 0) -> tuple[SubagentRunner, SimpleNamespace]:
+def _runner(
+    parent_tool_calls: int = 0,
+) -> tuple[SubagentRunner, SimpleNamespace]:
     parent = SimpleNamespace(tool_calls=parent_tool_calls)
     runner = SubagentRunner(SimpleNamespace(), parent, {})
     return runner, parent

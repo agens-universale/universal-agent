@@ -34,12 +34,21 @@ def _token(auth: Optional[str]) -> str:
     return "Bearer"  # никогда не литерал
 
 
-def summary_line(*, url: str, auth: Optional[str], model: str, mcp_count: int, voice: str = "") -> str:
+def summary_line(
+    *,
+    url: str,
+    auth: Optional[str],
+    model: str,
+    mcp_count: int,
+    voice: str = "",
+) -> str:
     server = _host_port(url)
     tok = _token(auth)
     mdl = _clip(model) if model else "—"
     mcp = str(mcp_count) if mcp_count else "—"
-    line = f"сервер: {server}  ·  токен: {tok}  ·  модель: {mdl}  ·  MCP: {mcp}"
+    line = (
+        f"сервер: {server}  ·  токен: {tok}  ·  модель: {mdl}  ·  MCP: {mcp}"
+    )
     if voice:
         line += f"  ·  голосовой ввод: {voice}"
     return line

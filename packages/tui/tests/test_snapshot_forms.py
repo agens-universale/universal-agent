@@ -66,8 +66,13 @@ def _isolate_voice_state(monkeypatch, tmp_path):
     реальный каталог данных агента, и кадр зависел бы от машины разработчика."""
     from gc_tui.voice_runtime import paths as vpaths
 
-    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "voice_data" / "state.json")
+    monkeypatch.setattr(
+        vpaths, "voice_data_dir", lambda: tmp_path / "voice_data"
+    )
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "voice_data" / "state.json",
+    )
 
 
 async def _freeze_cursors(pilot):
@@ -106,7 +111,9 @@ async def _wait_probe_settled(pilot, scr):
     «✓ сервер доступен» — подстрока финального «✓ сервер доступен · авторизация
     не требуется». Гейт по тексту прошёл бы на нулевой итерации, до автопробы, и
     при пере-снятии эталона запечатал бы укороченную строку."""
-    await wait_until(pilot, lambda: scr._draft_checked is not None, "автопроба секции осела")
+    await wait_until(
+        pilot, lambda: scr._draft_checked is not None, "автопроба секции осела"
+    )
     await pilot.pause()
 
 
@@ -160,11 +167,16 @@ def test_wizard_model_snapshot(snap_compare, tmp_path, monkeypatch):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         await pilot.press("pagedown")  # PgDn — «далее» на шаг «Модель»
         await wait_until(
             pilot,
-            lambda: bool(scr.query(ModelEditor)) and scr.query(ModelEditor).first().models_loaded,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
             "models loaded",
         )
         await _freeze_cursors(pilot)
@@ -231,7 +243,9 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
 
     # Инъекции fetch у секции «Модель» нет (список берёт `model_picker.fetch_models`
     # прямо на монтировании) — подменяем сам модуль-источник.
-    monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: _models())
+    monkeypatch.setattr(
+        model_picker, "fetch_models", lambda *a, **k: _models()
+    )
     app = _app(tmp_path, _cfg())
     cfg_file = _write_cfg(tmp_path)
 
@@ -243,7 +257,10 @@ def test_settings_model_snapshot(snap_compare, tmp_path, monkeypatch):
         open_settings_section(scr, "Модели")
         await wait_until(
             pilot,
-            lambda: bool(scr.query(ModelEditor)) and scr.query(ModelEditor).first().models_loaded,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
             "models loaded",
         )
         await _freeze_cursors(pilot)
@@ -258,7 +275,9 @@ def test_settings_voice_cloud_snapshot(snap_compare, tmp_path, monkeypatch):
 
     async def setup(pilot):
         await pilot.pause()
-        scr, _fake = _mk_voice_settings(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        scr, _fake = _mk_voice_settings(
+            tmp_path, CLOUD, config_text=CLOUD_CONFIG
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Голосовой ввод")
@@ -279,7 +298,9 @@ _URL_PRESET_CONFIG = (
 )
 
 
-def test_settings_voice_url_presets_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_settings_voice_url_presets_snapshot(
+    snap_compare, tmp_path, monkeypatch
+):
     """/settings → «Голос»: курсор на поле «URL» — раскрыт пресет-лист адреса,
     подсвечена строка действующего провайдера (Groq)."""
     _isolate_voice_state(monkeypatch, tmp_path)
@@ -287,14 +308,20 @@ def test_settings_voice_url_presets_snapshot(snap_compare, tmp_path, monkeypatch
 
     async def setup(pilot):
         await pilot.pause()
-        scr, _fake = _mk_voice_settings(tmp_path, CLOUD, config_text=_URL_PRESET_CONFIG)
+        scr, _fake = _mk_voice_settings(
+            tmp_path, CLOUD, config_text=_URL_PRESET_CONFIG
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Голосовой ввод")
         await pilot.pause()
-        await pilot.press("tab")  # строка режима → группа полей, первое поле — «URL»
+        await pilot.press(
+            "tab"
+        )  # строка режима → группа полей, первое поле — «URL»
         await pilot.pause()
-        await pilot.press("alt+down")  # адрес задан — список раскрывает явная клавиша
+        await pilot.press(
+            "alt+down"
+        )  # адрес задан — список раскрывает явная клавиша
         await pilot.pause()
         await _freeze_cursors(pilot)
 

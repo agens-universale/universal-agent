@@ -26,12 +26,19 @@ async def test_new_when_idle_goes_to_empty_state(tmp_path):
     )
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 1,
+            }
         ),
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -73,7 +80,9 @@ async def test_new_when_running_asks_confirm(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
@@ -85,7 +94,9 @@ async def test_new_when_running_asks_confirm(tmp_path):
         inp.text = "/new"
         await pilot.press("enter")
         await pilot.pause(0.2)
-        assert any(isinstance(s, ConfirmScreen) for s in pilot.app.screen_stack)
+        assert any(
+            isinstance(s, ConfirmScreen) for s in pilot.app.screen_stack
+        )
 
         await pilot.press("y")
         await pilot.pause(0.3)
@@ -116,7 +127,9 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -126,8 +139,12 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
         inp.text = "/new"
         await pilot.press("enter")
         await pilot.pause(0.2)
-        modal = next(s for s in pilot.app.screen_stack if isinstance(s, ConfirmScreen))
-        assert modal.query_one("#confirm-dialog").border_title == "Новая задача"
+        modal = next(
+            s for s in pilot.app.screen_stack if isinstance(s, ConfirmScreen)
+        )
+        assert (
+            modal.query_one("#confirm-dialog").border_title == "Новая задача"
+        )
         hint = str(modal.query_one("#confirm-hint").render())
         assert "прервать" in hint and "продолжить" in hint
 
@@ -156,7 +173,9 @@ async def test_new_confirm_yes_clears_runner_and_indicator(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

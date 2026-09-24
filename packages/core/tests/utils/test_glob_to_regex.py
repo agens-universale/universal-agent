@@ -145,7 +145,9 @@ def test_compile_glob():
     regex = compile_glob(pattern)
     assert regex.match("data/processed/file.csv") is not None
     assert regex.match("data/year/month/processed/file.csv") is not None
-    assert regex.match("data/processed/sub/file.csv") is None  # нет /processed/ в конце пути?
+    assert (
+        regex.match("data/processed/sub/file.csv") is None
+    )  # нет /processed/ в конце пути?
     assert regex.match("other/data/processed/file.csv") is None
 
     # 5. Одиночная звезда — только один уровень
@@ -217,7 +219,9 @@ def test_compile_glob():
     assert regex.match("logA.txt") is not None
     assert regex.match("log_.txt") is not None
     assert regex.match("log1.txt") is None
-    assert regex.match("log.txt") is None  # потому что после log должен быть один символ
+    assert (
+        regex.match("log.txt") is None
+    )  # потому что после log должен быть один символ
 
     # 14. Многосимвольный класс
     pattern = "[abc][0-9]/data"
@@ -251,7 +255,9 @@ def test_compile_glob():
     regex = compile_glob(pattern)
     assert regex.match("output/results.json") is not None
     assert regex.match("data/output/info.json") is not None
-    assert regex.match("data/output/sub/info.json") is None  # sub не допускается после output/
+    assert (
+        regex.match("data/output/sub/info.json") is None
+    )  # sub не допускается после output/
     assert regex.match("result.json") is None
 
     # 18. Составной путь с несколькими **
@@ -268,7 +274,9 @@ def test_compile_glob():
     regex = compile_glob(pattern)
     # print(pattern, regex)
     assert regex.match("config.ini") is not None
-    assert regex.match("config.local.json") is not None  # если хотим несколько точек — нужно **
+    assert (
+        regex.match("config.local.json") is not None
+    )  # если хотим несколько точек — нужно **
     assert regex.match("config") is None
     assert regex.match("config.") is not None
 

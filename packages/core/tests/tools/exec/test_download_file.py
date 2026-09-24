@@ -13,7 +13,14 @@ EXE_BYTES = b"MZ" + b"\x00" * 50
 
 
 class _Resp:
-    def __init__(self, *, content=b"", status_code=200, url="https://example.com/file", headers=None):
+    def __init__(
+        self,
+        *,
+        content=b"",
+        status_code=200,
+        url="https://example.com/file",
+        headers=None,
+    ):
         self.content = content
         self.status_code = status_code
         self.url = url
@@ -55,7 +62,14 @@ class _RedirectSessionStub:
         return response
 
 
-def _config(launch_root, *, download_dir="downloads", max_bytes=52_428_800, write_guard=None, url_policy=None):
+def _config(
+    launch_root,
+    *,
+    download_dir="downloads",
+    max_bytes=52_428_800,
+    write_guard=None,
+    url_policy=None,
+):
     cfg = {
         "launch_root": str(launch_root),
         "download": {
@@ -70,7 +84,12 @@ def _config(launch_root, *, download_dir="downloads", max_bytes=52_428_800, writ
     return cfg
 
 
-def _resp(content=b"", content_type="application/octet-stream", status_code=200, headers=None):
+def _resp(
+    content=b"",
+    content_type="application/octet-stream",
+    status_code=200,
+    headers=None,
+):
     """Ответ сети как его отдаст httpx."""
     hdrs = {"Content-Type": content_type}
     if headers:
@@ -107,9 +126,15 @@ def _install(monkeypatch, handler):
             return handler(request)
         return handler
 
-    factory = lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(_dispatch))
+    factory = lambda **kw: httpx.AsyncClient(
+        transport=httpx.MockTransport(_dispatch)
+    )
     monkeypatch.setattr(async_http, "get_async_client", factory)
-    for target in (DownloadFile.__call__, DownloadFile._http_get_bytes, DownloadFile._stream_with_redirect_validation):
+    for target in (
+        DownloadFile.__call__,
+        DownloadFile._http_get_bytes,
+        DownloadFile._stream_with_redirect_validation,
+    ):
         globals_dict = getattr(inspect.unwrap(target), "__globals__", None)
         if globals_dict is not None and "get_async_client" in globals_dict:
             monkeypatch.setitem(globals_dict, "get_async_client", factory)
@@ -173,7 +198,9 @@ def test_download_file_docx_zip_header(tmp_path, monkeypatch):
         ("data.json", b'{"ok": true, "n": 1}\n'),
     ],
 )
-def test_download_file_plain_text_extensions(tmp_path, monkeypatch, filename, body):
+def test_download_file_plain_text_extensions(
+    tmp_path, monkeypatch, filename, body
+):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     _install(monkeypatch, _resp(content=body))
@@ -235,7 +262,9 @@ def test_download_file_invalid_filename_path_traversal(tmp_path):
         ("file with spaces.txt", b"hello plain text\n"),
     ],
 )
-def test_download_file_accepts_spaces_parens_unicode(tmp_path, monkeypatch, filename, body):
+def test_download_file_accepts_spaces_parens_unicode(
+    tmp_path, monkeypatch, filename, body
+):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     _install(monkeypatch, _resp(content=body))
@@ -334,7 +363,9 @@ def test_download_file_too_large(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=10)),
+            with_local_ctx(
+                DownloadFile, config_dict=_config(launch_root, max_bytes=10)
+            ),
             url="https://example.com/big.pdf",
             filename="big.pdf",
         )
@@ -385,7 +416,10 @@ def test_download_file_relative_download_dir(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root, download_dir="incoming")),
+            with_local_ctx(
+                DownloadFile,
+                config_dict=_config(launch_root, download_dir="incoming"),
+            ),
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -395,7 +429,9 @@ def test_download_file_relative_download_dir(tmp_path, monkeypatch):
     assert (launch_root / "incoming" / "report.pdf").exists()
 
 
-def test_download_file_absolute_download_dir_in_extra_paths(tmp_path, monkeypatch):
+def test_download_file_absolute_download_dir_in_extra_paths(
+    tmp_path, monkeypatch
+):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     scratch = tmp_path / "agent-scratch" / "downloads"
@@ -408,7 +444,11 @@ def test_download_file_absolute_download_dir_in_extra_paths(tmp_path, monkeypatc
                 config_dict=_config(
                     launch_root,
                     download_dir=str(scratch),
-                    write_guard={"enabled": True, "mode": "deny", "extra_paths": [str(scratch.parent)]},
+                    write_guard={
+                        "enabled": True,
+                        "mode": "deny",
+                        "extra_paths": [str(scratch.parent)],
+                    },
                 ),
             ),
             url="https://example.com/report.pdf",
@@ -420,7 +460,9 @@ def test_download_file_absolute_download_dir_in_extra_paths(tmp_path, monkeypatc
     assert (scratch / "report.pdf").exists()
 
 
-def test_download_file_absolute_download_dir_outside_perimeter(tmp_path, monkeypatch):
+def test_download_file_absolute_download_dir_outside_perimeter(
+    tmp_path, monkeypatch
+):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     outside = tmp_path / "outside-downloads"
@@ -433,7 +475,11 @@ def test_download_file_absolute_download_dir_outside_perimeter(tmp_path, monkeyp
                 config_dict=_config(
                     launch_root,
                     download_dir=str(outside),
-                    write_guard={"enabled": True, "mode": "deny", "extra_paths": []},
+                    write_guard={
+                        "enabled": True,
+                        "mode": "deny",
+                        "extra_paths": [],
+                    },
                 ),
             ),
             url="https://example.com/report.pdf",
@@ -490,7 +536,9 @@ def test_download_file_atomic_write_replace_failure(tmp_path, monkeypatch):
 # --- M11: тело не приезжает в память целиком --------------------------------
 
 
-def test_oversized_file_is_rejected_by_content_length_without_downloading(monkeypatch, tmp_path):
+def test_oversized_file_is_rejected_by_content_length_without_downloading(
+    monkeypatch, tmp_path
+):
     """Сервер честно сказал размер — качать нечего вовсе.
 
     Раньше файл скачивался в память ЦЕЛИКОМ и только потом сравнивался с
@@ -506,14 +554,19 @@ def test_oversized_file_is_rejected_by_content_length_without_downloading(monkey
         return httpx.Response(
             200,
             content=b"x" * 64,
-            headers={"Content-Length": "999999999", "Content-Type": "application/octet-stream"},
+            headers={
+                "Content-Length": "999999999",
+                "Content-Type": "application/octet-stream",
+            },
         )
 
     _install(monkeypatch, _handler)
 
     out = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=1024)),
+            with_local_ctx(
+                DownloadFile, config_dict=_config(launch_root, max_bytes=1024)
+            ),
             url="https://example.com/big.pdf",
             filename="big.pdf",
         )
@@ -531,13 +584,19 @@ def test_lying_content_length_is_caught_while_streaming(monkeypatch, tmp_path):
 
     def _handler(request):
         # Заголовка нет вовсе: единственная защита — счёт прочитанного.
-        return httpx.Response(200, content=b"y" * 20_000, headers={"Content-Type": "application/octet-stream"})
+        return httpx.Response(
+            200,
+            content=b"y" * 20_000,
+            headers={"Content-Type": "application/octet-stream"},
+        )
 
     _install(monkeypatch, _handler)
 
     out = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=1024)),
+            with_local_ctx(
+                DownloadFile, config_dict=_config(launch_root, max_bytes=1024)
+            ),
             url="https://example.com/lying.pdf",
             filename="lying.pdf",
         )
@@ -557,13 +616,17 @@ def test_small_file_still_downloads(monkeypatch, tmp_path):
     body = PDF_BYTES
 
     def _handler(request):
-        return httpx.Response(200, content=body, headers={"Content-Type": "application/pdf"})
+        return httpx.Response(
+            200, content=body, headers={"Content-Type": "application/pdf"}
+        )
 
     _install(monkeypatch, _handler)
 
     out = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root, max_bytes=4096)),
+            with_local_ctx(
+                DownloadFile, config_dict=_config(launch_root, max_bytes=4096)
+            ),
             url="https://example.com/ok.pdf",
             filename="ok.pdf",
         )

@@ -44,13 +44,17 @@ def test_manifest_declares_requests_only_while_the_list_is_not_empty():
     """
     manifest = tomllib.loads(_MANIFEST.read_text(encoding="utf-8"))
     deps = manifest["project"]["dependencies"]
-    declared = [d for d in deps if d.split("[")[0].strip().lower() == "requests"]
+    declared = [
+        d for d in deps if d.split("[")[0].strip().lower() == "requests"
+    ]
     if _REQUESTS_ALLOWED:
         assert declared, (
             "модули из _REQUESTS_ALLOWED импортируют requests, а в зависимостях его нет — установка развалится"
         )
     else:
-        assert not declared, f"переводить нечего, а requests остался: {declared}"
+        assert not declared, (
+            f"переводить нечего, а requests остался: {declared}"
+        )
 
 
 def _modules_importing_requests() -> list[str]:
@@ -68,7 +72,9 @@ def _modules_importing_requests() -> list[str]:
                 names = [node.module or ""]
             else:
                 continue
-            if any(n == "requests" or n.startswith("requests.") for n in names):
+            if any(
+                n == "requests" or n.startswith("requests.") for n in names
+            ):
                 offenders.append(str(path.relative_to(_SRC)))
                 break
     return sorted(set(offenders))
@@ -88,7 +94,9 @@ def test_no_new_module_imports_requests():
     extra = sorted(offenders - _REQUESTS_ALLOWED)
     stale = sorted(_REQUESTS_ALLOWED - offenders)
     assert not extra, f"requests импортируется в новых модулях: {extra}"
-    assert not stale, f"модули уже без requests, снимите их со списка _REQUESTS_ALLOWED: {stale}"
+    assert not stale, (
+        f"модули уже без requests, снимите их со списка _REQUESTS_ALLOWED: {stale}"
+    )
 
 
 @pytest.mark.parametrize(

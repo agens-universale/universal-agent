@@ -28,7 +28,9 @@ def _validate_tool_arguments(
         validator = Draft7Validator(tool_schema)
     except Exception as e:
         # Невалидная сама схема инструмента
-        raise ValueError(f"Invalid JSON Schema for tool '{tool_name}': {e}") from e
+        raise ValueError(
+            f"Invalid JSON Schema for tool '{tool_name}': {e}"
+        ) from e
 
     errors = sorted(validator.iter_errors(arguments), key=lambda e: e.path)
     if not errors:
@@ -39,7 +41,10 @@ def _validate_tool_arguments(
         path = "/".join(str(p) for p in err.path) or "<root>"
         parts.append(f"path='{path}': {err.message}")
 
-    message = f"Arguments for tool '{tool_name}' do not match its schema. Details:\n" + "\n".join(parts)
+    message = (
+        f"Arguments for tool '{tool_name}' do not match its schema. Details:\n"
+        + "\n".join(parts)
+    )
     raise ValueError(message)
 
 

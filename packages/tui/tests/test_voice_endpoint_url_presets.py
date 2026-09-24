@@ -8,8 +8,12 @@ from gc_core.config_modules.endpoint_presets import EndpointPreset
 from textual.app import App, ComposeResult
 
 PRESETS = [
-    EndpointPreset(name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"),
-    EndpointPreset(name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"),
+    EndpointPreset(
+        name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"
+    ),
+    EndpointPreset(
+        name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"
+    ),
 ]
 
 
@@ -21,11 +25,21 @@ def _harness(editor):
     return _App()
 
 
-def _editor(values=None, *, url_presets=None, readonly=(), fields=("url", "token", "model")):
+def _editor(
+    values=None,
+    *,
+    url_presets=None,
+    readonly=(),
+    fields=("url", "token", "model"),
+):
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
     return VoiceEndpointEditor(
-        values=values or {}, fields=fields, autofocus=False, readonly=readonly, url_presets=url_presets
+        values=values or {},
+        fields=fields,
+        autofocus=False,
+        readonly=readonly,
+        url_presets=url_presets,
     )
 
 
@@ -52,7 +66,10 @@ async def test_pick_of_foreign_preset_writes_url_and_clears_model():
     """В поле URL — адрес OpenAI, в модели — whisper-1; выбор Groq → URL сменился,
     модель пуста. Подстановка идёт РЕАЛЬНЫМ путём (open → move → pick_in), а не
     прямым вызовом колбэка."""
-    ed = _editor({"url": PRESETS[0].url, "model": "whisper-1"}, url_presets=list(PRESETS))
+    ed = _editor(
+        {"url": PRESETS[0].url, "model": "whisper-1"},
+        url_presets=list(PRESETS),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         # `forced` — это Alt+↓: поверх заполненного поля пресет-лист сам не
@@ -68,7 +85,10 @@ async def test_pick_of_foreign_preset_writes_url_and_clears_model():
 
 async def test_pick_of_same_preset_keeps_model():
     """В поле URL уже адрес OpenAI; выбор того же OpenAI → модель НЕ тронута."""
-    ed = _editor({"url": PRESETS[0].url, "model": "whisper-1"}, url_presets=list(PRESETS))
+    ed = _editor(
+        {"url": PRESETS[0].url, "model": "whisper-1"},
+        url_presets=list(PRESETS),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         ed.url_list.open(forced=True)  # входит с подсветкой ЭТОГО пресета
@@ -85,11 +105,15 @@ async def test_submit_with_empty_model_is_a_form_error():
     async with app.run_test():
         ok, values = ed.submit()
         assert (ok, values) == (False, None)
-        assert any("выберите модель" in str(w.render()) for w in ed.query(".onb-warn"))
+        assert any(
+            "выберите модель" in str(w.render()) for w in ed.query(".onb-warn")
+        )
 
 
 def test_stt_markers_include_voxtral():
     from gc_tui.editors.voice_endpoint import _STT_MARKERS, stt_models_first
 
     assert "voxtral" in _STT_MARKERS
-    assert stt_models_first(["voxtral-small-latest", "gpt-x"]) == ["voxtral-small-latest"]
+    assert stt_models_first(["voxtral-small-latest", "gpt-x"]) == [
+        "voxtral-small-latest"
+    ]

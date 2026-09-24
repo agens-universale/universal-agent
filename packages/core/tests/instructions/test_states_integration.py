@@ -50,7 +50,9 @@ def test_state_cli_no_layers(tmp_path, monkeypatch):
     state = _make_state(is_tui=False, agent_md_path="")
     meta = state.set_call_metadata()
 
-    assert "ROOT RULES" not in meta["promptVariables"].get("userInstructions", "")
+    assert "ROOT RULES" not in meta["promptVariables"].get(
+        "userInstructions", ""
+    )
 
 
 def test_state_tui_loads_agentsmd(tmp_path, monkeypatch):
@@ -118,7 +120,9 @@ def test_state_exposes_override_conflict_warning(tmp_path, monkeypatch):
     role = tmp_path / "role.md"
     _write(role, "ROLE PROMPT")
 
-    state = _make_state(is_tui=True, agent_md_path=str(role), agentsmd_override=True)
+    state = _make_state(
+        is_tui=True, agent_md_path=str(role), agentsmd_override=True
+    )
 
     assert AGENTSMD_OVERRIDE_IGNORED_WARNING in state.instruction_warnings
 

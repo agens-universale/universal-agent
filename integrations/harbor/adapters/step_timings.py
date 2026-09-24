@@ -46,13 +46,20 @@ def _install_once() -> None:
             if sink is None:
                 return await orig_llm(messages, state, ctx, **kwargs)
             name = str(getattr(state, "default_model", None) or "llm")
-            return await sink.aspan("llm", name, state, lambda: orig_llm(messages, state, ctx, **kwargs))
+            return await sink.aspan(
+                "llm",
+                name,
+                state,
+                lambda: orig_llm(messages, state, ctx, **kwargs),
+            )
 
         async def tool_wrapper(*args, **kwargs):
             sink = _sink()
             if sink is None:
                 return await orig_tool(*args, **kwargs)
-            name = str(kwargs.get("tool_name") or (args[0] if args else "tool"))
+            name = str(
+                kwargs.get("tool_name") or (args[0] if args else "tool")
+            )
             return await sink.aspan(
                 "tool",
                 name,
@@ -124,7 +131,9 @@ class StepTimings:
         две копии разошлись бы, и ``timings.jsonl`` синхронного и асинхронного
         прогона перестал бы сравниваться.
         """
-        depth, head, started = self._open_span(kind, name, state, nested=nested)
+        depth, head, started = self._open_span(
+            kind, name, state, nested=nested
+        )
         ok, error = True, None
         try:
             return await call()
@@ -132,9 +141,13 @@ class StepTimings:
             ok, error = False, f"{type(exc).__name__}: {exc}"[:300]
             raise
         finally:
-            self._close_span(kind, depth, head, started, ok, error, nested=nested)
+            self._close_span(
+                kind, depth, head, started, ok, error, nested=nested
+            )
 
-    def _open_span(self, kind: str, name: str, state: Any, *, nested: bool) -> "tuple[int, dict, float]":
+    def _open_span(
+        self, kind: str, name: str, state: Any, *, nested: bool
+    ) -> "tuple[int, dict, float]":
         depth = getattr(self._local, "depth", 0)
         with self._lock:
             self._seq += 1
@@ -184,7 +197,9 @@ class StepTimings:
         *,
         nested: bool = False,
     ) -> Any:
-        depth, head, started = self._open_span(kind, name, state, nested=nested)
+        depth, head, started = self._open_span(
+            kind, name, state, nested=nested
+        )
         ok, error = True, None
         try:
             return call()
@@ -192,7 +207,9 @@ class StepTimings:
             ok, error = False, f"{type(exc).__name__}: {exc}"[:300]
             raise
         finally:
-            self._close_span(kind, depth, head, started, ok, error, nested=nested)
+            self._close_span(
+                kind, depth, head, started, ok, error, nested=nested
+            )
 
     def _emit(self, record: dict) -> None:
         # Читаем дескриптор ПОД ТЕМ ЖЕ локом, под которым пишем. Снаружи была

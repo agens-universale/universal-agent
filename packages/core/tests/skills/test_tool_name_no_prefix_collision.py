@@ -11,7 +11,10 @@ from gc_core.tools.skills.skills_tools import get_skills_tools_data
 
 def test_skills_tool_names_have_no_prefix_collision():
     names = list(get_skills_tools_data(None).keys())
-    collisions = [(a, b) for a in names for b in names if a != b and b.startswith(a)]
-    assert not collisions, "tool name is a strict prefix of another (autoregressive tool-name trap): " + ", ".join(
-        f"{a!r} prefix-of {b!r}" for a, b in collisions
+    collisions = [
+        (a, b) for a in names for b in names if a != b and b.startswith(a)
+    ]
+    assert not collisions, (
+        "tool name is a strict prefix of another (autoregressive tool-name trap): "
+        + ", ".join(f"{a!r} prefix-of {b!r}" for a, b in collisions)
     )

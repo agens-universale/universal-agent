@@ -37,11 +37,15 @@ def render_system_prompt(
     - tag blocks: <user_info>...</user_info>, <specific_role>...</specific_role>
     """
     if not isinstance(system_prompt, str):
-        raise ValueError(f"system_prompt is not string. got: {type(system_prompt)}")
+        raise ValueError(
+            f"system_prompt is not string. got: {type(system_prompt)}"
+        )
     if not isinstance(tools_spec, list):
         raise ValueError(f"tools_spec is not list. got: {type(tools_spec)}")
     if not isinstance(project_info, dict):
-        raise ValueError(f"project_info is not dict. got: {type(project_info)}")
+        raise ValueError(
+            f"project_info is not dict. got: {type(project_info)}"
+        )
 
     # --- tool data (if tools rendered locally - by default it should be on backend) ---
     if "<tool_data>" in system_prompt:
@@ -56,7 +60,9 @@ def render_system_prompt(
 
     # Tag block variant
     if "</user_info>" in system_prompt:
-        system_prompt = _replace_tag_block(system_prompt, "user_info", user_info_inner)
+        system_prompt = _replace_tag_block(
+            system_prompt, "user_info", user_info_inner
+        )
     # Legacy placeholder variant (no closing tag present)
     elif "<user_info>" in system_prompt:
         system_prompt = system_prompt.replace("<user_info>", user_info_inner)
@@ -66,12 +72,18 @@ def render_system_prompt(
         specific_role = "Specific role is not provided. Follow the common prompt instructions."
 
     if "</specific_role>" in system_prompt:
-        system_prompt = _replace_tag_block(system_prompt, "specific_role", str(specific_role))
+        system_prompt = _replace_tag_block(
+            system_prompt, "specific_role", str(specific_role)
+        )
     elif "<specific_role>" in system_prompt:
-        system_prompt = system_prompt.replace("<specific_role>", str(specific_role))
+        system_prompt = system_prompt.replace(
+            "<specific_role>", str(specific_role)
+        )
 
     # --- special instructions (client-provided; e.g. TUI consumption rules) ---
     if "</special_instructions>" in system_prompt:
-        system_prompt = _replace_tag_block(system_prompt, "special_instructions", special_instructions or "")
+        system_prompt = _replace_tag_block(
+            system_prompt, "special_instructions", special_instructions or ""
+        )
 
     return system_prompt

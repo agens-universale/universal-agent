@@ -56,7 +56,9 @@ class StubExecutor:
             "updated_at": "2026-05-21T12:00:00+00:00",
             "messages_count": len(records),
         }
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        )
 
     def stop_run(self) -> None:
         self.stopped = True
@@ -64,5 +66,7 @@ class StubExecutor:
     def add_message(self, message: dict) -> None:
         pass  # для snapshot-тестов не используется
 
-    def _build_records(self, user_messages: list, *, scenario: str) -> list[dict]:
+    def _build_records(
+        self, user_messages: list, *, scenario: str
+    ) -> list[dict]:
         return SCENARIOS[scenario](user_messages)

@@ -95,7 +95,9 @@ def test_exit_stops_the_runner_before_releasing_it(app):
 
     app.on_unmount()
 
-    assert runner.events == ["stop", "release"], f"порядок на выходе: {runner.events} — ожидание человека не снято"
+    assert runner.events == ["stop", "release"], (
+        f"порядок на выходе: {runner.events} — ожидание человека не снято"
+    )
 
 
 def test_stop_and_replace_releases_after_stop():
@@ -107,7 +109,9 @@ def test_stop_and_replace_releases_after_stop():
     from gc_tui.screens.main import TraceScreen
 
     runner = _Runner(running=True)
-    screen = SimpleNamespace(app=SimpleNamespace(active_runner=runner, last_stop_requested=False))
+    screen = SimpleNamespace(
+        app=SimpleNamespace(active_runner=runner, last_stop_requested=False)
+    )
 
     TraceScreen._stop_and_replace_runner(screen)
 

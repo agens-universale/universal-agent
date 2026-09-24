@@ -151,7 +151,9 @@ async def test_real_url_guard_blocks_async_tool():
         called["n"] += 1
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(await fetch("https://blocked.example", config_dict=_URL_CONFIG))
+    result = json.loads(
+        await fetch("https://blocked.example", config_dict=_URL_CONFIG)
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "url_blocked_by_policy"
@@ -164,12 +166,16 @@ async def test_real_url_guard_lets_allowed_async_tool_through():
     async def fetch(url: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(await fetch("https://allowed.example", config_dict=_URL_CONFIG))
+    result = json.loads(
+        await fetch("https://allowed.example", config_dict=_URL_CONFIG)
+    )
 
     assert result == {"ok": True, "url": "https://allowed.example"}
 
 
-def test_real_url_guard_verdicts_match_across_sync_and_async(anyio_backend=None):
+def test_real_url_guard_verdicts_match_across_sync_and_async(
+    anyio_backend=None,
+):
     """Вердикт синхронного тула — тот же, что у асинхронного.
 
     Это и есть смысл одного тела: разъехавшаяся политика между sync- и
@@ -192,9 +198,15 @@ def test_real_url_guard_verdicts_match_across_sync_and_async(anyio_backend=None)
         data.pop("tool", None)
         return data
 
-    for url in ("https://blocked.example", "https://allowed.example", "http://insecure.example"):
+    for url in (
+        "https://blocked.example",
+        "https://allowed.example",
+        "http://insecure.example",
+    ):
         sync_verdict = _verdict(fetch_sync(url, config_dict=_URL_CONFIG))
-        async_verdict = _verdict(asyncio.run(fetch_async(url, config_dict=_URL_CONFIG)))
+        async_verdict = _verdict(
+            asyncio.run(fetch_async(url, config_dict=_URL_CONFIG))
+        )
         assert sync_verdict == async_verdict, url
 
 
@@ -234,7 +246,9 @@ async def test_guard_uses_one_thread_not_two():
         threading.Thread.start = real_start
 
     guard_threads = [n for n in spawned if "guard" in n or "blocking" in n]
-    assert len(guard_threads) == 1, f"гвард завёл {len(guard_threads)} потоков вместо одного: {guard_threads}"
+    assert len(guard_threads) == 1, (
+        f"гвард завёл {len(guard_threads)} потоков вместо одного: {guard_threads}"
+    )
 
 
 async def test_cancelled_guard_closes_its_body():

@@ -13,7 +13,11 @@ import pytest
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
 # reorder sys.path so real site-packages wins, then evict cached shadows.
 _harbor_sp = next(
-    (p for p in sys.path if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+    (
+        p
+        for p in sys.path
+        if (Path(p) / "harbor" / "agents" / "base.py").exists()
+    ),
     None,
 )
 if _harbor_sp:
@@ -76,7 +80,12 @@ def test_orphan_tool_result_falls_back_to_user_step():
 def test_stringify_handles_none_str_and_parts():
     assert _stringify_content(None) == ""
     assert _stringify_content("x") == "x"
-    assert _stringify_content([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]) == "a\nb"
+    assert (
+        _stringify_content(
+            [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+        )
+        == "a\nb"
+    )
 
 
 def test_gc_cli_config_overrides_merge_into_build_config():
@@ -150,8 +159,12 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
 
 def _agent(**kwargs) -> GcCliExternal:
     kwargs.setdefault("gc_cli_config", {})
-    kwargs["gc_cli_config"].setdefault("completions_url", "http://test/v1/chat/completions")
-    return GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", **kwargs)
+    kwargs["gc_cli_config"].setdefault(
+        "completions_url", "http://test/v1/chat/completions"
+    )
+    return GcCliExternal(
+        logs_dir=Path("/tmp"), model_name="openai/m", **kwargs
+    )
 
 
 def test_polar_session_id_goes_into_every_llm_call(monkeypatch):
@@ -167,7 +180,9 @@ def test_profile_authorization_wins_over_session_bearer(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     cfg = _agent(
         session_id="task-1",
-        gc_cli_config={"chat_completion_headers": {"Authorization": "Bearer real-key"}},
+        gc_cli_config={
+            "chat_completion_headers": {"Authorization": "Bearer real-key"}
+        },
     )._build_config()
     headers = cfg["chat_completion_headers"]
     assert headers["Authorization"] == "Bearer real-key"
@@ -197,14 +212,18 @@ def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
     from pathlib import Path
 
     # Runtime sources (runner --model / env URL) are authoritative over profile.
-    monkeypatch.setenv("GC_CLI_BACKEND_URL", "http://runtime/v1/chat/completions")
+    monkeypatch.setenv(
+        "GC_CLI_BACKEND_URL", "http://runtime/v1/chat/completions"
+    )
     agent = GcCliExternal(
         logs_dir=Path("/tmp"),
         model_name="openai/real-model",
         gc_cli_config={"completions_url": "http://stale", "model": "stale"},
     )
     cfg = agent._build_config()
-    assert cfg["model"] == "real-model"  # openai/ stripped, profile value ignored
+    assert (
+        cfg["model"] == "real-model"
+    )  # openai/ stripped, profile value ignored
     assert cfg["completions_url"] == "http://runtime/v1/chat/completions"
 
 
@@ -222,10 +241,16 @@ def _state_with_usage(**calls):
 
 def test_usage_totals_reach_agent_context():
     context = AgentContext()
-    state = _state_with_usage(input_tokens=14300, output_tokens=250, cached_tokens=1200)
+    state = _state_with_usage(
+        input_tokens=14300, output_tokens=250, cached_tokens=1200
+    )
     _agent()._populate_usage(context, state)
     # n_input_tokens includes cache, per AgentContext's contract.
-    assert (context.n_input_tokens, context.n_output_tokens, context.n_cache_tokens) == (
+    assert (
+        context.n_input_tokens,
+        context.n_output_tokens,
+        context.n_cache_tokens,
+    ) == (
         14300,
         250,
         1200,
@@ -234,7 +259,12 @@ def test_usage_totals_reach_agent_context():
 
 def test_usage_sums_across_categories():
     """Summariser, finish gate and subagent calls are part of what the run cost."""
-    from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUBAGENT, CATEGORY_SUMMARY, UsageAccount
+    from gc_core.usage.account import (
+        CATEGORY_MAIN,
+        CATEGORY_SUBAGENT,
+        CATEGORY_SUMMARY,
+        UsageAccount,
+    )
 
     account = UsageAccount()
     account.add(CATEGORY_MAIN, input_tokens=1000, output_tokens=100)

@@ -31,7 +31,9 @@ def _section_header(label: str) -> Horizontal:
 class ToolCallDetailScreen(Screen):
     """Детальный экран: header + scroll(CALL section + OUTPUT section) + footer."""
 
-    def __init__(self, *, call_event: TraceEvent, result_event: Optional[TraceEvent]) -> None:
+    def __init__(
+        self, *, call_event: TraceEvent, result_event: Optional[TraceEvent]
+    ) -> None:
         super().__init__()
         self._call_event = call_event
         self._result_event = result_event
@@ -61,11 +63,15 @@ class ToolCallDetailScreen(Screen):
 
     def _output_widget(self):
         if self._result_event is None:
-            return Static("(результат ещё не получен)", classes="line-meta", markup=False)
+            return Static(
+                "(результат ещё не получен)", classes="line-meta", markup=False
+            )
         # full_payload result-event: {type: function_call_output, output: <str>}.
         # Нас интересует именно поле output.
         payload = self._result_event.full_payload
-        output_val = payload.get("output") if isinstance(payload, dict) else payload
+        output_val = (
+            payload.get("output") if isinstance(payload, dict) else payload
+        )
         if output_val is None:
             return Static("(пустой output)", classes="line-meta", markup=False)
         return render_payload(output_val)

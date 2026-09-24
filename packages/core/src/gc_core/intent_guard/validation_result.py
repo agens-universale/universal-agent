@@ -9,7 +9,9 @@ from gc_core.utils.json_text import parse_json_from_text
 
 _logger = logging.getLogger(__name__)
 
-_FINISH_GATE_ACTIONS = frozenset({"accept", "fix_report", "continue_work", "fix_report_and_continue"})
+_FINISH_GATE_ACTIONS = frozenset(
+    {"accept", "fix_report", "continue_work", "fix_report_and_continue"}
+)
 
 
 @dataclass
@@ -69,7 +71,9 @@ def _parse_coverage(value: Any) -> float:
         return 0.0
 
 
-def _warn_if_ok_disagrees(parsed: dict, ok: bool, trace_ok: bool, report_ok: bool) -> None:
+def _warn_if_ok_disagrees(
+    parsed: dict, ok: bool, trace_ok: bool, report_ok: bool
+) -> None:
     if "ok" not in parsed:
         return
     json_ok = _parse_bool(parsed.get("ok"))
@@ -83,7 +87,9 @@ def _warn_if_ok_disagrees(parsed: dict, ok: bool, trace_ok: bool, report_ok: boo
         )
 
 
-def _normalized_action(action_token: str, trace_ok: bool, report_ok: bool) -> str:
+def _normalized_action(
+    action_token: str, trace_ok: bool, report_ok: bool
+) -> str:
     """Действие по осям; расхождение с ответом валидатора — в лог, побеждают оси."""
     expected = expected_action_for_axes(trace_ok=trace_ok, report_ok=report_ok)
     if action_token != expected:
@@ -133,7 +139,9 @@ def parse_validator_response(raw: str) -> ValidationResult | None:
     if not report_mismatches:
         report_mismatches = _str_list(parsed.get("conflicts"))
 
-    missing_requirements = _str_list(parsed.get("missing_requirements")) or list(trace_gaps)
+    missing_requirements = _str_list(
+        parsed.get("missing_requirements")
+    ) or list(trace_gaps)
     conflicts = _str_list(parsed.get("conflicts")) or list(report_mismatches)
 
     return ValidationResult(

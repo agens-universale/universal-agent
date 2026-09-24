@@ -35,7 +35,9 @@ def test_delete_thread_removes_all_shapes(tmp_path):
     for name in files_in_root:
         assert not os.path.exists(os.path.join(d, name)), name
     for name in files_in_locks:
-        assert not os.path.exists(os.path.join(d, "locks", name)), f"locks/{name}"
+        assert not os.path.exists(os.path.join(d, "locks", name)), (
+            f"locks/{name}"
+        )
     assert os.path.exists(os.path.join(d, f"data_{sys_}_{other}.jsonl"))
     all_files = files_in_root + files_in_locks
     assert len(deleted) == len(all_files)

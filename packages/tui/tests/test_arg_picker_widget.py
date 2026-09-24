@@ -2,7 +2,10 @@
 
 import pytest
 
-_OPTS = [("txt", "вся сессия в читаемом виде"), ("json", "структурированные данные сессии")]
+_OPTS = [
+    ("txt", "вся сессия в читаемом виде"),
+    ("json", "структурированные данные сессии"),
+]
 
 
 def test_empty_filter_returns_all():
@@ -106,12 +109,18 @@ def test_three_tuple_row_renders_status_column_colored():
     active_row = p._format_row(opts[2])
 
     # описание начинается в общей колонке, как у 2-tuple опций
-    assert none_row.plain.index("работать") == active_row.plain.index("глобальный")
+    assert none_row.plain.index("работать") == active_row.plain.index(
+        "глобальный"
+    )
     # статус — самая правая часть строки, только у активной
     assert active_row.plain.rstrip().endswith("● активен")
     assert "активен" not in none_row.plain
 
-    spans = [s for s in active_row.spans if active_row.plain[s.start : s.end] == "● активен"]
+    spans = [
+        s
+        for s in active_row.spans
+        if active_row.plain[s.start : s.end] == "● активен"
+    ]
     assert spans and str(spans[0].style) == pal.OK
 
 
@@ -198,7 +207,9 @@ def test_hint_provider_not_called_again_on_repeated_desired_height():
     calls.clear()  # __init__ уже посчитал хинт один раз ради стартового desired_height
     for _ in range(5):
         _ = p.desired_height
-    assert calls == [], f"повторные обращения к desired_height дёрнули провайдер заново: {calls}"
+    assert calls == [], (
+        f"повторные обращения к desired_height дёрнули провайдер заново: {calls}"
+    )
 
 
 def test_hint_provider_called_again_after_selection_changes():

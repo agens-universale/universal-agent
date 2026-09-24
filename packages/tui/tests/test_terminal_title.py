@@ -1,6 +1,9 @@
 import io
 
-from gc_tui.services.terminal_title import format_terminal_title, set_terminal_title
+from gc_tui.services.terminal_title import (
+    format_terminal_title,
+    set_terminal_title,
+)
 
 
 def test_format_idle():
@@ -15,7 +18,10 @@ def test_format_with_task_no_status():
 
 
 def test_format_collapses_newlines():
-    assert format_terminal_title("строка1\n строка2") == "✦ GigaCode · строка1 строка2"
+    assert (
+        format_terminal_title("строка1\n строка2")
+        == "✦ GigaCode · строка1 строка2"
+    )
 
 
 def test_format_truncates_long_task():
@@ -25,8 +31,13 @@ def test_format_truncates_long_task():
 
 def test_status_glyph_is_separator():
     # Глиф статуса сам разделяет имя и промпт — без ·.
-    assert format_terminal_title("сделай рефактор", "running") == "✦ GigaCode ▸ сделай рефактор"
-    assert format_terminal_title("готово", "completed") == "✦ GigaCode ✓ готово"
+    assert (
+        format_terminal_title("сделай рефактор", "running")
+        == "✦ GigaCode ▸ сделай рефактор"
+    )
+    assert (
+        format_terminal_title("готово", "completed") == "✦ GigaCode ✓ готово"
+    )
     assert format_terminal_title("стоп", "stopped") == "✦ GigaCode ■ стоп"
     assert format_terminal_title("упало", "failed") == "✦ GigaCode ✗ упало"
     assert format_terminal_title("ждём", "asking") == "✦ GigaCode ? ждём"

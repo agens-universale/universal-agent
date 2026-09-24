@@ -70,7 +70,11 @@ def _fill_cache(f: FetchUrl, n: int) -> None:
     """Записывает n URL через публичный метод записи кэша."""
     for i in range(n):
         url = f"https://example.com/{i}"
-        f._put_to_cache(url, f"page-{i}", {"title": None, "description": None, "lang": None})
+        f._put_to_cache(
+            url,
+            f"page-{i}",
+            {"title": None, "description": None, "lang": None},
+        )
 
 
 def test_cache_evicts_oldest_when_limit_exceeded():
@@ -133,7 +137,9 @@ def test_cache_order_survives_serialize_roundtrip():
     """Порядок ключей (LRU-возраст) сохраняется при персистентности в meta."""
     shared = SharedStateData()
     for i in range(10):
-        shared.fetch_url_cache[f"https://example.com/{i}"] = {"content": f"p{i}"}
+        shared.fetch_url_cache[f"https://example.com/{i}"] = {
+            "content": f"p{i}"
+        }
     # merge_shared_into_meta ставит state_schema_version, иначе shared_from_meta упадёт.
     meta = ThreadMetaMapper.merge_shared_into_meta({}, shared)
     raw_json = json.dumps(meta, ensure_ascii=False)
@@ -142,7 +148,9 @@ def test_cache_order_survives_serialize_roundtrip():
     restored_shared = ThreadMetaMapper.shared_from_meta(restored_meta)
     assert restored_shared is not None
     # Содержимое и порядок сохранены.
-    assert list(restored_shared.fetch_url_cache.keys()) == [f"https://example.com/{i}" for i in range(10)]
+    assert list(restored_shared.fetch_url_cache.keys()) == [
+        f"https://example.com/{i}" for i in range(10)
+    ]
 
 
 def test_cache_ordereddict_equals_plain_dict_for_compatibility():
@@ -165,7 +173,11 @@ def test_max_size_constant_is_ten():
 
 def test_get_from_cache_returns_content_and_meta():
     f = _make_fetch()
-    f._put_to_cache("https://x.com", "body text", {"title": "T", "description": None, "lang": "en"})
+    f._put_to_cache(
+        "https://x.com",
+        "body text",
+        {"title": "T", "description": None, "lang": "en"},
+    )
     result = f._get_from_cache("https://x.com")
     assert result is not None
     content, meta = result
@@ -175,7 +187,11 @@ def test_get_from_cache_returns_content_and_meta():
 
 def test_get_from_cache_returns_none_for_missing_url():
     f = _make_fetch()
-    f._put_to_cache("https://x.com", "body", {"title": None, "description": None, "lang": None})
+    f._put_to_cache(
+        "https://x.com",
+        "body",
+        {"title": None, "description": None, "lang": None},
+    )
     assert f._get_from_cache("https://y.com") is None
 
 
@@ -187,7 +203,11 @@ def test_get_from_cache_returns_none_when_no_state():
 def test_put_to_cache_noop_when_no_state():
     f = CallableTool(FetchUrl(state=None))
     # Не должен падать — просто no-op.
-    f._put_to_cache("https://x.com", "body", {"title": None, "description": None, "lang": None})
+    f._put_to_cache(
+        "https://x.com",
+        "body",
+        {"title": None, "description": None, "lang": None},
+    )
 
 
 def test_put_to_cache_evicts_on_overflow():
@@ -217,7 +237,11 @@ def test_get_from_cache_updates_lru_order():
 
 
 def test_simple_fetch_max_size_matches_fetch_url():
-    assert SimpleFetchUrl.fetch_url_cache_max_size == FetchUrl.fetch_url_cache_max_size == 10
+    assert (
+        SimpleFetchUrl.fetch_url_cache_max_size
+        == FetchUrl.fetch_url_cache_max_size
+        == 10
+    )
 
 
 def test_simple_fetch_get_cache_normalizes_plain_dict_to_ordereddict():

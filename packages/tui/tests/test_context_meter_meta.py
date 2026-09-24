@@ -5,13 +5,23 @@ import json
 import pytest
 
 
-def _write_task(tmp_path, tid, *, content="hello", runtime=None, tui=None, data_content=None):
+def _write_task(
+    tmp_path,
+    tid,
+    *,
+    content="hello",
+    runtime=None,
+    tui=None,
+    data_content=None,
+):
     meta = {"thread_id": tid, "system_id": "cli"}
     if runtime is not None:
         meta["runtime"] = runtime
     if tui is not None:
         meta["tui"] = tui
-    (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
     body = data_content if data_content is not None else content
     rec = {
         "type": "message",
@@ -21,7 +31,9 @@ def _write_task(tmp_path, tid, *, content="hello", runtime=None, tui=None, data_
         "ts": "t",
         "payload": {"role": "user", "content": body},
     }
-    (tmp_path / f"data_cli_{tid}.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        json.dumps(rec) + "\n", encoding="utf-8"
+    )
 
 
 def _cfg(trigger=10_000, turn_end=1):
@@ -73,7 +85,9 @@ async def test_context_meter_reads_meta_not_data(tmp_path):
         runtime={"live_history_chars": 500, "live_msg_count": 1},
         data_content="Z" * 50_000,
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_cfg(trigger=1000))
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config=_cfg(trigger=1000)
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -105,7 +119,9 @@ async def test_cmd_compact_antispam_uses_live_msg_count(tmp_path):
         "runtime": {"live_msg_count": 3},
         "tui": {"last_compact_msg_count": 3},
     }
-    (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
     class _Runner:

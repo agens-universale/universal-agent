@@ -12,14 +12,25 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
-from gc_core.config_modules.agent import merge_special_instructions_with_model_steering
-from gc_core.config_modules.stored_outputs import get_stored_tool_outputs_max_entries
-from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
+from gc_core.config_modules.agent import (
+    merge_special_instructions_with_model_steering,
+)
+from gc_core.config_modules.stored_outputs import (
+    get_stored_tool_outputs_max_entries,
+)
+from gc_core.intent_log.user_turn import (
+    append_user_ask_deduped,
+    append_user_asks_from_messages,
+)
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.message_policy.tool_usage_notice.state import persist_tool_usage_notice_state
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.message_policy.tool_usage_notice.state import (
+    persist_tool_usage_notice_state,
+)
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.processing_responses import (
     _acall_blocking_hook,
@@ -35,21 +46,35 @@ from gc_core.run_summary_coordinator import (
 )
 from gc_core.security.permission_store import PermissionStore
 from gc_core.states import SharedStateData, State
-from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
-from gc_core.thread_store import ThreadSession, make_message_key, resolve_threads_dir
+from gc_core.summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_turn_end_trigger_chars,
+)
+from gc_core.thread_store import (
+    ThreadSession,
+    make_message_key,
+    resolve_threads_dir,
+)
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
-from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER as _STREAM_SESSION_MANAGER
+from gc_core.tools.connect_mcp.stream_client import (
+    _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
+)
 from gc_core.tools.subagents.active_scope import (
     active_parent_call_id,
     is_child_input_active,
     try_enqueue_user_message,
 )
 from gc_core.tools.subagents.selection import subagents_enabled
-from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity
+from gc_core.tools.subagents.sidecar import (
+    bind_thread_identity,
+    clear_thread_identity,
+)
 from gc_core.trace_id import trace_id_from_config
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_dict, build_run_usage_report
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 from gc_core.utils.local_render_system_prompt import render_system_prompt
 from gc_core.utils.logging_module import human_console_enabled
 
@@ -64,7 +89,9 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
 )
 
 
-async def _aappend_trace_id_to_meta(thread_session: Any, trace_id: str, logger: Any | None = None) -> None:
+async def _aappend_trace_id_to_meta(
+    thread_session: Any, trace_id: str, logger: Any | None = None
+) -> None:
     """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
 
     Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
@@ -98,11 +125,15 @@ async def _aappend_trace_id_to_meta(thread_session: Any, trace_id: str, logger: 
         if trace_id in ids:
             return
         ids.append(trace_id)
-        await port.aupdate_runtime_meta(sys_norm, thread_id, {"trace_ids": ids})
+        await port.aupdate_runtime_meta(
+            sys_norm, thread_id, {"trace_ids": ids}
+        )
     except Exception as exc:
         if logger is not None:
             try:
-                logger.debug("trace_id_meta_write_failed error=%s", exc, exc_info=True)
+                logger.debug(
+                    "trace_id_meta_write_failed error=%s", exc, exc_info=True
+                )
             except Exception:
                 pass
         return
@@ -207,7 +238,15 @@ class AgentExecutor:
             self._pending_messages = []
             return out
 
-    async def _aopen_thread_session(self, thread_id, *, start_new_thread: bool, system, backend_api_mode: str, logger):
+    async def _aopen_thread_session(
+        self,
+        thread_id,
+        *,
+        start_new_thread: bool,
+        system,
+        backend_api_mode: str,
+        logger,
+    ):
         """Тред-сессия прогона → (thread_session, thread_shared, previous_response_id, system_id)."""
         config_dict = self._ctx.config_dict
         system_id = system or "cli"
@@ -221,7 +260,9 @@ class AgentExecutor:
             if _reset_store is None:
                 from gc_core.thread_store_file import FileThreadStore
 
-                _reset_store = FileThreadStore(resolve_threads_dir(config_dict))
+                _reset_store = FileThreadStore(
+                    resolve_threads_dir(config_dict)
+                )
             from gc_core.thread_store_async import athread_store
 
             await athread_store(_reset_store).areset(system_id, thread_id)
@@ -272,7 +313,9 @@ class AgentExecutor:
         )
         return thread_session, thread_shared, previous_response_id, system_id
 
-    async def _amcp_snapshot(self, thread_session, thread_id, system_id: str) -> None:
+    async def _amcp_snapshot(
+        self, thread_session, thread_id, system_id: str
+    ) -> None:
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
         config_dict = self._ctx.config_dict
         if thread_id is None or not config_dict.get("mcp-servers"):
@@ -280,7 +323,9 @@ class AgentExecutor:
         try:
             from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 
-            snap = build_mcp_tools_snapshot(config_dict, self._ctx.tools_data, self._ctx.mcp_status)
+            snap = build_mcp_tools_snapshot(
+                config_dict, self._ctx.tools_data, self._ctx.mcp_status
+            )
             await thread_session.port.aupdate_runtime_meta(
                 system_id,
                 thread_id,
@@ -289,7 +334,9 @@ class AgentExecutor:
         except Exception:
             pass
 
-    def _load_chat_completions_prompts(self, *, effective_verbose: bool, logger) -> tuple:
+    def _load_chat_completions_prompts(
+        self, *, effective_verbose: bool, logger
+    ) -> tuple:
         """(system prompt, special instructions) для chat/completions из файлов конфига."""
         config_dict = self._ctx.config_dict
         chat_completions_system_prompt: str | None = None
@@ -304,11 +351,16 @@ class AgentExecutor:
             # файл виноват.
             except (OSError, UnicodeDecodeError) as e:
                 if effective_verbose:
-                    print(f"Не удалось прочитать chat_completions system prompt: {prompt_path}")
+                    print(
+                        f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
+                    )
                 if logger is not None:
                     logger.warning(
                         "system_prompt_read_failed",
-                        extra={"event": "system_prompt_read_failed", "path": prompt_path},
+                        extra={
+                            "event": "system_prompt_read_failed",
+                            "path": prompt_path,
+                        },
                     )
                 raise e
 
@@ -344,7 +396,9 @@ class AgentExecutor:
         """State прогона и отрендеренный system prompt (chat/completions) либо None."""
         config_dict = self._ctx.config_dict
         state_data = {
-            "limit_project_metadata": config_dict.get("limit_project_metadata", False),
+            "limit_project_metadata": config_dict.get(
+                "limit_project_metadata", False
+            ),
             "parent_state_id": None,
             "verbose": effective_verbose,
             "model": config_dict["model"],
@@ -354,10 +408,14 @@ class AgentExecutor:
             "skills_list": skills_list,
             "system_prompt_id": config_dict["system_prompt_id"],
             "chat_completions_system_prompt": chat_completions_system_prompt,
-            "use_server_subagents": config_dict.get("use_server_subagents", False),
+            "use_server_subagents": config_dict.get(
+                "use_server_subagents", False
+            ),
             "agent_md_path": config_dict.get("agent_md_path"),
             "is_tui": bool(getattr(self._ctx, "is_tui", False)),
-            "agentsmd_override": bool(config_dict.get("agentsmd_override", False)),
+            "agentsmd_override": bool(
+                config_dict.get("agentsmd_override", False)
+            ),
             "thread_id": thread_id,
             "shared": thread_shared,
             "workspace_config": config_dict,
@@ -373,9 +431,13 @@ class AgentExecutor:
         # → честная ошибка класса 2 ДО транспорта (спека §8), не сырой
         # AliasCircuitOpenError на старте рана.
         begin_turn_main_trace(state, self._ctx)
-        state.tool_call_outputs_store.set_max_entries(get_stored_tool_outputs_max_entries(config_dict))
+        state.tool_call_outputs_store.set_max_entries(
+            get_stored_tool_outputs_max_entries(config_dict)
+        )
         state.backend_api_mode = backend_api_mode
-        state.on_messages_evicted = getattr(self._ctx, "on_messages_evicted", None)
+        state.on_messages_evicted = getattr(
+            self._ctx, "on_messages_evicted", None
+        )
         state.dialog_steps_offset = 0
         if thread_session is not None:
             meta = getattr(thread_session, "meta", None) or {}
@@ -384,7 +446,9 @@ class AgentExecutor:
             state.init_user_turn_seq(meta.get("user_turn_seq"))
             state.infer_user_turn_seq_if_missing()
             state.init_tool_usage_notice_from_meta(meta)
-            state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
+            state.dialog_steps_offset = int(
+                meta.get("dialog_steps_offset", 0) or 0
+            )
             state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         rendered_system_prompt: str | None = None
         if (
@@ -414,7 +478,9 @@ class AgentExecutor:
     def _bind_state(self, state, *, discard_writes_after_stop: bool) -> None:
         with self._lock:
             self._state = state
-            self._state.discard_writes_after_stop = bool(discard_writes_after_stop)
+            self._state.discard_writes_after_stop = bool(
+                discard_writes_after_stop
+            )
             # Применить stop, пришедший пока state ещё не существовал (setup-фаза),
             # чтобы первый же check_stop вышел ДО persist user-сообщения.
             if self._stop_pending:
@@ -447,7 +513,14 @@ class AgentExecutor:
                     user_turn_seq=state.user_turn_seq,
                 )
 
-    def _thread_persist_callback(self, *, thread_session, state, backend_api_mode: str, rendered_system_prompt):
+    def _thread_persist_callback(
+        self,
+        *,
+        thread_session,
+        state,
+        backend_api_mode: str,
+        rendered_system_prompt,
+    ):
         async def _persist_thread_batch(step_messages: list[dict]) -> None:
             if is_persist_discarded(state):
                 return
@@ -458,25 +531,44 @@ class AgentExecutor:
                 and isinstance(rendered_system_prompt, str)
                 and rendered_system_prompt.strip()
             ):
-                thread_session.meta["chat_completions_system_prompt_rendered"] = rendered_system_prompt
+                thread_session.meta[
+                    "chat_completions_system_prompt_rendered"
+                ] = rendered_system_prompt
             _shared = getattr(state, "shared", None)
             if isinstance(_shared, SharedStateData):
-                thread_session.meta = ThreadMetaMapper.merge_shared_into_meta(thread_session.meta, _shared)
+                thread_session.meta = ThreadMetaMapper.merge_shared_into_meta(
+                    thread_session.meta, _shared
+                )
             known_before = set(thread_session.known_message_keys)
-            step_messages_for_user_scope = [m for m in step_messages if make_message_key(m) not in known_before]
+            step_messages_for_user_scope = [
+                m
+                for m in step_messages
+                if make_message_key(m) not in known_before
+            ]
             state.current_user_intent = append_user_asks_from_messages(
                 state.current_user_intent,
                 step_messages_for_user_scope,
                 user_turn_seq=state.user_turn_seq,
             )
-            thread_session.meta = ThreadMetaMapper.merge_state_into_meta(thread_session.meta, state)
+            thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
+                thread_session.meta, state
+            )
             thread_session.meta["backend_api_mode"] = state.backend_api_mode
             thread_session.backend_api_mode = state.backend_api_mode
             persist_tool_usage_notice_state(state, thread_session.meta)
-            last_backend_response_id = getattr(state, "last_backend_response_id", None)
-            if isinstance(last_backend_response_id, str) and last_backend_response_id:
-                thread_session.meta["last_backend_response_id"] = last_backend_response_id
-            await thread_session.apersist_batch(step_messages, previous_response_id=state.previous_response_id)
+            last_backend_response_id = getattr(
+                state, "last_backend_response_id", None
+            )
+            if (
+                isinstance(last_backend_response_id, str)
+                and last_backend_response_id
+            ):
+                thread_session.meta["last_backend_response_id"] = (
+                    last_backend_response_id
+                )
+            await thread_session.apersist_batch(
+                step_messages, previous_response_id=state.previous_response_id
+            )
 
         return _persist_thread_batch
 
@@ -502,11 +594,19 @@ class AgentExecutor:
             # из state + batch без дублей (см. create_call_data_completions).
             if backend_api_mode == "chat_completions":
                 base_messages = list(thread_session.history_messages)
-                state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
+                state.skip_initial_user_ask_step_when_history = (
+                    len(base_messages) > 0
+                )
                 messages = list(new_user_messages)
             else:
-                base_messages = list(thread_session.history_messages) if previous_response_id is None else []
-                state.skip_initial_user_ask_step_when_history = len(base_messages) > 0
+                base_messages = (
+                    list(thread_session.history_messages)
+                    if previous_response_id is None
+                    else []
+                )
+                state.skip_initial_user_ask_step_when_history = (
+                    len(base_messages) > 0
+                )
                 messages = [*base_messages, *new_user_messages]
             persist = self._thread_persist_callback(
                 thread_session=thread_session,
@@ -515,7 +615,10 @@ class AgentExecutor:
                 rendered_system_prompt=rendered_system_prompt,
             )
             return messages, persist, thread_session.get_full_history_messages
-        if backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
+        if (
+            backend_api_mode == "chat_completions"
+            and summary_trigger_chars > 0
+        ):
 
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
                 if is_persist_discarded(state):
@@ -531,17 +634,25 @@ class AgentExecutor:
 
     async def _afinalize_thread(self, thread_session, state, logger) -> None:
         config_dict = self._ctx.config_dict
-        if thread_session is None or (state.discard_writes_after_stop and state.stop_requested):
+        if thread_session is None or (
+            state.discard_writes_after_stop and state.stop_requested
+        ):
             return
-        thread_session.meta = ThreadMetaMapper.merge_state_into_meta(thread_session.meta, state)
+        thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
+            thread_session.meta, state
+        )
         thread_session.meta["backend_api_mode"] = state.backend_api_mode
         persist_tool_usage_notice_state(state, thread_session.meta)
-        await thread_session.apersist_batch([], previous_response_id=state.previous_response_id)
+        await thread_session.apersist_batch(
+            [], previous_response_id=state.previous_response_id
+        )
         _run_trace_id = trace_id_from_config(config_dict)
         if _run_trace_id:
             # После persist_batch: он пересобирает мету с диска, поэтому
             # запись должна быть последней, иначе её затрёт.
-            await _aappend_trace_id_to_meta(thread_session, _run_trace_id, logger)
+            await _aappend_trace_id_to_meta(
+                thread_session, _run_trace_id, logger
+            )
 
     def _report_run_usage(self, state, run_start_usage, logger) -> None:
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
@@ -558,7 +669,9 @@ class AgentExecutor:
             )
             if usage_text:
                 if logger is not None:
-                    logger.info("\n<run_usage>\n%s\n</run_usage>\n", usage_text)
+                    logger.info(
+                        "\n<run_usage>\n%s\n</run_usage>\n", usage_text
+                    )
                 if human_console_enabled(config_dict):
                     print(f"\n{usage_text}\n")
             if logger is not None:
@@ -575,7 +688,9 @@ class AgentExecutor:
                     )
         except Exception as usage_exc:  # отчёт не должен ронять прогон
             if logger is not None:
-                logger.warning("run usage report failed: %s", usage_exc, exc_info=True)
+                logger.warning(
+                    "run usage report failed: %s", usage_exc, exc_info=True
+                )
 
     async def arun(
         self,
@@ -615,10 +730,23 @@ class AgentExecutor:
             self._state = None
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
-        effective_verbose = verbose if verbose is not None else config_dict.get("verbose", False)
+        effective_verbose = (
+            verbose
+            if verbose is not None
+            else config_dict.get("verbose", False)
+        )
         skills_list = await self._ctx.skills_registry.list_skills()
-        backend_api_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-        thread_session, thread_shared, previous_response_id, system_id = await self._aopen_thread_session(
+        backend_api_mode = (
+            str(config_dict.get("backend_api_mode", "responses"))
+            .strip()
+            .lower()
+        )
+        (
+            thread_session,
+            thread_shared,
+            previous_response_id,
+            system_id,
+        ) = await self._aopen_thread_session(
             thread_id,
             start_new_thread=start_new_thread,
             system=system,
@@ -637,14 +765,18 @@ class AgentExecutor:
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
-        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(config_dict)
+        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(
+            config_dict
+        )
 
         chat_completions_system_prompt: str | None = None
         special_instructions: str | None = None
         if backend_api_mode == "chat_completions":
-            chat_completions_system_prompt, special_instructions = self._load_chat_completions_prompts(
-                effective_verbose=effective_verbose,
-                logger=logger,
+            chat_completions_system_prompt, special_instructions = (
+                self._load_chat_completions_prompts(
+                    effective_verbose=effective_verbose,
+                    logger=logger,
+                )
             )
 
         state, rendered_system_prompt = await self._abuild_run_state(
@@ -658,15 +790,27 @@ class AgentExecutor:
             backend_api_mode=backend_api_mode,
             logger=logger,
         )
-        self._bind_state(state, discard_writes_after_stop=discard_writes_after_stop)
+        self._bind_state(
+            state, discard_writes_after_stop=discard_writes_after_stop
+        )
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
-        self._ctx.permission_store = PermissionStore(session_rules=state.shared.confirm_rules)
+        self._ctx.permission_store = PermissionStore(
+            session_rules=state.shared.confirm_rules
+        )
 
-        if thread_session is not None and backend_api_mode == "chat_completions" and thread_session.history_messages:
+        if (
+            thread_session is not None
+            and backend_api_mode == "chat_completions"
+            and thread_session.history_messages
+        ):
             state.messages.extend(
-                [_shallow_copy_msg(m) for m in thread_session.history_messages if isinstance(m, dict)]
+                [
+                    _shallow_copy_msg(m)
+                    for m in thread_session.history_messages
+                    if isinstance(m, dict)
+                ]
             )
 
         summary = RunSummaryCoordinator(
@@ -684,10 +828,14 @@ class AgentExecutor:
 
         # Хук компакции ждём тем же способом, что и три остальных
         # (_acall_blocking_hook): корутину — нативно, обычную функцию — в потоке.
-        await _acall_blocking_hook(summary.apre_run_compact_if_needed, trigger_reason="pre_run")
+        await _acall_blocking_hook(
+            summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+        )
 
         if not messages:
-            raise ValueError("Список пользовательских сообщений не должен быть пустым.")
+            raise ValueError(
+                "Список пользовательских сообщений не должен быть пустым."
+            )
         user_bodies = [str(x) for x in messages]
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
@@ -700,14 +848,16 @@ class AgentExecutor:
         )
         self._seed_current_user_intent(state, new_user_messages)
 
-        messages, persist_messages_callback, get_full_history_messages = self._persistence_for_run(
-            thread_session=thread_session,
-            state=state,
-            backend_api_mode=backend_api_mode,
-            rendered_system_prompt=rendered_system_prompt,
-            previous_response_id=previous_response_id,
-            new_user_messages=new_user_messages,
-            summary_trigger_chars=summary_trigger_chars,
+        messages, persist_messages_callback, get_full_history_messages = (
+            self._persistence_for_run(
+                thread_session=thread_session,
+                state=state,
+                backend_api_mode=backend_api_mode,
+                rendered_system_prompt=rendered_system_prompt,
+                previous_response_id=previous_response_id,
+                new_user_messages=new_user_messages,
+                summary_trigger_chars=summary_trigger_chars,
+            )
         )
 
         def get_pending_messages() -> list[dict]:
@@ -718,7 +868,11 @@ class AgentExecutor:
 
         def check_stop() -> bool:
             with self._lock:
-                return self._state.stop_requested if self._state is not None else False
+                return (
+                    self._state.stop_requested
+                    if self._state is not None
+                    else False
+                )
 
         # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
         # отчёт же показывает токены именно этого прогона (дельту). Тот же baseline
@@ -728,7 +882,9 @@ class AgentExecutor:
         # Входим во владение MCP-сессиями этого контекста. Всё, что поднимут
         # тулы внутри прогона, ляжет под этот токен — и на выходе мы закроем
         # ровно своё, не тронув сессии параллельных агентов на том же loop.
-        _owner_reset = set_owner(getattr(self._ctx, "mcp_session_owner", "") or None)
+        _owner_reset = set_owner(
+            getattr(self._ctx, "mcp_session_owner", "") or None
+        )
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
@@ -754,11 +910,21 @@ class AgentExecutor:
                 force_compact_hook=summary.aforce_compact_once,
                 get_pending_messages=get_pending_messages,
                 check_stop=check_stop,
-                session_meta=(thread_session.meta if thread_session is not None else None),
-                mark_finalizing=(lambda active: aset_tui_finalizing(thread_session, active)),
-                mark_finish_gate_checking=(lambda active: aset_tui_finish_gate_checking(thread_session, active)),
+                session_meta=(
+                    thread_session.meta if thread_session is not None else None
+                ),
+                mark_finalizing=(
+                    lambda active: aset_tui_finalizing(thread_session, active)
+                ),
+                mark_finish_gate_checking=(
+                    lambda active: aset_tui_finish_gate_checking(
+                        thread_session, active
+                    )
+                ),
             )
-            self.last_terminal_outcome = getattr(state, "terminal_outcome", None)
+            self.last_terminal_outcome = getattr(
+                state, "terminal_outcome", None
+            )
             await self._afinalize_thread(thread_session, state, logger)
         finally:
             # Несъеденное циклом откладываем в сторону: оно не должно молча
@@ -786,7 +952,10 @@ class AgentExecutor:
         if logger is not None:
             logger.info(
                 "log_path",
-                extra={"event": "log_path", "path": getattr(self._ctx, "logging_path", None)},
+                extra={
+                    "event": "log_path",
+                    "path": getattr(self._ctx, "logging_path", None),
+                },
             )
         return response
 
@@ -874,7 +1043,9 @@ class AgentExecutor:
             return (session_meta, request_meta)
 
     @staticmethod
-    def _build_user_messages(user_bodies, *, message_ids, display_contents, skills_loaded, gen_id):
+    def _build_user_messages(
+        user_bodies, *, message_ids, display_contents, skills_loaded, gen_id
+    ):
         """Собрать user-сообщения с опциональными display_content/skill_loaded.
         display_content ставится только при отличии от content; skill_loaded — если задан."""
         out = []
@@ -883,12 +1054,24 @@ class AgentExecutor:
             msg = {
                 "role": "user",
                 "content": body,
-                "id": (message_ids[i] if message_ids and i < len(message_ids) and message_ids[i] else gen_id("m")),
+                "id": (
+                    message_ids[i]
+                    if message_ids and i < len(message_ids) and message_ids[i]
+                    else gen_id("m")
+                ),
             }
-            disp = display_contents[i] if display_contents and i < len(display_contents) else None
+            disp = (
+                display_contents[i]
+                if display_contents and i < len(display_contents)
+                else None
+            )
             if disp is not None and disp != body:
                 msg["display_content"] = disp
-            sk = skills_loaded[i] if skills_loaded and i < len(skills_loaded) else None
+            sk = (
+                skills_loaded[i]
+                if skills_loaded and i < len(skills_loaded)
+                else None
+            )
             if sk:
                 msg["skill_loaded"] = sk
             out.append(msg)
@@ -905,11 +1088,19 @@ class AgentExecutor:
             else:
                 self._stop_pending = True
 
-    async def acompact_thread(self, thread_id: str, system: str | None = None) -> bool:
+    async def acompact_thread(
+        self, thread_id: str, system: str | None = None
+    ) -> bool:
         """Форс-сжатие треда (ручной /compact) — делегат в manual_compaction
         (оркестрация суммаризации, вне run-loop)."""
-        from gc_core.manual_compaction import acompact_thread as _acompact_thread
+        from gc_core.manual_compaction import (
+            acompact_thread as _acompact_thread,
+        )
 
         return await _acompact_thread(
-            ctx=self._ctx, _lock=self._lock, self_state=self._state, thread_id=thread_id, system=system
+            ctx=self._ctx,
+            _lock=self._lock,
+            self_state=self._state,
+            thread_id=thread_id,
+            system=system,
         )

@@ -6,7 +6,17 @@ def test_policy_forwards_on_delta(monkeypatch):
     seen = {}
 
     async def fake_req(
-        payload, headers, *, url, verify, use_retry, logger, on_delta=None, cert=None, timeout=600, config_proxy=None
+        payload,
+        headers,
+        *,
+        url,
+        verify,
+        use_retry,
+        logger,
+        on_delta=None,
+        cert=None,
+        timeout=600,
+        config_proxy=None,
     ):
         seen["on_delta"] = on_delta
         seen["timeout"] = timeout
@@ -17,7 +27,11 @@ def test_policy_forwards_on_delta(monkeypatch):
     sentinel = lambda k, t: None
     res, payload = run_coro(
         policy.arequest_chat_completions_with_policy(
-            payload_factory=lambda mt: {"model": "m", "max_tokens": mt, "messages": []},
+            payload_factory=lambda mt: {
+                "model": "m",
+                "max_tokens": mt,
+                "messages": [],
+            },
             initial_max_tokens=100,
             min_response_tokens=10,
             headers={},

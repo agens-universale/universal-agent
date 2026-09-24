@@ -19,7 +19,9 @@ def _content_text(widget) -> str:
             return content.plain
         return str(content)
 
-    children = list(getattr(widget, "_pending_children", []) or widget.children)
+    children = list(
+        getattr(widget, "_pending_children", []) or widget.children
+    )
     if not children:
         return _one(widget)
     return "".join(_one(c) for c in children)

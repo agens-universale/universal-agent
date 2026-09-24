@@ -11,7 +11,14 @@ async def test_preview_multiparagraph_prose_single_row(tmp_path):
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    rec = {"payload": {"id": "a1", "role": "assistant", "content": "абзац1\n\nабзац2"}, "ts": ""}
+    rec = {
+        "payload": {
+            "id": "a1",
+            "role": "assistant",
+            "content": "абзац1\n\nабзац2",
+        },
+        "ts": "",
+    }
 
     class _App(App):
         def compose(self):

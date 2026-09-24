@@ -14,7 +14,9 @@ from gc_testkit.paths import REPO
 
 
 def load_script(name):
-    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(
+        name, REPO / "scripts" / f"{name}.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -27,7 +29,9 @@ def repository(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_lint_expands_literal_directories_without_splitting_filenames(repository):
+def test_lint_expands_literal_directories_without_splitting_filenames(
+    repository,
+):
     folder = repository / "src [literal]"
     folder.mkdir()
     tracked = folder / "tracked file.py"
@@ -38,7 +42,12 @@ def test_lint_expands_literal_directories_without_splitting_filenames(repository
     (repository / ".gitignore").write_text("*.ignored\n")
     (folder / "secret.ignored").write_text("ignore me")
     checker = load_script("lint_paths")
-    expected = sorted([str(tracked.relative_to(repository)), str(new.relative_to(repository))])
+    expected = sorted(
+        [
+            str(tracked.relative_to(repository)),
+            str(new.relative_to(repository)),
+        ]
+    )
     assert checker.expand_paths([folder.name, str(tracked)]) == expected
     assert checker.expand_paths(["."]) == sorted([*expected, ".gitignore"])
 
@@ -54,14 +63,28 @@ def test_lint_propagates_runner_failure_and_passes_real_files(repository):
     (repository / "src").mkdir()
     (repository / "src" / "bad file.py").write_text("if flag:\n    pass\n")
     spy = repository / "runner.py"
-    spy.write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\nsys.exit(17)\n")
+    spy.write_text(
+        "import json, sys\nprint(json.dumps(sys.argv[1:]))\nsys.exit(17)\n"
+    )
     result = subprocess.run(
-        [sys.executable, str(REPO / "scripts/lint_paths.py"), sys.executable, str(spy), "--", "src"],
+        [
+            sys.executable,
+            str(REPO / "scripts/lint_paths.py"),
+            sys.executable,
+            str(spy),
+            "--",
+            "src",
+        ],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 17
-    assert json.loads(result.stdout) == ["--hook-stage", "manual", "--files", "src/bad file.py"]
+    assert json.loads(result.stdout) == [
+        "--hook-stage",
+        "manual",
+        "--files",
+        "src/bad file.py",
+    ]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="lint.sh requires a POSIX shell")
@@ -85,15 +108,28 @@ def test_lint_shell_wires_directory_expansion(repository, monkeypatch):
     )
     uv.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
-    result = subprocess.run(["bash", str(scripts / "lint.sh"), "src"], text=True, capture_output=True)
+    result = subprocess.run(
+        ["bash", str(scripts / "lint.sh"), "src"],
+        text=True,
+        capture_output=True,
+    )
     assert result.returncode == 19, result.stderr
-    assert json.loads(result.stdout) == ["pre-commit", "run", "--hook-stage", "manual", "--files", "src/a file.py"]
+    assert json.loads(result.stdout) == [
+        "pre-commit",
+        "run",
+        "--hook-stage",
+        "manual",
+        "--files",
+        "src/a file.py",
+    ]
 
 
 @pytest.mark.parametrize("stage", ["pre-commit", "pre-push", "manual"])
 def test_lock_only_change_cannot_skip_consistency_hook(repository, stage):
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
-    hook = next(h for h in config["repos"][0]["hooks"] if h["id"] == "uv-lock-check")
+    hook = next(
+        h for h in config["repos"][0]["hooks"] if h["id"] == "uv-lock-check"
+    )
     # Сохраняем реальные фильтры и стадии. Анализатор заменяем отказом:
     # тест должен увидеть этот отказ даже при глобально исключённом uv.lock.
     hook["entry"] = shlex.join([sys.executable, "-c", "raise SystemExit(42)"])
@@ -101,7 +137,17 @@ def test_lock_only_change_cannot_skip_consistency_hook(repository, stage):
     (repository / ".pre-commit-config.yaml").write_text(yaml.safe_dump(config))
     (repository / "uv.lock").write_text("invalid lock for this test\n")
     result = subprocess.run(
-        [sys.executable, "-m", "pre_commit", "run", "uv-lock-check", "--hook-stage", stage, "--files", "uv.lock"],
+        [
+            sys.executable,
+            "-m",
+            "pre_commit",
+            "run",
+            "uv-lock-check",
+            "--hook-stage",
+            stage,
+            "--files",
+            "uv.lock",
+        ],
         capture_output=True,
         text=True,
     )
@@ -111,7 +157,9 @@ def test_lock_only_change_cannot_skip_consistency_hook(repository, stage):
 
 
 @pytest.mark.parametrize("content", [b"def broken(:\n", b"\xff\xfe\xff"])
-def test_dead_code_input_errors_fail_the_command(repository, monkeypatch, capsys, content):
+def test_dead_code_input_errors_fail_the_command(
+    repository, monkeypatch, capsys, content
+):
     checker = load_script("dead_code_check")
     (repository / "broken.py").write_bytes(content)
     monkeypatch.setattr(checker, "ROOT", repository)

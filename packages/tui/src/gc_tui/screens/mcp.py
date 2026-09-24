@@ -117,7 +117,9 @@ class ServerCard(Static):
             for n, d in shorts:
                 t.append(f"\n    {n.ljust(width)}", style=_TOOL_NAME)
                 if d:
-                    t.append(f"  {_truncate(d, _TOOL_DESC_LIMIT)}", style=_DEEP_DIM)
+                    t.append(
+                        f"  {_truncate(d, _TOOL_DESC_LIMIT)}", style=_DEEP_DIM
+                    )
         elif not connected and self._info.get("reason"):
             full = str(self._info["reason"])
             for ln in full.splitlines():
@@ -125,10 +127,15 @@ class ServerCard(Static):
 
 
 class McpScreen(Screen):
-    def __init__(self, *, config: dict | None = None, tools_snapshot: dict | None = None) -> None:
+    def __init__(
+        self, *, config: dict | None = None, tools_snapshot: dict | None = None
+    ) -> None:
         super().__init__()
         self._snapshot = tools_snapshot  # {server: {status,reason,description,tools}} | None
-        self.cards: list[ServerCard] = [ServerCard(name, info) for name, info in (tools_snapshot or {}).items()]
+        self.cards: list[ServerCard] = [
+            ServerCard(name, info)
+            for name, info in (tools_snapshot or {}).items()
+        ]
 
     def on_mount(self) -> None:
         if self.cards:
@@ -183,7 +190,9 @@ class McpScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static("mcp · серверы и тулы", id="header-left", markup=False)
+                yield Static(
+                    "mcp · серверы и тулы", id="header-left", markup=False
+                )
             trace = VerticalScroll(id="trace")
             trace.can_focus = False  # фокус живёт на карточках; глобальный
             # #trace:focus-outline рисуется поверх контента — здесь не нужен
@@ -193,5 +202,7 @@ class McpScreen(Screen):
                     yield Static(empty)
                 else:
                     yield from self.cards
-                    yield Static(self._summary_renderable(), classes="mcp-summary")
+                    yield Static(
+                        self._summary_renderable(), classes="mcp-summary"
+                    )
             yield Static(_FOOTER, id="footer", markup=False)

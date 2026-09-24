@@ -45,7 +45,12 @@ def reconcile_batch_phases(rows: Sequence[Any]) -> None:
     Одинаково для любых тулов (не special-case subagent). rows — в порядке
     появления в batch (insertion order _active_calls).
     """
-    pending = [r for r in rows if getattr(r, "_result", None) is None and not getattr(r, "_interrupted", False)]
+    pending = [
+        r
+        for r in rows
+        if getattr(r, "_result", None) is None
+        and not getattr(r, "_interrupted", False)
+    ]
     if not pending:
         return
     first, *rest = pending
@@ -158,7 +163,14 @@ def plan_progress_actions(
         elif ev.kind in ("confirm", "confirm_done"):
             # Баннер confirm уже открывает tui_confirm(via=…); здесь только heartbeat.
             actions.append(_heartbeat(ev))
-        elif ev.kind in ("finished", "error", "cancelled", "started", "heartbeat", "usage"):
+        elif ev.kind in (
+            "finished",
+            "error",
+            "cancelled",
+            "started",
+            "heartbeat",
+            "usage",
+        ):
             # Nested в живой сессии оставляем под parent (✓/✗); collapse — только
             # при clear/смене треда.
             actions.append(_heartbeat(ev))
@@ -309,7 +321,9 @@ class SubagentProgressConsumer:
         self._seen_tool_calls.clear()
 
 
-def format_parent_live_status(*, step: int, max_steps: int, last_tool: Optional[str]) -> str:
+def format_parent_live_status(
+    *, step: int, max_steps: int, last_tool: Optional[str]
+) -> str:
     """Хвост корневой строки субагента: `step 4/100 · last=fs_read_file`."""
     parts = [f"step {step}/{max_steps}" if max_steps else f"step {step}"]
     if last_tool:

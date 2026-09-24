@@ -37,7 +37,9 @@ class _Sandbox:
         return ExecResult(return_code=1)
 
 
-async def test_discovery_without_a_registry_does_not_start_the_server_on_the_host(tmp_path):
+async def test_discovery_without_a_registry_does_not_start_the_server_on_the_host(
+    tmp_path,
+):
     """Команда сервера из конфига не должна исполниться в нашем процессе."""
     marker = tmp_path / "started-here"
     servers_cfg = {

@@ -18,7 +18,10 @@ import pytest
 
 pytest.importorskip("textual")
 
-from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
+from gc_core.runtime_notices import (
+    clear_runtime_notices,
+    collect_runtime_notices,
+)
 from gc_testkit.tui_support import open_settings_section
 from gc_tui.screens import settings as s
 from textual.widgets import Input, Static
@@ -45,7 +48,10 @@ _PROFILE_BODY = "models:\n  glm:\n    url: http://y\n    token: sk\nslots:\n  de
 
 
 def _base_dict() -> dict:
-    return {"completions_url": "http://host/v1/chat/completions", "model": "test-model"}
+    return {
+        "completions_url": "http://host/v1/chat/completions",
+        "model": "test-model",
+    }
 
 
 def _fake_probe(endpoint, auth, verify, model, **kw):
@@ -55,7 +61,9 @@ def _fake_probe(endpoint, auth, verify, model, **kw):
     from gc_core.model_picker import ModelInfo
     from gc_tui.services.settings_probe import ProbeResult
 
-    return ProbeResult("ok", 200, [ModelInfo(id="test-model")], 118, "доступен")
+    return ProbeResult(
+        "ok", 200, [ModelInfo(id="test-model")], 118, "доступен"
+    )
 
 
 def _mk_screen(config=None, config_path=None, on_apply=None):
@@ -69,8 +77,12 @@ def _mk_screen(config=None, config_path=None, on_apply=None):
     )
 
 
-async def _profiles_screen(pilot, app, base_cfg, *, config=None, on_apply=None):
-    scr = _mk_screen(config=config or _base_dict(), config_path=base_cfg, on_apply=on_apply)
+async def _profiles_screen(
+    pilot, app, base_cfg, *, config=None, on_apply=None
+):
+    scr = _mk_screen(
+        config=config or _base_dict(), config_path=base_cfg, on_apply=on_apply
+    )
     app.push_screen(scr)
     await pilot.pause()
     open_settings_section(scr, "Профили")
@@ -114,7 +126,9 @@ async def _type_name(pilot, scr, value: str) -> None:
 # --- создание: бланк PROFILE_SKELETON в БАЗОВЫЙ корень ---------------------------
 
 
-async def test_create_writes_the_blank_skeleton_into_the_base_root(tmp_path, monkeypatch):
+async def test_create_writes_the_blank_skeleton_into_the_base_root(
+    tmp_path, monkeypatch
+):
     """`n` → инлайн-ввод имени → файл `<база>/profiles/<имя>.yml` из
     `PROFILE_SKELETON` (Task 1). Корень — базовый: проектные профили остаются
     ручной YAML-территорией (§12.3, территорию не расширяем)."""
@@ -138,7 +152,9 @@ async def test_create_writes_the_blank_skeleton_into_the_base_root(tmp_path, mon
     assert not (project_dir / ".gc" / "profiles" / "work.yml").exists()
 
 
-async def test_created_file_is_valid_by_the_profile_schema(tmp_path, monkeypatch):
+async def test_created_file_is_valid_by_the_profile_schema(
+    tmp_path, monkeypatch
+):
     """Страж бланка: то, что кладёт создание, обязано грузиться профильным
     валидатором — иначе первый же созданный профиль был бы нерабочим."""
     from gc_core.config_modules.profiles import validate_profile_text
@@ -156,7 +172,9 @@ async def test_created_file_is_valid_by_the_profile_schema(tmp_path, monkeypatch
         await pilot.pause()
         await _type_name(pilot, scr, "work")
 
-    text = (tmp_path / "base" / "profiles" / "work.yml").read_text(encoding="utf-8")
+    text = (tmp_path / "base" / "profiles" / "work.yml").read_text(
+        encoding="utf-8"
+    )
     validate_profile_text(text)  # не бросает — файл валиден
     assert "sk-" not in text  # бланк не несёт литерального токена
 
@@ -221,9 +239,13 @@ async def test_create_refuses_bad_names(tmp_path, monkeypatch, name, expected):
         await pilot.pause()
         await _type_name(pilot, scr, name)
         assert expected in _notice(scr)
-        assert [r["name"] for r in scr._profiles_rows() if r["kind"] == "profile"] == ["home"]
+        assert [
+            r["name"] for r in scr._profiles_rows() if r["kind"] == "profile"
+        ] == ["home"]
         # Отказ обязан быть ЧИСТЫМ: ни файла профиля, ни мусорного носителя ADS.
-        assert sorted(p.name for p in (tmp_path / "base" / "profiles").iterdir()) == ["home.yml"]
+        assert sorted(
+            p.name for p in (tmp_path / "base" / "profiles").iterdir()
+        ) == ["home.yml"]
 
 
 async def test_create_refuses_on_the_package_template(tmp_path, monkeypatch):
@@ -249,7 +271,9 @@ async def test_create_refuses_on_the_package_template(tmp_path, monkeypatch):
 # --- переименование ---------------------------------------------------------------
 
 
-async def test_rename_moves_the_file_and_follows_the_pointer_of_the_active(tmp_path, monkeypatch):
+async def test_rename_moves_the_file_and_follows_the_pointer_of_the_active(
+    tmp_path, monkeypatch
+):
     """`r` на активном профиле: переименованы И файл, И указатель — иначе конфиг
     остался бы ссылаться на несуществующее имя (холодный старт — строгая ошибка)."""
     from gc_tui import app as app_mod
@@ -257,7 +281,9 @@ async def test_rename_moves_the_file_and_follows_the_pointer_of_the_active(tmp_p
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
@@ -267,7 +293,9 @@ async def test_rename_moves_the_file_and_follows_the_pointer_of_the_active(tmp_p
         await _put_cursor(pilot, scr, "profile", "home")
         await pilot.press("r")
         await pilot.pause()
-        assert scr.query_one("#set-profile-name", Input).value == "home"  # префилл
+        assert (
+            scr.query_one("#set-profile-name", Input).value == "home"
+        )  # префилл
         await _type_name(pilot, scr, "house")
 
     assert (tmp_path / "base" / "profiles" / "house.yml").is_file()
@@ -275,7 +303,9 @@ async def test_rename_moves_the_file_and_follows_the_pointer_of_the_active(tmp_p
     assert 'profile: "house"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_rename_puts_the_cursor_on_the_renamed_row(tmp_path, monkeypatch):
+async def test_rename_puts_the_cursor_on_the_renamed_row(
+    tmp_path, monkeypatch
+):
     """Ревью MR #80 (L25): список сортирован, и новое имя встаёт в другую позицию.
     Курсор, оставшийся на прежнем индексе, указывал на СОСЕДНИЙ профиль — Space
     активировал соседа без подтверждения. Создание и удаление курсор ставят —
@@ -302,14 +332,18 @@ async def test_rename_puts_the_cursor_on_the_renamed_row(tmp_path, monkeypatch):
         assert rows[scr._profiles_idx]["name"] == "zzz"
 
 
-async def test_rename_of_an_inactive_profile_leaves_the_pointer_alone(tmp_path, monkeypatch):
+async def test_rename_of_an_inactive_profile_leaves_the_pointer_alone(
+    tmp_path, monkeypatch
+):
     """Неактивный профиль указателем не назван — переименование его не трогает."""
     from gc_tui import app as app_mod
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("other"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("other")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
     _write(tmp_path / "base" / "profiles" / "other.yml", _PROFILE_BODY)
 
@@ -326,7 +360,9 @@ async def test_rename_of_an_inactive_profile_leaves_the_pointer_alone(tmp_path, 
     assert 'profile: "other"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_rename_to_the_same_name_is_a_quiet_cancel(tmp_path, monkeypatch):
+async def test_rename_to_the_same_name_is_a_quiet_cancel(
+    tmp_path, monkeypatch
+):
     """Открыли ввод, ничего не поменяли, Enter — тихая отмена, а не «уже
     существует» (сам себе тёзкой не считается)."""
     from gc_tui import app as app_mod
@@ -349,7 +385,9 @@ async def test_rename_to_the_same_name_is_a_quiet_cancel(tmp_path, monkeypatch):
     assert (tmp_path / "base" / "profiles" / "home.yml").is_file()
 
 
-async def test_rename_and_delete_are_noop_on_service_rows(tmp_path, monkeypatch):
+async def test_rename_and_delete_are_noop_on_service_rows(
+    tmp_path, monkeypatch
+):
     """`r`/`Del` работают по объекту под курсором: на «— без профиля» объекта нет —
     клавиши молчат (ввод имени не поднимается).
 
@@ -380,7 +418,9 @@ async def test_rename_and_delete_are_noop_on_service_rows(tmp_path, monkeypatch)
 # --- удаление: подтверждение + бэкап (В2) ------------------------------------------
 
 
-async def test_delete_asks_before_removing_and_esc_cancels(tmp_path, monkeypatch):
+async def test_delete_asks_before_removing_and_esc_cancels(
+    tmp_path, monkeypatch
+):
     """Del поднимает confirm-баннер (канон MCP) — файл ещё на месте; Esc снимает
     баннер и НЕ выходит из секции."""
     from gc_tui import app as app_mod
@@ -389,7 +429,9 @@ async def test_delete_asks_before_removing_and_esc_cancels(tmp_path, monkeypatch
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    profile = _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    profile = _write(
+        tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -398,7 +440,11 @@ async def test_delete_asks_before_removing_and_esc_cancels(tmp_path, monkeypatch
         await pilot.press("delete")
         await pilot.pause()
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
-        assert "home" in banner and "Enter — удалить" in banner and "Esc — отмена" in banner
+        assert (
+            "home" in banner
+            and "Enter — удалить" in banner
+            and "Esc — отмена" in banner
+        )
         assert profile.is_file()
 
         await pilot.press("escape")
@@ -408,7 +454,9 @@ async def test_delete_asks_before_removing_and_esc_cancels(tmp_path, monkeypatch
         assert profile.is_file()
 
 
-async def test_delete_backs_the_file_up_and_names_the_path(tmp_path, monkeypatch):
+async def test_delete_backs_the_file_up_and_names_the_path(
+    tmp_path, monkeypatch
+):
     """Enter в баннере: файл уезжает в `backups/<файл>.bak-<ts>` (конвенция
     `config_sync`, В2), плашка называет ПУТЬ — иначе бэкап не найти."""
     from gc_tui import app as app_mod
@@ -417,7 +465,9 @@ async def test_delete_backs_the_file_up_and_names_the_path(tmp_path, monkeypatch
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    profile = _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    profile = _write(
+        tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -430,7 +480,9 @@ async def test_delete_backs_the_file_up_and_names_the_path(tmp_path, monkeypatch
         flash = _flash(scr)
 
     assert not profile.exists()
-    backups = list((tmp_path / "base" / "profiles" / "backups").glob("home.yml.bak-*"))
+    backups = list(
+        (tmp_path / "base" / "profiles" / "backups").glob("home.yml.bak-*")
+    )
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == _PROFILE_BODY
     assert str(backups[0]) in flash
@@ -449,11 +501,15 @@ async def test_delete_keeps_only_the_last_backups(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    profile = _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    profile = _write(
+        tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
+    )
     backups_dir = tmp_path / "base" / "profiles" / "backups"
     backups_dir.mkdir(parents=True)
     for i in range(12):  # уже накопленные бэкапы прошлых удалений
-        (backups_dir / f"home.yml.bak-2026010{i % 10}-00000{i % 10}").write_text("x", encoding="utf-8")
+        (
+            backups_dir / f"home.yml.bak-2026010{i % 10}-00000{i % 10}"
+        ).write_text("x", encoding="utf-8")
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -471,7 +527,9 @@ async def test_delete_keeps_only_the_last_backups(tmp_path, monkeypatch):
     assert any(p.read_text(encoding="utf-8") == _PROFILE_BODY for p in kept)
 
 
-async def test_delete_of_the_active_profile_clears_the_pointer(tmp_path, monkeypatch):
+async def test_delete_of_the_active_profile_clears_the_pointer(
+    tmp_path, monkeypatch
+):
     """Удаление активного снимает указатель (`profile: ""`) — иначе конфиг
     ссылался бы на исчезнувший файл; баннер об этом предупреждает заранее."""
     from gc_tui import app as app_mod
@@ -479,7 +537,9 @@ async def test_delete_of_the_active_profile_clears_the_pointer(tmp_path, monkeyp
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
@@ -489,7 +549,9 @@ async def test_delete_of_the_active_profile_clears_the_pointer(tmp_path, monkeyp
         await _put_cursor(pilot, scr, "profile", "home")
         await pilot.press("delete")
         await pilot.pause()
-        assert "активен" in " ".join(str(w.render()) for w in scr.query(".set-confirm"))
+        assert "активен" in " ".join(
+            str(w.render()) for w in scr.query(".set-confirm")
+        )
         await pilot.press("enter")
         await pilot.pause()
 
@@ -504,12 +566,16 @@ def _app_for_session(tmp_path, base_cfg):
     from gc_tui import app as app_mod
 
     cfg, _meta = load_config_ex(str(base_cfg))
-    app = app_mod.TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=cfg)
+    app = app_mod.TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+    )
     app.set_config_path(str(base_cfg))
     return app
 
 
-async def test_delete_sanitizes_the_session_choice_with_a_notice(tmp_path, monkeypatch):
+async def test_delete_sanitizes_the_session_choice_with_a_notice(
+    tmp_path, monkeypatch
+):
     """Профиль выбран ТЕКУЩЕЙ сессией (`/profiles`), а не конфигом. Удаление из
     UI впервые делает этот путь достижимым: оверрайд обязан сняться с notice
     (§9.2), иначе сессия осталась бы с висячей ссылкой на удалённый файл."""
@@ -524,7 +590,9 @@ async def test_delete_sanitizes_the_session_choice_with_a_notice(tmp_path, monke
     async with app.run_test() as pilot:
         app.set_session_override("profile", "home")
         assert app._session_overrides.get("profile") == "home"
-        scr = await _profiles_screen(pilot, app, base_cfg, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, on_apply=app.reload_config
+        )
         await _put_cursor(pilot, scr, "profile", "home")
         await pilot.press("delete")
         await pilot.pause()
@@ -532,10 +600,14 @@ async def test_delete_sanitizes_the_session_choice_with_a_notice(tmp_path, monke
         await pilot.pause()
 
         assert "profile" not in app._session_overrides
-        assert "session_profile_stale" in [n.code for n in collect_runtime_notices()]
+        assert "session_profile_stale" in [
+            n.code for n in collect_runtime_notices()
+        ]
 
 
-async def test_rename_of_another_profile_leaves_the_session_choice_alone(tmp_path, monkeypatch):
+async def test_rename_of_another_profile_leaves_the_session_choice_alone(
+    tmp_path, monkeypatch
+):
     """Переименовали ЧУЖОЙ профиль — сессионный выбор не при чём: ни переезда, ни
     санации (переезд выбранного проверяет отдельный страж ниже).
 
@@ -554,14 +626,18 @@ async def test_rename_of_another_profile_leaves_the_session_choice_alone(tmp_pat
     app = _app_for_session(tmp_path, base_cfg)
     async with app.run_test() as pilot:
         app.set_session_override("profile", "home")
-        scr = await _profiles_screen(pilot, app, base_cfg, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, on_apply=app.reload_config
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("r")
         await pilot.pause()
         await _type_name(pilot, scr, "job")
 
         assert app._session_overrides.get("profile") == "home"
-        assert "session_profile_stale" not in [n.code for n in collect_runtime_notices()]
+        assert "session_profile_stale" not in [
+            n.code for n in collect_runtime_notices()
+        ]
         assert "остаётся на «home»" in _flash(scr)
 
 
@@ -590,7 +666,9 @@ async def test_space_activates_the_profile(tmp_path, monkeypatch):
     assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_enter_on_a_profile_row_opens_instead_of_activating(tmp_path, monkeypatch):
+async def test_enter_on_a_profile_row_opens_instead_of_activating(
+    tmp_path, monkeypatch
+):
     """Enter — «войти внутрь» (редактор профиля, Task 6), и это НЕ активация:
     указатель `profile:` после него прежний. Разведение ролей В1 — Space меняет
     состояние, Enter входит внутрь (сам редактор — `test_profile_editor.py`)."""
@@ -621,7 +699,9 @@ async def test_space_on_the_none_row_deactivates(tmp_path, monkeypatch):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
@@ -648,7 +728,9 @@ async def test_letters_and_space_go_into_the_name_field(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    profile = _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+    profile = _write(
+        tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -661,12 +743,16 @@ async def test_letters_and_space_go_into_the_name_field(tmp_path, monkeypatch):
         await pilot.press("n", "r", "space", "delete")
         await pilot.pause()
         assert inp.value == "nr "
-        assert len(scr.query("#set-profile-name")) == 1  # второго ввода не поднялось
+        assert (
+            len(scr.query("#set-profile-name")) == 1
+        )  # второго ввода не поднялось
         assert not scr.query(".set-confirm")  # Del не спросил об удалении
     assert profile.is_file()
 
 
-async def test_esc_cancels_the_name_input_without_leaving_the_section(tmp_path, monkeypatch):
+async def test_esc_cancels_the_name_input_without_leaving_the_section(
+    tmp_path, monkeypatch
+):
     """Esc при вводе имени — отмена ВВОДА (внутрь глобального escape-гейта), не
     выход в меню: под-состояние закрывается своим уровнем."""
     from gc_tui import app as app_mod
@@ -695,7 +781,9 @@ async def test_esc_cancels_the_name_input_without_leaving_the_section(tmp_path, 
 # --- футеры (В1 дословно и целиком) -----------------------------------------------
 
 
-async def test_footer_names_the_v1_keys_on_a_profile_row(tmp_path, monkeypatch):
+async def test_footer_names_the_v1_keys_on_a_profile_row(
+    tmp_path, monkeypatch
+):
     """Футер строки профиля — вариант В1 ДОСЛОВНО И ЦЕЛИКОМ: с приездом редактора
     (Task 6) заработал Enter, и сегмент «Enter — открыть» встал на своё место —
     первым, сразу за «↑/↓» (бюджет проверен: 115 символов, две строки на 64
@@ -721,7 +809,9 @@ async def test_footer_names_the_v1_keys_on_a_profile_row(tmp_path, monkeypatch):
     )
 
 
-async def test_add_row_footer_names_creating_and_nothing_below_it(tmp_path, monkeypatch):
+async def test_add_row_footer_names_creating_and_nothing_below_it(
+    tmp_path, monkeypatch
+):
     """Пустое состояние: курсор стартует на строке «+ добавить профиль…» — её
     футер обещает создание и НЕ обещает клавиш объектов (Space/r/Del на
     строке-действии не работают: канон «недоступное не обещаем»).
@@ -786,7 +876,9 @@ def _two_layer_setup(tmp_path, monkeypatch):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     _write(project_dir / ".gc" / "config.yml", 'profile: "corp"\n')
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
     _write(tmp_path / "base" / "profiles" / "corp.yml", _PROFILE_BODY)
@@ -803,7 +895,9 @@ def _loads_outside_project(tmp_path, base_cfg, monkeypatch) -> dict:
     return cfg
 
 
-async def test_delete_clears_the_pointer_in_every_file_layer(tmp_path, monkeypatch):
+async def test_delete_clears_the_pointer_in_every_file_layer(
+    tmp_path, monkeypatch
+):
     """Репро ревью дословно: Del на `work`, которого называет ТОЛЬКО базовый слой
     (в merged победил проектный `corp`). Указатель обязан сняться и там — иначе
     запуск вне проекта падает «профиль work не найден» (§3.1)."""
@@ -818,15 +912,21 @@ async def test_delete_clears_the_pointer_in_every_file_layer(tmp_path, monkeypat
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("delete")
         await pilot.pause()
-        assert str(base_cfg) in " ".join(str(w.render()) for w in scr.query(".set-confirm"))
+        assert str(base_cfg) in " ".join(
+            str(w.render()) for w in scr.query(".set-confirm")
+        )
         await pilot.press("enter")
         await pilot.pause()
 
     assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
-    assert _loads_outside_project(tmp_path, base_cfg, monkeypatch).get("profile") in ("", None)
+    assert _loads_outside_project(tmp_path, base_cfg, monkeypatch).get(
+        "profile"
+    ) in ("", None)
 
 
-async def test_rename_moves_the_pointer_in_every_file_layer(tmp_path, monkeypatch):
+async def test_rename_moves_the_pointer_in_every_file_layer(
+    tmp_path, monkeypatch
+):
     """Та же двухслойная развилка у переименования: базовый указатель обязан
     поехать за именем, иначе он остаётся висеть на несуществующем файле."""
     from gc_tui import app as app_mod
@@ -843,13 +943,18 @@ async def test_rename_moves_the_pointer_in_every_file_layer(tmp_path, monkeypatc
         await _type_name(pilot, scr, "job")
 
     assert 'profile: "job"' in base_cfg.read_text(encoding="utf-8")
-    assert _loads_outside_project(tmp_path, base_cfg, monkeypatch).get("profile") == "job"
+    assert (
+        _loads_outside_project(tmp_path, base_cfg, monkeypatch).get("profile")
+        == "job"
+    )
 
 
 # --- находка ревьюера A (вторая половина): указатель в проекте — фаза 2 стека ----
 
 
-async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_stack(tmp_path, monkeypatch):
+async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_stack(
+    tmp_path, monkeypatch
+):
     """Ревью: модели — в базе, `slots.default` — в профиле (легальная раскладка),
     указатель `profile:` живёт в проектном `.gc/config.yml`. Раньше запись шла
     однофайловой валидацией (`validate_config_text`) — синтаксис `profile: ""`
@@ -872,8 +977,12 @@ async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_
         '  a:\n    model: "x"\n'
         '  b:\n    model: "y"\n',
     )
-    _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n')
-    project_cfg = _write(project_dir / ".gc" / "config.yml", 'profile: "work"\n')
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n'
+    )
+    project_cfg = _write(
+        project_dir / ".gc" / "config.yml", 'profile: "work"\n'
+    )
 
     cfg = dict(_base_dict(), profile="work")
     app = app_mod.TuiApp(config=cfg)
@@ -885,8 +994,12 @@ async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_
         notice = _notice(scr)
 
     assert "профиль не снят" in notice, notice
-    assert "раздел" in notice and "Модел" in notice, notice  # обёртка называет, где чинить
-    assert "slots.default" in notice, notice  # деталь валидатора никуда не делась
+    assert "раздел" in notice and "Модел" in notice, (
+        notice
+    )  # обёртка называет, где чинить
+    assert "slots.default" in notice, (
+        notice
+    )  # деталь валидатора никуда не делась
     # живой откат: файл проектного слоя — ровно тот же, что и до попытки записи
     assert project_cfg.read_text(encoding="utf-8") == 'profile: "work"\n'
     # и следующий холодный старт (внутри проекта — оверлей действует) всё ещё грузится
@@ -894,7 +1007,9 @@ async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_
     assert loaded.get("profile") == "work"
 
 
-async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_the_stack(tmp_path, monkeypatch):
+async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_the_stack(
+    tmp_path, monkeypatch
+):
     """Тот же дефект, но хуже: `.gc/config.yml` ещё не существует, и писатель
     уходит в `create_pointer_file`, у которой не было ВООБЩЕ никакой валидации —
     ни фазы 1, ни фазы 2. Раскладка ревью: 2 модели в базе без слотов, проектный
@@ -918,7 +1033,10 @@ async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_
         '  a:\n    model: "x"\n'
         '  b:\n    model: "y"\n',
     )
-    _write(project_dir / ".gc" / "profiles" / "work.yml", 'slots:\n  default: "ghost"\n')
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'slots:\n  default: "ghost"\n',
+    )
     project_cfg = project_dir / ".gc" / "config.yml"
     assert not project_cfg.exists()
 
@@ -932,9 +1050,13 @@ async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_
         notice = _notice(scr)
 
     assert "профиль не включён" in notice, notice
-    assert "раздел" in notice and "Модел" in notice, notice  # обёртка называет, где чинить
+    assert "раздел" in notice and "Модел" in notice, (
+        notice
+    )  # обёртка называет, где чинить
     assert "ghost" in notice, notice  # деталь валидатора никуда не делась
-    assert not project_cfg.exists()  # файл не создан вовсе — не только не переписан
+    assert (
+        not project_cfg.exists()
+    )  # файл не создан вовсе — не только не переписан
     # живой откат: раз файла нет, следующий холодный старт падает по СТАРОЙ,
     # НЕ связанной с этой находкой причине (2 модели без единого слота в самой
     # базе — ожидаемо для ещё не настроенного проекта), а не тем необработанным
@@ -946,7 +1068,9 @@ async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_
     assert "ghost" not in str(excinfo.value)
 
 
-async def test_renaming_the_active_profile_succeeds_when_the_base_needs_its_slot(tmp_path, monkeypatch):
+async def test_renaming_the_active_profile_succeeds_when_the_base_needs_its_slot(
+    tmp_path, monkeypatch
+):
     """СТРАЖ РЕГРЕССА: указатель пишется на НОВОЕ имя ДО физического rename()
     файла профиля (`_rename_profile`) — в момент валидации `job.yml` на диске
     ещё нет, `resolve_profile` его не находит. Раскладка «2+ моделей в базе,
@@ -963,13 +1087,18 @@ async def test_renaming_the_active_profile_succeeds_when_the_base_needs_its_slot
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(
-        tmp_path / "base" / "config.yml", 'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n'
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
     )
-    work = _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n')
+    work = _write(
+        tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n'
+    )
 
     app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=dict(_base_dict(), profile="work"))
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, config=dict(_base_dict(), profile="work")
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("r")
         await pilot.pause()
@@ -981,11 +1110,16 @@ async def test_renaming_the_active_profile_succeeds_when_the_base_needs_its_slot
     assert "переименован в «job»" in flash, flash
     job = tmp_path / "base" / "profiles" / "job.yml"
     assert not work.exists()
-    assert job.exists() and job.read_text(encoding="utf-8") == 'slots:\n  default: "a"\n'
+    assert (
+        job.exists()
+        and job.read_text(encoding="utf-8") == 'slots:\n  default: "a"\n'
+    )
     assert 'profile: "job"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_renaming_a_profile_with_a_broken_slot_still_shows_the_wrapped_refusal(tmp_path, monkeypatch):
+async def test_renaming_a_profile_with_a_broken_slot_still_shows_the_wrapped_refusal(
+    tmp_path, monkeypatch
+):
     """Подстановка чинит именно РАЗРЫВ резолва (имя ещё не на диске) — не
     отменяет фазу 2 вовсе. Профиль сломан НЕЗАВИСИМО от переименования (слот
     смотрит на несуществующий алиас) — будущий документ на новом пути несёт ТУ
@@ -997,13 +1131,19 @@ async def test_renaming_a_profile_with_a_broken_slot_still_shows_the_wrapped_ref
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(
-        tmp_path / "base" / "config.yml", 'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n'
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
     )
-    work = _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "ghost"\n')
+    work = _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        'slots:\n  default: "ghost"\n',
+    )
 
     app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=dict(_base_dict(), profile="work"))
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, config=dict(_base_dict(), profile="work")
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("r")
         await pilot.pause()
@@ -1019,7 +1159,9 @@ async def test_renaming_a_profile_with_a_broken_slot_still_shows_the_wrapped_ref
     assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_deleting_the_sole_slot_provider_shows_the_wrapped_refusal(tmp_path, monkeypatch):
+async def test_deleting_the_sole_slot_provider_shows_the_wrapped_refusal(
+    tmp_path, monkeypatch
+):
     """Находка соседей: `_delete_profile` шёл через `_repoint_profile_layers`
     тем же путём, что и включение/снятие/переименование ДО их правки, и не
     заворачивал отказ фазы 2 — человек видел сырое «✗ не удалить:
@@ -1034,13 +1176,18 @@ async def test_deleting_the_sole_slot_provider_shows_the_wrapped_refusal(tmp_pat
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(
-        tmp_path / "base" / "config.yml", 'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n'
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nmodels:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
     )
-    work = _write(tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n')
+    work = _write(
+        tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n'
+    )
 
     app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=dict(_base_dict(), profile="work"))
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, config=dict(_base_dict(), profile="work")
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("delete")
         await pilot.pause()
@@ -1056,7 +1203,9 @@ async def test_deleting_the_sole_slot_provider_shows_the_wrapped_refusal(tmp_pat
     assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_rollback_that_also_fails_does_not_promise_a_retry(tmp_path, monkeypatch):
+async def test_rollback_that_also_fails_does_not_promise_a_retry(
+    tmp_path, monkeypatch
+):
     """Аварийный откат (`_rollback_profile_pointers`) — восстановление ПОСЛЕ
     чужого сбоя, не первая попытка: если восстановить старый указатель тоже не
     удаётся, «поправьте и повторите» — обещание того, чего нет (состояние уже
@@ -1072,12 +1221,20 @@ async def test_rollback_that_also_fails_does_not_promise_a_retry(tmp_path, monke
     # на несуществующий профиль стек следующего старта не переживёт — ту же
     # дорогу проходит любой НЕуспешный `_write_profile_pointer`, откуда бы он ни
     # был вызван.
-    base_cfg = _write(tmp_path / "base" / "config.yml", 'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
-        scr._rollback_profile_pointers([base_cfg], "ghost", file_exc="исходная причина сбоя", action="переименовать")
+        scr._rollback_profile_pointers(
+            [base_cfg],
+            "ghost",
+            file_exc="исходная причина сбоя",
+            action="переименовать",
+        )
         await pilot.pause()
         notice = _notice(scr)
 
@@ -1088,7 +1245,9 @@ async def test_rollback_that_also_fails_does_not_promise_a_retry(tmp_path, monke
     assert "ghost" in notice and "не найден" in notice, notice
 
 
-async def test_stuck_rollback_sends_to_the_profiles_section_not_models(tmp_path, monkeypatch):
+async def test_stuck_rollback_sends_to_the_profiles_section_not_models(
+    tmp_path, monkeypatch
+):
     """Ревью MR #80 (L36): указатель `profile:` пишет секция «Профили» — отказ
     отката слал чинить в «Модели», раздел, который ключ не правит (сам код рядом
     дважды осознанно проводит эту границу). Файлы перечислены следом, и «прямо в
@@ -1098,16 +1257,26 @@ async def test_stuck_rollback_sends_to_the_profiles_section_not_models(tmp_path,
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", 'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
-        scr._rollback_profile_pointers([base_cfg], "ghost", file_exc="исходная причина сбоя", action="удалить")
+        scr._rollback_profile_pointers(
+            [base_cfg],
+            "ghost",
+            file_exc="исходная причина сбоя",
+            action="удалить",
+        )
         await pilot.pause()
         notice = _notice(scr)
 
-    assert "автоматический откат" in notice, notice  # предусловие: откат застрял
+    assert "автоматический откат" in notice, (
+        notice
+    )  # предусловие: откат застрял
     assert "разделе «Профили»" in notice, notice
     assert "разделе «Модели»" not in notice, notice
     assert "в файле" in notice, notice
@@ -1122,7 +1291,9 @@ async def test_stuck_rollback_sends_to_the_profiles_section_not_models(tmp_path,
 # ВЕРНУЛСЯ, файл профиля цел, бэкапа нет.
 
 
-async def test_failed_delete_move_rolls_the_pointer_back_in_the_file(tmp_path, monkeypatch):
+async def test_failed_delete_move_rolls_the_pointer_back_in_the_file(
+    tmp_path, monkeypatch
+):
     """Сбой перемещения файла ПОСЛЕ уже снятого указателя: `profile: "work"`
     возвращается в базовый конфиг — иначе холодный старт падал бы на указателе
     в никуда (§3.1), хотя файл профиля никуда не делся."""
@@ -1133,7 +1304,9 @@ async def test_failed_delete_move_rolls_the_pointer_back_in_the_file(tmp_path, m
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     work = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     def _boom(*_a, **_k):
@@ -1152,13 +1325,17 @@ async def test_failed_delete_move_rolls_the_pointer_back_in_the_file(tmp_path, m
         await pilot.pause()
         assert "не удалось удалить" in _notice(scr)
 
-    assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")  # указатель вернулся
+    assert 'profile: "work"' in base_cfg.read_text(
+        encoding="utf-8"
+    )  # указатель вернулся
     assert work.is_file()  # файл на месте
     backups = tmp_path / "base" / "profiles" / "backups"
     assert not backups.exists() or not list(backups.iterdir())  # бэкапа нет
 
 
-async def test_failed_rename_move_rolls_the_pointer_back_in_the_file(tmp_path, monkeypatch):
+async def test_failed_rename_move_rolls_the_pointer_back_in_the_file(
+    tmp_path, monkeypatch
+):
     """Сбой самого `rename()` ПОСЛЕ уже переписанных на новое имя указателей:
     указатель вернулся на СТАРОЕ имя, файла под новым именем не появилось."""
     import pathlib
@@ -1168,7 +1345,9 @@ async def test_failed_rename_move_rolls_the_pointer_back_in_the_file(tmp_path, m
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     work = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     real_rename = pathlib.Path.rename
@@ -1190,12 +1369,16 @@ async def test_failed_rename_move_rolls_the_pointer_back_in_the_file(tmp_path, m
         await _type_name(pilot, scr, "work2")
         assert "не удалось переименовать" in _notice(scr)
 
-    assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")  # старое имя вернулось
+    assert 'profile: "work"' in base_cfg.read_text(
+        encoding="utf-8"
+    )  # старое имя вернулось
     assert work.is_file()
     assert not (tmp_path / "base" / "profiles" / "work2.yml").exists()
 
 
-async def test_failed_delete_rolls_the_pointer_back_in_every_layer(tmp_path, monkeypatch):
+async def test_failed_delete_rolls_the_pointer_back_in_every_layer(
+    tmp_path, monkeypatch
+):
     """Указатель в ДВУХ файловых слоях (проектный `.gc/config.yml` + базовый):
     откат возвращает исходное значение в КАЖДЫЙ — полу-откат оставлял бы слои
     спорящими, и победитель мержа ссылался бы в никуда."""
@@ -1206,8 +1389,12 @@ async def test_failed_delete_rolls_the_pointer_back_in_every_layer(tmp_path, mon
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    project_cfg = _write(project_dir / ".gc" / "config.yml", 'profile: "work"\n')
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    project_cfg = _write(
+        project_dir / ".gc" / "config.yml", 'profile: "work"\n'
+    )
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     work = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     def _boom(*_a, **_k):
@@ -1240,7 +1427,9 @@ async def test_failed_delete_rolls_the_pointer_back_in_every_layer(tmp_path, mon
 # старт падал «профиль не найден».
 
 
-async def test_rename_rewrites_a_pointer_written_as_an_env_ref(tmp_path, monkeypatch):
+async def test_rename_rewrites_a_pointer_written_as_an_env_ref(
+    tmp_path, monkeypatch
+):
     from gc_core import config_raw
     from gc_tui import app as app_mod
 
@@ -1248,7 +1437,10 @@ async def test_rename_rewrites_a_pointer_written_as_an_env_ref(tmp_path, monkeyp
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     monkeypatch.setenv("GC_TEST_PROFILE_PTR", "work")
-    project_cfg = _write(project_dir / ".gc" / "config.yml", 'profile: "${ENV:GC_TEST_PROFILE_PTR}"\n')
+    project_cfg = _write(
+        project_dir / ".gc" / "config.yml",
+        'profile: "${ENV:GC_TEST_PROFILE_PTR}"\n',
+    )
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
@@ -1267,7 +1459,9 @@ async def test_rename_rewrites_a_pointer_written_as_an_env_ref(tmp_path, monkeyp
     assert config_raw.read_document(project_cfg).get("profile") == "job"
 
 
-async def test_delete_snaps_a_pointer_written_as_an_env_ref(tmp_path, monkeypatch):
+async def test_delete_snaps_a_pointer_written_as_an_env_ref(
+    tmp_path, monkeypatch
+):
     from gc_core import config_raw
     from gc_tui import app as app_mod
 
@@ -1275,7 +1469,10 @@ async def test_delete_snaps_a_pointer_written_as_an_env_ref(tmp_path, monkeypatc
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     monkeypatch.setenv("GC_TEST_PROFILE_PTR", "work")
-    project_cfg = _write(project_dir / ".gc" / "config.yml", 'profile: "${ENV:GC_TEST_PROFILE_PTR}"\n')
+    project_cfg = _write(
+        project_dir / ".gc" / "config.yml",
+        'profile: "${ENV:GC_TEST_PROFILE_PTR}"\n',
+    )
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     broken = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
@@ -1287,7 +1484,9 @@ async def test_delete_snaps_a_pointer_written_as_an_env_ref(tmp_path, monkeypatc
         await pilot.press("delete")
         await pilot.pause()
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
-        assert str(project_cfg) in banner, banner  # баннер называет слой-носитель
+        assert str(project_cfg) in banner, (
+            banner
+        )  # баннер называет слой-носитель
         await pilot.press("enter")
         await pilot.pause()
 
@@ -1298,7 +1497,9 @@ async def test_delete_snaps_a_pointer_written_as_an_env_ref(tmp_path, monkeypatc
 # --- ревью Task 5 #2: переименование ПЕРЕВОЗИТ сессионный выбор -------------------
 
 
-async def test_rename_moves_the_session_choice_instead_of_dropping_it(tmp_path, monkeypatch):
+async def test_rename_moves_the_session_choice_instead_of_dropping_it(
+    tmp_path, monkeypatch
+):
     """Переименование — не исчезновение: сессионный выбор `/profiles` едет за новым
     именем (ruling координатора), а не снимается санацией §9.2. Переезд доходит и
     до meta треда — иначе возврат в тред воскресил бы старое имя."""
@@ -1314,30 +1515,42 @@ async def test_rename_moves_the_session_choice_instead_of_dropping_it(tmp_path, 
     # каталог тредов ИЗ КОНФИГА, и без этой строки персист уехал бы в дефолтный
     # каталог пользователя мимо tmp_path.
     base_cfg = _write(
-        tmp_path / "base" / "config.yml", _base_config_text() + f'paths:\n  threads_data_path: "{threads.as_posix()}"\n'
+        tmp_path / "base" / "config.yml",
+        _base_config_text()
+        + f'paths:\n  threads_data_path: "{threads.as_posix()}"\n',
     )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     app = _app_for_session(tmp_path, base_cfg)
     async with app.run_test() as pilot:
-        app.tui_state.active_task_id = "t-rename"  # тред есть — персист доедет до meta
+        app.tui_state.active_task_id = (
+            "t-rename"  # тред есть — персист доедет до meta
+        )
         app.set_session_override("profile", "home")
-        scr = await _profiles_screen(pilot, app, base_cfg, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, on_apply=app.reload_config
+        )
         await _put_cursor(pilot, scr, "profile", "home")
         await pilot.press("r")
         await pilot.pause()
         await _type_name(pilot, scr, "house")
 
         assert app._session_overrides.get("profile") == "house"
-        assert "session_profile_stale" not in [n.code for n in collect_runtime_notices()]
-        meta = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli").get_task_meta("t-rename")
+        assert "session_profile_stale" not in [
+            n.code for n in collect_runtime_notices()
+        ]
+        meta = FileTaskStore(
+            threads_dir=str(tmp_path / "threads"), system="cli"
+        ).get_task_meta("t-rename")
         assert read_from_meta(meta).get("profile") == "house"
 
 
 # --- ревью Task 5 #3/#4: эффект для сессии и обнажившийся тёзка — на экране -------
 
 
-async def test_delete_banner_and_flash_name_the_session_effect(tmp_path, monkeypatch):
+async def test_delete_banner_and_flash_name_the_session_effect(
+    tmp_path, monkeypatch
+):
     """Канон волны A (`_activate_profile`): эффект для ТЕКУЩЕЙ сессии виден в
     плашке, а не только в `/notices`. Баннер предупреждает заранее — снятие
     сессионного выбора необратимо."""
@@ -1351,7 +1564,9 @@ async def test_delete_banner_and_flash_name_the_session_effect(tmp_path, monkeyp
     app = _app_for_session(tmp_path, base_cfg)
     async with app.run_test() as pilot:
         app.set_session_override("profile", "home")
-        scr = await _profiles_screen(pilot, app, base_cfg, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, on_apply=app.reload_config
+        )
         await _put_cursor(pilot, scr, "profile", "home")
         await pilot.press("delete")
         await pilot.pause()
@@ -1364,7 +1579,9 @@ async def test_delete_banner_and_flash_name_the_session_effect(tmp_path, monkeyp
     assert "сессионный выбор" in flash and "home" in flash
 
 
-async def test_delete_flash_names_the_twin_that_surfaced(tmp_path, monkeypatch):
+async def test_delete_flash_names_the_twin_that_surfaced(
+    tmp_path, monkeypatch
+):
     """Удалён победивший тёзка — строка с тем же именем остаётся в списке (из
     второго корня). Молчать об этом нельзя: экран читался бы как «удаление не
     сработало»."""
@@ -1375,7 +1592,9 @@ async def test_delete_flash_names_the_twin_that_surfaced(tmp_path, monkeypatch):
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(project_dir / ".gc" / "profiles" / "work.yml", _PROFILE_BODY)
-    shadowed = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    shadowed = _write(
+        tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -1394,7 +1613,9 @@ async def test_delete_flash_names_the_twin_that_surfaced(tmp_path, monkeypatch):
 # --- ревью Task 5 #6/#7/#8: гейт Del, глагол отказа, бэкапы в одну секунду --------
 
 
-async def test_delete_refuses_on_the_package_template_before_the_banner(tmp_path, monkeypatch):
+async def test_delete_refuses_on_the_package_template_before_the_banner(
+    tmp_path, monkeypatch
+):
     """`Del` отказывает НА ВХОДЕ, как `r`: поднимать вопрос, на который заведомо
     ответишь отказом, — ложное обещание. Профиль в шаблоне подкладываем сами —
     важен гейт, а не содержимое установленного пакета."""
@@ -1407,7 +1628,10 @@ async def test_delete_refuses_on_the_package_template_before_the_banner(tmp_path
     template = Path(_default_config_path())
     monkeypatch.setattr(
         "gc_core.config_modules.profiles.profile_roots",
-        lambda project, base: [project_dir / ".gc" / "profiles", tmp_path / "pkg-profiles"],
+        lambda project, base: [
+            project_dir / ".gc" / "profiles",
+            tmp_path / "pkg-profiles",
+        ],
     )
     _write(tmp_path / "pkg-profiles" / "home.yml", _PROFILE_BODY)
 
@@ -1422,7 +1646,9 @@ async def test_delete_refuses_on_the_package_template_before_the_banner(tmp_path
     assert (tmp_path / "pkg-profiles" / "home.yml").is_file()
 
 
-async def test_refusal_names_the_action_that_did_not_happen(tmp_path, monkeypatch):
+async def test_refusal_names_the_action_that_did_not_happen(
+    tmp_path, monkeypatch
+):
     """Отказ говорит о своём действии: «не создано», а не «не сохранено» — глагол
     чужого действия заставляет гадать, что именно не произошло."""
     from gc_core.config import _default_config_path
@@ -1440,10 +1666,14 @@ async def test_refusal_names_the_action_that_did_not_happen(tmp_path, monkeypatc
         notice = _notice(scr)
         assert "не создано" in notice
         assert "не сохранено" not in notice
-        assert "каталог профилей" in notice  # объект отказа — тот, что недоступен
+        assert (
+            "каталог профилей" in notice
+        )  # объект отказа — тот, что недоступен
 
 
-async def test_two_deletes_in_the_same_second_keep_both_backups(tmp_path, monkeypatch):
+async def test_two_deletes_in_the_same_second_keep_both_backups(
+    tmp_path, monkeypatch
+):
     """Бэкап — единственная копия удалённого файла (в отличие от `config_sync`, где
     оригинал остаётся на месте): совпадение секунды не смеет затирать предыдущий."""
     from gc_tui import app as app_mod
@@ -1470,7 +1700,10 @@ async def test_two_deletes_in_the_same_second_keep_both_backups(tmp_path, monkey
 
     backups = sorted((profiles / "backups").glob("home.yml.bak-*"))
     assert len(backups) == 2
-    assert {b.read_text(encoding="utf-8") for b in backups} == {"models: {}\n", "slots: {}\n"}
+    assert {b.read_text(encoding="utf-8") for b in backups} == {
+        "models: {}\n",
+        "slots: {}\n",
+    }
 
 
 # --- ре-ревью: гейт по СЛОЯМ доведён до двери, объект отказа назван верно --------
@@ -1483,13 +1716,19 @@ def _readonly_base_layer(tmp_path, monkeypatch):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     _write(project_dir / ".gc" / "profiles" / "work.yml", _PROFILE_BODY)
-    monkeypatch.setattr("gc_core.config._default_config_path", lambda: base_cfg)
+    monkeypatch.setattr(
+        "gc_core.config._default_config_path", lambda: base_cfg
+    )
     return base_cfg
 
 
-async def test_delete_refuses_at_the_door_when_a_pointer_layer_is_read_only(tmp_path, monkeypatch):
+async def test_delete_refuses_at_the_door_when_a_pointer_layer_is_read_only(
+    tmp_path, monkeypatch
+):
     """Контракт #6 целиком: отказ на входе, а не после Enter. Баннер, на который
     заведомо ответишь отказом, — то же ложное обещание, что и футер."""
     from gc_tui import app as app_mod
@@ -1510,7 +1749,9 @@ async def test_delete_refuses_at_the_door_when_a_pointer_layer_is_read_only(tmp_
     assert (tmp_path / "project" / ".gc" / "profiles" / "work.yml").is_file()
 
 
-async def test_rename_refuses_at_the_door_when_a_pointer_layer_is_read_only(tmp_path, monkeypatch):
+async def test_rename_refuses_at_the_door_when_a_pointer_layer_is_read_only(
+    tmp_path, monkeypatch
+):
     """То же у второй двери: поле ввода имени не раскрывается — набирать имя,
     которое некуда записать, человек не должен."""
     from gc_tui import app as app_mod
@@ -1569,7 +1810,9 @@ def _assert_pointer_write_fails_with_oserror(base_cfg: Path) -> None:
         ocw.write_text(base_cfg, base_cfg.read_text(encoding="utf-8"))
 
 
-async def test_rename_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch):
+async def test_rename_reports_a_file_error_as_a_file_error(
+    tmp_path, monkeypatch
+):
     """PermissionError на записи указателя — «не удалось переименовать: …» (так было
     на базе), а не совет поправить раздел «Модели»: конфиг нерабочим не становился,
     ему просто не хватило прав."""
@@ -1578,8 +1821,12 @@ async def test_rename_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
-    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
+    profile = _write(
+        tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
+    )
     unlock = _lock_against_writing(base_cfg)
     try:
         _assert_pointer_write_fails_with_oserror(base_cfg)
@@ -1599,7 +1846,9 @@ async def test_rename_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch
     assert profile.is_file() and not profile.with_name("work2.yml").exists()
 
 
-async def test_delete_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch):
+async def test_delete_reports_a_file_error_as_a_file_error(
+    tmp_path, monkeypatch
+):
     """То же у удаления: снять указатель не дали права на файл — «не удалось
     удалить: …», файл профиля на месте, бэкапа нет."""
     from gc_tui import app as app_mod
@@ -1607,8 +1856,12 @@ async def test_delete_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
-    profile = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
+    profile = _write(
+        tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
+    )
     unlock = _lock_against_writing(base_cfg)
     try:
         _assert_pointer_write_fails_with_oserror(base_cfg)
@@ -1632,7 +1885,9 @@ async def test_delete_reports_a_file_error_as_a_file_error(tmp_path, monkeypatch
 # --- ре-ревью: хвост «применится со следующего хода» — только когда применится ---
 
 
-async def test_rename_of_a_pointerless_profile_promises_nothing(tmp_path, monkeypatch):
+async def test_rename_of_a_pointerless_profile_promises_nothing(
+    tmp_path, monkeypatch
+):
     """Переименован профиль, на который не указывает ни один слой и который не
     выбран сессией: для агента не изменилось НИЧЕГО. «Применится со следующего
     хода агента» здесь — та же ложь, за которую переписывались футеры."""
@@ -1657,7 +1912,9 @@ async def test_rename_of_a_pointerless_profile_promises_nothing(tmp_path, monkey
     assert "применится" not in flash
 
 
-async def test_delete_of_a_pointerless_profile_promises_nothing(tmp_path, monkeypatch):
+async def test_delete_of_a_pointerless_profile_promises_nothing(
+    tmp_path, monkeypatch
+):
     """Та же проверка у удаления: указателя не было — применяться нечему."""
     from gc_tui import app as app_mod
 
@@ -1681,7 +1938,9 @@ async def test_delete_of_a_pointerless_profile_promises_nothing(tmp_path, monkey
     assert "применится" not in flash
 
 
-async def test_delete_of_the_active_profile_still_promises_the_next_turn(tmp_path, monkeypatch):
+async def test_delete_of_the_active_profile_still_promises_the_next_turn(
+    tmp_path, monkeypatch
+):
     """Обратная сторона того же правила: действующий указатель СНЯТ — обещание
     про следующий ход правдиво и обязано остаться."""
     from gc_tui import app as app_mod
@@ -1689,7 +1948,9 @@ async def test_delete_of_the_active_profile_still_promises_the_next_turn(tmp_pat
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
@@ -1709,7 +1970,9 @@ async def test_delete_of_the_active_profile_still_promises_the_next_turn(tmp_pat
     assert "Выбор снят: со следующего хода агента — без профиля." in flash
 
 
-async def test_delete_of_the_active_twin_says_the_choice_is_dropped_not_the_shadow(tmp_path, monkeypatch):
+async def test_delete_of_the_active_twin_says_the_choice_is_dropped_not_the_shadow(
+    tmp_path, monkeypatch
+):
     """Ревью MR #80 (L24): удалён победивший тёзка АКТИВНОГО имени. Плашка обязана
     (1) сказать, что выбор снят — раньше говорил только баннер; (2) развести
     снятие с резолвингом: хвост «применится со следующего хода агента» ПОСЛЕ
@@ -1719,9 +1982,15 @@ async def test_delete_of_the_active_twin_says_the_choice_is_dropped_not_the_shad
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
-    _write(project_dir / ".gc" / "profiles" / "work.yml", _PROFILE_BODY)  # победитель
-    shadowed = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml", _PROFILE_BODY
+    )  # победитель
+    shadowed = _write(
+        tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
+    )
 
     cfg = dict(_base_dict(), profile="work")
     app = app_mod.TuiApp(config=cfg)
@@ -1734,7 +2003,9 @@ async def test_delete_of_the_active_twin_says_the_choice_is_dropped_not_the_shad
         await pilot.pause()
         flash = _flash(scr)
 
-    assert "Выбор снят: со следующего хода агента — без профиля." in flash, flash
+    assert "Выбор снят: со следующего хода агента — без профиля." in flash, (
+        flash
+    )
     assert str(shadowed) in flash and "включить — Space" in flash, flash
     # Снятие выбора стоит ДО строки о тёзке — иначе хвост снова прирастает к тени.
     assert flash.index("Выбор снят") < flash.index("резолвится"), flash
@@ -1752,7 +2023,9 @@ async def test_delete_of_the_active_twin_says_the_choice_is_dropped_not_the_shad
 # origins`, см. `onboarding.load_config_for_repair`).
 
 
-async def test_delete_banner_names_the_managed_pointer_it_will_not_touch(tmp_path, monkeypatch):
+async def test_delete_banner_names_the_managed_pointer_it_will_not_touch(
+    tmp_path, monkeypatch
+):
     """Managed `config.local.yml` c `profile: "work"`: баннер удаления обязан
     назвать файл-носитель — раньше он был голым «Файл уедет в backups/», и после
     Enter managed продолжал называть исчезнувший профиль. Сторож от пере-срабатывания:
@@ -1788,7 +2061,9 @@ async def test_delete_banner_names_the_managed_pointer_it_will_not_touch(tmp_pat
     assert "следующий запуск не соберётся" in banner, banner
 
 
-async def test_rename_prompt_names_the_managed_pointer_it_will_not_touch(tmp_path, monkeypatch):
+async def test_rename_prompt_names_the_managed_pointer_it_will_not_touch(
+    tmp_path, monkeypatch
+):
     """Симметрия на переименовании: указатель в managed остаётся на СТАРОМ имени —
     предупреждение стоит у поля ввода, до Enter."""
     from gc_tui import app as app_mod
@@ -1813,7 +2088,9 @@ async def test_rename_prompt_names_the_managed_pointer_it_will_not_touch(tmp_pat
     assert "следующий запуск не соберётся" in texts, texts
 
 
-async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(tmp_path, monkeypatch):
+async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(
+    tmp_path, monkeypatch
+):
     """Ревью #11: `_profile_pointer_pinned_elsewhere` перечитывала оба слоя
     (`config_raw.read_document`) с диска заново, хотя `_profile_pointer_layers`
     секундой раньше уже прочитал те же файлы в кэш прохода (`_base_config_doc`/
@@ -1827,7 +2104,9 @@ async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(tmp_path
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="work")
@@ -1836,13 +2115,19 @@ async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(tmp_path
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         reads: list = []
         real = config_raw.read_document
-        monkeypatch.setattr(config_raw, "read_document", lambda path: reads.append(Path(path).resolve()) or real(path))
+        monkeypatch.setattr(
+            config_raw,
+            "read_document",
+            lambda path: reads.append(Path(path).resolve()) or real(path),
+        )
 
         scr._profiles_disk_cache = {}  # начало прохода: кэш сброшен
         base_path = base_cfg.resolve()
         layers = scr._profile_pointer_layers("work")
         after_layers = reads.count(base_path)
-        assert after_layers >= 1, "первое обращение к слоям обязано прочитать базу"
+        assert after_layers >= 1, (
+            "первое обращение к слоям обязано прочитать базу"
+        )
 
         scr._profile_pointer_pinned_elsewhere("work", layers)
         assert reads.count(base_path) == after_layers, (
@@ -1864,15 +2149,22 @@ def _app_with_flag(tmp_path, base_cfg, profile_override):
     from gc_core.config import load_config_ex
     from gc_tui import app as app_mod
 
-    cfg, _meta = load_config_ex(str(base_cfg), profile_override=profile_override)
+    cfg, _meta = load_config_ex(
+        str(base_cfg), profile_override=profile_override
+    )
     app = app_mod.TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg, profile_override=profile_override
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        config=cfg,
+        profile_override=profile_override,
     )
     app.set_config_path(str(base_cfg))
     return app
 
 
-async def test_activation_under_the_profile_flag_names_the_launch_profile(tmp_path, monkeypatch):
+async def test_activation_under_the_profile_flag_names_the_launch_profile(
+    tmp_path, monkeypatch
+):
     """`gc-ua --profile work`, указатель файла пуст; Space на `corp` пишет указатель,
     а запуск остаётся на `work` — плашка обязана сказать именно это."""
     project_dir = tmp_path / "project"
@@ -1884,7 +2176,13 @@ async def test_activation_under_the_profile_flag_names_the_launch_profile(tmp_pa
 
     app = _app_with_flag(tmp_path, base_cfg, "work")
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot,
+            app,
+            base_cfg,
+            config=app._config,
+            on_apply=app.reload_config,
+        )
         await _put_cursor(pilot, scr, "profile", "corp")
         await pilot.press("space")
         await pilot.pause()
@@ -1896,7 +2194,9 @@ async def test_activation_under_the_profile_flag_names_the_launch_profile(tmp_pa
     assert "применится со следующего хода" not in flash
 
 
-async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare(tmp_path, monkeypatch):
+async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare(
+    tmp_path, monkeypatch
+):
     """`gc-ua --profile ""` — обход сломанного профиля: починили, включили Space —
     указатель записан, но этот запуск профиля не поднимет."""
     project_dir = tmp_path / "project"
@@ -1907,7 +2207,13 @@ async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare
 
     app = _app_with_flag(tmp_path, base_cfg, "")
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot,
+            app,
+            base_cfg,
+            config=app._config,
+            on_apply=app.reload_config,
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("space")
         await pilot.pause()
@@ -1919,7 +2225,9 @@ async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare
     assert "применится со следующего хода" not in flash
 
 
-async def test_rename_of_the_flag_profile_moves_the_flag_with_it(tmp_path, monkeypatch):
+async def test_rename_of_the_flag_profile_moves_the_flag_with_it(
+    tmp_path, monkeypatch
+):
     """Переименован профиль, выбранный флагом: флаг едет за именем — как сессионный
     выбор (ruling координатора), — иначе следующее перечитывание не нашло бы профиль
     флага и отказалось бы собирать базу, оставив окно на прежней («не перечитан»)."""
@@ -1932,7 +2240,13 @@ async def test_rename_of_the_flag_profile_moves_the_flag_with_it(tmp_path, monke
 
     app = _app_with_flag(tmp_path, base_cfg, "work")
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot,
+            app,
+            base_cfg,
+            config=app._config,
+            on_apply=app.reload_config,
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("r")
         await pilot.pause()
@@ -1941,12 +2255,16 @@ async def test_rename_of_the_flag_profile_moves_the_flag_with_it(tmp_path, monke
 
         assert app._profile_override == "job"
         assert app._config["profile"] == "job"
-        assert "profile_flag_stale" not in [n.code for n in collect_runtime_notices()]
+        assert "profile_flag_stale" not in [
+            n.code for n in collect_runtime_notices()
+        ]
     assert "переименован" in flash
     assert "не перечитан" not in _notice(scr)
 
 
-async def test_delete_of_the_flag_profile_clears_the_flag(tmp_path, monkeypatch):
+async def test_delete_of_the_flag_profile_clears_the_flag(
+    tmp_path, monkeypatch
+):
     """Удалён профиль, выбранный флагом: флаг снимается в `""` («этот запуск без
     профиля» — раскладку уже понимает `_load_base_config`), как у переименования
     он едет за именем. Иначе флаг продолжает называть исчезнувший файл, и КАЖДОЕ
@@ -1963,7 +2281,13 @@ async def test_delete_of_the_flag_profile_clears_the_flag(tmp_path, monkeypatch)
 
     app = _app_with_flag(tmp_path, base_cfg, "work")
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot,
+            app,
+            base_cfg,
+            config=app._config,
+            on_apply=app.reload_config,
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("delete")
         await pilot.pause()
@@ -1974,13 +2298,19 @@ async def test_delete_of_the_flag_profile_clears_the_flag(tmp_path, monkeypatch)
 
         assert app._profile_override == ""
         assert (app._config.get("profile") or None) is None
-        assert "profile_flag_stale" not in [n.code for n in collect_runtime_notices()]
-    assert "без профиля" in banner, banner  # следствие для флага названо заранее
+        assert "profile_flag_stale" not in [
+            n.code for n in collect_runtime_notices()
+        ]
+    assert "без профиля" in banner, (
+        banner
+    )  # следствие для флага названо заранее
     assert "бэкап" in flash, flash  # плашка удаления, а не «не перечитан»
     assert "не перечитан" not in _notice(scr)
 
 
-async def test_delete_of_the_flag_profile_with_a_surfaced_twin_names_the_original_flag(tmp_path, monkeypatch):
+async def test_delete_of_the_flag_profile_with_a_surfaced_twin_names_the_original_flag(
+    tmp_path, monkeypatch
+):
     """Ревью #10: удаление профиля флага пишет `_profile_override = ""` — раскладку
     для перечитки менять нельзя (докстринг `_launch_profile_effect`/удаления), но
     ТЕКСТ эффекта путает её с настоящим `--profile ""`. Тёзка того же имени жив в
@@ -1989,13 +2319,23 @@ async def test_delete_of_the_flag_profile_with_a_surfaced_twin_names_the_origina
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
-    _write(project_dir / ".gc" / "profiles" / "work.yml", _PROFILE_BODY)  # победитель
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml", _PROFILE_BODY
+    )  # победитель
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)  # тёзка
 
     app = _app_with_flag(tmp_path, base_cfg, "work")
     async with app.run_test() as pilot:
-        scr = await _profiles_screen(pilot, app, base_cfg, config=app._config, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot,
+            app,
+            base_cfg,
+            config=app._config,
+            on_apply=app.reload_config,
+        )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("delete")
         await pilot.pause()
@@ -2003,7 +2343,9 @@ async def test_delete_of_the_flag_profile_with_a_surfaced_twin_names_the_origina
         await pilot.pause()
         assert app._profile_override == ""  # раскладка перечитки не меняется
 
-        await _put_cursor(pilot, scr, "profile", "work")  # тот же тёзка, «включить — Space»
+        await _put_cursor(
+            pilot, scr, "profile", "work"
+        )  # тот же тёзка, «включить — Space»
         await pilot.press("space")
         await pilot.pause()
         flash = _flash(scr)
@@ -2036,7 +2378,9 @@ async def test_rename_survives_a_failed_session_persist(tmp_path, monkeypatch):
 
         monkeypatch.setattr(app, "persist_session_overrides", _boom)
 
-        scr = await _profiles_screen(pilot, app, base_cfg, on_apply=app.reload_config)
+        scr = await _profiles_screen(
+            pilot, app, base_cfg, on_apply=app.reload_config
+        )
         await _put_cursor(pilot, scr, "profile", "home")
         await pilot.press("r")
         await pilot.pause()
@@ -2044,13 +2388,17 @@ async def test_rename_survives_a_failed_session_persist(tmp_path, monkeypatch):
 
         assert (tmp_path / "base" / "profiles" / "house.yml").is_file()
         assert "profile" not in app._session_overrides  # откат + санация
-        assert "session_profile_stale" in [n.code for n in collect_runtime_notices()]
+        assert "session_profile_stale" in [
+            n.code for n in collect_runtime_notices()
+        ]
 
 
 # --- Имя профиля: коллизия по регистру ------------------------------------------
 
 
-async def test_rename_into_a_name_differing_only_in_case_is_refused(tmp_path, monkeypatch):
+async def test_rename_into_a_name_differing_only_in_case_is_refused(
+    tmp_path, monkeypatch
+):
     """`testprof2` → `TestProf1` при живом `testprof1` — отказ по имени, а не крэш
     файловой системы.
 
@@ -2067,8 +2415,14 @@ async def test_rename_into_a_name_differing_only_in_case_is_refused(tmp_path, mo
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "testprof1.yml", "# ПЕРВЫЙ\n" + _PROFILE_BODY)
-    _write(tmp_path / "base" / "profiles" / "testprof2.yml", "# ВТОРОЙ\n" + _PROFILE_BODY)
+    _write(
+        tmp_path / "base" / "profiles" / "testprof1.yml",
+        "# ПЕРВЫЙ\n" + _PROFILE_BODY,
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "testprof2.yml",
+        "# ВТОРОЙ\n" + _PROFILE_BODY,
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -2083,11 +2437,16 @@ async def test_rename_into_a_name_differing_only_in_case_is_refused(tmp_path, mo
         assert "WinError" not in notice and "Errno" not in notice
         # оба файла целы и на своих местах
         root = tmp_path / "base" / "profiles"
-        assert sorted(p.name for p in root.iterdir()) == ["testprof1.yml", "testprof2.yml"]
+        assert sorted(p.name for p in root.iterdir()) == [
+            "testprof1.yml",
+            "testprof2.yml",
+        ]
         assert "ПЕРВЫЙ" in (root / "testprof1.yml").read_text(encoding="utf-8")
 
 
-async def test_create_with_a_name_differing_only_in_case_is_refused(tmp_path, monkeypatch):
+async def test_create_with_a_name_differing_only_in_case_is_refused(
+    tmp_path, monkeypatch
+):
     """То же правило на входе создания: `create_profile_file` отказ даёт, но
     техническим текстом про существующий файл — про ИМЯ отвечает гейт."""
     from gc_tui import app as app_mod
@@ -2112,7 +2471,9 @@ async def test_create_with_a_name_differing_only_in_case_is_refused(tmp_path, mo
         assert ".yml" not in notice
 
 
-async def test_renaming_a_profile_to_its_own_name_in_another_case_still_works(tmp_path, monkeypatch):
+async def test_renaming_a_profile_to_its_own_name_in_another_case_still_works(
+    tmp_path, monkeypatch
+):
     """Сторож от чрезмерного запрета: сменить РЕГИСТР СВОЕГО имени можно —
     тёзка здесь сам себе, и файловая система такое переименование принимает."""
     from gc_tui import app as app_mod
@@ -2146,11 +2507,15 @@ def _spy_repoint(monkeypatch) -> list:
         calls.append(value)
         return real(self, layers, value, **kwargs)
 
-    monkeypatch.setattr(s.SettingsScreen, "_repoint_profile_layers", _recording)
+    monkeypatch.setattr(
+        s.SettingsScreen, "_repoint_profile_layers", _recording
+    )
     return calls
 
 
-async def test_renaming_onto_a_file_discovery_does_not_see_is_refused_before_pointers(tmp_path, monkeypatch):
+async def test_renaming_onto_a_file_discovery_does_not_see_is_refused_before_pointers(
+    tmp_path, monkeypatch
+):
     """Ревью MR #80 (H1): гейт тёзки судил по именам ДИСКАВЕРИ, а `rename()`
     работает с ПУТЯМИ. `default.yml` — резервное имя, дискавери его пропускает,
     casefold-гейт молчит — и на регистронечувствительной ФС цель «Default.yml»
@@ -2162,12 +2527,18 @@ async def test_renaming_onto_a_file_discovery_does_not_see_is_refused_before_poi
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     root = tmp_path / "base" / "profiles"
     _write(root / "work.yml", _PROFILE_BODY)
-    foreign = _write(root / "default.yml", "# ФАЙЛ ПОЛЬЗОВАТЕЛЯ — дискавери его не видит\n")
+    foreign = _write(
+        root / "default.yml", "# ФАЙЛ ПОЛЬЗОВАТЕЛЯ — дискавери его не видит\n"
+    )
     if not (root / "DEFAULT.YML").exists():
-        pytest.skip("регистрочувствительная ФС: «Default.yml» в default.yml тут не попадает")
+        pytest.skip(
+            "регистрочувствительная ФС: «Default.yml» в default.yml тут не попадает"
+        )
     base_before = base_cfg.read_bytes()
     foreign_before = foreign.read_bytes()
     calls = _spy_repoint(monkeypatch)
@@ -2189,7 +2560,9 @@ async def test_renaming_onto_a_file_discovery_does_not_see_is_refused_before_poi
     assert (root / "work.yml").is_file()
 
 
-async def test_renaming_onto_a_directory_namesake_is_refused_before_pointers(tmp_path, monkeypatch):
+async def test_renaming_onto_a_directory_namesake_is_refused_before_pointers(
+    tmp_path, monkeypatch
+):
     """Тот же гейт на регистрочувствительной ФС: каталог-тёзка `<имя>.yml` для
     дискавери невидим (`is_file()`), casefold-гейт молчит — а без гейта указатели
     переписывались бы и откатывались, отказ приходил бы от ФС уже ПОСЛЕ них."""
@@ -2198,7 +2571,9 @@ async def test_renaming_onto_a_directory_namesake_is_refused_before_pointers(tmp
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
     root = tmp_path / "base" / "profiles"
     _write(root / "work.yml", _PROFILE_BODY)
     occupant = _write(root / "job.yml" / "данные.txt", "не профиль\n")
@@ -2222,7 +2597,9 @@ async def test_renaming_onto_a_directory_namesake_is_refused_before_pointers(tmp
     assert (root / "work.yml").is_file()
 
 
-async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(tmp_path, monkeypatch):
+async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(
+    tmp_path, monkeypatch
+):
     """Пока идёт ввод имени, подсказка под списком молчит.
 
     Она рассказывает про строку ПОД КУРСОРОМ («Space — активировать», путь файла),
@@ -2253,7 +2630,9 @@ async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(tmp_path, m
         assert "переименовать" in _footer(scr)  # роль клавиш называет футер
 
 
-async def test_renaming_reports_a_clean_refusal_when_the_profile_file_vanishes_mid_read(tmp_path, monkeypatch):
+async def test_renaming_reports_a_clean_refusal_when_the_profile_file_vanishes_mid_read(
+    tmp_path, monkeypatch
+):
     """Находка ревью: чтение файла профиля для будущего документа-кандидата
     (`_rename_profile`, готовит `extra_candidates`) не было обёрнуто, в отличие
     от каждого другого файлового доступа этой функции (`rename()` ниже, запись
@@ -2309,10 +2688,15 @@ def _write_utf16(path: Path, text: str) -> Path:
 def _loadable_base_text(profile: str = "") -> str:
     """База, которая ГРУЗИТСЯ сама по себе: одна модель и заданный `slots.default`.
     Иначе отказ активации нечем отличить от давнего «2+ моделей без слотов»."""
-    return _base_config_text(profile) + 'models:\n  a:\n    model: "x"\nslots:\n  default: "a"\n'
+    return (
+        _base_config_text(profile)
+        + 'models:\n  a:\n    model: "x"\nslots:\n  default: "a"\n'
+    )
 
 
-async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(tmp_path, monkeypatch):
+async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(
+    tmp_path, monkeypatch
+):
     """ЖИВОЙ СМОК ВЛАДЕЛЬЦА: рядом с базой лежит профиль в UTF-16, человек жмёт
     Space. Раньше запись указателя ПРОХОДИЛА (сборка стека падала, а гейт читал
     её отказ как «проверять нечего»), и следующий `gc-ua` не поднимался вовсе —
@@ -2326,7 +2710,10 @@ async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(tm
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text())
     before = base_cfg.read_text(encoding="utf-8")
-    bad = _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml", 'slots:\n  default: "a"\n')
+    bad = _write_utf16(
+        tmp_path / "base" / "profiles" / "broken-enc.yml",
+        'slots:\n  default: "a"\n',
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -2346,13 +2733,19 @@ async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(tm
     # Имя файла человек уже видит в блоке под курсором (`_profiles_row_hint`):
     # витрина печатает путь первой строкой, причину — второй.
     assert notice.count(str(bad)) == 0, notice
-    assert str(bad) in scr._profiles_hint_text(scr._profiles_rows()), "путь остался в витрине"
+    assert str(bad) in scr._profiles_hint_text(scr._profiles_rows()), (
+        "путь остался в витрине"
+    )
     assert notice.count("не удалось прочитать") == 1, notice
-    assert base_cfg.read_text(encoding="utf-8") == before  # указатель никуда не уехал
+    assert (
+        base_cfg.read_text(encoding="utf-8") == before
+    )  # указатель никуда не уехал
     config_mod.load_config_ex(str(base_cfg))  # следующий старт по-прежнему жив
 
 
-async def test_deactivating_an_already_unreadable_profile_still_works(tmp_path, monkeypatch):
+async def test_deactivating_an_already_unreadable_profile_still_works(
+    tmp_path, monkeypatch
+):
     """Выход из ловушки той же дверью, что и вход: указатель на нечитаемый профиль
     уже записан (руками, прежней версией, чужой машиной) — снятие обязано
     пройти. Гейт, отказывающий по одному лишь факту «стек не собрался», запер бы
@@ -2362,8 +2755,13 @@ async def test_deactivating_an_already_unreadable_profile_still_works(tmp_path, 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
-    _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml", 'slots:\n  default: "a"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc")
+    )
+    _write_utf16(
+        tmp_path / "base" / "profiles" / "broken-enc.yml",
+        'slots:\n  default: "a"\n',
+    )
 
     cfg = dict(_base_dict(), profile="broken-enc")
     app = app_mod.TuiApp(config=cfg)
@@ -2378,7 +2776,9 @@ async def test_deactivating_an_already_unreadable_profile_still_works(tmp_path, 
     assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_deleting_an_already_unreadable_profile_still_works(tmp_path, monkeypatch):
+async def test_deleting_an_already_unreadable_profile_still_works(
+    tmp_path, monkeypatch
+):
     """Вторая дверь наружу из той же ловушки: удаление снимает указатель (пишет
     `profile: ""`) и уносит файл в бэкап — стек оно ЧИНИТ, а не ломает."""
     from gc_tui import app as app_mod
@@ -2386,8 +2786,13 @@ async def test_deleting_an_already_unreadable_profile_still_works(tmp_path, monk
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
-    broken = _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml", 'slots:\n  default: "a"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc")
+    )
+    broken = _write_utf16(
+        tmp_path / "base" / "profiles" / "broken-enc.yml",
+        'slots:\n  default: "a"\n',
+    )
 
     cfg = dict(_base_dict(), profile="broken-enc")
     app = app_mod.TuiApp(config=cfg)
@@ -2405,7 +2810,9 @@ async def test_deleting_an_already_unreadable_profile_still_works(tmp_path, monk
     assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_creating_a_profile_beside_an_unreadable_one_is_untouched(tmp_path, monkeypatch):
+async def test_creating_a_profile_beside_an_unreadable_one_is_untouched(
+    tmp_path, monkeypatch
+):
     """Создание указателя не пишет вовсе — соседний нечитаемый профиль (даже
     активный) ему не помеха. Сторож против «починки» гейта запретом всего
     подряд: запереть человека без единственной кнопки «завести рабочий профиль»
@@ -2415,8 +2822,13 @@ async def test_creating_a_profile_beside_an_unreadable_one_is_untouched(tmp_path
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
-    _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml", 'slots:\n  default: "a"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc")
+    )
+    _write_utf16(
+        tmp_path / "base" / "profiles" / "broken-enc.yml",
+        'slots:\n  default: "a"\n',
+    )
 
     cfg = dict(_base_dict(), profile="broken-enc")
     app = app_mod.TuiApp(config=cfg)
@@ -2430,10 +2842,14 @@ async def test_creating_a_profile_beside_an_unreadable_one_is_untouched(tmp_path
 
     assert notice == "", notice
     assert (tmp_path / "base" / "profiles" / "fresh.yml").is_file()
-    assert 'profile: "broken-enc"' in base_cfg.read_text(encoding="utf-8")  # указатель не трогали
+    assert 'profile: "broken-enc"' in base_cfg.read_text(
+        encoding="utf-8"
+    )  # указатель не трогали
 
 
-async def test_renaming_an_unreadable_profile_is_refused_and_names_the_file(tmp_path, monkeypatch):
+async def test_renaming_an_unreadable_profile_is_refused_and_names_the_file(
+    tmp_path, monkeypatch
+):
     """Переименование читает файл профиля само (готовит документ-кандидат на его
     будущий путь) и отказывает ещё до записи указателей. Отказ обязан называть
     ФАЙЛ: голая жалоба кодека («'utf-8' codec can't decode byte 0xff») не
@@ -2443,9 +2859,14 @@ async def test_renaming_an_unreadable_profile_is_refused_and_names_the_file(tmp_
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _loadable_base_text("broken-enc")
+    )
     before = base_cfg.read_text(encoding="utf-8")
-    broken = _write_utf16(tmp_path / "base" / "profiles" / "broken-enc.yml", 'slots:\n  default: "a"\n')
+    broken = _write_utf16(
+        tmp_path / "base" / "profiles" / "broken-enc.yml",
+        'slots:\n  default: "a"\n',
+    )
 
     cfg = dict(_base_dict(), profile="broken-enc")
     app = app_mod.TuiApp(config=cfg)

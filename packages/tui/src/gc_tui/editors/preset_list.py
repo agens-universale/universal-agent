@@ -22,7 +22,9 @@ PRESET_HINT = "провайдеры · печать — фильтр/свой а
 # (`connection.PRESET_NO_MATCH_CLOSED`) — канон в редакции 2026-08-18.
 # Глагол — тот же, что в футере шага (`onboarding._FOOTER_PRESET_LIST_NO_MATCH`): обе
 # строки видны одновременно, и звать одну клавишу двумя словами нельзя.
-PRESET_HINT_NO_MATCH = "в списке такого нет · Enter — оставить свой адрес · Esc — свернуть"
+PRESET_HINT_NO_MATCH = (
+    "в списке такого нет · Enter — оставить свой адрес · Esc — свернуть"
+)
 
 
 def preset_list_controller(
@@ -97,7 +99,14 @@ def preset_list_controller(
         владельца по смоку)."""
         if not value:
             return 0
-        return next((i for i, p in enumerate(items) if p.url == value and not getattr(p, "inherit", False)), None)
+        return next(
+            (
+                i
+                for i, p in enumerate(items)
+                if p.url == value and not getattr(p, "inherit", False)
+            ),
+            None,
+        )
 
     return FieldListController(
         host,

@@ -1,4 +1,8 @@
-from gc_tui.services.mcp_progress import McpProgress, format_mcp_progress, format_mcp_settle
+from gc_tui.services.mcp_progress import (
+    McpProgress,
+    format_mcp_progress,
+    format_mcp_settle,
+)
 
 
 def test_sink_begin_update_snapshot():
@@ -15,13 +19,17 @@ def test_sink_begin_update_snapshot():
 
 
 def test_format_progress_multiline_block():
-    text = format_mcp_progress({"a": {"status": "connected"}, "b": None, "c": {"status": "failed"}})
+    text = format_mcp_progress(
+        {"a": {"status": "connected"}, "b": None, "c": {"status": "failed"}}
+    )
     lines = text.splitlines()
     assert lines[0].startswith("подключаю MCP")  # заголовок
     assert lines[1] == ""  # отступ-строка после заголовка
     assert len(lines) == 5  # заголовок + отступ + 3 сервера
     body = lines[2:]
-    assert any("a" in ln and "✓" in ln for ln in body)  # каждый сервер на своей строке
+    assert any(
+        "a" in ln and "✓" in ln for ln in body
+    )  # каждый сервер на своей строке
     assert any("b" in ln and "⏳" in ln for ln in body)
     assert any("c" in ln and "✗" in ln for ln in body)
 
@@ -54,7 +62,9 @@ def test_format_settle_all_ok():
 
 
 def test_format_settle_failed():
-    text = format_mcp_settle({"a": {"status": "connected"}, "office": {"status": "failed"}})
+    text = format_mcp_settle(
+        {"a": {"status": "connected"}, "office": {"status": "failed"}}
+    )
     # счётчик N/M вместо имён серверов, хинт /mcp, без строки готовности
     assert "⚠" in text and "1/2" in text and "/mcp" in text
     assert "готов" not in text
@@ -62,6 +72,8 @@ def test_format_settle_failed():
 
 def test_format_settle_zero_connected():
     # все упали — специальная фраза «ни один не подключился»
-    text = format_mcp_settle({"office": {"status": "failed"}, "computer": {"status": "failed"}})
+    text = format_mcp_settle(
+        {"office": {"status": "failed"}, "computer": {"status": "failed"}}
+    )
     assert "⚠" in text and "0/2" in text and "/mcp" in text
     assert "ни один" in text

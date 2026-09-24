@@ -7,7 +7,9 @@ import pytest
 async def test_address_and_presets_live_in_one_group(tmp_path):
     """Поле и строки списка — потомки одного контейнера с рамкой, а не соседи."""
     pytest.importorskip("textual")
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.containers import VerticalScroll
@@ -16,7 +18,11 @@ async def test_address_and_presets_live_in_one_group(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
-            url_current="", auth_header=None, proxy_current="", create_mode=True, presets=default_endpoint_presets()
+            url_current="",
+            auth_header=None,
+            proxy_current="",
+            create_mode=True,
+            presets=default_endpoint_presets(),
         )
         await pilot.app.screen.mount(ed)
         await pilot.pause()
@@ -31,14 +37,20 @@ async def test_address_and_presets_live_in_one_group(tmp_path):
 async def test_hint_is_below_the_group_not_inside(tmp_path):
     """Подсказка про клавиши — снаружи рамки: внутри неё только выбор (§3.2.2)."""
     pytest.importorskip("textual")
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
-            url_current="", auth_header=None, proxy_current="", create_mode=True, presets=default_endpoint_presets()
+            url_current="",
+            auth_header=None,
+            proxy_current="",
+            create_mode=True,
+            presets=default_endpoint_presets(),
         )
         await pilot.app.screen.mount(ed)
         await pilot.pause()
@@ -69,12 +81,18 @@ async def test_saved_secret_marked_on_field(tmp_path):
         await pilot.pause()
         assert ed.query_one("#conn-token", Input).has_class("has-saved")
 
-        ed2 = ConnectionEditor(url_current="", auth_header=None, proxy_current="", create_mode=True, presets=[])
+        ed2 = ConnectionEditor(
+            url_current="",
+            auth_header=None,
+            proxy_current="",
+            create_mode=True,
+            presets=[],
+        )
         await pilot.app.screen.mount(ed2)
         await pilot.pause()
-        assert not ed2.query_one("#conn-token", Input).has_class("has-saved"), (
-            "без сохранённого токена маркера быть не должно"
-        )
+        assert not ed2.query_one("#conn-token", Input).has_class(
+            "has-saved"
+        ), "без сохранённого токена маркера быть не должно"
 
 
 @pytest.mark.asyncio
@@ -127,12 +145,18 @@ async def test_form_hints_are_one_dim_colour(tmp_path):
 
         def colour(wid):
             w = ed.query_one(f"#{wid}", Input)
-            return w.get_component_styles("input--placeholder").color.hex.lower()
+            return w.get_component_styles(
+                "input--placeholder"
+            ).color.hex.lower()
 
         # #conn-url живёт в группе (без set-framed), токен и прокси — в рамке поля
-        assert colour("conn-url") == DEEP_DIM.lower(), "поле в группе тоже приглушаем сами"
+        assert colour("conn-url") == DEEP_DIM.lower(), (
+            "поле в группе тоже приглушаем сами"
+        )
         assert colour("conn-proxy") == DEEP_DIM.lower()
-        assert colour("conn-token") == INK.lower(), "маска сохранённого — цветом значения"
+        assert colour("conn-token") == INK.lower(), (
+            "маска сохранённого — цветом значения"
+        )
 
 
 @pytest.mark.asyncio
@@ -149,7 +173,11 @@ async def test_voice_saved_token_marked_too(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         ed = VoiceEndpointEditor(
-            values={"url": "https://h/v1/audio/transcriptions", "token": "", "model": ""},
+            values={
+                "url": "https://h/v1/audio/transcriptions",
+                "token": "",
+                "model": "",
+            },
             autofocus=False,
             placeholders={"token": "sec***"},
         )
@@ -158,18 +186,24 @@ async def test_voice_saved_token_marked_too(tmp_path):
 
         def colour(wid):
             w = ed.query_one(f"#{wid}", Input)
-            return w.get_component_styles("input--placeholder").color.hex.lower()
+            return w.get_component_styles(
+                "input--placeholder"
+            ).color.hex.lower()
 
         assert ed.query_one("#voice-token", Input).has_class("has-saved")
         assert colour("voice-token") == INK.lower()
-        assert colour("voice-model") == DEEP_DIM.lower(), "подсказка остаётся подсказкой"
+        assert colour("voice-model") == DEEP_DIM.lower(), (
+            "подсказка остаётся подсказкой"
+        )
 
-        ed2 = VoiceEndpointEditor(values={"url": "", "token": "", "model": ""}, autofocus=False)
+        ed2 = VoiceEndpointEditor(
+            values={"url": "", "token": "", "model": ""}, autofocus=False
+        )
         await pilot.app.screen.mount(ed2)
         await pilot.pause()
-        assert not ed2.query_one("#voice-token", Input).has_class("has-saved"), (
-            "сохранённого токена нет — маркера быть не должно"
-        )
+        assert not ed2.query_one("#voice-token", Input).has_class(
+            "has-saved"
+        ), "сохранённого токена нет — маркера быть не должно"
 
 
 @pytest.mark.asyncio
@@ -198,10 +232,14 @@ async def test_disabled_field_group_is_dimmed(tmp_path):
         def border() -> str:
             return group.styles.border_top[1].hex.lower()
 
-        assert border() == DEEP_DIM.lower(), "замороженное поле — рамка группы гаснет"
+        assert border() == DEEP_DIM.lower(), (
+            "замороженное поле — рамка группы гаснет"
+        )
         inp.disabled = False
         await pilot.pause()
-        assert border() == RUN_COLOR.lower(), "поле ожило — рамка снова рабочая"
+        assert border() == RUN_COLOR.lower(), (
+            "поле ожило — рамка снова рабочая"
+        )
         inp.disabled = True
         await pilot.pause()
         assert border() == DEEP_DIM.lower(), "и обратно, тем же движением"
@@ -264,7 +302,10 @@ async def test_ctrl_space_probes_regardless_of_the_preset_list_state(tmp_path):
     from form_harness import recording_probe, settings_connection
 
     calls = []
-    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
+    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (
+        pilot,
+        scr,
+    ):
         from gc_tui.editors.connection import ConnectionEditor
 
         ed = scr.query_one(ConnectionEditor)
@@ -300,7 +341,9 @@ async def test_ctrl_down_on_address_opens_the_list_like_alt_down(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ctrl_space_on_an_unselected_filter_does_not_probe_the_typed_text(tmp_path):
+async def test_ctrl_space_on_an_unselected_filter_does_not_probe_the_typed_text(
+    tmp_path,
+):
     """§2.3 спеки 2026-08-06: пока список раскрыт, в поле лежит фильтр (`gr`), а не
     адрес. Ctrl+Space не имеет права стучаться на набранный текст — статус говорит,
     что адрес ещё не выбран, а не шлёт запрос на "gr". Прежний вердикт и снимок
@@ -321,30 +364,49 @@ async def test_ctrl_space_on_an_unselected_filter_does_not_probe_the_typed_text(
     from textual.widgets import Input, Static
 
     calls = []
-    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
+    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (
+        pilot,
+        scr,
+    ):
         from gc_tui.editors.connection import ConnectionEditor
 
         ed = scr.query_one(ConnectionEditor)
         calls.clear()
-        scr.query_one("#conn-url", Input).value = "gr"  # непустой невалидный текст
+        scr.query_one(
+            "#conn-url", Input
+        ).value = "gr"  # непустой невалидный текст
         await pilot.pause()
-        await pilot.press("down")  # уход с поля — автопроба «gr» (вне скоупа §2.3)
-        await wait_until(pilot, lambda: scr._draft_checked is not None, "автопроба ухода с поля должна была осесть")
-        await pilot.press("up")  # назад на «gr»: снимок совпал, повторно не пробит
+        await pilot.press(
+            "down"
+        )  # уход с поля — автопроба «gr» (вне скоупа §2.3)
+        await wait_until(
+            pilot,
+            lambda: scr._draft_checked is not None,
+            "автопроба ухода с поля должна была осесть",
+        )
+        await pilot.press(
+            "up"
+        )  # назад на «gr»: снимок совпал, повторно не пробит
         await pilot.pause()
         calls.clear()
         snapshot = scr._last_probed_snapshot
         checked = scr._draft_checked
         timer = scr._autoprobe_timer
-        assert checked is not None, "предусловие: вердикт должен быть живым, не None"
+        assert checked is not None, (
+            "предусловие: вердикт должен быть живым, не None"
+        )
         await pilot.press("ctrl+space")
         await pilot.pause()
         assert not calls, "проба не должна была стартовать"
         probe_line = str(scr.query_one(".set-probe", Static).render())
         assert "адрес" in probe_line
-        assert scr._last_probed_snapshot == snapshot, "снимок предыдущей пробы должен уцелеть"
+        assert scr._last_probed_snapshot == snapshot, (
+            "снимок предыдущей пробы должен уцелеть"
+        )
         assert scr._draft_checked is checked, "прежний вердикт трогать нельзя"
-        assert scr._autoprobe_timer is timer, "автопроба не должна быть отменена"
+        assert scr._autoprobe_timer is timer, (
+            "автопроба не должна быть отменена"
+        )
 
 
 @pytest.mark.asyncio
@@ -357,13 +419,18 @@ async def test_ctrl_space_on_an_empty_address_falls_back_like_before(tmp_path):
     from textual.widgets import Input
 
     calls = []
-    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (pilot, scr):
+    async with settings_connection(tmp_path, probe=recording_probe(calls)) as (
+        pilot,
+        scr,
+    ):
         calls.clear()
         scr.query_one("#conn-url", Input).value = ""
         await pilot.pause()
         await pilot.press("ctrl+space")
         await pilot.pause(0.3)
-        assert calls, "пустое поле обязано уйти в пробу сохранённого адреса, как раньше"
+        assert calls, (
+            "пустое поле обязано уйти в пробу сохранённого адреса, как раньше"
+        )
 
 
 @pytest.mark.asyncio
@@ -379,17 +446,23 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path):
     from textual.widgets import Static
 
     calls = []
-    async with settings_connection(tmp_path, probe=recording_probe(calls), url="${ENV:GC_URL}") as (pilot, scr):
+    async with settings_connection(
+        tmp_path, probe=recording_probe(calls), url="${ENV:GC_URL}"
+    ) as (pilot, scr):
         calls.clear()
         await pilot.press("ctrl+space")
         await pilot.pause(0.3)
-        assert calls, "ссылка обязана дойти до пробы, а не быть принятой за фильтр"
+        assert calls, (
+            "ссылка обязана дойти до пробы, а не быть принятой за фильтр"
+        )
         probe_line = str(scr.query_one(".set-probe", Static).render())
         assert "сначала выберите адрес" not in probe_line
 
 
 @pytest.mark.asyncio
-async def test_preset_list_opens_full_not_filtered_by_the_current_address(tmp_path):
+async def test_preset_list_opens_full_not_filtered_by_the_current_address(
+    tmp_path,
+):
     """Раскрытый список — ПОЛНЫЙ, а не сужен текущим адресом.
 
     Было: при первом раскрытии виден один вариант (значение поля прилетало фильтром
@@ -403,7 +476,9 @@ async def test_preset_list_opens_full_not_filtered_by_the_current_address(tmp_pa
     """
     pytest.importorskip("textual")
     from form_harness import settings_connection
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
 
     async with settings_connection(tmp_path) as (pilot, scr):
         from gc_tui.editors.connection import ConnectionEditor
@@ -428,4 +503,6 @@ async def test_preset_list_opens_full_not_filtered_by_the_current_address(tmp_pa
         await pilot.pause()
         assert ed.presets_open, "предусловие: Alt+↓ раскрыл список"
         rows = [w for w in ed.query(".conn-preset-row") if w.display]
-        assert len(rows) == len(presets), "список обязан быть полным, а не сужен адресом"
+        assert len(rows) == len(presets), (
+            "список обязан быть полным, а не сужен адресом"
+        )

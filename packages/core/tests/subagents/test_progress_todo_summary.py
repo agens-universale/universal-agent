@@ -9,7 +9,10 @@ from __future__ import annotations
 import json
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.tools.subagents.progress import brief_args_summary, todo_items_from_arguments
+from gc_core.tools.subagents.progress import (
+    brief_args_summary,
+    todo_items_from_arguments,
+)
 
 ITEMS = [
     {"content": "Прочитать файлы", "status": "completed"},
@@ -19,22 +22,31 @@ ITEMS = [
 
 
 def test_todo_summary_shows_progress_and_current_step():
-    out = brief_args_summary({"todos": ITEMS}, tool_name=SESSION_TODO_TOOL_NAME)
+    out = brief_args_summary(
+        {"todos": ITEMS}, tool_name=SESSION_TODO_TOOL_NAME
+    )
     assert out == "чек-лист 1/3 · Написать ревью"
 
 
 def test_todo_summary_without_current_step():
     items = [{"content": "Готово", "status": "completed"}]
-    out = brief_args_summary({"todos": items}, tool_name=SESSION_TODO_TOOL_NAME)
+    out = brief_args_summary(
+        {"todos": items}, tool_name=SESSION_TODO_TOOL_NAME
+    )
     assert out == "чек-лист 1/1"
 
 
 def test_todo_summary_empty_list_means_cleared():
-    assert brief_args_summary({"todos": []}, tool_name=SESSION_TODO_TOOL_NAME) == "чек-лист очищен"
+    assert (
+        brief_args_summary({"todos": []}, tool_name=SESSION_TODO_TOOL_NAME)
+        == "чек-лист очищен"
+    )
 
 
 def test_todo_summary_accepts_json_string_arguments():
-    out = brief_args_summary(json.dumps({"todos": ITEMS}), tool_name=SESSION_TODO_TOOL_NAME)
+    out = brief_args_summary(
+        json.dumps({"todos": ITEMS}), tool_name=SESSION_TODO_TOOL_NAME
+    )
     assert out == "чек-лист 1/3 · Написать ревью"
 
 
@@ -61,9 +73,24 @@ def test_parse_rejects_whole_list_on_any_invalid_item():
     при целом списке."""
     good = {"content": "Шаг", "status": "pending"}
     assert todo_items_from_arguments({"todos": [good, "мусор"]}) is None
-    assert todo_items_from_arguments({"todos": [good, {"content": "", "status": "pending"}]}) is None
-    assert todo_items_from_arguments({"todos": [good, {"content": "x", "status": "done"}]}) is None
-    assert todo_items_from_arguments({"todos": [{"content": "x", "status": "pending", "id": 1}]}) is None
+    assert (
+        todo_items_from_arguments(
+            {"todos": [good, {"content": "", "status": "pending"}]}
+        )
+        is None
+    )
+    assert (
+        todo_items_from_arguments(
+            {"todos": [good, {"content": "x", "status": "done"}]}
+        )
+        is None
+    )
+    assert (
+        todo_items_from_arguments(
+            {"todos": [{"content": "x", "status": "pending", "id": 1}]}
+        )
+        is None
+    )
 
 
 def test_parse_accepts_fully_valid_list():
@@ -109,8 +136,13 @@ def test_brief_summary_partially_broken_list_falls_back_to_generic():
 
 def test_brief_summary_truncates_long_current_item():
     """Однострочная сводка обязана соблюдать общий лимит, как все прочие тулы."""
-    long_item = {"content": "Пройти по всем файлам сервиса и " + "деталь " * 40, "status": "in_progress"}
-    out = brief_args_summary({"todos": [long_item]}, tool_name=SESSION_TODO_TOOL_NAME)
+    long_item = {
+        "content": "Пройти по всем файлам сервиса и " + "деталь " * 40,
+        "status": "in_progress",
+    }
+    out = brief_args_summary(
+        {"todos": [long_item]}, tool_name=SESSION_TODO_TOOL_NAME
+    )
     assert len(out) <= 81, f"сводка длиной {len(out)}: {out[:120]}"
     assert out.startswith("чек-лист 0/1 · ")
     assert out.endswith("…")

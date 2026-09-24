@@ -14,8 +14,15 @@ import pytest
 
 
 def _write_task(tmp_path, tid):
-    meta = {"thread_id": tid, "status": "running", "updated_at": "2026-06-15T12:00:00+00:00", "messages_count": 0}
-    (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
+    meta = {
+        "thread_id": tid,
+        "status": "running",
+        "updated_at": "2026-06-15T12:00:00+00:00",
+        "messages_count": 0,
+    }
+    (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
@@ -23,7 +30,9 @@ def _app(tmp_path):
     from gc_tui.app import TuiApp
 
     return TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
     )
 
 
@@ -31,7 +40,10 @@ async def _tall(pilot, tid):
     scr = pilot.app.screen
     scr.attach_active_task(tid)
     big = "\n".join(f"строка {i}" for i in range(80))  # трейс на весь экран
-    scr._render_record({"payload": {"id": "a1", "role": "assistant", "content": big}}, live=True)
+    scr._render_record(
+        {"payload": {"id": "a1", "role": "assistant", "content": big}},
+        live=True,
+    )
     await pilot.pause(0.4)
     return scr
 
@@ -50,7 +62,9 @@ async def test_palette_not_squished_when_trace_tall(tmp_path):
         footer = pilot.app.query_one("#footer")
         assert palette is not None
         assert footer.region.bottom <= 24  # футер на экране (не выдавлен)
-        assert palette.region.height >= 10  # палитра НЕ зажата (показывает контент)
+        assert (
+            palette.region.height >= 10
+        )  # палитра НЕ зажата (показывает контент)
         assert scr._trace_max_height < full_max  # #trace ужался под палитру
 
 
@@ -82,7 +96,9 @@ async def test_overlay_capped_at_half_screen(tmp_path):
         scr._open_palette(prefix="")
         await pilot.pause(0.4)
         palette = scr._palette
-        assert palette.region.height == 28 // 2  # ровно половина (контент 16 > 14 → cap)
+        assert (
+            palette.region.height == 28 // 2
+        )  # ровно половина (контент 16 > 14 → cap)
 
 
 @pytest.mark.asyncio
@@ -99,7 +115,9 @@ async def test_trace_regrows_when_palette_filtered_down(tmp_path):
         full_palette = scr._trace_max_height  # ужат под полную палитру
         scr._palette.set_filter("co")  # → 2 команды (compact, config)
         await pilot.pause(0.4)  # poll пересчитает desired
-        assert scr._trace_max_height > full_palette  # палитра сузилась → #trace вырос
+        assert (
+            scr._trace_max_height > full_palette
+        )  # палитра сузилась → #trace вырос
 
 
 @pytest.mark.asyncio

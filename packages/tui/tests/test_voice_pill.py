@@ -43,7 +43,9 @@ def test_recording_spectrum_equalizer():
     assert len(glyphs_of(solo)) == 1
     # высота колонки монотонна по уровню полосы (дБ-шкала)
     height = lambda s: max((_RAMP.index(ch) for ch in glyphs_of(s)), default=0)
-    assert height(pill((0.01,) + (0.0,) * 6)) < height(pill((0.3,) + (0.0,) * 6))
+    assert height(pill((0.01,) + (0.0,) * 6)) < height(
+        pill((0.3,) + (0.0,) * 6)
+    )
 
 
 def test_transcribing_braille_wave_flies():

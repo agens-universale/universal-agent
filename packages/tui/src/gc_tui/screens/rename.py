@@ -39,7 +39,9 @@ class RenameScreen(ModalScreen[Optional[str]]):
     def compose(self) -> ComposeResult:
         with Vertical(id="rename-dialog"):
             yield Input(value=self._current, id="rename-input")
-            yield Static("Enter сохранить · Esc отмена", id="rename-hint", markup=False)
+            yield Static(
+                "Enter сохранить · Esc отмена", id="rename-hint", markup=False
+            )
 
     def on_mount(self) -> None:
         self.query_one("#rename-dialog").border_title = "Переименование сессии"

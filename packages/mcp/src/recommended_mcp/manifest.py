@@ -115,7 +115,9 @@ def load_agent_dep_dir(path: Path) -> Path:
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         return default_agent_dep_dir()
     if not isinstance(raw, str):
-        raise ManifestError(f"'agent_dep_dir' must be a string in {path}, got {type(raw).__name__}")
+        raise ManifestError(
+            f"'agent_dep_dir' must be a string in {path}, got {type(raw).__name__}"
+        )
     return Path(raw).expanduser().resolve()
 
 
@@ -139,13 +141,17 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         raise ManifestError(f"mcp '{name}' missing 'path' in {source}")
     install_raw = raw.get("install")
     if not isinstance(install_raw, dict):
-        raise ManifestError(f"mcp '{name}' missing 'install' block in {source}")
+        raise ManifestError(
+            f"mcp '{name}' missing 'install' block in {source}"
+        )
     source_raw = install_raw.get("source")
     install_source = Path(source_raw) if source_raw else None
     package_raw = install_raw.get("package")
     install_package = str(package_raw).strip() if package_raw else None
     npm_package_raw = install_raw.get("npm_package")
-    install_npm_package = str(npm_package_raw).strip() if npm_package_raw else None
+    install_npm_package = (
+        str(npm_package_raw).strip() if npm_package_raw else None
+    )
     dist_raw = install_raw.get("dist")
     install_dist = str(dist_raw).strip() if dist_raw else None
     version_raw = install_raw.get("version")
@@ -166,15 +172,21 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
     if not install.type:
         raise ManifestError(f"mcp '{name}' missing 'install.type' in {source}")
     if install.type == "source" and install.source is None:
-        raise ManifestError(f"mcp '{name}' install.type=source requires install.source in {source}")
+        raise ManifestError(
+            f"mcp '{name}' install.type=source requires install.source in {source}"
+        )
     if install.type == "pypi" and not install.package:
-        raise ManifestError(f"mcp '{name}' install.type=pypi requires install.package in {source}")
+        raise ManifestError(
+            f"mcp '{name}' install.type=pypi requires install.package in {source}"
+        )
 
     run_raw = raw.get("run")
     run: RunSpec | None = None
     if run_raw is not None:
         if not isinstance(run_raw, dict):
-            raise ManifestError(f"mcp '{name}' 'run' must be a dict in {source}")
+            raise ManifestError(
+                f"mcp '{name}' 'run' must be a dict in {source}"
+            )
         run_type = run_raw.get("type")
         if not run_type:
             raise ManifestError(f"mcp '{name}' missing 'run.type' in {source}")
@@ -184,7 +196,9 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         run_args = tuple(str(arg) for arg in raw_args)
         raw_env = run_raw.get("env", {}) or {}
         if not isinstance(raw_env, dict):
-            raise ManifestError(f"mcp '{name}' run.env must be a dict in {source}")
+            raise ManifestError(
+                f"mcp '{name}' run.env must be a dict in {source}"
+            )
         run_env = tuple((str(k), str(v)) for k, v in raw_env.items())
         run_command = run_raw.get("command")
         run_command_str = str(run_command).strip() if run_command else None
@@ -197,7 +211,9 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
             cwd=run_cwd,
         )
         if run.type == "command" and not run.command:
-            raise ManifestError(f"mcp '{name}' run.type=command requires run.command in {source}")
+            raise ManifestError(
+                f"mcp '{name}' run.type=command requires run.command in {source}"
+            )
 
     description = str(raw.get("description", "")).strip()
 

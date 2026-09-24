@@ -141,7 +141,10 @@ from gc_core.config_modules.env_vars import project_slug
 
 
 def test_project_slug_windows_path_double_dash():
-    assert project_slug("D:\\dev\\sber\\background-agent") == "d--dev-sber-background-agent"
+    assert (
+        project_slug("D:\\dev\\sber\\background-agent")
+        == "d--dev-sber-background-agent"
+    )
 
 
 def test_project_slug_posix_path_keeps_leading_dash():
@@ -213,7 +216,9 @@ def test_gc_paths_windows_dot_gc_defaults(clear_gc_env, monkeypatch):
     assert paths["data"] == gc
 
 
-def test_gc_paths_xdg_state_home_respected_on_unix(clear_gc_env, monkeypatch, tmp_path):
+def test_gc_paths_xdg_state_home_respected_on_unix(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     _isolate_env(monkeypatch)
@@ -239,10 +244,14 @@ def test_gc_paths_gc_home_collapses_all(clear_gc_env, monkeypatch, tmp_path):
     assert paths["data"] == tmp_path
 
 
-def test_gc_paths_pointed_state_dir_overrides_gc_home(clear_gc_env, monkeypatch, tmp_path):
+def test_gc_paths_pointed_state_dir_overrides_gc_home(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     custom_state = tmp_path / "state"
-    _isolate_env(monkeypatch, gc_home=tmp_path / "home", gc_state_dir=custom_state)
+    _isolate_env(
+        monkeypatch, gc_home=tmp_path / "home", gc_state_dir=custom_state
+    )
     paths = gc_paths()
     assert paths["state"] == custom_state
     # config/cache/data — от GC_HOME
@@ -253,7 +262,9 @@ def test_gc_paths_pointed_state_dir_overrides_gc_home(clear_gc_env, monkeypatch,
 from gc_core.config_modules.env_vars import effective_config_dir
 
 
-def test_effective_config_dir_default_when_usable(clear_gc_env, monkeypatch, tmp_path):
+def test_effective_config_dir_default_when_usable(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     _isolate_env(monkeypatch)
@@ -261,7 +272,9 @@ def test_effective_config_dir_default_when_usable(clear_gc_env, monkeypatch, tmp
     assert effective_config_dir() == tmp_path / ".config" / "gc"
 
 
-def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(clear_gc_env, monkeypatch, tmp_path):
+def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     _isolate_env(monkeypatch)
@@ -270,7 +283,9 @@ def test_effective_config_dir_falls_back_to_dot_gc_when_config_locked(clear_gc_e
     assert effective_config_dir() == tmp_path / ".gc"
 
 
-def test_effective_config_dir_respects_gc_home_no_fallback(clear_gc_env, monkeypatch, tmp_path):
+def test_effective_config_dir_respects_gc_home_no_fallback(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     _isolate_env(monkeypatch, gc_home=tmp_path / "home")
     # явный GC_HOME — фоллбэка нет, даже если каталог «нельзя создать»

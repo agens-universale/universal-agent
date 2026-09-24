@@ -60,7 +60,9 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     async def _afrom(**kw):
         return _TS()
 
-    monkeypatch.setattr(mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom))
+    monkeypatch.setattr(
+        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom)
+    )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
     monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
@@ -68,7 +70,12 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
-        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x", "backend_api_mode": "chat_completions"},
+        config_dict={
+            "model": "M",
+            "max_steps": 30,
+            "system_prompt_id": "x",
+            "backend_api_mode": "chat_completions",
+        },
         tools_spec=[],
         tools_description=[],
     )
@@ -80,10 +87,14 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     assert ok is True
     assert captured.get("forced") is True
     # история треда загружена в state, по которому идёт сжатие
-    assert any(m.get("content") == "привет" for m in captured["coord_state"].messages)
+    assert any(
+        m.get("content") == "привет" for m in captured["coord_state"].messages
+    )
 
 
-def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, state_cls):
+def _make_compact_executor(
+    monkeypatch, tmp_path, *, baseline_meta, coord_cls, state_cls
+):
     import threading
 
     # Логика compact_thread живёт в manual_compaction (mc) — патчим ЕГО namespace,
@@ -118,7 +129,12 @@ def _make_compact_executor(monkeypatch, tmp_path, *, baseline_meta, coord_cls, s
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
-        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x", "backend_api_mode": "chat_completions"},
+        config_dict={
+            "model": "M",
+            "max_steps": 30,
+            "system_prompt_id": "x",
+            "backend_api_mode": "chat_completions",
+        },
         tools_spec=[],
         tools_description=[],
     )
@@ -193,8 +209,12 @@ def test_compact_thread_persists_summary_usage(monkeypatch, tmp_path):
 
     saved = load_thread_meta(str(tmp_path), "cli", "t1") or {}
     persisted = UsageAccount.from_meta(saved.get("token_usage"))
-    assert persisted.by_category["main"]["input"] == 600000  # кумулятив сохранён
-    assert persisted.by_category["summary"]["input"] == 30000  # summary добавлен
+    assert (
+        persisted.by_category["main"]["input"] == 600000
+    )  # кумулятив сохранён
+    assert (
+        persisted.by_category["summary"]["input"] == 30000
+    )  # summary добавлен
     assert persisted.by_category["summary"]["output"] == 500
 
 
@@ -228,7 +248,12 @@ def test_compact_thread_updates_live_state_for_footer(monkeypatch, tmp_path):
 def test_compact_thread_noop_in_responses(monkeypatch, tmp_path):
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
-        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x", "backend_api_mode": "responses"},
+        config_dict={
+            "model": "M",
+            "max_steps": 30,
+            "system_prompt_id": "x",
+            "backend_api_mode": "responses",
+        },
         tools_spec=[],
         tools_description=[],
     )

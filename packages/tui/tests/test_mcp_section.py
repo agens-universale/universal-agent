@@ -82,12 +82,19 @@ async def test_section_worker_fills_statuses():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    states = {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)}
+    states = {
+        "office": McpState(True, "0.3.1", None),
+        "playwright": McpState(False, None, None),
+    }
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=FakeManager(_rows(), states))
         await app.mount(ed)
-        await wait_until(pilot, lambda: "office" in ed._states and "playwright" in ed._states, "states loaded")
+        await wait_until(
+            pilot,
+            lambda: "office" in ed._states and "playwright" in ed._states,
+            "states loaded",
+        )
         from textual.widgets import Static
 
         blob = " ".join(str(w.render()) for w in ed.query(Static))
@@ -100,7 +107,13 @@ async def test_toggle_unwires_connected():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
@@ -142,7 +155,9 @@ async def test_toggle_noop_when_not_installed():
         await wait_until(pilot, lambda: ed.status_ready("computer"), "loaded")
         hint = ed.toggle()  # не установлен → no-op + хинт про Enter
         assert mgr.calls == []  # ни wire, ни unwire
-        assert hint is not None and "Enter" in hint  # подсказка, как установить
+        assert (
+            hint is not None and "Enter" in hint
+        )  # подсказка, как установить
 
 
 def test_toggle_noop_before_status_arrives():
@@ -171,7 +186,9 @@ async def test_enter_installs_not_installed():
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         assert ed.begin_enter() is True
         assert ed.awaiting_confirm is True
         assert mgr.calls == []  # confirm показан, ничего ещё не поставлено
@@ -217,7 +234,9 @@ async def test_ctrl_d_on_not_installed_is_noop():
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         assert ed.request_remove() is False
         assert ed.awaiting_confirm is False
 
@@ -231,7 +250,9 @@ def test_ctrl_d_noop_before_status_arrives():
     # Не монтируем → воркер статусов не запускается, статус детерминированно не пришёл
     ed = McpSectionEditor(manager=mgr)
     assert not ed.status_ready("computer")
-    assert ed.request_remove() is False  # st is None → no-op, даже installed в manager
+    assert (
+        ed.request_remove() is False
+    )  # st is None → no-op, даже installed в manager
     assert ed.awaiting_confirm is False
     assert mgr.calls == []
 
@@ -265,12 +286,20 @@ async def test_action_rows_visibility():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         ed.refresh_action_rows()
         from textual.widgets import Static
 
@@ -285,12 +314,24 @@ async def test_move_reaches_action_rows():
     from gc_tui.editors.mcp_section import McpSectionEditor
 
     # office wired + update available → ⟳; playwright не установлен → ⤓
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", "0.4.0"),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("office") and ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                ed.status_ready("office") and ed.status_ready("playwright")
+            ),
+            "loaded",
+        )
         assert ed._action_kinds() == ["missing", "update"]
         assert ed.current_action is None  # старт на управляемой строке
         ed.move(1)  # office → playwright
@@ -310,12 +351,20 @@ async def test_selected_class_follows_cursor():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         rows = list(ed.query(".mcp-row-managed"))
         assert rows[0].has_class("selected")
         assert not rows[1].has_class("selected")
@@ -331,12 +380,24 @@ async def test_selected_class_follows_action_cursor():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", "0.4.0"),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("office") and ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                ed.status_ready("office") and ed.status_ready("playwright")
+            ),
+            "loaded",
+        )
         ed.move(1)  # office → playwright
         ed.move(1)  # playwright → ⤓ (missing)
         assert ed.current_action == "missing"
@@ -354,12 +415,24 @@ async def test_action_rows_updated_in_place_on_move():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", "0.4.0"), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", "0.4.0"),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("office") and ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                ed.status_ready("office") and ed.status_ready("playwright")
+            ),
+            "loaded",
+        )
         assert ed._action_kinds() == ["missing", "update"]
         before = list(ed.query(".mcp-action-row"))
         assert len(before) == 2
@@ -376,12 +449,20 @@ async def test_run_action_installs_missing():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         ed.move(1)  # office → playwright
         ed.move(1)  # → ⤓ (единственная строка-действие)
         assert ed.current_action == "missing"
@@ -399,21 +480,39 @@ async def test_run_action_updates_all():
     from gc_tui.editors.mcp_section import McpSectionEditor
     from gc_tui.services.mcp_manager import McpRow
 
-    rows = [McpRow("office", wired=True, manual=False), McpRow("ddg", wired=True, manual=False)]
-    mgr = FakeManager(rows, {"office": McpState(True, "0.3.1", "0.4.0"), "ddg": McpState(True, "0.1.0", "0.2.0")})
+    rows = [
+        McpRow("office", wired=True, manual=False),
+        McpRow("ddg", wired=True, manual=False),
+    ]
+    mgr = FakeManager(
+        rows,
+        {
+            "office": McpState(True, "0.3.1", "0.4.0"),
+            "ddg": McpState(True, "0.1.0", "0.2.0"),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("office") and ed.status_ready("ddg"), "loaded")
-        assert ed._action_kinds() == ["update"]  # оба updatable, недостающих нет
+        await wait_until(
+            pilot,
+            lambda: ed.status_ready("office") and ed.status_ready("ddg"),
+            "loaded",
+        )
+        assert ed._action_kinds() == [
+            "update"
+        ]  # оба updatable, недостающих нет
         ed.move(1)
         ed.move(1)  # office → ddg → ⟳
         assert ed.current_action == "update"
         assert ed.begin_enter() is True
         assert mgr.calls == []
         res = ed.confirm_pending()
-        assert ("install", "office") in mgr.calls and ("install", "ddg") in mgr.calls
+        assert ("install", "office") in mgr.calls and (
+            "install",
+            "ddg",
+        ) in mgr.calls
         assert res == [("office", True), ("ddg", True)]
 
 
@@ -427,7 +526,10 @@ async def test_update_all_row_shows_for_connected_without_updates():
     from gc_tui.services.mcp_manager import McpRow
     from textual.widgets import Static
 
-    rows = [McpRow("office", wired=True, manual=False), McpRow("ddg", wired=True, manual=False)]
+    rows = [
+        McpRow("office", wired=True, manual=False),
+        McpRow("ddg", wired=True, manual=False),
+    ]
     mgr = FakeManager(
         rows,
         {
@@ -439,7 +541,11 @@ async def test_update_all_row_shows_for_connected_without_updates():
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("office") and ed.status_ready("ddg"), "loaded")
+        await wait_until(
+            pilot,
+            lambda: ed.status_ready("office") and ed.status_ready("ddg"),
+            "loaded",
+        )
         assert ed._action_kinds() == ["update"]  # подключённые есть → ↻ видна
         blob = " ".join(str(w.render()) for w in ed.query(Static))
         assert "Обновить все подключённые" in blob
@@ -449,7 +555,10 @@ async def test_update_all_row_shows_for_connected_without_updates():
         assert ed.current_action == "update"
         assert ed.begin_enter() is True
         ed.confirm_pending()
-        assert ("install", "office") in mgr.calls and ("install", "ddg") in mgr.calls
+        assert ("install", "office") in mgr.calls and (
+            "install",
+            "ddg",
+        ) in mgr.calls
 
 
 async def test_ctrl_u_updates_current():
@@ -457,7 +566,13 @@ async def test_ctrl_u_updates_current():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
@@ -477,12 +592,20 @@ async def test_ctrl_u_noop_on_not_installed_and_action_row():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         ed.move(1)  # office → playwright (не установлен)
         assert ed.begin_update() is False  # не установлен и не wired → no-op
         assert ed.awaiting_confirm is False
@@ -500,12 +623,20 @@ async def test_reload_keeps_cursor_after_action_row_op():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
-        await wait_until(pilot, lambda: ed.status_ready("playwright"), "loaded")
+        await wait_until(
+            pilot, lambda: ed.status_ready("playwright"), "loaded"
+        )
         ed.move(1)
         ed.move(1)  # курсор на ⤓ (строка-действие)
         assert ed.current_action == "missing"
@@ -521,7 +652,13 @@ async def test_confirm_gate_blocks_other_actions():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    mgr = FakeManager(_rows(), {"office": McpState(True, "0.3.1", None), "playwright": McpState(False, None, None)})
+    mgr = FakeManager(
+        _rows(),
+        {
+            "office": McpState(True, "0.3.1", None),
+            "playwright": McpState(False, None, None),
+        },
+    )
     app = app_mod.TuiApp(config={})
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
@@ -547,7 +684,14 @@ async def test_mcp_row_shows_description(monkeypatch):
 
     class _Mgr:
         def rows(self):
-            return [McpRow("office", wired=False, manual=False, description="чтение/запись Word · Excel · PDF")]
+            return [
+                McpRow(
+                    "office",
+                    wired=False,
+                    manual=False,
+                    description="чтение/запись Word · Excel · PDF",
+                )
+            ]
 
         def state(self, n):
             return McpState(installed=False, version=None, update=None)
@@ -569,9 +713,15 @@ async def test_mcp_descriptions_align_across_statuses():
     from gc_tui.services.mcp_manager import McpRow, McpState
 
     rows = [
-        McpRow("computer", wired=True, manual=False, description="DESCA"),  # подключён · v0.1.0
-        McpRow("office", wired=False, manual=False, description="DESCB"),  # не установлен
-        McpRow("science", wired=False, manual=False, description="DESCC"),  # установлен, отключён · v0.1.0
+        McpRow(
+            "computer", wired=True, manual=False, description="DESCA"
+        ),  # подключён · v0.1.0
+        McpRow(
+            "office", wired=False, manual=False, description="DESCB"
+        ),  # не установлен
+        McpRow(
+            "science", wired=False, manual=False, description="DESCC"
+        ),  # установлен, отключён · v0.1.0
     ]
     states = {
         "computer": McpState(installed=True, version="0.1.0", update=None),
@@ -590,7 +740,10 @@ async def test_mcp_descriptions_align_across_statuses():
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=_Mgr())
         ed._states = states
-        cols = [ed._row_text(r, i).plain.index("DESC" + "ABC"[i]) for i, r in enumerate(rows)]
+        cols = [
+            ed._row_text(r, i).plain.index("DESC" + "ABC"[i])
+            for i, r in enumerate(rows)
+        ]
         assert len(set(cols)) == 1, f"описания не выровнены: {cols}"
 
 

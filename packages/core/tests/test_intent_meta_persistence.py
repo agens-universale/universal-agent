@@ -62,7 +62,9 @@ def test_merge_state_into_meta_writes_structured_intent_and_seq():
     assert meta["state_schema_version"] == STATE_SCHEMA_VERSION
     assert meta["user_turn_seq"] == 3
     assert meta["user_intent_log"] == serialize_for_meta(state.user_intent_log)
-    assert meta["current_user_intent"] == serialize_for_meta(state.current_user_intent)
+    assert meta["current_user_intent"] == serialize_for_meta(
+        state.current_user_intent
+    )
     assert meta["user_intent_log"][0]["action"] == ACTION_USER_ASK
     assert meta["user_intent_log"][0]["content"] == "closed turn"
 
@@ -89,7 +91,9 @@ def test_state_snapshot_roundtrip_preserves_intent_records_and_seq():
     state = _make_state()
     state.shared.working_memory = {"goal": "ship", "knowledge": "fact"}
     current = append_user_ask([], "open ask", user_turn_seq=1, ts=FIXED_TS)
-    current = append_user_ask(current, "second ask", user_turn_seq=1, ts=FIXED_TS)
+    current = append_user_ask(
+        current, "second ask", user_turn_seq=1, ts=FIXED_TS
+    )
     log = [_closed_record(turn=1)]
     state.user_intent_log = log
     state.current_user_intent = current
@@ -110,7 +114,9 @@ def test_state_snapshot_roundtrip_preserves_intent_records_and_seq():
 def test_flush_current_user_intent_increments_seq_and_moves_records():
     state = _make_state()
     state.user_turn_seq = 0
-    state.current_user_intent = append_user_ask([], "turn one", user_turn_seq=0, ts=FIXED_TS)
+    state.current_user_intent = append_user_ask(
+        [], "turn one", user_turn_seq=0, ts=FIXED_TS
+    )
 
     state.flush_current_user_intent()
 

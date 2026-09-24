@@ -66,7 +66,11 @@ class StreamingEnv(RaisingEnv):
 
 class _Res:
     def __init__(self, stdout, stderr=None, return_code=0):
-        self.stdout, self.stderr, self.return_code = stdout, stderr, return_code
+        self.stdout, self.stderr, self.return_code = (
+            stdout,
+            stderr,
+            return_code,
+        )
 
 
 TIMEOUT = RuntimeError("Command timed out after 10 seconds")
@@ -99,15 +103,21 @@ async def test_harbor_backend_timeout_from_runtime_error(loop_in_thread):
     assert result.stderr == ""
 
 
-async def test_harbor_backend_timeout_from_asyncio_timeout_error(loop_in_thread):
+async def test_harbor_backend_timeout_from_asyncio_timeout_error(
+    loop_in_thread,
+):
     """Bare TimeoutError / asyncio.TimeoutError also maps to timed_out=True."""
-    result = await _backend(TimeoutError(), loop_in_thread).aexec("true", timeout=300)
+    result = await _backend(TimeoutError(), loop_in_thread).aexec(
+        "true", timeout=300
+    )
 
     assert result.timed_out is True
     assert result.return_code is None
 
 
-async def test_harbor_backend_propagates_non_timeout_runtime_error(loop_in_thread):
+async def test_harbor_backend_propagates_non_timeout_runtime_error(
+    loop_in_thread,
+):
     """Other RuntimeError is not masked as timeout."""
     with pytest.raises(RuntimeError, match="Failed to build Docker image"):
         await _backend(
@@ -118,9 +128,18 @@ async def test_harbor_backend_propagates_non_timeout_runtime_error(loop_in_threa
 
 async def test_harbor_backend_timeout_keeps_streamed_chunks(loop_in_thread):
     """Timeout = partial completion: chunks streamed before the timeout survive."""
-    env = StreamingEnv(TIMEOUT, chunks=[("line 1\n", "stdout"), ("line 2\n", "stdout"), ("warn\n", "stderr")])
+    env = StreamingEnv(
+        TIMEOUT,
+        chunks=[
+            ("line 1\n", "stdout"),
+            ("line 2\n", "stdout"),
+            ("warn\n", "stderr"),
+        ],
+    )
 
-    result = await HarborBackend(env, loop_in_thread).aexec("make test", timeout=10)
+    result = await HarborBackend(env, loop_in_thread).aexec(
+        "make test", timeout=10
+    )
 
     assert result.timed_out is True
     assert result.return_code is None
@@ -130,7 +149,9 @@ async def test_harbor_backend_timeout_keeps_streamed_chunks(loop_in_thread):
 
 async def test_harbor_backend_timeout_without_chunks_is_empty(loop_in_thread):
     """No chunks before timeout → empty streams are legal (silent command)."""
-    result = await HarborBackend(StreamingEnv(TIMEOUT), loop_in_thread).aexec("sleep 99", timeout=10)
+    result = await HarborBackend(StreamingEnv(TIMEOUT), loop_in_thread).aexec(
+        "sleep 99", timeout=10
+    )
 
     assert result.timed_out is True
     assert result.stdout == ""
@@ -148,11 +169,17 @@ async def test_harbor_backend_timeout_ignores_exception_attrs(loop_in_thread):
     assert result.stdout == "from stream\n"
 
 
-async def test_harbor_backend_timeout_partial_output_bounded_by_common_cap(loop_in_thread):
+async def test_harbor_backend_timeout_partial_output_bounded_by_common_cap(
+    loop_in_thread,
+):
     """Partial output keeps real head+tail bounded by the same capture cap."""
-    env = StreamingEnv(TIMEOUT, chunks=[("x" * 50, "stdout"), ("y" * 50, "stdout")])
+    env = StreamingEnv(
+        TIMEOUT, chunks=[("x" * 50, "stdout"), ("y" * 50, "stdout")]
+    )
 
-    result = await HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).aexec("cmd", timeout=10)
+    result = await HarborBackend(
+        env, loop_in_thread, exec_output_capture_max_chars=70
+    ).aexec("cmd", timeout=10)
 
     assert result.timed_out is True
     cs = result.stdout_stream
@@ -163,11 +190,15 @@ async def test_harbor_backend_timeout_partial_output_bounded_by_common_cap(loop_
     assert cs.omitted_chars == 30
 
 
-async def test_harbor_backend_timeout_output_exactly_at_cap_then_more_keeps_real_tail(loop_in_thread):
+async def test_harbor_backend_timeout_output_exactly_at_cap_then_more_keeps_real_tail(
+    loop_in_thread,
+):
     """Chunks after the head is full still count and still update the ring tail."""
     env = StreamingEnv(TIMEOUT, chunks=[("x" * 70, "stdout"), ("y", "stdout")])
 
-    result = await HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).aexec("cmd", timeout=10)
+    result = await HarborBackend(
+        env, loop_in_thread, exec_output_capture_max_chars=70
+    ).aexec("cmd", timeout=10)
 
     cs = result.stdout_stream
     assert cs.truncated is True
@@ -176,10 +207,14 @@ async def test_harbor_backend_timeout_output_exactly_at_cap_then_more_keeps_real
     assert result.stdout_hit_capture_cap is True
 
 
-async def test_harbor_backend_timeout_output_exactly_at_cap_without_more_is_not_flagged(loop_in_thread):
+async def test_harbor_backend_timeout_output_exactly_at_cap_without_more_is_not_flagged(
+    loop_in_thread,
+):
     env = StreamingEnv(TIMEOUT, chunks=[("x" * 70, "stdout")])
 
-    result = await HarborBackend(env, loop_in_thread, exec_output_capture_max_chars=70).aexec("cmd", timeout=10)
+    result = await HarborBackend(
+        env, loop_in_thread, exec_output_capture_max_chars=70
+    ).aexec("cmd", timeout=10)
 
     assert result.stdout == "x" * 70
     assert result.stdout_hit_capture_cap is False
@@ -188,19 +223,31 @@ async def test_harbor_backend_timeout_output_exactly_at_cap_without_more_is_not_
 async def test_harbor_backend_timeout_respects_per_call_cap(loop_in_thread):
     env = StreamingEnv(TIMEOUT, chunks=[("x" * 100, "stdout")])
 
-    result = await HarborBackend(env, loop_in_thread)._aexec_impl("cmd", timeout=10, capture_max_chars=30)
+    result = await HarborBackend(env, loop_in_thread)._aexec_impl(
+        "cmd", timeout=10, capture_max_chars=30
+    )
 
     assert result.stdout == "x" * 30
     assert result.stdout_hit_capture_cap is True
 
 
-async def test_harbor_backend_success_uses_result_and_releases_callback(loop_in_thread):
+async def test_harbor_backend_success_uses_result_and_releases_callback(
+    loop_in_thread,
+):
     """Success path: ExecResult from ``res``; callback scope is left afterwards."""
-    env = StreamingEnv(chunks=[("streamed\n", "stdout")], result=_Res("final out", "final err", 3))
+    env = StreamingEnv(
+        chunks=[("streamed\n", "stdout")],
+        result=_Res("final out", "final err", 3),
+    )
 
     result = await HarborBackend(env, loop_in_thread).aexec("cmd", timeout=10)
 
-    assert (result.stdout, result.stderr, result.return_code, result.timed_out) == ("final out", "final err", 3, False)
+    assert (
+        result.stdout,
+        result.stderr,
+        result.return_code,
+        result.timed_out,
+    ) == ("final out", "final err", 3, False)
     assert env.active_callbacks == []
 
 
@@ -212,12 +259,22 @@ async def test_harbor_backend_timeout_releases_callback(loop_in_thread):
     assert env.active_callbacks == []
 
 
-def test_execute_command_timeout_envelope_carries_partial_output(loop_in_thread):
+def test_execute_command_timeout_envelope_carries_partial_output(
+    loop_in_thread,
+):
     """D3: the agent sees what the command printed before the timeout."""
-    env = StreamingEnv(TIMEOUT, chunks=[("Length: 162M\n", "stdout"), ("Saving to: cifar.tar.gz\n", "stdout")])
+    env = StreamingEnv(
+        TIMEOUT,
+        chunks=[
+            ("Length: 162M\n", "stdout"),
+            ("Saving to: cifar.tar.gz\n", "stdout"),
+        ],
+    )
     tool = ExecuteCommand.__new__(ExecuteCommand)
     tool._config_dict = None
-    tool = bind_os_backend(tool, HarborBackend(env, loop_in_thread), config_dict={})
+    tool = bind_os_backend(
+        tool, HarborBackend(env, loop_in_thread), config_dict={}
+    )
 
     envelope = json.loads(tool(command="wget …", timeout=10))
 
@@ -246,9 +303,13 @@ def test_execute_command_maps_harbor_timeout_envelope(loop_in_thread):
     assert "timed out" in env["error"]["message"].lower()
 
 
-def test_execute_command_non_timeout_runtime_error_stays_execution_failed(loop_in_thread):
+def test_execute_command_non_timeout_runtime_error_stays_execution_failed(
+    loop_in_thread,
+):
     """Non-timeout RuntimeError still becomes generic execution_failed."""
-    backend = _backend(RuntimeError("Failed to build Docker image"), loop_in_thread)
+    backend = _backend(
+        RuntimeError("Failed to build Docker image"), loop_in_thread
+    )
     tool = ExecuteCommand.__new__(ExecuteCommand)
     tool._config_dict = None
     tool = bind_os_backend(tool, backend, config_dict={})

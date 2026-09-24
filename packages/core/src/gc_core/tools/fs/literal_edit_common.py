@@ -31,30 +31,47 @@ class LoadError:
 
 
 def diff_arg_error(
-    backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256
+    backup,
+    return_diff,
+    diff_context_lines,
+    max_diff_chars,
+    expected_file_sha256,
 ) -> tuple[str, Dict[str, Any]] | None:
     """(message, error) для первого невалидного аргумента бэкапа/диффа/хеша либо None."""
     if not isinstance(backup, bool):
-        return "Argument 'backup' must be a boolean.", {"type": "invalid_argument", "field": "backup"}
-    if not isinstance(return_diff, bool):
-        return "Argument 'return_diff' must be a boolean.", {"type": "invalid_argument", "field": "return_diff"}
-    if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
-        return "Argument 'diff_context_lines' must be a non-negative integer.", {
+        return "Argument 'backup' must be a boolean.", {
             "type": "invalid_argument",
-            "field": "diff_context_lines",
+            "field": "backup",
         }
+    if not isinstance(return_diff, bool):
+        return "Argument 'return_diff' must be a boolean.", {
+            "type": "invalid_argument",
+            "field": "return_diff",
+        }
+    if not isinstance(diff_context_lines, int) or diff_context_lines < 0:
+        return (
+            "Argument 'diff_context_lines' must be a non-negative integer.",
+            {
+                "type": "invalid_argument",
+                "field": "diff_context_lines",
+            },
+        )
     if not isinstance(max_diff_chars, int) or max_diff_chars < 1:
         return "Argument 'max_diff_chars' must be a positive integer.", {
             "type": "invalid_argument",
             "field": "max_diff_chars",
         }
     if expected_file_sha256 is not None and (
-        not isinstance(expected_file_sha256, str) or not is_valid_sha256_hex(expected_file_sha256)
+        not isinstance(expected_file_sha256, str)
+        or not is_valid_sha256_hex(expected_file_sha256)
     ):
-        return "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.", {
-            "type": "invalid_argument",
-            "field": "expected_file_sha256",
-        }
+        return (
+            "Argument 'expected_file_sha256' must be a 64-character hex SHA-256 digest.",
+            {
+                "type": "invalid_argument",
+                "field": "expected_file_sha256",
+            },
+        )
     return None
 
 
@@ -83,7 +100,9 @@ def build_unified_diff(
     return diff_text[:max_chars], True
 
 
-def splice_replacements(content: str, selected: list, search: str, replace: str) -> str:
+def splice_replacements(
+    content: str, selected: list, search: str, replace: str
+) -> str:
     """Заменить выбранные вхождения (start_idx, start_line, end_line) на replace."""
     parts: list[str] = []
     prev_end = 0
@@ -112,7 +131,10 @@ async def load_text_source(
     try:
         file_size = await tool._backend.getsize(path)
     except Exception as e:
-        return LoadError("Failed to get file size.", {"type": "stat_failed", "message": str(e)})
+        return LoadError(
+            "Failed to get file size.",
+            {"type": "stat_failed", "message": str(e)},
+        )
     size_err = check_file_size(
         file_size,
         fs_mutate_max_bytes(tool._config_dict),
@@ -123,25 +145,42 @@ async def load_text_source(
     try:
         raw = await tool._backend.read_bytes(path)
     except Exception as e:
-        return LoadError("Failed to read file.", {"type": "read_failed", "message": str(e)})
+        return LoadError(
+            "Failed to read file.", {"type": "read_failed", "message": str(e)}
+        )
     decoded = decode_text_bytes(raw, encoding=encoding)
     if not decoded.ok:
-        err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
+        err = decoded.error or {
+            "type": "read_failed",
+            "message": "Failed to decode file.",
+        }
         return LoadError(err.get("message", "Failed to decode file."), err)
-    stale_error = check_expected_file_sha256(sha256_hex_of_bytes(raw), expected_file_sha256)
+    stale_error = check_expected_file_sha256(
+        sha256_hex_of_bytes(raw), expected_file_sha256
+    )
     if stale_error is not None:
         return LoadError(stale_error["message"], stale_error)
     return decoded.text or "", decoded.encoding_used
 
 
-async def encode_and_write(tool, path: str, text: str, encoding_used: str | None):
+async def encode_and_write(
+    tool, path: str, text: str, encoding_used: str | None
+):
     """(bytes, None) либо (None, (message, error)); ``tool._backend`` — внутри ``try``, как было."""
     try:
-        out_bytes, encode_err = try_encode_text_bytes(text, encoding_used or "utf-8")
+        out_bytes, encode_err = try_encode_text_bytes(
+            text, encoding_used or "utf-8"
+        )
         if encode_err is not None:
-            return None, (encode_err.get("message", "Failed to encode file."), encode_err)
+            return None, (
+                encode_err.get("message", "Failed to encode file."),
+                encode_err,
+            )
         assert out_bytes is not None
         await tool._backend.write_bytes(path, out_bytes)
     except Exception as e:
-        return None, ("Failed to write file.", {"type": "write_failed", "message": str(e)})
+        return None, (
+            "Failed to write file.",
+            {"type": "write_failed", "message": str(e)},
+        )
     return out_bytes, None

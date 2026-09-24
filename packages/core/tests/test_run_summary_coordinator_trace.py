@@ -25,11 +25,15 @@ def coordinator_ctx(tmp_path):
     )
 
 
-async def test_summary_trace_prefers_ctx_path_over_logs_dump_dir(tmp_path, coordinator_ctx):
+async def test_summary_trace_prefers_ctx_path_over_logs_dump_dir(
+    tmp_path, coordinator_ctx
+):
     custom = tmp_path / "custom_trace.jsonl"
     coordinator_ctx.summary_trace_path = str(custom)
     coordinator_ctx.config_dict["save_logs"] = True
-    coordinator_ctx.config_dict["logs_dump_dir"] = str(tmp_path / "ignored_logs")
+    coordinator_ctx.config_dict["logs_dump_dir"] = str(
+        tmp_path / "ignored_logs"
+    )
 
     state = SimpleNamespace(
         backend_api_mode="chat_completions",
@@ -81,7 +85,9 @@ def test_pre_run_compact_swallows_exceptions(monkeypatch, coordinator_ctx):
         logger=None,
     )
 
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(
+        rsc, "history_exceeds_summary_trigger", lambda **_k: True
+    )
     monkeypatch.setattr(
         rsc,
         "arun_summary_compaction",
@@ -110,7 +116,9 @@ async def test_archive_called_on_summary_applied(monkeypatch, coordinator_ctx):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    monkeypatch.setattr(summary_logging, "append_summary_trace_record", lambda *a, **k: None)
+    monkeypatch.setattr(
+        summary_logging, "append_summary_trace_record", lambda *a, **k: None
+    )
 
     await coord.on_summary_applied(
         {
@@ -121,4 +129,6 @@ async def test_archive_called_on_summary_applied(monkeypatch, coordinator_ctx):
         }
     )
 
-    thread.aarchive_and_compact_summary_payload.assert_awaited_once_with({"p": 1})
+    thread.aarchive_and_compact_summary_payload.assert_awaited_once_with(
+        {"p": 1}
+    )

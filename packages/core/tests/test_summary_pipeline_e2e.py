@@ -5,14 +5,22 @@ import types
 
 from gc_core.intent_log import deserialize_list
 from gc_core.summarize.compaction import amaybe_run_summary_compaction
-from gc_core.thread_store import ThreadSession, append_new_thread_messages, load_thread_meta
+from gc_core.thread_store import (
+    ThreadSession,
+    append_new_thread_messages,
+    load_thread_meta,
+)
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
+    monkeypatch.setattr(
+        "gc_core.summarize.thread_summarizer.arequest_summary_text", fake
+    )
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", fake
+    )
 
 
 def _ctx():
@@ -61,7 +69,9 @@ def _read_current_data_rows(tmp_dir: str, thread_id: str):
         return [json.loads(line) for line in fd if line.strip()]
 
 
-async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(monkeypatch):
+async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_block(
+    monkeypatch,
+):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread"
         system_id = "cli"
@@ -89,16 +99,23 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         state = _state()
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
-        state.user_intent_log = deserialize_list(["first request", "second request"])
+        state.user_intent_log = deserialize_list(
+            ["first request", "second request"]
+        )
         state.user_turn_seq = 1
 
-        monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr(
+            "gc_core.summarize.prompt_loading.load_prompt_template",
+            lambda _p: "prompt",
+        )
 
         async def _fake_summary(**_kwargs):
             return _valid_summary("s")
 
         _patch_chat_completion(monkeypatch, _fake_summary)
-        empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+        empty_patch = types.SimpleNamespace(
+            request_messages=[], raw_response=""
+        )
 
         async def _fake_patch_replace(**_k):
             return empty_patch
@@ -114,8 +131,10 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
-                event.get("summary_payload", {})
+            on_summary_applied=lambda event: (
+                session.aarchive_and_compact_summary_payload(
+                    event.get("summary_payload", {})
+                )
             ),
         )
 
@@ -123,9 +142,14 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         assert len(rows_after_first) == 1
         first_compact_content = rows_after_first[0]["payload"]["content"]
         assert "<original_user_messages>" not in first_compact_content
-        assert "Summarized context from previous dialogue." in first_compact_content
+        assert (
+            "Summarized context from previous dialogue."
+            in first_compact_content
+        )
 
-        state.user_intent_log.extend(deserialize_list(["third request", "fourth request"]))
+        state.user_intent_log.extend(
+            deserialize_list(["third request", "fourth request"])
+        )
         await session.apersist_batch(
             [
                 {"role": "user", "content": "third request"},
@@ -143,8 +167,10 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
-                event.get("summary_payload", {})
+            on_summary_applied=lambda event: (
+                session.aarchive_and_compact_summary_payload(
+                    event.get("summary_payload", {})
+                )
             ),
         )
         assert int(state.dialog_steps_offset) > prev_offset
@@ -163,7 +189,9 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         assert isinstance(meta_after_second.get("dialog_steps_offset"), int)
         assert meta_after_second.get("messages_count") == 1
         assert meta_after_second.get("previous_response_id") is None
-        assert intent_user_ask_texts(deserialize_list(meta_after_second.get("user_intent_log"))) == [
+        assert intent_user_ask_texts(
+            deserialize_list(meta_after_second.get("user_intent_log"))
+        ) == [
             "first request",
             "second request",
             "third request",
@@ -192,8 +220,17 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
                     "role": "user",
                     "content": '<current_context>client has non-empty thread notes; call `thread_notes` with action="read" to load them.</current_context>',
                 },
-                {"type": "function_call", "call_id": "c1", "name": "thread_notes", "arguments": "{}"},
-                {"type": "function_call_output", "call_id": "c1", "output": "ok"},
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "thread_notes",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": "ok",
+                },
                 {"role": "user", "content": "real request"},
             ],
             known,
@@ -217,13 +254,18 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         )
         state.user_turn_seq = 1
 
-        monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr(
+            "gc_core.summarize.prompt_loading.load_prompt_template",
+            lambda _p: "prompt",
+        )
 
         async def _fake_summary(**_kwargs):
             return _valid_summary("s-tech")
 
         _patch_chat_completion(monkeypatch, _fake_summary)
-        empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+        empty_patch = types.SimpleNamespace(
+            request_messages=[], raw_response=""
+        )
 
         async def _fake_patch_replace(**_k):
             return empty_patch
@@ -239,8 +281,10 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
-                event.get("summary_payload", {})
+            on_summary_applied=lambda event: (
+                session.aarchive_and_compact_summary_payload(
+                    event.get("summary_payload", {})
+                )
             ),
         )
         # После compaction user log в state не перезаписывается: source of truth

@@ -8,8 +8,16 @@
 - ``report`` — рендер итоговой таблицы.
 """
 
-from gc_core.usage.account import CATEGORY_UNCATEGORIZED, UsageAccount, category_for_request_label
-from gc_core.usage.context import current_usage_context, record_usage, usage_scope
+from gc_core.usage.account import (
+    CATEGORY_UNCATEGORIZED,
+    UsageAccount,
+    category_for_request_label,
+)
+from gc_core.usage.context import (
+    current_usage_context,
+    record_usage,
+    usage_scope,
+)
 from gc_core.usage.normalize import normalize_usage
 
 __all__ = [

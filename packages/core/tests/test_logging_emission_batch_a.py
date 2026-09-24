@@ -46,7 +46,9 @@ class _FakeCtx:
 
 
 def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
-    logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ah1", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _jsonl_cfg(tmp_path), run_id="ah1", agent_kind="main"
+    )
 
     answers = iter(["hello", ""])
     monkeypatch.setattr(builtins, "input", lambda: next(answers))
@@ -63,7 +65,9 @@ def test_ask_human_question_and_response_events(tmp_path, monkeypatch):
 
 
 def test_ask_human_interrupted_event(tmp_path, monkeypatch):
-    logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ah2", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _jsonl_cfg(tmp_path), run_id="ah2", agent_kind="main"
+    )
 
     def _raise():
         raise KeyboardInterrupt()
@@ -76,12 +80,16 @@ def test_ask_human_interrupted_event(tmp_path, monkeypatch):
 
     for h in logger.handlers:
         h.flush()
-    events = [e for e in _read_events(path) if e["event"] == "ask_human_interrupted"]
+    events = [
+        e for e in _read_events(path) if e["event"] == "ask_human_interrupted"
+    ]
     assert events
 
 
 def test_ask_human_error_event(tmp_path, monkeypatch):
-    logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ah3", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _jsonl_cfg(tmp_path), run_id="ah3", agent_kind="main"
+    )
 
     def _raise():
         raise RuntimeError("boom")
@@ -104,7 +112,9 @@ def test_ask_human_error_event(tmp_path, monkeypatch):
 
 
 def test_intermediate_reply_event(tmp_path):
-    logger, path, _ = create_run_logger(_jsonl_cfg(tmp_path), run_id="ir1", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _jsonl_cfg(tmp_path), run_id="ir1", agent_kind="main"
+    )
 
     tool = CallableTool(IntermediateReply(ctx=_FakeCtx(logger)))
     out = json.loads(tool(answer="status update", artifact_path="report.md"))
@@ -112,7 +122,9 @@ def test_intermediate_reply_event(tmp_path):
 
     for h in logger.handlers:
         h.flush()
-    events = [e for e in _read_events(path) if e["event"] == "intermediate_reply"]
+    events = [
+        e for e in _read_events(path) if e["event"] == "intermediate_reply"
+    ]
     assert events
     assert events[0]["answer"] == "status update"
     assert events[0]["artifact_path"] == "report.md"

@@ -40,7 +40,11 @@ class UsageSample(NamedTuple):
 _INPUT_KEYS = ("prompt_tokens", "input_tokens")
 _OUTPUT_KEYS = ("completion_tokens", "output_tokens")
 # Плоские ключи кэша (DeepSeek-native и пр.)
-_CACHED_FLAT_KEYS = ("prompt_cache_hit_tokens", "cached_tokens", "cache_read_input_tokens")
+_CACHED_FLAT_KEYS = (
+    "prompt_cache_hit_tokens",
+    "cached_tokens",
+    "cache_read_input_tokens",
+)
 # Вложенные контейнеры с ``cached_tokens`` внутри
 _CACHED_DETAIL_KEYS = ("prompt_tokens_details", "input_tokens_details")
 

@@ -65,8 +65,12 @@ def python_walk(monkeypatch):
     """
     from gc_core.backends.local import LocalFsBackend
 
-    monkeypatch.setattr(LocalFsBackend, "has_find", property(lambda self: False))
-    monkeypatch.setattr(LocalFsBackend, "has_grep", property(lambda self: False))
+    monkeypatch.setattr(
+        LocalFsBackend, "has_find", property(lambda self: False)
+    )
+    monkeypatch.setattr(
+        LocalFsBackend, "has_grep", property(lambda self: False)
+    )
 
 
 @pytest.fixture
@@ -115,10 +119,14 @@ async def _worst_gap_while(coro):
     return result, pulse.worst(), len(pulse.gaps)
 
 
-async def test_list_files_lets_the_loop_breathe(big_tree, python_walk, costly_walk):
+async def test_list_files_lets_the_loop_breathe(
+    big_tree, python_walk, costly_walk
+):
     tool = ListFiles(ctx=local_ctx())
 
-    _out, worst, ticks = await _worst_gap_while(tool.acall(path=str(big_tree), max_entries=100_000, max_depth=10))
+    _out, worst, ticks = await _worst_gap_while(
+        tool.acall(path=str(big_tree), max_entries=100_000, max_depth=10)
+    )
 
     assert ticks > 3, f"обход отработал быстрее пульса: {ticks}"
     assert worst < _MAX_GAP_SEC, f"loop залипал на {worst * 1000:.0f} мс"
@@ -145,4 +153,6 @@ async def test_the_yielder_does_not_yield_on_every_entry():
     finally:
         coop.asyncio.sleep = real_sleep
 
-    assert yields < 500, f"уступали {yields} раз на 10 000 записей — слишком часто"
+    assert yields < 500, (
+        f"уступали {yields} раз на 10 000 записей — слишком часто"
+    )

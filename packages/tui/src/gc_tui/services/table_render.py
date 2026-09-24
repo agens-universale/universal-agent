@@ -17,7 +17,9 @@ from rich.console import Console
 from rich.text import Text
 
 
-def table_to_text(headers: list[str], rows: list[list[str]], aligns: list[str], *, width: int) -> Text:
+def table_to_text(
+    headers: list[str], rows: list[list[str]], aligns: list[str], *, width: int
+) -> Text:
     """Таблица как Text: псевдографика и стили сохранены, хвостового \\n нет."""
     from gc_tui.services.markdown_render import build_markdown_table
 

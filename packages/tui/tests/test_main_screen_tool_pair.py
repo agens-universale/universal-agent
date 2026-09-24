@@ -18,7 +18,12 @@ async def test_call_then_output_mutates_in_place(tmp_path):
     # вызов легитимно остаётся running, инвариант поллинга его не финализирует.
     meta.write_text(
         json.dumps(
-            {"thread_id": tid, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1, "status": "running"}
+            {
+                "thread_id": tid,
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 1,
+                "status": "running",
+            }
         ),
         encoding="utf-8",
     )
@@ -51,7 +56,9 @@ async def test_call_then_output_mutates_in_place(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -76,7 +83,13 @@ async def test_call_then_output_mutates_in_place(tmp_path):
                             "type": "function_call_output",
                             "call_id": "c1",
                             "name": "read_file",
-                            "output": json.dumps({"tool": "read_file", "ok": True, "total_lines": 312}),
+                            "output": json.dumps(
+                                {
+                                    "tool": "read_file",
+                                    "ok": True,
+                                    "total_lines": 312,
+                                }
+                            ),
                         },
                     }
                 )
@@ -84,7 +97,12 @@ async def test_call_then_output_mutates_in_place(tmp_path):
             )
         meta.write_text(
             json.dumps(
-                {"thread_id": tid, "updated_at": "2026-05-21T12:00:03+00:00", "messages_count": 3, "status": "running"}
+                {
+                    "thread_id": tid,
+                    "updated_at": "2026-05-21T12:00:03+00:00",
+                    "messages_count": 3,
+                    "status": "running",
+                }
             ),
             encoding="utf-8",
         )
@@ -106,7 +124,13 @@ async def test_active_calls_cleared_on_task_switch(tmp_path):
 
     # Setup task A with one pending function_call (no output)
     (tmp_path / "meta_cli_A.json").write_text(
-        json.dumps({"thread_id": "A", "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
+        json.dumps(
+            {
+                "thread_id": "A",
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 1,
+            }
+        ),
         encoding="utf-8",
     )
     (tmp_path / "data_cli_A.jsonl").write_text(
@@ -128,13 +152,23 @@ async def test_active_calls_cleared_on_task_switch(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "meta_cli_B.json").write_text(
-        json.dumps({"thread_id": "B", "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 0}),
+        json.dumps(
+            {
+                "thread_id": "B",
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 0,
+            }
+        ),
         encoding="utf-8",
     )
     (tmp_path / "data_cli_B.jsonl").write_text("", encoding="utf-8")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
-    app.active_runner = _StubLiveRunner()  # жив — инвариант поллинга не гасит callA
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
+    app.active_runner = (
+        _StubLiveRunner()
+    )  # жив — инвариант поллинга не гасит callA
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("A")
@@ -165,7 +199,13 @@ async def test_ask_human_placeholder_shows_question(tmp_path):
     from gc_tui.widgets.ask_human_banner import AskHumanBanner
 
     (tmp_path / "meta_cli_t.json").write_text(
-        json.dumps({"thread_id": "t", "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
+        json.dumps(
+            {
+                "thread_id": "t",
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 1,
+            }
+        ),
         encoding="utf-8",
     )
     (tmp_path / "data_cli_t.jsonl").write_text(
@@ -179,7 +219,9 @@ async def test_ask_human_placeholder_shows_question(tmp_path):
                     "type": "function_call",
                     "call_id": "c1",
                     "name": "ask_human",
-                    "arguments": json.dumps({"question": "Какого типа отчёт?"}),
+                    "arguments": json.dumps(
+                        {"question": "Какого типа отчёт?"}
+                    ),
                 },
             }
         )
@@ -187,7 +229,9 @@ async def test_ask_human_placeholder_shows_question(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     # Fix D: без живого runner-а recovery-блок снял бы banner. Здесь мы тестируем
     # именно рендер banner-а с вопросом → подсовываем live-stub.
     app.active_runner = _StubLiveRunner()
@@ -201,7 +245,14 @@ async def test_ask_human_placeholder_shows_question(tmp_path):
 
         rows = list(banner[0].query(TraceRow))
         assert rows, "баннер должен смонтировать блок-виджеты"
-        joined = " ".join((r._content.plain if hasattr(r._content, "plain") else str(r._content)) for r in rows)
+        joined = " ".join(
+            (
+                r._content.plain
+                if hasattr(r._content, "plain")
+                else str(r._content)
+            )
+            for r in rows
+        )
         assert "Какого типа отчёт" in joined
 
 
@@ -221,7 +272,11 @@ async def test_resume_orphan_call_finalized_as_interrupted(tmp_path):
     tid = "orphan"
     (tmp_path / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}
+            {
+                "thread_id": tid,
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 1,
+            }
         ),  # БЕЗ status=running — тред брошен
         encoding="utf-8",
     )
@@ -244,7 +299,9 @@ async def test_resume_orphan_call_finalized_as_interrupted(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -275,12 +332,18 @@ async def test_local_stop_finalizes_running_rows(tmp_path):
         def is_running(self):
             return self.live
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     runner = _ToggleRunner()
     app.active_runner = runner
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        row = ToolCallRow(call_id="c1", tool_name="subagent_code_reviewer", args_summary="task=анализ")
+        row = ToolCallRow(
+            call_id="c1",
+            tool_name="subagent_code_reviewer",
+            args_summary="task=анализ",
+        )
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()
         scr._active_calls["c1"] = row

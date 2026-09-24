@@ -15,7 +15,9 @@ class PermissionStore:
     """
 
     def __init__(self, session_rules: Optional[dict] = None) -> None:
-        self._session_rules: dict[str, bool] = session_rules if session_rules is not None else {}
+        self._session_rules: dict[str, bool] = (
+            session_rules if session_rules is not None else {}
+        )
         self._run_rules: dict[str, bool] = {}
 
     def decision_for(self, key: str) -> Optional[bool]:

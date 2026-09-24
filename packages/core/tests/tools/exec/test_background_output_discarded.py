@@ -36,22 +36,30 @@ def _files_under(root):
     return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
 
 
-def test_background_launch_writes_nothing_and_says_output_is_not_captured(tmp_path):
+def test_background_launch_writes_nothing_and_says_output_is_not_captured(
+    tmp_path,
+):
     """Фоновый запуск не заводит лог и не отсылает модель его читать.
 
     Ломается, если вернуть лог по умолчанию: в проекте появится `.gc/tmp/…`, а в
     ответе — путь, который модель всё равно не прочитает.
     """
     project = _project(tmp_path)
-    tool = with_local_ctx(ExecuteCommand, config_dict={"launch_root": str(project)})
+    tool = with_local_ctx(
+        ExecuteCommand, config_dict={"launch_root": str(project)}
+    )
 
-    res = json.loads(tool(command=_CMD, run_in_background=True, cwd=str(project)))
+    res = json.loads(
+        tool(command=_CMD, run_in_background=True, cwd=str(project))
+    )
 
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, res
     assert res["background"]["output"] == "not captured", res["background"]
     assert "log_path" not in res["background"], res["background"]
-    assert _files_under(project) == [], "фоновый запуск записал что-то в проект"
+    assert _files_under(project) == [], (
+        "фоновый запуск записал что-то в проект"
+    )
 
 
 def test_a_log_path_from_the_model_is_dropped_and_nothing_is_written(tmp_path):
@@ -79,7 +87,11 @@ def test_a_log_path_from_the_model_is_dropped_and_nothing_is_written(tmp_path):
     raw = run_coro(
         aapply_tool(
             "exec_command",
-            {"command": _CMD, "run_in_background": True, "log_path": str(wanted)},
+            {
+                "command": _CMD,
+                "run_in_background": True,
+                "log_path": str(wanted),
+            },
             tools_data_=tools,
             ctx=local_ctx(cfg),
         )
@@ -88,5 +100,7 @@ def test_a_log_path_from_the_model_is_dropped_and_nothing_is_written(tmp_path):
     res = json.loads(raw)
     assert res["ok"] is True, res
     assert res["background"]["pid"] > 0, "команду не запустили"
-    assert "log_path" in res.get("dropped_arguments", ""), f"модели не сказали, что поле снято: {res}"
+    assert "log_path" in res.get("dropped_arguments", ""), (
+        f"модели не сказали, что поле снято: {res}"
+    )
     assert not wanted.exists(), "тул записал вывод туда, куда указала модель"

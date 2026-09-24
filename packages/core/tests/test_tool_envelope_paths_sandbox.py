@@ -111,7 +111,9 @@ class RecordingSandboxBackend(FsBackend):
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    def run_python(
+        self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None
+    ):
         raise NotImplementedError
 
     def default_cwd(self):
@@ -124,7 +126,9 @@ def test_write_to_file_envelope_reports_container_path(monkeypatch, tmp_path):
     backend = RecordingSandboxBackend()
     tool = bind_os_backend(CallableTool(WriteToFile()), backend)
 
-    out = tool(path="/testbed/mod.py", content="x")  # tools are callables (__call__)
+    out = tool(
+        path="/testbed/mod.py", content="x"
+    )  # tools are callables (__call__)
     envelope = json.loads(out) if isinstance(out, str) else out
 
     assert envelope["ok"] is True

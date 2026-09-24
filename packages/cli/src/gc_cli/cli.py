@@ -24,7 +24,10 @@ from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
 from gc_core.utils.json_text import format_json_for_display
 from gc_core.utils.logging_module import human_console_enabled
-from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+from recommended_mcp.runtime.daemon_autostart import (
+    ensure_mcp_daemons,
+    shutdown_mcp_daemons,
+)
 
 from gc_cli import arg_parser
 
@@ -76,7 +79,9 @@ async def arun(
     )
 
 
-async def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | None:
+async def _resolve_forced_skill(
+    skill_name: str, config_dict: dict
+) -> str | None:
     """Resolve the -s/--skill flag deterministically (pack-aware).
 
     Returns the exact canonical skill id when resolved; the raw name as a
@@ -90,7 +95,10 @@ async def _resolve_forced_skill(skill_name: str, config_dict: dict) -> str | Non
     if not name:
         return None
     from gc_core.tools.skills.registry import get_skills_registry
-    from gc_core.tools.skills.skill_arg_resolver import Failed, resolve_skill_arg
+    from gc_core.tools.skills.skill_arg_resolver import (
+        Failed,
+        resolve_skill_arg,
+    )
 
     try:
         catalog = await get_skills_registry(config_dict).skill_catalog()
@@ -141,7 +149,9 @@ def _run_init() -> int:
         # Лестница исчерпана: не собирается и шаблон — сломан слой, в который
         # мастер не пишет (оверлей). Чинить его мастером нечем: то же объяснение,
         # что на обычном старте, и код 1 — не трейсбек.
-        print(onboarding.explain_broken_config(str(path), exc), file=sys.stderr)
+        print(
+            onboarding.explain_broken_config(str(path), exc), file=sys.stderr
+        )
         return 1
     config_dict = loaded.config
     if loaded.message:
@@ -171,7 +181,15 @@ def _run_init() -> int:
     else:
         # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
         # запускать» врало бы человеку, чей следующий старт падает.
-        print(onboarding.setup_guide(str(path), config_dict, just_created=just_created, repair=loaded), file=sys.stderr)
+        print(
+            onboarding.setup_guide(
+                str(path),
+                config_dict,
+                just_created=just_created,
+                repair=loaded,
+            ),
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -220,13 +238,21 @@ def _run_sync_config() -> int:
         f"     перенесено: {report.transferred} · переименовано: {report.renamed}",
     ]
     if report.removed:
-        lines.append(f"     устаревших убрано: {', '.join(report.removed)} (в бэкапе)")
+        lines.append(
+            f"     устаревших убрано: {', '.join(report.removed)} (в бэкапе)"
+        )
     if report.unknown:
-        lines.append(f"     неизвестных ключей: {', '.join(report.unknown)} (в бэкапе)")
+        lines.append(
+            f"     неизвестных ключей: {', '.join(report.unknown)} (в бэкапе)"
+        )
     if report.reenter:
-        lines.append(f"     задайте заново (формат изменился): {', '.join(report.reenter)}")
+        lines.append(
+            f"     задайте заново (формат изменился): {', '.join(report.reenter)}"
+        )
     lines.append(f"     бэкап: {report.backup_path}")
-    lines.append("     личные комментарии из старого файла не переносятся — они в бэкапе.")
+    lines.append(
+        "     личные комментарии из старого файла не переносятся — они в бэкапе."
+    )
     print("\n".join(lines), file=sys.stderr)
     return 0
 
@@ -346,8 +372,12 @@ def _run_update() -> int:
     src = _updater_source_or_hint()
     if src is not None:
         config_dict = load_config(arg_parser.run_args.config)
-        command = updater_runner.build_install_command(src, updater_check.extra_args(config_dict))
-        updater_runner.spawn_detached_update(command, parent_pid=os.getpid(), restart_cmd=None)
+        command = updater_runner.build_install_command(
+            src, updater_check.extra_args(config_dict)
+        )
+        updater_runner.spawn_detached_update(
+            command, parent_pid=os.getpid(), restart_cmd=None
+        )
         print(
             f"[gc] установка запущена {updater_runner.install_location_phrase()} — "
             "по завершении запустите gc-cli/gc-ua заново",
@@ -434,14 +464,20 @@ async def arun_cli() -> int:
     profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
     try:
-        config_dict, _profile_meta = load_config_ex(config_arg, profile_override=profile_arg)
+        config_dict, _profile_meta = load_config_ex(
+            config_arg, profile_override=profile_arg
+        )
     except ValueError as exc:
         # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
         # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
         # тот же, что грузили: по указателю из файла объяснение описывало бы
         # чужой стек.
         print(
-            onboarding.explain_broken_config(resolve_config_path(config_arg), exc, profile_override=profile_arg),
+            onboarding.explain_broken_config(
+                resolve_config_path(config_arg),
+                exc,
+                profile_override=profile_arg,
+            ),
             file=sys.stderr,
         )
         return 1
@@ -456,14 +492,18 @@ async def arun_cli() -> int:
         read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
         no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
         read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
-        agentsmd_override=getattr(arg_parser.run_args, "agentsmd_override", False),
+        agentsmd_override=getattr(
+            arg_parser.run_args, "agentsmd_override", False
+        ),
         trace_id=getattr(arg_parser.run_args, "trace_id", None),
     )
     # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
     force_legacy = cli_forces_legacy_model(config_dict)
     if force_legacy:
-        config_dict.setdefault("compat_notices", []).append("--model: уровни отключены на этот запуск (легаси-форс)")
+        config_dict.setdefault("compat_notices", []).append(
+            "--model: уровни отключены на этот запуск (легаси-форс)"
+        )
     from gc_core import upgrade_gate
 
     _upgrade_info = upgrade_gate.detect_upgrade()
@@ -471,24 +511,36 @@ async def arun_cli() -> int:
     # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
     # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
     if config_arg is None and onboarding.is_unconfigured(config_dict):
-        print(onboarding.setup_guide(str(user_config_path()), config_dict, just_created=just_created), file=sys.stderr)
+        print(
+            onboarding.setup_guide(
+                str(user_config_path()), config_dict, just_created=just_created
+            ),
+            file=sys.stderr,
+        )
         return 0
 
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
-    forced_skill_id = await _resolve_forced_skill(arg_parser.run_args.skill, config_dict)
+    forced_skill_id = await _resolve_forced_skill(
+        arg_parser.run_args.skill, config_dict
+    )
 
     auth_connector = build_auth_connector(config_dict)
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
         # У gc-cli автозапуск opt-in: выключается тем, что `-a` не передан.
         # Флага `--no-auto-mcp` здесь нет — он живёт только у gc-ua.
-        ensure_mcp_daemons(config_dict, disable_hint="отключить автозапуск: запустите без `-a`")
+        ensure_mcp_daemons(
+            config_dict,
+            disable_hint="отключить автозапуск: запустите без `-a`",
+        )
     # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
-    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
+    ctx = await acreate_run_context(
+        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+    )
     # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
     # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
     # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
@@ -497,7 +549,10 @@ async def arun_cli() -> int:
     ctx.ask_human = make_cli_ask_human_port()
 
     # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
-    from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli
+    from gc_core.startup_notices import (
+        collect_startup_notices,
+        render_notices_for_cli,
+    )
     from gc_core.tools.registry import all_builtin_tool_names
 
     _notices = collect_startup_notices(
@@ -517,7 +572,9 @@ async def arun_cli() -> int:
     if arg_parser.run_args.wrap_technical:
         user_parts[0] = wrap_technical_user_content(user_parts[0])
     if forced_skill_id:
-        user_parts.append(wrap_skill_resolution_technical_instruction(forced_skill_id))
+        user_parts.append(
+            wrap_skill_resolution_technical_instruction(forced_skill_id)
+        )
 
     verbose = arg_parser.run_args.verbose
     thread_id = arg_parser.run_args.thread_id

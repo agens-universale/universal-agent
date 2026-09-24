@@ -13,7 +13,9 @@ class StreamBlock(Static):
     def __init__(self) -> None:
         super().__init__("", classes="stream-block", markup=False)
 
-    def set_text(self, text: RenderableType, *, thinking: bool = False) -> None:
+    def set_text(
+        self, text: RenderableType, *, thinking: bool = False
+    ) -> None:
         if not self.is_mounted:
             return
         if thinking:

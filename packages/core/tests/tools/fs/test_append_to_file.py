@@ -2,7 +2,10 @@ import copy
 import json
 
 import pytest
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.schema_optional import apply_openai_strict_parameters
 from gc_testkit.helpers.tool_ctx import with_local_ctx
@@ -21,7 +24,13 @@ def test_append_success_existing_file(tmp_path):
 def test_append_create_missing_with_dirs(tmp_path):
     p = tmp_path / "a" / "b" / "c.txt"
     res = json.loads(
-        with_local_ctx(AppendToFile)(path=str(p), content="hello", create_if_missing=True, make_dirs=True, separator="")
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content="hello",
+            create_if_missing=True,
+            make_dirs=True,
+            separator="",
+        )
     )
     assert res["ok"] is True
     assert res["created"] is True
@@ -92,7 +101,9 @@ def test_append_errors(tmp_path):
     assert rel["ok"] is False and rel["error"]["field"] == "path"
     miss = json.loads(tool(path=str(tmp_path / "missing.txt"), content="x"))
     assert miss["ok"] is False and miss["error"]["type"] == "not_found"
-    bad_sep = json.loads(tool(path=str(tmp_path / "x.txt"), content="x", separator=123))
+    bad_sep = json.loads(
+        tool(path=str(tmp_path / "x.txt"), content="x", separator=123)
+    )
     assert bad_sep["ok"] is False and bad_sep["error"]["field"] == "separator"
 
 
@@ -115,7 +126,11 @@ def test_append_cp1251_round_trip(tmp_path):
 def test_append_unsupported_encoding(tmp_path):
     p = tmp_path / "a.txt"
     p.write_text("x", encoding="utf-8")
-    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="y", separator="", encoding="shift_jis"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="y", separator="", encoding="shift_jis"
+        )
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "unsupported_encoding"
     assert p.read_text(encoding="utf-8") == "x"
@@ -125,7 +140,11 @@ def test_append_encode_failed_keeps_file(tmp_path):
     p = tmp_path / "a.txt"
     original = "Hi".encode("latin-1")
     p.write_bytes(original)
-    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="Привет", separator="", encoding="latin-1"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="Привет", separator="", encoding="latin-1"
+        )
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "encode_failed"
     assert p.read_bytes() == original
@@ -135,7 +154,11 @@ def test_append_wrong_encoding_keeps_file(tmp_path):
     p = tmp_path / "ru.txt"
     original = "Привет".encode("cp1251")
     p.write_bytes(original)
-    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content=" x", separator="", encoding="utf-8"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content=" x", separator="", encoding="utf-8"
+        )
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "undecodable_text"
     assert p.read_bytes() == original
@@ -145,7 +168,11 @@ def test_append_rejects_nul_binary(tmp_path):
     p = tmp_path / "blob.bin"
     original = b"aaa\x00bbb"
     p.write_bytes(original)
-    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="x", separator="", encoding="utf-8"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="x", separator="", encoding="utf-8"
+        )
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "is_binary"
     assert p.read_bytes() == original
@@ -160,7 +187,11 @@ def test_append_large_file_without_full_read(tmp_path):
     body = ("line\n" * 30_000).encode("utf-8")
     assert len(body) > APPEND_HEAD_SAMPLE_BYTES
     p.write_bytes(body)
-    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="TAIL", separator="\n", encoding="utf-8"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="TAIL", separator="\n", encoding="utf-8"
+        )
+    )
     assert res["ok"] is True
     assert p.read_bytes().endswith(b"\nTAIL")
     assert p.read_bytes().startswith(body[:64])
@@ -177,7 +208,11 @@ def test_append_head_truncated_utf8_still_ok(tmp_path):
     rest = "я".encode() + b" more text\n"
     p = tmp_path / "cut.txt"
     p.write_bytes(prefix + rest)
-    res = json.loads(with_local_ctx(AppendToFile)(path=str(p), content="ok", separator="", encoding="utf-8"))
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p), content="ok", separator="", encoding="utf-8"
+        )
+    )
     assert res["ok"] is True
     assert p.read_bytes().endswith(b"ok")
 
@@ -216,14 +251,18 @@ def test_append_utf16_no_mid_bom(tmp_path, encoding):
 
     raw = p.read_bytes()
     # The leading BOM (written by fs_write_file) must still be present at offset 0.
-    expected_bom = b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    expected_bom = (
+        b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    )
     assert raw[:2] == expected_bom, f"{encoding}: start BOM lost: {raw[:2]!r}"
 
     # Decoded text must NOT contain U+FEFF anywhere — decode_text_bytes strips the
     # leading BOM, so any remaining U+FEFF is a spurious mid-file BOM (the bug).
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok, f"{encoding}: decode failed: {decoded.error}"
-    assert "\ufeff" not in decoded.text, f"{encoding}: spurious mid-file BOM (U+FEFF): {decoded.text!r}"
+    assert "\ufeff" not in decoded.text, (
+        f"{encoding}: spurious mid-file BOM (U+FEFF): {decoded.text!r}"
+    )
     assert decoded.text == "Строка первая\nСтрока втораяСтрока третья"
 
     # bytes_appended must count the payload without the BOM (26 bytes = 13 chars * 2).
@@ -248,8 +287,12 @@ def test_append_utf16_create_missing_has_bom(tmp_path, encoding):
     )
     assert res["ok"] and res["created"], res
     raw = p.read_bytes()
-    expected_bom = b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
-    assert raw[:2] == expected_bom, f"{encoding}: start BOM missing: {raw[:2]!r}"
+    expected_bom = (
+        b"\xff\xfe" if encoding in ("utf-16", "utf-16-le") else b"\xfe\xff"
+    )
+    assert raw[:2] == expected_bom, (
+        f"{encoding}: start BOM missing: {raw[:2]!r}"
+    )
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok and decoded.text == "Hello"
 
@@ -289,7 +332,9 @@ def test_append_utf8_sig_no_mid_bom(tmp_path):
     # Start BOM preserved by fs_write_file.
     assert raw[:3] == b"\xef\xbb\xbf", f"start BOM lost: {raw[:3]!r}"
     # No second BOM in the middle of the byte stream.
-    assert b"\xef\xbb\xbf" not in raw[3:], f"spurious mid-file utf-8-sig BOM: {raw!r}"
+    assert b"\xef\xbb\xbf" not in raw[3:], (
+        f"spurious mid-file utf-8-sig BOM: {raw!r}"
+    )
     decoded = decode_text_bytes(raw, encoding="utf-8-sig")
     assert decoded.ok and "\ufeff" not in decoded.text
     assert decoded.text == "first line\nsecond linethird line"
@@ -319,7 +364,9 @@ def test_append_utf8_sig_create_missing_has_bom(tmp_path):
     assert decoded.ok and decoded.text == "Hello"
 
 
-@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-8-sig"])
+@pytest.mark.parametrize(
+    "encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-8-sig"]
+)
 def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
     """An existing but empty (size==0) file must be treated like create: BOM emitted.
 
@@ -350,7 +397,9 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
     elif encoding == "utf-16-be":
         assert raw[:2] == b"\xfe\xff", f"{encoding}: BOM missing: {raw[:2]!r}"
     else:  # utf-8-sig
-        assert raw[:3] == b"\xef\xbb\xbf", f"{encoding}: BOM missing: {raw[:3]!r}"
+        assert raw[:3] == b"\xef\xbb\xbf", (
+            f"{encoding}: BOM missing: {raw[:3]!r}"
+        )
     decoded = decode_text_bytes(raw, encoding=encoding)
     assert decoded.ok and decoded.text == "Hello"
 

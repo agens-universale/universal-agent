@@ -31,11 +31,15 @@ async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._skills_cache = [{"id": "coder"}]  # coder не в реальном реестре — задаём явно
+        scr._skills_cache = [
+            {"id": "coder"}
+        ]  # coder не в реальном реестре — задаём явно
         await scr._handle_command("skill coder почини баг в парсере")
         await pilot.pause(0.3)
         msgs = captured["messages"]
@@ -68,7 +72,9 @@ async def test_skill_inline_prompt_during_run_single_add_message(tmp_path):
         def add_message(self, m):
             added.append(m)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -88,7 +94,9 @@ async def test_skill_without_prompt_stays_pending(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await scr._handle_command("skill coder")
@@ -103,7 +111,9 @@ async def test_unknown_skill_first_token_not_inline(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._skills_cache = [{"id": "coder"}]  # 'foo' НЕ валиден
@@ -118,10 +128,14 @@ async def test_picker_closes_when_id_plus_prompt(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._skills_cache = [{"id": "coder"}]  # фиктивный кэш: coder — валидный id
+        scr._skills_cache = [
+            {"id": "coder"}
+        ]  # фиктивный кэш: coder — валидный id
         inp = pilot.app.query_one("#cmdinput")
 
         inp.text = "/skill coder"  # id без промпта → picker открыт

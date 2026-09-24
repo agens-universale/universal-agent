@@ -13,19 +13,42 @@ from gc_core.thread_store import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
-def _seed(threads_dir, tid, prompt, *, project_path=None, updated_at="2026-05-30T10:00:00+00:00", msgs=1):
+def _seed(
+    threads_dir,
+    tid,
+    prompt,
+    *,
+    project_path=None,
+    updated_at="2026-05-30T10:00:00+00:00",
+    msgs=1,
+):
     """Сессия = data-файл + meta. project_path пишется в meta.tui."""
     append_new_thread_messages(
-        str(threads_dir), "cli", tid, [{"role": "user", "content": prompt, "id": f"m_{tid}"}], set()
+        str(threads_dir),
+        "cli",
+        tid,
+        [{"role": "user", "content": prompt, "id": f"m_{tid}"}],
+        set(),
     )
-    meta = {"thread_id": tid, "system": "cli", "status": "stopped", "updated_at": updated_at, "messages_count": msgs}
+    meta = {
+        "thread_id": tid,
+        "system": "cli",
+        "status": "stopped",
+        "updated_at": updated_at,
+        "messages_count": msgs,
+    }
     if project_path is not None:
         meta["tui"] = {"project_path": project_path}
-    (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def _rows_text(pilot):
-    return "\n".join(str(s.render()) for s in pilot.app.screen.query("#sessions-list Static"))
+    return "\n".join(
+        str(s.render())
+        for s in pilot.app.screen.query("#sessions-list Static")
+    )
 
 
 @pytest.mark.asyncio
@@ -39,7 +62,9 @@ async def test_card_shows_project_path(tmp_path):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
         await pilot.pause()
         text = _rows_text(pilot)
         assert "pp000001" in text  # short id
@@ -64,7 +89,9 @@ async def test_card_without_project_path_no_crash(tmp_path):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
         await pilot.pause()
         text = _rows_text(pilot)
         assert "old00001" in text
@@ -77,7 +104,9 @@ async def test_long_project_path_truncated_left(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.screens.sessions import _PATH_MAXLEN
 
-    long_path = "/home/alex/sber_gigacode/mini-cli-pub/very/deep/nested/dir/structure"
+    long_path = (
+        "/home/alex/sber_gigacode/mini-cli-pub/very/deep/nested/dir/structure"
+    )
     assert len(long_path) > _PATH_MAXLEN
     _seed(tmp_path, "long0001", "длинный путь", project_path=long_path)
     from gc_tui.app import TuiApp
@@ -85,7 +114,9 @@ async def test_long_project_path_truncated_left(tmp_path):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli")
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
         await pilot.pause()
         text = _rows_text(pilot)
         # Хвост пути сохранён (truncate_path_left оставляет конец)
@@ -113,10 +144,14 @@ async def test_project_path_captured_on_new_session(tmp_path, monkeypatch):
         await pilot.pause()
         tid = pilot.app.tui_state.active_task_id
         assert tid is not None
-        meta = FileTaskStore(threads_dir=str(tmp_path), system="cli").get_task_meta(tid)
+        meta = FileTaskStore(
+            threads_dir=str(tmp_path), system="cli"
+        ).get_task_meta(tid)
         ppath = meta.get("tui", {}).get("project_path")
         assert ppath is not None
-        assert str(tmp_path) in ppath or ppath.endswith(str(tmp_path).lstrip("/"))
+        assert str(tmp_path) in ppath or ppath.endswith(
+            str(tmp_path).lstrip("/")
+        )
 
 
 class _NoopExecutor:

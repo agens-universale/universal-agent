@@ -111,7 +111,9 @@ def _ask_human_record(
             "type": "function_call",
             "name": "ask_human",
             "call_id": call_id,
-            "arguments": json.dumps({"question": question}, ensure_ascii=False),
+            "arguments": json.dumps(
+                {"question": question}, ensure_ascii=False
+            ),
         },
     }
 
@@ -172,7 +174,11 @@ class _BlockingFake:
                     "type": "message",
                     "seq": 0,
                     "ts_utc": "2026-05-27T23:59:59+00:00",
-                    "payload": {"id": "u0", "role": "user", "content": messages[0]},
+                    "payload": {
+                        "id": "u0",
+                        "role": "user",
+                        "content": messages[0],
+                    },
                 }
             )
             + "\n",
@@ -194,7 +200,9 @@ class _BlockingFake:
 
 
 @pytest.mark.asyncio
-async def test_submit_solution_event_switches_indicator_to_validating(tmp_path):
+async def test_submit_solution_event_switches_indicator_to_validating(
+    tmp_path,
+):
     """submit_solution-event переключает индикатор в режим "validating"
     немедленно + _last_event_kind == '_finalized'. Без 1.5с задержки."""
     pytest.importorskip("textual")
@@ -205,7 +213,9 @@ async def test_submit_solution_event_switches_indicator_to_validating(tmp_path):
         records=[_submit_solution_record(report="Готово, вот ответ.")],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -234,7 +244,9 @@ async def test_poll_active_keeps_validating_state_until_runner_exits(tmp_path):
         records=[_submit_solution_record()],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -256,7 +268,9 @@ async def test_poll_active_keeps_validating_state_until_runner_exits(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_synthetic_submit_solution_output_does_not_reset_sentinel(tmp_path):
+async def test_synthetic_submit_solution_output_does_not_reset_sentinel(
+    tmp_path,
+):
     """Регрессия (запись старого формата треда, chat_completions):
 
     После submit_solution function_call в jsonl мог лежать синтетический
@@ -271,11 +285,15 @@ async def test_synthetic_submit_solution_output_does_not_reset_sentinel(tmp_path
     fake = _BlockingFake(
         records=[
             _submit_solution_record(seq=1, call_id="call_ss_42"),
-            _submit_solution_synthetic_output_record(seq=2, call_id="call_ss_42"),
+            _submit_solution_synthetic_output_record(
+                seq=2, call_id="call_ss_42"
+            ),
         ],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -300,7 +318,9 @@ async def test_synthetic_submit_solution_output_does_not_reset_sentinel(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_policy_event_after_finalized_switches_back_to_thinking(tmp_path):
+async def test_policy_event_after_finalized_switches_back_to_thinking(
+    tmp_path,
+):
     """После finalize прилёт [policy]-строки (gate-reject feedback) переключает
     индикатор обратно в "thinking": _last_event_kind переходит в 'system',
     _poll_active меняет state с validating на thinking."""
@@ -315,7 +335,9 @@ async def test_policy_event_after_finalized_switches_back_to_thinking(tmp_path):
         ],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -345,7 +367,9 @@ async def test_new_user_send_clears_finalized(tmp_path):
         records=[_submit_solution_record()],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -371,7 +395,9 @@ async def test_reset_render_state_clears_finalized(tmp_path):
         records=[_submit_solution_record()],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -399,7 +425,9 @@ async def test_ask_human_active_hides_thinking_indicator(tmp_path):
         records=[_ask_human_record(question="Выбери: A или B?")],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -420,7 +448,9 @@ async def test_ask_human_active_hides_thinking_indicator(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_runner_not_running_shows_terminal_state_after_finalized(tmp_path):
+async def test_runner_not_running_shows_terminal_state_after_finalized(
+    tmp_path,
+):
     """Если runner.is_running() == False — индикатор не уничтожается, а
     переходит в состояние «done» (store сообщает status=completed, runner
     не был остановлен напрямую).
@@ -434,7 +464,9 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(tmp_path)
         records=[_submit_solution_record()],
         threads_dir=Path(tmp_path),
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -458,7 +490,9 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(tmp_path)
                 pass
 
         screen._store = _CompletedStore()
-        screen._cursor = None  # skip tail_events — стор двойник не реализует его
+        screen._cursor = (
+            None  # skip tail_events — стор двойник не реализует его
+        )
 
         # Симулируем выход runner-треда (без _stop_requested → outcome=completed→done).
         class _StoppedRunner:

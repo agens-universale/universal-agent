@@ -87,7 +87,9 @@ def _patch_apply(monkeypatch, calls, *, results=None, fail_names=None):
         name = kw["tool_name"]
         calls.append(name)
         if name in fail_names:
-            raise pr.WrongFunctionArgumentsException("bad args", received_args=kw["arguments"], tool_name=name)
+            raise pr.WrongFunctionArgumentsException(
+                "bad args", received_args=kw["arguments"], tool_name=name
+            )
         if name in results:
             return results[name]
         if name == "turn_finish":
@@ -110,13 +112,23 @@ def _patch_apply(monkeypatch, calls, *, results=None, fail_names=None):
         return json.dumps({"tool": name, "ok": True}, ensure_ascii=False)
 
     monkeypatch.setattr(pr, "aapply_tool", _async_noop(fake_apply))
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
 
 def _outputs_by_call(messages):
-    return {m["call_id"]: m for m in messages if m.get("type") == "function_call_output"}
+    return {
+        m["call_id"]: m
+        for m in messages
+        if m.get("type") == "function_call_output"
+    }
 
 
 def _is_cycle_stop_stub(output: str) -> bool:
@@ -127,11 +139,21 @@ def _is_cycle_stop_stub(output: str) -> bool:
 
 
 def test_split_batch_new_keeps_notice_and_compact_after_finish():
-    work = {"type": "function_call_output", "call_id": "c_work", "output": "{}"}
-    finish = {"type": "function_call_output", "call_id": "c_fin", "output": "{}"}
+    work = {
+        "type": "function_call_output",
+        "call_id": "c_work",
+        "output": "{}",
+    }
+    finish = {
+        "type": "function_call_output",
+        "call_id": "c_fin",
+        "output": "{}",
+    }
     notice = {"role": "user", "content": "Loop detector: repeated"}
     resume = {"role": "user", "content": "session_compact finished."}
-    prefix, fin, tail = _split_batch_new_around_finish([work, finish, notice, resume], "c_fin")
+    prefix, fin, tail = _split_batch_new_around_finish(
+        [work, finish, notice, resume], "c_fin"
+    )
     assert prefix == [work]
     assert fin == [finish]
     assert tail == [notice, resume]
@@ -167,7 +189,9 @@ def test_split_ask_human_defers_runtime_barrier_decision():
         {"name": "fs_read_file"},
         {"name": "turn_finish"},
     )
-    executed, skipped = partition_work_then_finish([memory, ask, later, finish])
+    executed, skipped = partition_work_then_finish(
+        [memory, ask, later, finish]
+    )
     assert executed == [memory, ask, later, finish]
     assert skipped == []
 
@@ -182,7 +206,9 @@ def test_process_tool_calls_executes_memory_before_finish(monkeypatch):
         _fc("session_memory", "c_mem", '{"action":"write"}'),
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     by_call = _outputs_by_call(outs)
     assert calls == ["session_memory", "turn_finish"]
     assert set(by_call) == {"c_mem", "c_fin"}
@@ -198,7 +224,9 @@ def test_process_tool_calls_finish_first_still_runs_memory(monkeypatch):
         _fc("turn_finish", "c_fin", _finish_args()),
         _fc("session_memory", "c_mem", '{"action":"write"}'),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     by_call = _outputs_by_call(outs)
     assert calls == ["session_memory", "turn_finish"]
     assert json.loads(by_call["c_mem"]["output"])["ok"] is True
@@ -213,7 +241,9 @@ def test_process_tool_calls_all_work_before_finish(monkeypatch):
         _fc("fs_read_file", "c2", '{"path":"a.py"}'),
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     assert calls == ["session_memory", "fs_read_file", "turn_finish"]
     by_call = _outputs_by_call(outs)
     assert set(by_call) == {"c1", "c2", "c_fin"}
@@ -229,7 +259,9 @@ def test_process_tool_calls_second_finish_not_executed(monkeypatch):
         _fc("turn_finish", "c_fin1", _finish_args()),
         _fc("turn_finish", "c_fin2", _finish_args(task_report="второй")),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     assert calls == ["session_memory", "turn_finish"]
     by_call = _outputs_by_call(outs)
     assert set(by_call) == {"c_mem", "c_fin1", "c_fin2"}
@@ -245,7 +277,9 @@ def test_process_tool_calls_work_error_does_not_drop_siblings(monkeypatch):
         _fc("fs_read_file", "c_read", '{"path":"a.py"}'),
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     assert calls == ["session_memory", "fs_read_file", "turn_finish"]
     by_call = _outputs_by_call(outs)
     assert json.loads(by_call["c_mem"]["output"])["ok"] is False
@@ -261,7 +295,9 @@ def test_process_tool_calls_ask_human_is_work_and_blocks_finish(monkeypatch):
         _fc("fs_read_file", "c_read", '{"path":"a.py"}'),
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     assert calls == ["session_memory", "turn_ask_human"]
     by_call = _outputs_by_call(outs)
     assert json.loads(by_call["c_mem"]["output"])["ok"] is True
@@ -269,7 +305,9 @@ def test_process_tool_calls_ask_human_is_work_and_blocks_finish(monkeypatch):
     assert json.loads(by_call["c_fin"]["output"])["skipped"] is True
 
 
-def test_process_tool_calls_rejected_ask_human_does_not_block_finish(monkeypatch):
+def test_process_tool_calls_rejected_ask_human_does_not_block_finish(
+    monkeypatch,
+):
     calls: list[str] = []
     rejected_ask = json.dumps(
         {
@@ -295,7 +333,9 @@ def test_process_tool_calls_rejected_ask_human_does_not_block_finish(monkeypatch
         _fc("turn_finish", "c_fin", _finish_args()),
     ]
 
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
 
     assert calls == ["turn_ask_human", "turn_finish"]
     by_call = _outputs_by_call(outs)
@@ -303,7 +343,9 @@ def test_process_tool_calls_rejected_ask_human_does_not_block_finish(monkeypatch
     assert json.loads(by_call["c_fin"]["output"])["ok"] is True
 
 
-def test_process_tool_calls_invalid_first_finish_still_skips_second(monkeypatch):
+def test_process_tool_calls_invalid_first_finish_still_skips_second(
+    monkeypatch,
+):
     calls: list[str] = []
     _patch_apply(monkeypatch, calls, fail_names={"turn_finish"})
     batch = [
@@ -311,7 +353,9 @@ def test_process_tool_calls_invalid_first_finish_still_skips_second(monkeypatch)
         _fc("turn_finish", "c_fin1", '{"bogus":1}'),
         _fc("turn_finish", "c_fin2", _finish_args()),
     ]
-    outs = run_coro(pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(batch, _state(), _ctx(), run_agent_func=None)
+    )
     assert calls == ["session_memory", "turn_finish"]
     by_call = _outputs_by_call(outs)
     assert json.loads(by_call["c_mem"]["output"])["ok"] is True
@@ -424,14 +468,22 @@ def test_run_agent_accepted_finish_drops_loop_notice(monkeypatch):
     )
     assert result == finish["arguments"]
 
-    notices = [m for m in state.messages if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))]
+    notices = [
+        m
+        for m in state.messages
+        if m.get("role") == "user"
+        and "Loop detector:" in str(m.get("content", ""))
+    ]
     assert notices == []
     by_call = _outputs_by_call(state.messages)
     assert by_call["c1"]["call_id"] == "c1"
     assert "call_finish" in by_call
 
     persisted_notices = [
-        m for m in persisted if m.get("role") == "user" and "Loop detector:" in str(m.get("content", ""))
+        m
+        for m in persisted
+        if m.get("role") == "user"
+        and "Loop detector:" in str(m.get("content", ""))
     ]
     assert persisted_notices == []
 
@@ -529,7 +581,13 @@ def test_run_agent_invalid_finish_keeps_work_and_stays_open(monkeypatch):
     monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     spec = _finish_spec()
     ctx = _agent_ctx(strict_turn_finish_validation=False)
-    ctx.tools_data = {"turn_finish": {"spec": spec, "tool_fabric": None, "injected_fields": []}}
+    ctx.tools_data = {
+        "turn_finish": {
+            "spec": spec,
+            "tool_fabric": None,
+            "injected_fields": [],
+        }
+    }
     state = _agent_state(max_steps=0)
     memory = _fc("session_memory", "call_mem", '{"action":"write"}')
     finish = _fc("turn_finish", "call_finish", '{"bogus": 1}')
@@ -544,7 +602,9 @@ def test_run_agent_invalid_finish_keeps_work_and_stays_open(monkeypatch):
 
 
 @pytest.mark.parametrize("backend", ["chat_completions", "responses"])
-def test_run_agent_rejected_finish_output_keeps_turn_open(monkeypatch, backend):
+def test_run_agent_rejected_finish_output_keeps_turn_open(
+    monkeypatch, backend
+):
     applied: list[str] = []
     rejected = json.dumps(
         {
@@ -599,7 +659,9 @@ def test_run_agent_rejected_finish_output_keeps_turn_open(monkeypatch, backend):
 
     assert result != finish["arguments"]
     assert applied == ["turn_finish"]
-    payload = json.loads(_outputs_by_call(state.messages)["call_finish"]["output"])
+    payload = json.loads(
+        _outputs_by_call(state.messages)["call_finish"]["output"]
+    )
     assert payload["ok"] is False
     assert payload["status"] == "rejected"
     assert payload["error"]["field"] == "solution_type"
@@ -612,7 +674,11 @@ def test_run_agent_gate_reject_keeps_work_in_trace(monkeypatch):
 
     async def _reject(**_kwargs):
         work_in_digest.append(
-            any(m.get("type") == "function_call_output" and m.get("call_id") == "call_mem" for m in state.messages)
+            any(
+                m.get("type") == "function_call_output"
+                and m.get("call_id") == "call_mem"
+                for m in state.messages
+            )
         )
         return ValidationResult(
             ok=False,
@@ -770,7 +836,11 @@ def test_run_agent_same_order_on_responses_backend(monkeypatch):
 
 def _persisted_calls(persisted: list) -> set:
     """call_id всех function_call_output, которые дошли до персиста."""
-    return {m.get("call_id") for m in persisted if isinstance(m, dict) and m.get("type") == "function_call_output"}
+    return {
+        m.get("call_id")
+        for m in persisted
+        if isinstance(m, dict) and m.get("type") == "function_call_output"
+    }
 
 
 def test_finish_output_reaches_the_thread_on_responses_backend(monkeypatch):
@@ -807,7 +877,9 @@ def test_finish_output_reaches_the_thread_on_responses_backend(monkeypatch):
 
     assert result == finish["arguments"]
     got = _persisted_calls(persisted)
-    assert "call_finish" in got, f"вывод turn_finish не доехал до хранилища: {sorted(got)}"
+    assert "call_finish" in got, (
+        f"вывод turn_finish не доехал до хранилища: {sorted(got)}"
+    )
 
 
 def test_nothing_in_state_is_missing_from_the_thread(monkeypatch):

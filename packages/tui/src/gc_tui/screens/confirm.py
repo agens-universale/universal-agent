@@ -76,14 +76,18 @@ class ConfirmScreen(ModalScreen[bool]):
         with Vertical(id="confirm-dialog"):
             yield Static(self._message, id="confirm-message", markup=False)
             yield Static("", id="confirm-spacer")
-            yield Static(_render_hint(self._hint, self._selected), id="confirm-hint")
+            yield Static(
+                _render_hint(self._hint, self._selected), id="confirm-hint"
+            )
 
     def on_mount(self) -> None:
         if self._title:
             self.query_one("#confirm-dialog").border_title = self._title
 
     def _refresh_hint(self) -> None:
-        self.query_one("#confirm-hint", Static).update(_render_hint(self._hint, self._selected))
+        self.query_one("#confirm-hint", Static).update(
+            _render_hint(self._hint, self._selected)
+        )
 
     def on_key(self, event: events.Key) -> None:
         key = event.key

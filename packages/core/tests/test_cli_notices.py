@@ -1,4 +1,7 @@
-from gc_core.startup_notices import collect_startup_notices, render_notices_for_cli
+from gc_core.startup_notices import (
+    collect_startup_notices,
+    render_notices_for_cli,
+)
 from gc_core.tools.registry import all_builtin_tool_names
 
 

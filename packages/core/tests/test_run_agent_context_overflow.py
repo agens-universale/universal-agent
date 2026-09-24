@@ -36,7 +36,9 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
                 "Requested token count exceeds the model's maximum context "
                 "length of 131072 tokens. Please reduce the number of tokens"
             )
-        return [{"role": "assistant", "type": "message", "content": "готово"}], "resp_2"
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp_2"
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
 
@@ -45,7 +47,9 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
             [{"role": "user", "content": "сделай", "id": "u1"}],
             _state(),
             _run_ctx(),
-            force_compact_hook=lambda: calls.__setitem__("compact", calls["compact"] + 1),
+            force_compact_hook=lambda: calls.__setitem__(
+                "compact", calls["compact"] + 1
+            ),
         )
     )
 

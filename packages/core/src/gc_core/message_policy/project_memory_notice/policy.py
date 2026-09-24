@@ -11,17 +11,28 @@ from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
     set_project_memory_check_cnt,
 )
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_CURRENT_CONTEXT, wrap_technical_user_content
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
+    wrap_technical_user_content,
+)
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id,
+)
 
 
 def tool_project_memory_enabled(config_dict: dict[str, Any] | None) -> bool:
-    stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
+    stop = (
+        config_dict.get("stop_tools")
+        if isinstance(config_dict, dict)
+        else None
+    )
     return not (isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop)
 
 
 def project_memory_hints_enabled(config_dict: dict[str, Any] | None) -> bool:
-    return project_memory_notice_enabled(config_dict) and tool_project_memory_enabled(config_dict)
+    return project_memory_notice_enabled(
+        config_dict
+    ) and tool_project_memory_enabled(config_dict)
 
 
 def on_persist_steps(meta: dict[str, Any], *, steps: int = 1) -> int:
@@ -97,12 +108,18 @@ def collect_project_memory_hints(
     if current is not None and baseline is None:
         hints.append(build_project_memory_exists_message())
         state.project_memory_content_hash = current
-    elif current is not None and isinstance(baseline, str) and current != baseline:
+    elif (
+        current is not None
+        and isinstance(baseline, str)
+        and current != baseline
+    ):
         hints.append(build_project_memory_changed_message())
     return hints
 
 
-def wrap_project_memory_hint_user_message(text: str, *, suffix: str = "mem_project") -> dict[str, Any]:
+def wrap_project_memory_hint_user_message(
+    text: str, *, suffix: str = "mem_project"
+) -> dict[str, Any]:
     return {
         "role": "user",
         "content": wrap_technical_user_content(

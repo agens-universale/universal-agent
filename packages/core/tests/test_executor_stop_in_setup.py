@@ -39,8 +39,13 @@ async def _executor(monkeypatch, tmp_path, seen: list):
         check_stop = kw.get("check_stop")
         seen.append(
             {
-                "batch": [m.get("content") if isinstance(m, dict) else m for m in messages],
-                "stopped": bool(check_stop()) if callable(check_stop) else None,
+                "batch": [
+                    m.get("content") if isinstance(m, dict) else m
+                    for m in messages
+                ],
+                "stopped": bool(check_stop())
+                if callable(check_stop)
+                else None,
             }
         )
         return {"finished": True}
@@ -50,13 +55,19 @@ async def _executor(monkeypatch, tmp_path, seen: list):
     return ae.AgentExecutor(ctx), ae
 
 
-async def test_stop_in_the_setup_of_a_second_turn_is_not_lost(monkeypatch, tmp_path):
+async def test_stop_in_the_setup_of_a_second_turn_is_not_lost(
+    monkeypatch, tmp_path
+):
     """Стоп во время сетапа второго хода останавливает именно этот ход."""
     seen: list = []
     ex, ae = await _executor(monkeypatch, tmp_path, seen)
 
-    await ex.arun(["первый"], thread_id="t", start_new_thread=True, system="cli")
-    assert [t["batch"] for t in seen] == [["первый"]], f"первый ход не дошёл до цикла: {seen}"
+    await ex.arun(
+        ["первый"], thread_id="t", start_new_thread=True, system="cli"
+    )
+    assert [t["batch"] for t in seen] == [["первый"]], (
+        f"первый ход не дошёл до цикла: {seen}"
+    )
 
     real_session = ae.ThreadSession
     reads: list = []
@@ -69,7 +80,9 @@ async def test_stop_in_the_setup_of_a_second_turn_is_not_lost(monkeypatch, tmp_p
             ex.stop_run()
         return await real_session.afrom_config(**kw)
 
-    monkeypatch.setattr(ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread))
+    monkeypatch.setattr(
+        ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
+    )
 
     await ex.arun(["второй"], thread_id="t", system="cli")
 
@@ -80,7 +93,9 @@ async def test_stop_in_the_setup_of_a_second_turn_is_not_lost(monkeypatch, tmp_p
     )
 
 
-async def test_stop_between_turns_does_not_leak_into_the_next_one(monkeypatch, tmp_path):
+async def test_stop_between_turns_does_not_leak_into_the_next_one(
+    monkeypatch, tmp_path
+):
     """А стоп, пришедший когда ход УЖЕ закончился, следующему не достаётся.
 
     Иначе нажатие стопа по остывшему прогону молча гасило бы следующий запрос
@@ -89,10 +104,14 @@ async def test_stop_between_turns_does_not_leak_into_the_next_one(monkeypatch, t
     seen: list = []
     ex, _ = await _executor(monkeypatch, tmp_path, seen)
 
-    await ex.arun(["первый"], thread_id="t", start_new_thread=True, system="cli")
+    await ex.arun(
+        ["первый"], thread_id="t", start_new_thread=True, system="cli"
+    )
     ex.stop_run()  # ход уже завершён, ничего не идёт
 
     await ex.arun(["второй"], thread_id="t", system="cli")
 
     assert [t["batch"] for t in seen] == [["первый"], ["второй"]], seen
-    assert seen[-1]["stopped"] is False, f"следующий запрос остановлен стопом от прошлого, остывшего хода: {seen}"
+    assert seen[-1]["stopped"] is False, (
+        f"следующий запрос остановлен стопом от прошлого, остывшего хода: {seen}"
+    )

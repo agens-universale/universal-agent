@@ -32,7 +32,12 @@ def _app(tmp_path, yaml_text):
 def test_resolver_matrix(gate, answers, expected):
     from gc_tui.toggles import resolve_preset
 
-    assert resolve_preset({"tui.finish_gate_mode": gate, "tui.text_answer_mode": answers}) == expected
+    assert (
+        resolve_preset(
+            {"tui.finish_gate_mode": gate, "tui.text_answer_mode": answers}
+        )
+        == expected
+    )
 
 
 def test_custom_unreachable_by_stepping(tmp_path):
@@ -45,7 +50,10 @@ def test_custom_unreachable_by_stepping(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.toggles import PRESET_CUSTOM, apply_toggle, next_toggle_value
 
-    b = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n')  # custom с самого начала
+    b = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+    )  # custom с самого начала
 
     for direction in (1, -1):
         for _ in range(7):  # больше одного полного оборота по трём значениям
@@ -63,17 +71,25 @@ def test_session_pair_not_preset_survives(tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.session_settings import read_from_meta
 
-    a = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
+    a = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+    )
     from gc_tui.toggles import apply_toggle
 
     apply_toggle(a, "rigor", "low")
     store = FileTaskStore(threads_dir=a._threads_dir, system=a._system)
     saved = read_from_meta(store.get_task_meta("t1"))
-    assert saved == {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}
+    assert saved == {
+        "tui.finish_gate_mode": "off",
+        "tui.text_answer_mode": "allow",
+    }
     assert "rigor" not in str(saved)  # пресет как значение не хранится
 
 
-def test_apply_rigor_preset_never_clears_session_overrides(tmp_path, monkeypatch):
+def test_apply_rigor_preset_never_clears_session_overrides(
+    tmp_path, monkeypatch
+):
     """§8, Г-А: «никакой выбор в палитре не снимает сессионные оверрайды» —
     прибиваем буквально, не чтением кода. `SESSION_KEYS` сейчас содержит РОВНО
     `RIGOR_KEYS` (`tui/session_settings.py`) — третьего, истинно-несвязанного
@@ -86,11 +102,20 @@ def test_apply_rigor_preset_never_clears_session_overrides(tmp_path, monkeypatch
     pytest.importorskip("textual")
     from gc_tui.toggles import apply_toggle
 
-    app = _app(tmp_path, 'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n')
-    app.apply_session_overrides({"tui.finish_gate_mode": "on"})  # частичный оверрайд
+    app = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
+    app.apply_session_overrides(
+        {"tui.finish_gate_mode": "on"}
+    )  # частичный оверрайд
 
     clear_calls = []
-    monkeypatch.setattr(app, "clear_session_overrides", lambda keys: clear_calls.append(tuple(keys)))
+    monkeypatch.setattr(
+        app,
+        "clear_session_overrides",
+        lambda keys: clear_calls.append(tuple(keys)),
+    )
 
     apply_toggle(app, "rigor", "low")
 
@@ -109,12 +134,18 @@ def test_smart_gate_counts_failed_and_subagent_calls():
 
     from gc_core.intent_guard.guard import FinishGateGuard
 
-    cfg = {"backend_api_mode": "chat_completions", "strict_turn_finish_validation": True, "finish_gate_smart": True}
+    cfg = {
+        "backend_api_mode": "chat_completions",
+        "strict_turn_finish_validation": True,
+        "finish_gate_smart": True,
+    }
     g0 = FinishGateGuard(
-        ctx=SimpleNamespace(config_dict=cfg), state=SimpleNamespace(parent_state_id=None, turn_tool_calls=0)
+        ctx=SimpleNamespace(config_dict=cfg),
+        state=SimpleNamespace(parent_state_id=None, turn_tool_calls=0),
     )
     g1 = FinishGateGuard(
-        ctx=SimpleNamespace(config_dict=cfg), state=SimpleNamespace(parent_state_id=None, turn_tool_calls=1)
+        ctx=SimpleNamespace(config_dict=cfg),
+        state=SimpleNamespace(parent_state_id=None, turn_tool_calls=1),
     )
     assert g0.enabled is False and g1.enabled is True
 
@@ -165,28 +196,51 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
     from gc_tui import palette as p
     from gc_tui.screens.settings import SettingsScreen
 
-    app = _app(tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')
+    app = _app(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+    )
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config=app._config, config_path=app._config_path, on_apply=app.reload_config)
+        scr = SettingsScreen(
+            config=app._config,
+            config_path=app._config_path,
+            on_apply=app.reload_config,
+        )
         app.push_screen(scr)
         await pilot.pause()
 
         rigor_text = scr._mode_row_text("rigor", selected=False)
-        assert any("bold" in str(s.style).lower() and p.INK.lower() in str(s.style).lower() for s in rigor_text.spans)
-        assert not any(p.DIM.lower() in str(s.style).lower() for s in rigor_text.spans)
+        assert any(
+            "bold" in str(s.style).lower()
+            and p.INK.lower() in str(s.style).lower()
+            for s in rigor_text.spans
+        )
+        assert not any(
+            p.DIM.lower() in str(s.style).lower() for s in rigor_text.spans
+        )
 
         gate_text = scr._mode_row_text("gate", selected=False)
 
         # Имя+описание ребёнка (head, включая имя команды) — DIM.
         gate_plain = gate_text.plain
-        dim_spans = [s for s in gate_text.spans if p.DIM.lower() in str(s.style).lower()]
-        assert dim_spans and dim_spans[0].start == 2  # сразу после курсора — БЕЗ отступа/маркера
-        assert dim_spans[0].end >= 2 + len("gate · самопроверка выполнения задачи")
+        dim_spans = [
+            s for s in gate_text.spans if p.DIM.lower() in str(s.style).lower()
+        ]
+        assert (
+            dim_spans and dim_spans[0].start == 2
+        )  # сразу после курсора — БЕЗ отступа/маркера
+        assert dim_spans[0].end >= 2 + len(
+            "gate · самопроверка выполнения задачи"
+        )
 
         # Подпись значения ребёнка ("on") — тоже DIM (трек между head и
         # подписью — семантические цвета, не задет).
         value_start = gate_plain.rindex("on")
-        assert any(p.DIM.lower() in str(s.style).lower() and s.start <= value_start < s.end for s in gate_text.spans)
+        assert any(
+            p.DIM.lower() in str(s.style).lower()
+            and s.start <= value_start < s.end
+            for s in gate_text.spans
+        )
 
 
 def test_exactly_one_preset_group_today():
@@ -224,7 +278,9 @@ def test_shipped_templates_resolve_to_medium():
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         app_cfg = AppConfig.model_validate(raw)
         cfg = flatten_app_config(app_cfg)
-        assert resolve_rigor_state(cfg) == "medium", f"{path.name}: не резолвится в medium"
+        assert resolve_rigor_state(cfg) == "medium", (
+            f"{path.name}: не резолвится в medium"
+        )
 
 
 @pytest.mark.asyncio
@@ -243,7 +299,9 @@ async def test_help_screen_lists_gate_and_answers_details():
             self.push_screen(HelpScreen())
 
     async with _A().run_test() as pilot:
-        cmds = "\n".join(str(s.render()) for s in pilot.app.screen.query(".help-row-cmd"))
+        cmds = "\n".join(
+            str(s.render()) for s in pilot.app.screen.query(".help-row-cmd")
+        )
         assert "/gate" in cmds and "/answers" in cmds and "/rigor" in cmds
 
 
@@ -272,7 +330,9 @@ async def test_help_detail_toggles_carry_rigor_setting_cue():
         assert "настройка /" not in rows.get("/rigor", "")
 
 
-def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch):
+def test_process_tool_calls_increments_counter_even_on_tool_failure(
+    monkeypatch,
+):
     """§8 (закрывает пробел, оставленный комментарием в тесте выше): счётчик
     инкрементится ДО try в process_tool_calls — упавший вызов (ошибка аргументов)
     считается наравне с успешным. Инкремент полностью generic по имени тула (не
@@ -290,11 +350,17 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
     WrongFunctionArgumentsException = pr.WrongFunctionArgumentsException
 
     async def _boom(**kw):
-        raise WrongFunctionArgumentsException("bad args", "{}", tool_name=kw["tool_name"])
+        raise WrongFunctionArgumentsException(
+            "bad args", "{}", tool_name=kw["tool_name"]
+        )
 
     monkeypatch.setattr(pr, "aapply_tool", _boom)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", lambda **kw: None)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_update_intent_scope_from_tool", lambda **kw: None
+    )
 
     class _State:
         messages = []
@@ -309,10 +375,17 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(monkeypatch)
     state = _State()
     ctx = SimpleNamespace(config_dict={}, logger=None)
     messages = [
-        {"type": "function_call", "name": "run_subagent", "call_id": "c1", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "run_subagent",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
     ]
     # Ошибка аргументов — output этого вызова, батч не прерывается.
-    outs = run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None)
+    )
     assert [o["call_id"] for o in outs] == ["c1"]
 
     assert state.turn_tool_calls == 1

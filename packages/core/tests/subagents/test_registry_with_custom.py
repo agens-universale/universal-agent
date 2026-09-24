@@ -43,7 +43,9 @@ class TestWithCustom:
         cfg = {"subagents_dir": str(tmp_path)}
         data = get_subagents_tools_data(cfg)
         assert len(data) == BUILTIN_COUNT + 1
-        assert data["subagent_alpha"]["description"] == "Описание subagent_alpha."
+        assert (
+            data["subagent_alpha"]["description"] == "Описание subagent_alpha."
+        )
         assert data["subagent_alpha"]["spec"]["name"] == "subagent_alpha"
 
     def test_custom_is_recognized_and_resolvable(self, tmp_path):
@@ -66,20 +68,35 @@ class TestWithCustom:
         _write(tmp_path, "b.md", "subagent_beta")
         assert resolve_subagent_definitions(cfg) is first
         # Свежий конфиг видит обоих — кэш привязан к словарю, а не к процессу.
-        assert len(resolve_subagent_definitions({"subagents_dir": str(tmp_path)})) == 2
+        assert (
+            len(resolve_subagent_definitions({"subagents_dir": str(tmp_path)}))
+            == 2
+        )
 
 
 class TestRequiredToolsAlwaysGranted:
     def test_allowlist_without_required_loads_fine(self, tmp_path):
         # Раньше это была ошибка старта; теперь ядро доливается само.
-        _write(tmp_path, "a.md", "subagent_alpha", extra="tools: [fs_read_file]\n")
+        _write(
+            tmp_path, "a.md", "subagent_alpha", extra="tools: [fs_read_file]\n"
+        )
         data = get_subagents_tools_data({"subagents_dir": str(tmp_path)})
         assert "subagent_alpha" in data
 
     def test_stop_tools_ban_warns_and_still_loads(self, tmp_path, caplog):
-        _write(tmp_path, "a.md", "subagent_alpha", extra="stop_tools: [turn_finish]\n")
+        _write(
+            tmp_path,
+            "a.md",
+            "subagent_alpha",
+            extra="stop_tools: [turn_finish]\n",
+        )
         with caplog.at_level(logging.WARNING):
-            defs = resolve_subagent_definitions({"subagents_dir": str(tmp_path)})
+            defs = resolve_subagent_definitions(
+                {"subagents_dir": str(tmp_path)}
+            )
         assert "subagent_alpha" in defs
         msgs = [r.getMessage() for r in caplog.records]
-        assert any("subagent_required_tools_kept" in m and "turn_finish" in m for m in msgs)
+        assert any(
+            "subagent_required_tools_kept" in m and "turn_finish" in m
+            for m in msgs
+        )

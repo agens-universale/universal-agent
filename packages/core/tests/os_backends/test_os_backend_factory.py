@@ -66,7 +66,9 @@ def test_resolve_harbor_rejects_non_string_exec_init():
 
 
 async def test_create_run_context_sets_local_os_backend():
-    ctx = await acreate_run_context({"backend_api_mode": "chat_completions", "save_logs": False})
+    ctx = await acreate_run_context(
+        {"backend_api_mode": "chat_completions", "save_logs": False}
+    )
     assert isinstance(ctx.os_backend, LocalFsBackend)
     assert getattr(ctx, "is_tui", False) is False
 

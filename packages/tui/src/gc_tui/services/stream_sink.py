@@ -49,12 +49,18 @@ class StreamSink:
                 # Рассуждение закончилось: модель перешла к выводу. Без этого шаг
                 # «рассуждение → вызов» навсегда оставался бы в состоянии "thinking",
                 # потому что фазу закрывала только ветка ответа.
-                if self._reasoning_started_at is not None and self._reasoning_ended_at is None:
+                if (
+                    self._reasoning_started_at is not None
+                    and self._reasoning_ended_at is None
+                ):
                     self._reasoning_ended_at = self._clock()
             else:  # "answer" (default)
                 self._answer += text
                 self._chars += len(text)
-                if self._reasoning_started_at is not None and self._reasoning_ended_at is None:
+                if (
+                    self._reasoning_started_at is not None
+                    and self._reasoning_ended_at is None
+                ):
                     self._reasoning_ended_at = self._clock()
 
     def snapshot(self) -> tuple[str, str]:
@@ -78,7 +84,10 @@ class StreamSink:
                 return (None, None)
             if self._reasoning_ended_at is None:
                 return ("thinking", None)
-            return ("done", self._reasoning_ended_at - self._reasoning_started_at)
+            return (
+                "done",
+                self._reasoning_ended_at - self._reasoning_started_at,
+            )
 
     def reset(self) -> None:
         with self._lock:
@@ -120,7 +129,9 @@ def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
     return f"⠇ {tail}" if tail else ""
 
 
-def select_stream_render(mode: str, clean_answer: str, reasoning_line: str) -> tuple[str, bool]:
+def select_stream_render(
+    mode: str, clean_answer: str, reasoning_line: str
+) -> tuple[str, bool]:
     """Что показать в StreamBlock по режиму tui_stream_display.
     Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}."""
     if mode == "minimal":

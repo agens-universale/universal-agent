@@ -109,10 +109,15 @@ def test_skills_load_ambiguous_returns_envelope_error(reg_with_packs):
     payload = json.loads(tool(skill_id="shared-name"))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "AMBIGUOUS_SKILL_ID"
-    assert set(payload["error"]["candidates"]) == {"alpha:shared-name", "beta:shared-name"}
+    assert set(payload["error"]["candidates"]) == {
+        "alpha:shared-name",
+        "beta:shared-name",
+    }
 
 
-def test_skills_load_reference_ambiguous_returns_envelope_error(reg_with_packs):
+def test_skills_load_reference_ambiguous_returns_envelope_error(
+    reg_with_packs,
+):
     import json
 
     from gc_core.tools.skills.skills_tools import LoadReferenceTool

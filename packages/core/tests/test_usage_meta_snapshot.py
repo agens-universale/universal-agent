@@ -80,5 +80,15 @@ def test_last_run_takes_precedence_when_set():
         run_start_usage_meta=baseline.to_meta(),
     )
     _, request_meta = ex.usage_meta_snapshot()
-    assert UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN]["input"] == 40
-    assert UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN]["output"] == 5
+    assert (
+        UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN][
+            "input"
+        ]
+        == 40
+    )
+    assert (
+        UsageAccount.from_meta(request_meta).by_category[CATEGORY_MAIN][
+            "output"
+        ]
+        == 5
+    )

@@ -36,7 +36,9 @@ from gc_server.swarm import storage as storage
 logger = logging.getLogger(__name__)
 
 
-FINAL_STATUSES = frozenset({"completed", "failed", "timeout", "unknown_failed"})
+FINAL_STATUSES = frozenset(
+    {"completed", "failed", "timeout", "unknown_failed"}
+)
 
 # Grace-период между SIGTERM и SIGKILL для CLI-процесса (см. swarm_spec.md §6
 # про summary compaction). Перекрывается с GNU timeout --kill-after=30 в wrapper.
@@ -70,7 +72,9 @@ def _is_pid_alive(pid: int) -> bool:
         return True
 
 
-def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> None:
+def _kill_process_tree(
+    pid: int, grace_period: float = _KILL_GRACE_SECONDS
+) -> None:
     """Послать SIGTERM всей process group → подождать → SIGKILL если жив.
 
     Полагается на `start_new_session=True` в runner.py (шаг 1.6): PID == PGID,
@@ -283,7 +287,11 @@ def _enforce_resource_limits(
 
     # --- Disk quota (шаг 2.2) ---
     disk_limit_mb = limits.get("disk_mb")
-    if isinstance(disk_limit_mb, (int, float)) and disk_limit_mb > 0 and sandbox_path:
+    if (
+        isinstance(disk_limit_mb, (int, float))
+        and disk_limit_mb > 0
+        and sandbox_path
+    ):
         actual_mb = _get_dir_size_mb(sandbox_path)
         if actual_mb is not None and actual_mb > disk_limit_mb:
             if isinstance(pid, int) and _is_pid_alive(pid):
@@ -300,7 +308,9 @@ def _enforce_resource_limits(
                 meta,
                 swarm_logs_dir=swarm_logs_dir,
                 error_type="disk_limit",
-                error_message=(f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds limit ({disk_limit_mb}MB)"),
+                error_message=(
+                    f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds limit ({disk_limit_mb}MB)"
+                ),
             )
 
     # --- Memory limit через psutil (шаг 2.3) ---
@@ -328,7 +338,9 @@ def _enforce_resource_limits(
                     swarm_id,
                     meta,
                     error_type="memory_limit",
-                    error_message=(f"RSS ({rss_mb:.1f}MB) exceeds limit ({mem_limit_mb}MB)"),
+                    error_message=(
+                        f"RSS ({rss_mb:.1f}MB) exceeds limit ({mem_limit_mb}MB)"
+                    ),
                 )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
@@ -359,7 +371,9 @@ def _enforce_resource_limits(
                     swarm_id,
                     meta,
                     error_type="cpu_limit",
-                    error_message=(f"CPU ({cpu_pct:.0f}%) exceeds limit ({cpu_limit}%)"),
+                    error_message=(
+                        f"CPU ({cpu_pct:.0f}%) exceeds limit ({cpu_limit}%)"
+                    ),
                 )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
@@ -421,7 +435,9 @@ def check_and_finalize(
                 "status": "timeout",
                 "finished_at": storage._utc_now_iso(),
                 "error_type": "timeout",
-                "error_message": (f"Killed by Python-side timeout after deadline {swarm_meta.get('deadline_at')}"),
+                "error_message": (
+                    f"Killed by Python-side timeout after deadline {swarm_meta.get('deadline_at')}"
+                ),
                 "sandbox_status": "completed",
             }
             base_meta = {

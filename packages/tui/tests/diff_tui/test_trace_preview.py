@@ -15,7 +15,9 @@ def test_visual_diff_provides_preview_lines_for_pending(tmp_path, monkeypatch):
     target = root / "src" / "foo.py"
     target.write_text("line1\nline2\nline3\nline4\n", encoding="utf-8")
     DiffStore(str(root)).register_mutation(str(target))
-    target.write_text("line1\nCHANGED\nline3\nline4\nextra\n", encoding="utf-8")
+    target.write_text(
+        "line1\nCHANGED\nline3\nline4\nextra\n", encoding="utf-8"
+    )
 
     svc = DiffService(
         str(root),

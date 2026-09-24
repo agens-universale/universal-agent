@@ -45,13 +45,19 @@ def _assert_canon(scr, *, scroll_id, frame_id, footer_id):
     footer = scr.query_one(footer_id)
     viewport = scr.region
     # (1) футер виден целиком
-    assert footer.display and footer.region.height > 0, f"{footer_id} не отрисован"
-    assert viewport.contains_region(footer.region), f"{footer_id} за краем экрана: {footer.region} ⊄ {viewport}"
+    assert footer.display and footer.region.height > 0, (
+        f"{footer_id} не отрисован"
+    )
+    assert viewport.contains_region(footer.region), (
+        f"{footer_id} за краем экрана: {footer.region} ⊄ {viewport}"
+    )
     # (2) рамка цельная: её носитель целиком во вьюпорте — ни верх, ни низ границы
     #     не уехали за край (а значит, скроллится содержимое ВНУТРИ неё, не она сама)
     # styles.border — четвёрка (тип, цвет) по сторонам; «рамки нет» = пустой ТИП
     # (сама четвёрка есть всегда, поэтому проверяем именно тип).
-    bordered = [w for w in (scroll, frame) if any(edge[0] for edge in w.styles.border)]
+    bordered = [
+        w for w in (scroll, frame) if any(edge[0] for edge in w.styles.border)
+    ]
     assert bordered, f"ни {scroll_id}, ни {frame_id} не рисуют рамку"
     for widget in bordered:
         assert viewport.contains_region(widget.region), (
@@ -70,12 +76,25 @@ def _assert_canon(scr, *, scroll_id, frame_id, footer_id):
     #     раньше, чем до неё доходило содержимое) и до остатка можно доехать скроллом
     #     (переполнение само по себе не гарантия — именно `max_scroll_y == 0` при
     #     переполненном содержимом и делало секцию непрокручиваемой).
-    assert scroll.content_region.height > 0, f"{scroll_id}: вьюпорт пуст — рамке (граница+паддинг) нечего показывать"
-    assert scroll.max_scroll_y > 0, f"{scroll_id}: контент переполняет вьюпорт, но max_scroll_y == 0 — непрокручиваемо"
+    assert scroll.content_region.height > 0, (
+        f"{scroll_id}: вьюпорт пуст — рамке (граница+паддинг) нечего показывать"
+    )
+    assert scroll.max_scroll_y > 0, (
+        f"{scroll_id}: контент переполняет вьюпорт, но max_scroll_y == 0 — непрокручиваемо"
+    )
 
 
 @pytest.mark.parametrize(
-    "section", ["Подключение", "Модели", "Профили", "MCP-серверы", "Голосовой ввод", "Режимы работы", "Обновление"]
+    "section",
+    [
+        "Подключение",
+        "Модели",
+        "Профили",
+        "MCP-серверы",
+        "Голосовой ввод",
+        "Режимы работы",
+        "Обновление",
+    ],
 )
 async def test_settings_footer_survives_overflowing_section(tmp_path, section):
     from gc_tui.app import TuiApp
@@ -84,14 +103,22 @@ async def test_settings_footer_survives_overflowing_section(tmp_path, section):
     app = TuiApp(config=_cfg())
     async with app.run_test(size=_TINY) as pilot:
         scr = SettingsScreen(
-            config=_cfg(), config_path=str(tmp_path / "config.yml"), on_apply=lambda: None, probe_fn=ok_probe()
+            config=_cfg(),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, section)
         await pilot.pause()
         await pilot.pause()
-        _assert_canon(scr, scroll_id="#set-scroll", frame_id="#set-frame", footer_id="#set-footer")
+        _assert_canon(
+            scr,
+            scroll_id="#set-scroll",
+            frame_id="#set-frame",
+            footer_id="#set-footer",
+        )
 
 
 async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
@@ -109,11 +136,17 @@ async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
     from test_settings_models_section import _SECTION, _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
-    registry = "models:\n" + "".join(f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(15))
+    registry = "models:\n" + "".join(
+        f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(15)
+    )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with mock.patch.object(model_picker, "fetch_models", lambda *a, **k: [ModelInfo(id="test-model")]):
+    with mock.patch.object(
+        model_picker,
+        "fetch_models",
+        lambda *a, **k: [ModelInfo(id="test-model")],
+    ):
         async with app.run_test(size=_TINY) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
             app.push_screen(scr)
@@ -129,7 +162,12 @@ async def test_selected_row_is_pulled_into_the_capped_frame(tmp_path):
             assert scr.region.contains_region(row.region), (
                 f"подсвеченная строка не подведена в кадр: {row.region} ⊄ {scr.region}"
             )
-            _assert_canon(scr, scroll_id="#set-scroll", frame_id="#set-frame", footer_id="#set-footer")
+            _assert_canon(
+                scr,
+                scroll_id="#set-scroll",
+                frame_id="#set-frame",
+                footer_id="#set-footer",
+            )
 
 
 async def test_onboarding_footer_survives_overflowing_step(tmp_path):
@@ -154,7 +192,9 @@ async def test_onboarding_footer_survives_overflowing_step(tmp_path):
         scr = OnboardingScreen(
             config={
                 "completions_url": "http://your-backend:PORT/v1/chat/completions",
-                "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+                "chat_completion_headers": {
+                    "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+                },
                 "model": "<ВПИШИТЕ_МОДЕЛЬ>",
             },
             config_path=str(tmp_path / "config.yml"),
@@ -166,7 +206,12 @@ async def test_onboarding_footer_survives_overflowing_step(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        _assert_canon(scr, scroll_id="#onb-scroll", frame_id="#onb-frame", footer_id="#onb-footer")
+        _assert_canon(
+            scr,
+            scroll_id="#onb-scroll",
+            frame_id="#onb-frame",
+            footer_id="#onb-footer",
+        )
 
 
 def _target(scr, selector: str):
@@ -204,11 +249,17 @@ async def test_delete_confirm_banner_is_pulled_into_view(tmp_path):
     from test_settings_models_section import _SECTION, _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
-    registry = "models:\n" + "".join(f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(12))
+    registry = "models:\n" + "".join(
+        f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(12)
+    )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with mock.patch.object(model_picker, "fetch_models", lambda *a, **k: [ModelInfo(id="test-model")]):
+    with mock.patch.object(
+        model_picker,
+        "fetch_models",
+        lambda *a, **k: [ModelInfo(id="test-model")],
+    ):
         async with app.run_test(size=_TINY) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
             app.push_screen(scr)
@@ -229,7 +280,10 @@ async def test_update_confirm_banner_is_pulled_into_view(tmp_path):
     app = TuiApp(config=_cfg())
     async with app.run_test(size=_TINY) as pilot:
         scr = SettingsScreen(
-            config=_cfg(), config_path=str(tmp_path / "config.yml"), on_apply=lambda: None, probe_fn=ok_probe()
+            config=_cfg(),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -262,7 +316,12 @@ async def test_env_overwrite_confirm_is_pulled_into_view(tmp_path):
     )
     app = TuiApp(config=_cfg())
     async with app.run_test(size=_TINY) as pilot:
-        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file), on_apply=lambda: None, probe_fn=ok_probe())
+        scr = SettingsScreen(
+            config=_cfg(),
+            config_path=str(cfg_file),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
+        )
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Подключение")
@@ -278,7 +337,9 @@ async def test_profile_name_prompt_is_pulled_into_view(tmp_path):
     from test_settings_models_section import _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
-    registry = "models:\n" + "".join(f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(12))
+    registry = "models:\n" + "".join(
+        f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(12)
+    )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
@@ -304,7 +365,10 @@ async def test_settings_menu_cursor_is_pulled_into_view(tmp_path):
     app = TuiApp(config=_cfg())
     async with app.run_test(size=(80, 16)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(), config_path=str(tmp_path / "config.yml"), on_apply=lambda: None, probe_fn=ok_probe()
+            config=_cfg(),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
         )
         app.push_screen(scr)
         await pilot.pause()
@@ -332,11 +396,17 @@ async def test_post_update_footer_survives_overflowing_card(monkeypatch):
 
     outdated = [f"server-{i}" for i in range(6)]  # длинная строка → перенос
     monkeypatch.setattr(cli, "wired_names", lambda config=None: outdated)
-    monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], None))
+    monkeypatch.setattr(
+        cli, "load_manifest_entries", lambda config=None: ([], None)
+    )
     monkeypatch.setattr(
         cli,
         "installed_state",
-        lambda name, config=None, manifest=None: {"installed": True, "version": "0.1.0", "update": "0.2.0"},
+        lambda name, config=None, manifest=None: {
+            "installed": True,
+            "version": "0.1.0",
+            "update": "0.2.0",
+        },
     )
     monkeypatch.setattr(config_sync, "needs_sync", lambda *a, **k: True)
     app = app_mod.TuiApp(config={})
@@ -345,7 +415,12 @@ async def test_post_update_footer_survives_overflowing_card(monkeypatch):
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        _assert_canon(scr, scroll_id="#pu-scroll", frame_id="#pu-frame", footer_id="#footer")
+        _assert_canon(
+            scr,
+            scroll_id="#pu-scroll",
+            frame_id="#pu-frame",
+            footer_id="#footer",
+        )
 
 
 @pytest.mark.parametrize("h", [14, 24, 30])
@@ -365,18 +440,26 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
     from test_settings_models_section import _SECTION, _write_cfg
     from test_settings_screen import _loaded, _mk_screen
 
-    registry = "models:\n" + "".join(f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(15))
+    registry = "models:\n" + "".join(
+        f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(15)
+    )
     cfg_file = _write_cfg(tmp_path, registry)
     cfg = _loaded(cfg_file)
     app = app_mod.TuiApp(config=cfg)
-    with mock.patch.object(model_picker, "fetch_models", lambda *a, **k: [ModelInfo(id="test-model")]):
+    with mock.patch.object(
+        model_picker,
+        "fetch_models",
+        lambda *a, **k: [ModelInfo(id="test-model")],
+    ):
         async with app.run_test(size=(80, h)) as pilot:
             scr = _mk_screen(config=cfg, config_path=str(cfg_file))
             app.push_screen(scr)
             await pilot.pause()
             open_settings_section(scr, _SECTION)
             await pilot.pause()
-            scr._notice("итог операции")  # плашка внизу секции, живёт до пересборки
+            scr._notice(
+                "итог операции"
+            )  # плашка внизу секции, живёт до пересборки
             await pilot.pause()
             for _ in range(20):
                 await pilot.press("down")
@@ -384,7 +467,9 @@ async def test_notice_does_not_outrank_the_cursor(tmp_path, h):
 
 
 @pytest.mark.parametrize("h", [7, 8, 9, 10, 11])
-async def test_frame_goes_compact_when_its_own_box_would_eat_the_viewport(tmp_path, h):
+async def test_frame_goes_compact_when_its_own_box_would_eat_the_viewport(
+    tmp_path, h
+):
     """Ниже 12 строк собственная коробка рамки (граница `round` + вертикальный
     `padding: 1 2`, 4 строки разом) съедала остаток экрана РАНЬШЕ, чем до него
     добиралось содержимое: потолок стоял (`available` было положительным), но
@@ -397,11 +482,16 @@ async def test_frame_goes_compact_when_its_own_box_would_eat_the_viewport(tmp_pa
     app = TuiApp(config=_cfg())
     async with app.run_test(size=(80, h)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(), config_path=str(tmp_path / "config.yml"), on_apply=lambda: None, probe_fn=ok_probe()
+            config=_cfg(),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        open_settings_section(scr, "Режимы работы")  # секция заведомо выше любого окна
+        open_settings_section(
+            scr, "Режимы работы"
+        )  # секция заведомо выше любого окна
         await pilot.pause()
         await pilot.pause()
         scroll = scr.query_one("#set-scroll")
@@ -436,7 +526,10 @@ async def test_frame_cap_is_never_left_stale_on_floor_height(tmp_path):
     app = TuiApp(config=_cfg())
     async with app.run_test(size=(80, 6)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(), config_path=str(tmp_path / "config.yml"), on_apply=lambda: None, probe_fn=ok_probe()
+            config=_cfg(),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -452,7 +545,9 @@ async def test_frame_cap_is_never_left_stale_on_floor_height(tmp_path):
             f"футер физически помещается (6 строк ровно хватает на шапку+отступы+футер), "
             f"но за краем: {footer.region} ⊄ {scr.region}"
         )
-        assert scroll.max_scroll_y > 0, "контент длиннее вьюпорта, но max_scroll_y == 0 — секция непрокручиваема"
+        assert scroll.max_scroll_y > 0, (
+            "контент длиннее вьюпорта, но max_scroll_y == 0 — секция непрокручиваема"
+        )
 
 
 @pytest.mark.parametrize("new_h", [30, 16, 12, 8, 6])
@@ -472,11 +567,16 @@ async def test_canon_survives_live_resize(tmp_path, new_h):
     app = TuiApp(config=_cfg())
     async with app.run_test(size=(80, 40)) as pilot:
         scr = SettingsScreen(
-            config=_cfg(), config_path=str(tmp_path / "config.yml"), on_apply=lambda: None, probe_fn=ok_probe()
+            config=_cfg(),
+            config_path=str(tmp_path / "config.yml"),
+            on_apply=lambda: None,
+            probe_fn=ok_probe(),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        open_settings_section(scr, "Подключение")  # секция заведомо выше любого окна
+        open_settings_section(
+            scr, "Подключение"
+        )  # секция заведомо выше любого окна
         await pilot.pause()
         await pilot.resize_terminal(80, new_h)
         await pilot.pause()

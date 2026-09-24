@@ -24,7 +24,11 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, Static
 
-from gc_tui.editors.field_list import LIST_FAILED, LIST_LOADING, FieldListController
+from gc_tui.editors.field_list import (
+    LIST_FAILED,
+    LIST_LOADING,
+    FieldListController,
+)
 from gc_tui.palette import ACCENT, DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
 
@@ -64,7 +68,9 @@ class ModelEditor(Vertical):
         config_proxy: str | None = None,
     ) -> None:
         super().__init__(classes="onb-dyn")
-        self._active_overridden = active_overridden  # модель из файла перекрыта оверлеем
+        self._active_overridden = (
+            active_overridden  # модель из файла перекрыта оверлеем
+        )
         self._current = current or ""
         self._endpoint = endpoint
         self._auth = auth
@@ -76,12 +82,18 @@ class ModelEditor(Vertical):
         self._on_loaded = on_loaded
         self._models = None
         self._gen = 0  # поколение загрузки: протухший ответ отбрасывается
-        self._synthetic = False  # псевдо-список из active (сервер список не отдал)
+        self._synthetic = (
+            False  # псевдо-список из active (сервер список не отдал)
+        )
         self._active_offered = True  # действующая модель есть в ответе сервера
         self.models_loaded = False
-        self._filter: str = ""  # напечатанное в поле — оно же фильтр (on_input_changed)
+        self._filter: str = (
+            ""  # напечатанное в поле — оно же фильтр (on_input_changed)
+        )
         self._marked = ""  # модель, зафиксированная в этой сессии (● на ней)
-        self._prev_row: _Row | None = None  # строка под ▸ до пересбора (см. _list_initial_index)
+        self._prev_row: _Row | None = (
+            None  # строка под ▸ до пересбора (см. _list_initial_index)
+        )
         self._list = FieldListController(
             self,
             input_id=self._input_id,
@@ -100,7 +112,9 @@ class ModelEditor(Vertical):
         )
 
     def compose(self) -> ComposeResult:
-        yield Static(LIST_LOADING, classes=_CLS_ONB_HINT_ONB_DYN, id="onb-model-loading")
+        yield Static(
+            LIST_LOADING, classes=_CLS_ONB_HINT_ONB_DYN, id="onb-model-loading"
+        )
 
     def on_mount(self) -> None:
         self._start_fetch()
@@ -113,7 +127,12 @@ class ModelEditor(Vertical):
         `refresh` — просьба к `fetch` не отвечать из кэша (см. `reload`)."""
         self._gen += 1
         gen = self._gen
-        self.run_worker(lambda: self._fetch_blocking(gen, refresh), thread=True, exclusive=True, name="model-fetch")
+        self.run_worker(
+            lambda: self._fetch_blocking(gen, refresh),
+            thread=True,
+            exclusive=True,
+            name="model-fetch",
+        )
 
     def reload(self) -> bool:
         """Alt+↓ на поле моделей: перечитать список с сервера принудительно —
@@ -176,7 +195,9 @@ class ModelEditor(Vertical):
             return
         # Строка, на которой стоял курсор ДО пересбора (перечитывание), или None —
         # первая загрузка, возвращать неоткуда.
-        self._prev_row = self._list.selected_item if self.models_loaded else None
+        self._prev_row = (
+            self._list.selected_item if self.models_loaded else None
+        )
         self._synthetic = False
         self._active_offered = True
         if not models and self._active:
@@ -259,7 +280,11 @@ class ModelEditor(Vertical):
         active = self._active_model()
         if active is not None:
             rows.append(_Row("current", active))
-        rows.extend(_Row("model", m) for m in (self._models or []) if m.id != self._active)
+        rows.extend(
+            _Row("model", m)
+            for m in (self._models or [])
+            if m.id != self._active
+        )
         return rows
 
     @staticmethod
@@ -341,10 +366,19 @@ class ModelEditor(Vertical):
             # Списка нет — группировать поле не с чем: остаётся одинокий ручной ввод
             # со своей рамкой и префиллом действующей модели.
             inp = PasteInput(
-                value=self._current, placeholder="имя модели", id=self._input_id, classes="onb-dyn set-framed"
+                value=self._current,
+                placeholder="имя модели",
+                id=self._input_id,
+                classes="onb-dyn set-framed",
             )
             self.mount(inp)
-            self.mount(Static(LIST_FAILED, id=self._source_id(), classes=_CLS_ONB_HINT_ONB_DYN))
+            self.mount(
+                Static(
+                    LIST_FAILED,
+                    id=self._source_id(),
+                    classes=_CLS_ONB_HINT_ONB_DYN,
+                )
+            )
             inp.focus()
             return
         # Поле и его список — под одной рамкой (спека §3.1): поле само себе фильтр,
@@ -366,12 +400,17 @@ class ModelEditor(Vertical):
         # надо именно его, иначе строки и поле показывали бы разное. На первой загрузке
         # _filter пуст, то есть поле, как и раньше, стартует пустым.
         inp = PasteInput(
-            value=self._filter, placeholder=_FIELD_PLACEHOLDER, id=self._input_id, classes="onb-dyn group-field"
+            value=self._filter,
+            placeholder=_FIELD_PLACEHOLDER,
+            id=self._input_id,
+            classes="onb-dyn group-field",
         )
         # Без set-framed: рамку рисует группа, а класс поля перебил бы её по
         # специфичности (#onb-model.set-framed — id+класс) и дал бы вторую рамку
         # внутри первой. Воздух внутри рамки — margin по .group-field.
-        group = Vertical(id=f"{self._input_id}-group", classes="field-group onb-dyn")
+        group = Vertical(
+            id=f"{self._input_id}-group", classes="field-group onb-dyn"
+        )
         # Группу и поле монтируем ПООЧЕРЁДНО и с await: строки список ставит сам, а
         # найти поле он может только по id — дети, переданные конструктору контейнера,
         # до compose-прохода лежат в `_pending_children` и запросом не находятся.
@@ -385,11 +424,19 @@ class ModelEditor(Vertical):
         # Счётчик, «ничего не найдено», ⚠ и источник — ПОД рамкой (§3.2.2/§3.2.4:
         # внутри неё только выбор). Монтируются раз и навсегда, дальше меняется
         # только их текст: пересборка сносила бы поле, в котором печатают.
-        self.mount(Static("", id=self._count_id(), classes=_CLS_ONB_HINT_ONB_DYN))
-        self.mount(Static("", id=self._nomatch_id(), classes=_CLS_ONB_HINT_ONB_DYN))
+        self.mount(
+            Static("", id=self._count_id(), classes=_CLS_ONB_HINT_ONB_DYN)
+        )
+        self.mount(
+            Static("", id=self._nomatch_id(), classes=_CLS_ONB_HINT_ONB_DYN)
+        )
         self.mount(Static("", id=self._warn_id(), classes="onb-warn onb-dyn"))
         self.mount(
-            Static(LIST_FAILED if self._synthetic else _SOURCE_OK, id=self._source_id(), classes=_CLS_ONB_HINT_ONB_DYN)
+            Static(
+                LIST_FAILED if self._synthetic else _SOURCE_OK,
+                id=self._source_id(),
+                classes=_CLS_ONB_HINT_ONB_DYN,
+            )
         )
         self._refresh_status()
         # Поле — внук (лежит в группе), а внуки монтируются отдельным проходом:
@@ -404,10 +451,15 @@ class ModelEditor(Vertical):
         from gc_tui.services.probe_presentation import plural_models
 
         self._set_status(self._count_id(), f"{n} {plural_models(n)}")
-        no_match = bool(self._filter) and not any(r.kind == "model" for r in self._rows)
+        no_match = bool(self._filter) and not any(
+            r.kind == "model" for r in self._rows
+        )
         self._set_status(self._nomatch_id(), _NO_MATCH if no_match else "")
         warn = any(
-            r.kind in ("current", "model") and r.model is not None and r.model.tool_capable is False for r in self._rows
+            r.kind in ("current", "model")
+            and r.model is not None
+            and r.model.tool_capable is False
+            for r in self._rows
         )
         self._set_status(self._warn_id(), f"⚠ {MODEL_WARN}" if warn else "")
 
@@ -467,8 +519,17 @@ class ModelEditor(Vertical):
         if prev is None:
             return anchor
         if prev.kind == "current":
-            return next((i for i, r in enumerate(rows) if r.kind == prev.kind), anchor)
-        return next((i for i, r in enumerate(rows) if r.kind == "model" and r.model.id == prev.model.id), anchor)
+            return next(
+                (i for i, r in enumerate(rows) if r.kind == prev.kind), anchor
+            )
+        return next(
+            (
+                i
+                for i, r in enumerate(rows)
+                if r.kind == "model" and r.model.id == prev.model.id
+            ),
+            anchor,
+        )
 
     @property
     def is_marked(self) -> bool:
@@ -543,7 +604,10 @@ class ModelEditor(Vertical):
 
     def _manual_value(self) -> str | None:
         try:
-            return self.query_one(self._manual_selector(), Input).value.strip() or None
+            return (
+                self.query_one(self._manual_selector(), Input).value.strip()
+                or None
+            )
         except Exception:
             return None
 

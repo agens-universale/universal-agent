@@ -28,7 +28,10 @@ def _adapter_tree():
 
 def _func(tree, name):
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
     raise AssertionError(f"{name} не найдена в адаптере")
 
@@ -46,7 +49,9 @@ def test_agent_run_closes_its_pool_in_finally():
         for c in ast.walk(stmt)
         if isinstance(c, ast.Call)
     )
-    assert closed_in_finally, "aclose_clients() не в finally — клиент трайла доживёт до сборщика"
+    assert closed_in_finally, (
+        "aclose_clients() не в finally — клиент трайла доживёт до сборщика"
+    )
 
 
 def test_agent_run_releases_the_trial_logger_in_finally():
@@ -62,7 +67,9 @@ def test_agent_run_releases_the_trial_logger_in_finally():
         for c in ast.walk(stmt)
         if isinstance(c, ast.Call)
     )
-    assert released_in_finally, "release_run_logger() не в finally — логгер трайла живёт до конца процесса"
+    assert released_in_finally, (
+        "release_run_logger() не в finally — логгер трайла живёт до конца процесса"
+    )
 
 
 def test_cancellation_is_recorded_before_the_executor_exists():
@@ -71,16 +78,22 @@ def test_cancellation_is_recorded_before_the_executor_exists():
     run = _func(tree, "_agent_run")
 
     names = {n.attr for n in ast.walk(run) if isinstance(n, ast.Attribute)}
-    assert "_cancelled" in names, "_agent_run не смотрит на отмену: отменённый трайл всё равно уйдёт в arun"
+    assert "_cancelled" in names, (
+        "_agent_run не смотрит на отмену: отменённый трайл всё равно уйдёт в arun"
+    )
     src = ADAPTER.read_text(encoding="utf-8")
     assert "self._cancelled = True" in src, "флаг отмены никто не ставит"
-    assert "_cancel_lock" in src, "флаг без лока: ставит его loop Harbor, читает рабочий поток агента"
+    assert "_cancel_lock" in src, (
+        "флаг без лока: ставит его loop Harbor, читает рабочий поток агента"
+    )
 
 
 def test_step_timings_reads_the_handle_under_the_lock():
     """Гонка на закрытии: дескриптор и читается, и пишется под одним локом."""
     sys.path.insert(0, str(HARBOR))
-    for key in [k for k in sys.modules if k.startswith("adapters.step_timings")]:
+    for key in [
+        k for k in sys.modules if k.startswith("adapters.step_timings")
+    ]:
         del sys.modules[key]
     import adapters.step_timings as mod
 
@@ -88,8 +101,14 @@ def test_step_timings_reads_the_handle_under_the_lock():
     emit = _func(ast.parse(src), "_emit")
 
     # Первый оператор тела — вход в лок; чтение дескриптора уже внутри.
-    assert isinstance(emit.body[0], ast.With), "_emit снова читает self._fh до входа в лок"
-    read_lines = [n.lineno for n in ast.walk(emit) if isinstance(n, ast.Attribute) and n.attr == "_fh"]
+    assert isinstance(emit.body[0], ast.With), (
+        "_emit снова читает self._fh до входа в лок"
+    )
+    read_lines = [
+        n.lineno
+        for n in ast.walk(emit)
+        if isinstance(n, ast.Attribute) and n.attr == "_fh"
+    ]
     assert read_lines and min(read_lines) > emit.body[0].lineno, read_lines
 
 

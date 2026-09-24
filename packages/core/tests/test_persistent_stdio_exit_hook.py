@@ -72,7 +72,9 @@ def _session(monkeypatch, *, close_tool: str | None = None):
     sess = ps.PersistentStdioSession.__new__(ps.PersistentStdioSession)
     sess._lock = threading.Lock()
     sess._proc = _FakeProc()
-    sess._server_cfg = {"persistent_session_close_tool": close_tool} if close_tool else {}
+    sess._server_cfg = (
+        {"persistent_session_close_tool": close_tool} if close_tool else {}
+    )
     sess._server_name = "probe"
 
     # Двойник повторяет ФОРМУ прода: терминация теперь только корутинная,
@@ -106,7 +108,9 @@ def test_close_does_not_wait_for_a_held_lock(monkeypatch):
     release.set()
     t.join(5)
 
-    assert elapsed < 1.0, f"close() ждал лок {elapsed:.2f} с — atexit подвесит выход процесса"
+    assert elapsed < 1.0, (
+        f"close() ждал лок {elapsed:.2f} с — atexit подвесит выход процесса"
+    )
     assert sess._proc is None, "процесс не снят с сессии"
 
 
@@ -124,7 +128,11 @@ def test_prologue_is_skipped_when_the_lock_is_busy(monkeypatch):
         "_read_matching_on",
         lambda self, proc, req_id, timeout: pytest.fail("читали чужой ридер"),
     )
-    monkeypatch.setattr(ps.PersistentStdioSession, "_close_prologue_tail", lambda self, proc: None)
+    monkeypatch.setattr(
+        ps.PersistentStdioSession,
+        "_close_prologue_tail",
+        lambda self, proc: None,
+    )
 
     holder_in = threading.Event()
     release = threading.Event()
@@ -163,8 +171,14 @@ def test_prologue_still_runs_when_the_lock_is_free(monkeypatch):
         "_read_matching_on",
         lambda self, proc, req_id, timeout: {"id": req_id},
     )
-    monkeypatch.setattr(ps.PersistentStdioSession, "_close_prologue_tail", lambda self, proc: None)
+    monkeypatch.setattr(
+        ps.PersistentStdioSession,
+        "_close_prologue_tail",
+        lambda self, proc: None,
+    )
 
     sess.close()
 
-    assert wrote == ["browser_close_all"], "на свободном локе close-тул не отправлен — потомки сервера переживут агента"
+    assert wrote == ["browser_close_all"], (
+        "на свободном локе close-тул не отправлен — потомки сервера переживут агента"
+    )

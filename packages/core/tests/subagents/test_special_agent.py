@@ -69,7 +69,9 @@ def _make_ctx(cfg=None):
 
 
 def _make_state(model="test-model"):
-    return SimpleNamespace(default_model=model, usage=None, state_id="s1", x_target=None)
+    return SimpleNamespace(
+        default_model=model, usage=None, state_id="s1", x_target=None
+    )
 
 
 class TestSpecialAgentCreateInstance:
@@ -178,7 +180,10 @@ class TestFinalizeRole:
         ) as mock_call:
             run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
-        assert mock_call.call_args.kwargs["max_tokens"] == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+        assert (
+            mock_call.call_args.kwargs["max_tokens"]
+            == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+        )
 
     def test_generate_role_failure_propagates(self):
         """If LLM call fails, finalize_role should raise."""
@@ -257,6 +262,11 @@ class TestSpecialAgentWithRunner:
         child_state = call_args[0][1]
 
         user_msgs = [m for m in messages if m["role"] == "user"]
-        assert any("Audit the authentication module" in m["content"] for m in user_msgs)
+        assert any(
+            "Audit the authentication module" in m["content"]
+            for m in user_msgs
+        )
         assert child_state.parent_state_id == orch.state_id
-        assert child_state.specific_role.startswith("You are a security auditor.")
+        assert child_state.specific_role.startswith(
+            "You are a security auditor."
+        )

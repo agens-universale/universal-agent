@@ -107,7 +107,11 @@ class AsyncMemoryThreadStore:
 @pytest.fixture(params=["sync", "async"])
 def store(request):
     """Обе формы чужого хранилища проходят одну приёмку."""
-    return MemoryThreadStore() if request.param == "sync" else AsyncMemoryThreadStore()
+    return (
+        MemoryThreadStore()
+        if request.param == "sync"
+        else AsyncMemoryThreadStore()
+    )
 
 
 def _inner(store):
@@ -118,7 +122,9 @@ def _inner(store):
 SDK_SYS = "sdk"
 
 
-async def test_sdk_run_writes_only_to_the_given_store(tmp_path, monkeypatch, store):
+async def test_sdk_run_writes_only_to_the_given_store(
+    tmp_path, monkeypatch, store
+):
     """Главный гейт: полный прогон агента не создаёт ни одного файла треда.
 
     ``tmp_path`` — рабочий каталог прогона, и после него там не должно
@@ -136,9 +142,15 @@ async def test_sdk_run_writes_only_to_the_given_store(tmp_path, monkeypatch, sto
     thread_files = [
         p
         for p in tmp_path.rglob("*")
-        if p.is_file() and (p.name.startswith(("data_", "meta_")) or "__pre_summary__" in p.name)
+        if p.is_file()
+        and (
+            p.name.startswith(("data_", "meta_"))
+            or "__pre_summary__" in p.name
+        )
     ]
-    assert thread_files == [], f"прогон создал файлы треда вопреки чужому хранилищу: {thread_files}"
+    assert thread_files == [], (
+        f"прогон создал файлы треда вопреки чужому хранилищу: {thread_files}"
+    )
 
 
 async def test_sdk_run_persists_the_whole_thread(tmp_path, monkeypatch, store):
@@ -159,7 +171,9 @@ async def test_sdk_run_persists_the_whole_thread(tmp_path, monkeypatch, store):
 
     assert "user" in roles, "пользовательское сообщение не сохранилось"
     assert any(r == "function_call" for r in roles), "вызов тула не сохранился"
-    assert any(r == "function_call_output" for r in roles), "результат тула не сохранился"
+    assert any(r == "function_call_output" for r in roles), (
+        "результат тула не сохранился"
+    )
     assert all(m.get("id") for m in messages), "у сообщения нет id"
 
     meta = inner.load_meta(SDK_SYS, "t-sdk")
@@ -170,7 +184,9 @@ async def test_sdk_run_persists_the_whole_thread(tmp_path, monkeypatch, store):
     assert isinstance(meta.get("token_usage"), dict), "token_usage не записан"
 
 
-async def test_runtime_flags_are_cleared_after_the_run(tmp_path, monkeypatch, store):
+async def test_runtime_flags_are_cleared_after_the_run(
+    tmp_path, monkeypatch, store
+):
     """Секции ``runtime`` не остаётся: индикаторы сняты, пустая секция убрана.
 
     Свойство контракта («снятие последнего флага убирает секцию целиком»)
@@ -188,7 +204,9 @@ async def test_runtime_flags_are_cleared_after_the_run(tmp_path, monkeypatch, st
         assert not runtime.get(flag), f"индикатор {flag} остался взведённым"
 
 
-async def test_second_run_continues_the_same_thread(tmp_path, monkeypatch, store):
+async def test_second_run_continues_the_same_thread(
+    tmp_path, monkeypatch, store
+):
     """Второй прогон дочитывает историю из хранилища и продолжает её.
 
     Проверяет чтение — ``load_thread_state`` и ``max_seq``. Ошибка «номер
@@ -211,11 +229,15 @@ async def test_second_run_continues_the_same_thread(tmp_path, monkeypatch, store
     assert len({m["id"] for m in messages}) == len(messages), "id задвоились"
 
     texts = [str(m.get("content") or "") for m in messages]
-    assert any("первый" in t for t in texts), "история первого прогона потеряна"
+    assert any("первый" in t for t in texts), (
+        "история первого прогона потеряна"
+    )
     assert any("второй" in t for t in texts), "второй прогон не записан"
 
 
-async def test_native_async_store_is_awaited_not_adapted(tmp_path, monkeypatch):
+async def test_native_async_store_is_awaited_not_adapted(
+    tmp_path, monkeypatch
+):
     """Асинхронное хранилище ждётся нативно, а не заворачивается в адаптер.
 
     Иначе выигрыш мнимый: адаптер зовёт синхронно, и сетевой round-trip
@@ -229,10 +251,14 @@ async def test_native_async_store_is_awaited_not_adapted(tmp_path, monkeypatch):
         await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited > 0, "ни одна корутина хранилища не была дождана"
-    assert store.inner.load_messages(SDK_SYS, "t-sdk"), "история не сохранилась"
+    assert store.inner.load_messages(SDK_SYS, "t-sdk"), (
+        "история не сохранилась"
+    )
 
 
-async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypatch):
+async def test_loop_stays_responsive_with_a_slow_async_store(
+    tmp_path, monkeypatch
+):
     """Медленное АСИНХРОННОЕ хранилище не морозит цикл.
 
     Что меряется: loop свободен всю жизнь агента — сборку, прогон и
@@ -274,7 +300,11 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
             locals()[f"a{_n}"] = _make(_n)
         del _make, _n, _NAMES
 
-    from gc_testkit import LoopPulse, assert_loop_was_free, quiet_gc_for_loop_timing
+    from gc_testkit import (
+        LoopPulse,
+        assert_loop_was_free,
+        quiet_gc_for_loop_timing,
+    )
 
     store = SlowAsyncStore()
     # Сборщик глушится на окне: тест судит НАТИВНОСТЬ ожидания хранилища, а
@@ -283,11 +313,15 @@ async def test_loop_stays_responsive_with_a_slow_async_store(tmp_path, monkeypat
     # до её первой уступки в замер не попадал бы.
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as pulse:
-            async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+            async with await AsyncAgent.create(
+                cfg, thread_store=store
+            ) as agent:
                 await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
-    assert_loop_was_free(pulse.gaps, tick=pulse.step, label="хранилище с RTT 5 мс: ")
+    assert_loop_was_free(
+        pulse.gaps, tick=pulse.step, label="хранилище с RTT 5 мс: "
+    )
 
 
 async def test_broken_store_fails_loudly_at_wiring(tmp_path, monkeypatch):
@@ -309,4 +343,6 @@ async def test_broken_store_fails_loudly_at_wiring(tmp_path, monkeypatch):
 
     text = str(err.value)
     assert "NotAStore" in text, "отказ не назвал класс встраивающего"
-    assert "AsyncThreadStore" in text, "отказ не подсказал асинхронный контракт"
+    assert "AsyncThreadStore" in text, (
+        "отказ не подсказал асинхронный контракт"
+    )

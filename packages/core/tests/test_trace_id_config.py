@@ -14,11 +14,15 @@ class TestTraceIdHeaderName:
         assert cfg["trace_id_header_name"] is None
 
     def test_explicit_value_reaches_flat_config(self):
-        cfg = flatten_app_config(_app({"agent": {"trace_id_header_name": "X-Trace-Id"}}))
+        cfg = flatten_app_config(
+            _app({"agent": {"trace_id_header_name": "X-Trace-Id"}})
+        )
         assert cfg["trace_id_header_name"] == "X-Trace-Id"
 
     def test_blank_becomes_none(self):
-        cfg = flatten_app_config(_app({"agent": {"trace_id_header_name": "   "}}))
+        cfg = flatten_app_config(
+            _app({"agent": {"trace_id_header_name": "   "}})
+        )
         assert cfg["trace_id_header_name"] is None
 
     def test_rejects_spaces_and_colon(self):
@@ -34,7 +38,13 @@ class TestTraceIdHeaderName:
 class TestMcpTraceHeaderFlag:
     def test_default_false(self):
         """Рассылка trace — opt-in: без явного разрешения сервер его не получает."""
-        raw = {"mcp": {"servers": {"srv": {"transport": "http", "url": "http://x/mcp"}}}}
+        raw = {
+            "mcp": {
+                "servers": {
+                    "srv": {"transport": "http", "url": "http://x/mcp"}
+                }
+            }
+        }
         cfg = flatten_app_config(_app(raw))
         assert cfg["mcp-servers"]["srv"]["trace_header_enabled"] is False
 

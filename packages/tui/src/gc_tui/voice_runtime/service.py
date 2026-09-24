@@ -62,7 +62,9 @@ def build_run_spec(state: VoiceState) -> RunSpec:
 
 def port_alive(state: VoiceState, timeout: float = 0.5) -> bool:
     try:
-        with socket.create_connection(("127.0.0.1", state.port), timeout=timeout):
+        with socket.create_connection(
+            ("127.0.0.1", state.port), timeout=timeout
+        ):
             return True
     except OSError:
         return False

@@ -34,7 +34,9 @@ async def _executor(monkeypatch, tmp_path, seen: list, on_teardown):
     monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
 
     async def _loop(messages, state, ctx, **kw):
-        seen.append([m.get("content") if isinstance(m, dict) else m for m in messages])
+        seen.append(
+            [m.get("content") if isinstance(m, dict) else m for m in messages]
+        )
         return {"finished": True}
 
     original_teardown = ae._aclose_mcp_and_release
@@ -49,23 +51,31 @@ async def _executor(monkeypatch, tmp_path, seen: list, on_teardown):
     return ae.AgentExecutor(ctx)
 
 
-async def test_message_queued_during_teardown_is_part_of_the_tail(monkeypatch, tmp_path):
+async def test_message_queued_during_teardown_is_part_of_the_tail(
+    monkeypatch, tmp_path
+):
     seen: list = []
     holder: dict = {}
 
     def _during_teardown():
-        holder["ex"].add_message({"role": "user", "content": "в окно сноса", "id": "m_late"})
+        holder["ex"].add_message(
+            {"role": "user", "content": "в окно сноса", "id": "m_late"}
+        )
 
     ex = await _executor(monkeypatch, tmp_path, seen, _during_teardown)
     holder["ex"] = ex
 
-    await ex.arun(["первый"], thread_id="t", start_new_thread=True, system="cli")
+    await ex.arun(
+        ["первый"], thread_id="t", start_new_thread=True, system="cli"
+    )
 
     tail = ex.take_undelivered_messages()
     assert [m["content"] for m in tail] == ["в окно сноса"], (
         f"сообщение, легшее в очередь во время сноса MCP, не попало в хвост: {tail}"
     )
-    assert ex.take_undelivered_messages() == [], "хвост отдан, но остался в очереди"
+    assert ex.take_undelivered_messages() == [], (
+        "хвост отдан, но остался в очереди"
+    )
 
 
 def test_tail_becomes_a_turn_with_the_same_ids_and_display_fields():

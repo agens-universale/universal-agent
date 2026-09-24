@@ -20,16 +20,26 @@ def isolated_env(monkeypatch, tmp_path):
     return fake
 
 
-def test_swarm_threads_default_under_state_projects_slug(isolated_env, tmp_path):
+def test_swarm_threads_default_under_state_projects_slug(
+    isolated_env, tmp_path
+):
     cfg = build_swarm_config({})
     threads_dir = Path(cfg["threads_dir"])
-    assert threads_dir == tmp_path / "projects" / project_slug() / "swarm" / "threads"
+    assert (
+        threads_dir
+        == tmp_path / "projects" / project_slug() / "swarm" / "threads"
+    )
 
 
-def test_swarm_sandbox_default_under_state_projects_slug(isolated_env, tmp_path):
+def test_swarm_sandbox_default_under_state_projects_slug(
+    isolated_env, tmp_path
+):
     cfg = build_swarm_config({})
     sandbox_dir = Path(cfg["sandbox_root_dir"])
-    assert sandbox_dir == tmp_path / "projects" / project_slug() / "swarm" / "sandboxes"
+    assert (
+        sandbox_dir
+        == tmp_path / "projects" / project_slug() / "swarm" / "sandboxes"
+    )
 
 
 def test_swarm_explicit_threads_dir_used_as_is(isolated_env, tmp_path):
@@ -60,7 +70,9 @@ def test_demo_template_swarm_paths_are_usable():
     """
     root = repo_root()
     assert root is not None, "тест обязан идти в рабочей копии, а не скипаться"
-    raw = yaml.safe_load((root / "demo_config_server.yml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load(
+        (root / "demo_config_server.yml").read_text(encoding="utf-8")
+    )
     cfg = build_swarm_config(raw)
 
     assert os.path.isfile(cfg["wrapper_path"]), cfg["wrapper_path"]
@@ -99,7 +111,9 @@ def _server_cfg_with_config_at(path: Path, swarm: dict) -> dict:
     return {"config_path": str(path), "swarm": swarm}
 
 
-def test_relative_user_paths_resolve_next_to_server_config(isolated_env, tmp_path):
+def test_relative_user_paths_resolve_next_to_server_config(
+    isolated_env, tmp_path
+):
     """Относительные пути берутся от каталога САМОГО config_server.yml."""
     conf_dir = tmp_path / "etc"
     conf_dir.mkdir()
@@ -120,7 +134,9 @@ def test_relative_user_paths_resolve_next_to_server_config(isolated_env, tmp_pat
     assert Path(cfg["skills_dir"]) == conf_dir / "swarm_skills"
 
 
-def test_relative_user_paths_never_land_in_bundled_assets(isolated_env, tmp_path):
+def test_relative_user_paths_never_land_in_bundled_assets(
+    isolated_env, tmp_path
+):
     """Сама регрессия: ни один пользовательский путь не уезжает в каталог ассетов.
 
     Проверяем не «равно ожидаемому», а «не внутри чужого пакета» — так сетка
@@ -140,7 +156,12 @@ def test_relative_user_paths_never_land_in_bundled_assets(isolated_env, tmp_path
             },
         )
     )
-    for key in ("threads_dir", "sandbox_root_dir", "swarm_logs_dir", "skills_dir"):
+    for key in (
+        "threads_dir",
+        "sandbox_root_dir",
+        "swarm_logs_dir",
+        "skills_dir",
+    ):
         resolved = Path(cfg[key]).resolve()
         assert assets not in resolved.parents and resolved != assets, (
             f"{key} снова резолвится внутрь ассетов: {resolved}"
@@ -166,13 +187,17 @@ def test_explicit_config_dir_beats_config_path(isolated_env, tmp_path):
     conf_dir.mkdir()
     explicit = tmp_path / "elsewhere"
     cfg = build_swarm_config(
-        _server_cfg_with_config_at(conf_dir / "config_server.yml", {"skills_dir": "./swarm_skills"}),
+        _server_cfg_with_config_at(
+            conf_dir / "config_server.yml", {"skills_dir": "./swarm_skills"}
+        ),
         config_dir=str(explicit),
     )
     assert Path(cfg["skills_dir"]) == explicit / "swarm_skills"
 
 
-def test_without_config_path_relative_resolves_from_cwd(isolated_env, tmp_path):
+def test_without_config_path_relative_resolves_from_cwd(
+    isolated_env, tmp_path
+):
     """Конфига нет вовсе (минимальный дефолт) — якорь CWD, первый кандидат поиска."""
     cfg = build_swarm_config({"swarm": {"skills_dir": "./swarm_skills"}})
     assert Path(cfg["skills_dir"]) == tmp_path / "swarm_skills"
@@ -186,10 +211,14 @@ def test_skills_dir_default_lives_under_gc_data(isolated_env, tmp_path):
     пропускал копирование.
     """
     cfg = build_swarm_config({})
-    assert Path(cfg["skills_dir"]) == env_vars.gc_paths()["data"] / "swarm_skills"
+    assert (
+        Path(cfg["skills_dir"]) == env_vars.gc_paths()["data"] / "swarm_skills"
+    )
 
 
-def test_config_path_of_load_server_config_feeds_the_anchor(monkeypatch, tmp_path):
+def test_config_path_of_load_server_config_feeds_the_anchor(
+    monkeypatch, tmp_path
+):
     """Сквозной путь: load_server_config → build_swarm_config, без ручной склейки.
 
     Именно так их зовёт gc_server.server, и именно здесь ломался якорь: путь
@@ -201,7 +230,11 @@ def test_config_path_of_load_server_config_feeds_the_anchor(monkeypatch, tmp_pat
         "swarm:\n  enabled: true\n  swarm_logs_dir: ./agent_logs\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=conf_dir / "config_server.yml"))
+    monkeypatch.setattr(
+        env_vars,
+        "env",
+        EnvVars(server_config_path=conf_dir / "config_server.yml"),
+    )
 
     cfg = build_swarm_config(load_server_config())
     assert Path(cfg["swarm_logs_dir"]) == conf_dir / "agent_logs"
@@ -268,7 +301,9 @@ def test_swarm_agent_overrides_is_a_copy_not_reference(isolated_env):
     assert "max_steps" not in original
 
 
-def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(isolated_env, tmp_path, caplog):
+def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(
+    isolated_env, tmp_path, caplog
+):
     """Прежнее штатное значение develop не роняет sworm, а даёт обёртку из пакета.
 
     `demo_config_server.yml` на develop раскладывал `wrapper_path:
@@ -284,7 +319,10 @@ def test_wrapper_path_from_develop_template_falls_back_to_the_packaged_one(isola
         cfg = build_swarm_config(
             {
                 "config_path": str(tmp_path / "config_server.yml"),
-                "swarm": {"enabled": True, "wrapper_path": "scripts/run-cli-in-sandbox.sh"},
+                "swarm": {
+                    "enabled": True,
+                    "wrapper_path": "scripts/run-cli-in-sandbox.sh",
+                },
             }
         )
 
@@ -311,7 +349,10 @@ def test_wrapper_path_next_to_the_config_wins(isolated_env, tmp_path):
     cfg = build_swarm_config(
         {
             "config_path": str(tmp_path / "config_server.yml"),
-            "swarm": {"enabled": True, "wrapper_path": "scripts/run-cli-in-sandbox.sh"},
+            "swarm": {
+                "enabled": True,
+                "wrapper_path": "scripts/run-cli-in-sandbox.sh",
+            },
         }
     )
     assert Path(cfg["wrapper_path"]) == own

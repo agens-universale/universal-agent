@@ -23,7 +23,12 @@ from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
-from gc_tui.editors.field_list import LIST_EMPTY, LIST_FAILED, LIST_LOADING, FieldListController
+from gc_tui.editors.field_list import (
+    LIST_EMPTY,
+    LIST_FAILED,
+    LIST_LOADING,
+    FieldListController,
+)
 from gc_tui.editors.field_list import MODEL_RELOAD_HINT as _MODEL_RELOAD_HINT
 from gc_tui.editors.field_list import write_field as _write_field
 from gc_tui.editors.preset_list import PRESET_HINT, preset_list_controller
@@ -167,7 +172,9 @@ VOICE_LANGUAGES = (
     ("yue", "кантонский"),
 )
 # Хинт списка — канон пресет-листа адресов (та же формула «что это · печать · Enter · Esc»).
-_LANG_HINT = "языки · печать — фильтр/свой код · Enter — подставить · Esc — свернуть"
+_LANG_HINT = (
+    "языки · печать — фильтр/свой код · Enter — подставить · Esc — свернуть"
+)
 # Фильтр не оставил строк: обещать «подставить» нечего — Enter уйдёт про введённое
 # (канон _LIST_NO_MATCH списка моделей — честная строка вместо залипшей).
 _LANG_HINT_NO_MATCH = "свой код · Enter — сохранить как есть · Esc — свернуть"
@@ -255,10 +262,14 @@ def _lang_initial_index(items, value: str) -> int | None:
     if not value:
         return 0
     value = value.lower()
-    return next((i for i, (code, _name) in enumerate(items) if code == value), None)
+    return next(
+        (i for i, (code, _name) in enumerate(items) if code == value), None
+    )
 
 
-def lang_list_controller(host, *, input_id: str, langs=VOICE_LANGUAGES, on_pick=None) -> FieldListController:
+def lang_list_controller(
+    host, *, input_id: str, langs=VOICE_LANGUAGES, on_pick=None
+) -> FieldListController:
     """Раскрывающийся список кодов языка под полем «Язык» — общий контроллер со своими
     параметрами: строки-константа, две колонки (код и название), фильтр по обоим
     («нем» → de), подсветка действующего кода.
@@ -298,7 +309,15 @@ class ModelListController(FieldListController):
     вписать вручную», ↑/↓ возвращаются ленте (ходить нечем), Enter сохраняет набранное
     руками — ровно как «свой код» у языка."""
 
-    def __init__(self, host, *, input_id: str, fetch, config_proxy: str | None = None, on_pick=None) -> None:
+    def __init__(
+        self,
+        host,
+        *,
+        input_id: str,
+        fetch,
+        config_proxy: str | None = None,
+        on_pick=None,
+    ) -> None:
         super().__init__(
             host,
             input_id=input_id,
@@ -331,7 +350,9 @@ class ModelListController(FieldListController):
         self._status = ""  # чем занят список, пока строк нет
         self._gen = 0  # поколение загрузки: протухший ответ отбрасывается
 
-    def _begin_open(self, field: Input, filter_text: str = "", *, forced: bool = False) -> None:
+    def _begin_open(
+        self, field: Input, filter_text: str = "", *, forced: bool = False
+    ) -> None:
         self._visible = []
         self._idx = None
         self._mount_hint(field)
@@ -410,15 +431,23 @@ class ModelListController(FieldListController):
 
         def _work() -> None:
             try:
-                models = self._fetch(url, token, verify, config_proxy=self._config_proxy)
+                models = self._fetch(
+                    url, token, verify, config_proxy=self._config_proxy
+                )
             except Exception:
-                models = None  # сбой загрузки секцию не роняет — см. док-строку
+                models = (
+                    None  # сбой загрузки секцию не роняет — см. док-строку
+                )
             try:
-                self._host.app.call_from_thread(self._on_loaded, models, gen, filter_text)
+                self._host.app.call_from_thread(
+                    self._on_loaded, models, gen, filter_text
+                )
             except Exception:
                 pass  # приложение уже закрылось, пока запрос летел
 
-        self._host.run_worker(_work, thread=True, exclusive=True, name="voice-model-list")
+        self._host.run_worker(
+            _work, thread=True, exclusive=True, name="voice-model-list"
+        )
 
     def _on_loaded(self, models, gen: int, filter_text: str) -> None:
         # Поколение протухло (список закрыли/переоткрыли, пока запрос летел) — коллбэк
@@ -450,7 +479,14 @@ class ModelListController(FieldListController):
         if not value:
             return 0 if items else None
         value = value.lower()
-        return next((i for i, model_id in enumerate(items) if model_id.lower() == value), None)
+        return next(
+            (
+                i
+                for i, model_id in enumerate(items)
+                if model_id.lower() == value
+            ),
+            None,
+        )
 
     def _model_hint(self, has_selection: bool) -> str:
         if self._status:
@@ -519,7 +555,9 @@ class VoiceEndpointEditor(Vertical):
         # Списки живут с редактором (их поля — его DOM), а раскрывает/сворачивает их
         # хозяин курсорной ленты: он один знает, где курсор.
         self.lang_list = lang_list_controller(
-            self, input_id=_FIELDS["language"][1], on_pick=lambda value: self._write("language", value)
+            self,
+            input_id=_FIELDS["language"][1],
+            on_pick=lambda value: self._write("language", value),
         )
         # Поле-факт списка не получает: в локальной панели модель задаёт установка сервиса.
         self.model_list = (
@@ -530,7 +568,9 @@ class VoiceEndpointEditor(Vertical):
                 config_proxy=config_proxy,
                 on_pick=lambda value: self._write("model", value),
             )
-            if fetch is not None and "model" in self._fields and "model" not in self._readonly
+            if fetch is not None
+            and "model" in self._fields
+            and "model" not in self._readonly
             else None
         )
         # Пресеты СТТ-адресов (спека 2026-08-05 §3): тот же контроллер, что у адреса
@@ -548,7 +588,9 @@ class VoiceEndpointEditor(Vertical):
                 no_match_hint=_URL_HINT_NO_MATCH,
                 on_pick=self._apply_url_preset,
             )
-            if presets and "url" in self._fields and "url" not in self._readonly
+            if presets
+            and "url" in self._fields
+            and "url" not in self._readonly
             else None
         )
 
@@ -560,9 +602,16 @@ class VoiceEndpointEditor(Vertical):
         """Enter по строке пресета: подставить адрес; ЧУЖОЙ адрес очищает поле
         «Модель» — у нового сервера свои имена, и старое с этого момента
         непроверенное утверждение (спека §4.1). Тот же адрес — модель цела."""
-        changed = self.query_one(f"#{_FIELDS['url'][1]}", Input).value.strip() != preset.url
+        changed = (
+            self.query_one(f"#{_FIELDS['url'][1]}", Input).value.strip()
+            != preset.url
+        )
         self._write("url", preset.url)
-        if changed and "model" in self._fields and "model" not in self._readonly:
+        if (
+            changed
+            and "model" in self._fields
+            and "model" not in self._readonly
+        ):
             self._write("model", "")
 
     def list_for(self, key: str | None):
@@ -587,7 +636,9 @@ class VoiceEndpointEditor(Vertical):
         """(токен, verify) для запроса списка. Пустое поле токена = сохранённый —
         то же правило, что при сохранении секции (поле-секрет не префиллится)."""
         try:
-            token = self.query_one(f"#{_FIELDS['token'][1]}", Input).value.strip()
+            token = self.query_one(
+                f"#{_FIELDS['token'][1]}", Input
+            ).value.strip()
         except NoMatches:
             token = ""
         return token or self._saved_token, self._verify_ssl
@@ -632,7 +683,9 @@ class VoiceEndpointEditor(Vertical):
                 # Поле — ПРЯМОЙ ребёнок группы: и признак `set-disabled` (PasteInput),
                 # и правила `.field-group > …` смотрят ровно на непосредственного
                 # родителя — обёртка вокруг поля молча съела бы рамку и воздух.
-                yield Vertical(field, id=f"{wid}-group", classes="field-group onb-dyn")
+                yield Vertical(
+                    field, id=f"{wid}-group", classes="field-group onb-dyn"
+                )
             else:
                 yield field
 
@@ -726,14 +779,19 @@ class VoiceEndpointEditor(Vertical):
         ctrl = self.list_for(key)
         if ctrl is None:
             return False
-        return ctrl.pick() is not None  # подстановку делает `on_pick` контроллера
+        return (
+            ctrl.pick() is not None
+        )  # подстановку делает `on_pick` контроллера
 
     def pick_language(self) -> bool:
         return self.pick_in("language")
 
     def values(self) -> dict:
         """Введённые значения по ключам полей (обрезанные), без сайд-эффектов."""
-        return {key: self.query_one(f"#{_FIELDS[key][1]}", Input).value.strip() for key in self._fields}
+        return {
+            key: self.query_one(f"#{_FIELDS[key][1]}", Input).value.strip()
+            for key in self._fields
+        }
 
     def submit(self) -> tuple[bool, dict | None]:
         """(ok, значения|None). Пустой/невалидный URL или пустая «Модель» →
@@ -747,7 +805,11 @@ class VoiceEndpointEditor(Vertical):
             self.last_error_field = "url"
             self._show_error(_URL_EMPTY if not url else _URL_ERROR)
             return False, None
-        if "model" in self._fields and "model" not in self._readonly and not values.get("model"):
+        if (
+            "model" in self._fields
+            and "model" not in self._readonly
+            and not values.get("model")
+        ):
             self.last_error_field = "model"
             self._show_error(_MODEL_REQUIRED)
             return False, None

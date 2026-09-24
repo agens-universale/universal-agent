@@ -66,34 +66,88 @@ def test_normalize_confirm_key_matches_tui_sets():
 def test_y_allows_and_records_session_true():
     store = PermissionStore()
     ctx, calls = _ctx("allow_remember", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:ls") is True
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:ls",
+        )
+        is True
+    )
     assert store.session_rules() == {"command:ls": True}
 
 
 def test_o_allows_and_records_run_only():
     store = PermissionStore()
     ctx, calls = _ctx("allow_once", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:ls") is True
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:ls",
+        )
+        is True
+    )
     assert store.session_rules() == {}
     # run-cache: second call doesn't re-ask
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:ls") is True
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:ls",
+        )
+        is True
+    )
     assert calls["n"] == 1
 
 
 def test_n_denies_and_records_session_false():
     store = PermissionStore()
     ctx, calls = _ctx("deny_remember", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:rm") is False
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:rm",
+        )
+        is False
+    )
     assert store.session_rules() == {"command:rm": False}
 
 
 def test_t_denies_and_records_run_only():
     store = PermissionStore()
     ctx, calls = _ctx("deny_once", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:rm") is False
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:rm",
+        )
+        is False
+    )
     assert store.session_rules() == {}
     # run-cache deny: second call doesn't re-ask
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:rm") is False
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:rm",
+        )
+        is False
+    )
     assert calls["n"] == 1
 
 
@@ -104,7 +158,13 @@ def test_invalid_choice_maps_to_deny_remember():
     store = PermissionStore()
     for bad in ("yes", None, "", "ok", 1, "session_old"):
         ctx, _ = _ctx(bad, store)
-        result = request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:x")
+        result = request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:x",
+        )
         assert result is False, f"bad {bad!r} must deny"
     # invalid → deny_remember → session False
     assert store.session_rules().get("command:x") is False
@@ -116,21 +176,48 @@ def test_invalid_choice_maps_to_deny_remember():
 def test_alias_once_maps_to_allow_once():
     store = PermissionStore()
     ctx, _ = _ctx("once", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:ls") is True
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:ls",
+        )
+        is True
+    )
     assert store.session_rules() == {}  # once → allow_once → run only
 
 
 def test_alias_session_maps_to_allow_remember():
     store = PermissionStore()
     ctx, _ = _ctx("session", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:ls") is True
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:ls",
+        )
+        is True
+    )
     assert store.session_rules() == {"command:ls": True}
 
 
 def test_alias_deny_maps_to_deny_remember():
     store = PermissionStore()
     ctx, _ = _ctx("deny", store)
-    assert request_confirm(title="t", question="q", fields=[], ctx=ctx, decision_key="command:rm") is False
+    assert (
+        request_confirm(
+            title="t",
+            question="q",
+            fields=[],
+            ctx=ctx,
+            decision_key="command:rm",
+        )
+        is False
+    )
     assert store.session_rules() == {"command:rm": False}
 
 

@@ -22,7 +22,9 @@ def test_backend_config_proxy_default_none():
 
 
 def test_backend_config_proxy_strips_and_empty_to_none():
-    assert BackendConfig(proxy="  socks5h://p:1080  ").proxy == "socks5h://p:1080"
+    assert (
+        BackendConfig(proxy="  socks5h://p:1080  ").proxy == "socks5h://p:1080"
+    )
     assert BackendConfig(proxy="").proxy is None
     assert BackendConfig(proxy="   ").proxy is None
 

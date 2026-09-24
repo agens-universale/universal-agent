@@ -96,14 +96,18 @@ def test_open_too_large(tmp_path):
 def test_open_disabled(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("ok", encoding="utf-8")
-    r = open_for_view("a.txt", cwd=str(tmp_path), settings=FileViewSettings(enabled=False))
+    r = open_for_view(
+        "a.txt", cwd=str(tmp_path), settings=FileViewSettings(enabled=False)
+    )
     assert isinstance(r, OpenErr)
     assert "выключен" in r.message
 
 
 def test_read_window_1based(tmp_path):
     f = tmp_path / "n.txt"
-    f.write_text("\n".join(f"L{i}" for i in range(1, 11)) + "\n", encoding="utf-8")
+    f.write_text(
+        "\n".join(f"L{i}" for i in range(1, 11)) + "\n", encoding="utf-8"
+    )
     w = read_window(f, start_line=3, line_count=3)
     assert w.lines == ("L3", "L4", "L5")
     assert w.start_line == 3
@@ -147,8 +151,14 @@ def test_position_store_roundtrip(tmp_path):
 
 
 def test_format_range_label():
-    assert format_range_label(start_line=1, end_line=10, total_lines=100) == "1–10 / 100"
-    assert format_range_label(start_line=1, end_line=10, total_lines=None) == "1–10 / ?"
+    assert (
+        format_range_label(start_line=1, end_line=10, total_lines=100)
+        == "1–10 / 100"
+    )
+    assert (
+        format_range_label(start_line=1, end_line=10, total_lines=None)
+        == "1–10 / ?"
+    )
     assert (
         format_range_label(
             start_line=1,
@@ -171,19 +181,28 @@ def test_settings_from_mapping():
     assert s.enabled is False
     assert s.max_file_bytes == 1024
     assert s.page_lines == 40
-    assert FileViewSettings.from_mapping(None).max_file_bytes == DEFAULT_MAX_FILE_BYTES
+    assert (
+        FileViewSettings.from_mapping(None).max_file_bytes
+        == DEFAULT_MAX_FILE_BYTES
+    )
     assert FileViewSettings.from_mapping(None).page_lines is None
 
 
 def test_settings_bad_max_bytes_falls_back():
-    assert FileViewSettings.from_mapping({"max_file_bytes": "nope"}).max_file_bytes == (DEFAULT_MAX_FILE_BYTES)
+    assert FileViewSettings.from_mapping(
+        {"max_file_bytes": "nope"}
+    ).max_file_bytes == (DEFAULT_MAX_FILE_BYTES)
 
 
 def test_settings_page_lines_auto_and_clamp():
-    assert FileViewSettings.from_mapping({"page_lines": None}).page_lines is None
+    assert (
+        FileViewSettings.from_mapping({"page_lines": None}).page_lines is None
+    )
     assert FileViewSettings.from_mapping({}).page_lines is None
     assert FileViewSettings.from_mapping({"page_lines": 0}).page_lines is None
-    assert FileViewSettings.from_mapping({"page_lines": "x"}).page_lines is None
+    assert (
+        FileViewSettings.from_mapping({"page_lines": "x"}).page_lines is None
+    )
     assert FileViewSettings.from_mapping({"page_lines": 999}).page_lines == 200
     assert FileViewSettings.from_mapping({"page_lines": 10}).page_lines == 10
 
@@ -207,7 +226,9 @@ def test_textarea_language_for_lexer_maps_aliases():
 def test_pygments_highlight_map_python_keywords():
     from gc_tui.services.file_view import pygments_highlight_map
 
-    mapped = pygments_highlight_map("def hello():\n    return 1\n", lexer="python")
+    mapped = pygments_highlight_map(
+        "def hello():\n    return 1\n", lexer="python"
+    )
     styles = {name for spans in mapped.values() for _, _, name in spans}
     assert "keyword" in styles
     assert mapped  # непусто

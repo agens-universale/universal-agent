@@ -115,7 +115,15 @@ class _PosixBox(LocalFsBackend):
 
     # --- exec surface ---
 
-    async def aexec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def aexec(
+        self,
+        command,
+        *,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
         self.commands.append(command)
         if command.startswith("command -v "):
             name = shlex.split(command)[2]
@@ -124,7 +132,16 @@ class _PosixBox(LocalFsBackend):
             return self._pipeline(command)
         return ExecResult("", "", 0)
 
-    async def aexec_argv(self, argv, *, stdin=None, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def aexec_argv(
+        self,
+        argv,
+        *,
+        stdin=None,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
         argv = [str(a) for a in argv]
         self.commands.append(" ".join(argv))
         prog = os.path.basename(argv[0])
@@ -162,7 +179,9 @@ class _PosixBox(LocalFsBackend):
                 return ExecResult("", "", 0)
             # No -r semantics: the utility still runs once, on empty stdin.
             ran = self._grep(rest, stdin="")
-            return ExecResult(ran.stdout, ran.stderr, 123 if ran.return_code else 0)
+            return ExecResult(
+                ran.stdout, ran.stderr, 123 if ran.return_code else 0
+            )
         return self._grep(rest + files)
 
     def _find(self, argv):
@@ -209,19 +228,31 @@ class _PosixBox(LocalFsBackend):
 
         rows = []
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if not any(fnmatch(d, p) for p in prune_names)]
+            dirnames[:] = [
+                d
+                for d in dirnames
+                if not any(fnmatch(d, p) for p in prune_names)
+            ]
             for d in sorted(dirnames):
                 rows.append((os.path.join(dirpath, d), True))
             for f in sorted(filenames):
                 rows.append((os.path.join(dirpath, f), False))
 
         if printf_fmt is not None:
-            out = "".join(os.path.relpath(p, root) + "\t" + ("d" if is_dir else "f") + "\n" for p, is_dir in rows)
+            out = "".join(
+                os.path.relpath(p, root)
+                + "\t"
+                + ("d" if is_dir else "f")
+                + "\n"
+                for p, is_dir in rows
+            )
             return ExecResult(out, "", 0)
 
         files = [p for p, is_dir in rows if not is_dir]
         if name_pat:
-            files = [p for p in files if fnmatch(os.path.basename(p), name_pat)]
+            files = [
+                p for p in files if fnmatch(os.path.basename(p), name_pat)
+            ]
         sep = "\0" if terminator == "-print0" else "\n"
         return ExecResult("".join(p + sep for p in files), "", 0)
 
@@ -237,7 +268,9 @@ class _PosixBox(LocalFsBackend):
                 pattern, paths = argv[i + 1], argv[i + 2 :]
                 break
             if tok in self.grep_rejects:
-                return ExecResult("", "grep: unrecognized option " + tok + "\n", 2)
+                return ExecResult(
+                    "", "grep: unrecognized option " + tok + "\n", 2
+                )
             if tok in ("-R", "-r"):
                 recursive = True
             elif tok == "-H":
@@ -248,7 +281,11 @@ class _PosixBox(LocalFsBackend):
                 fixed = True
             elif tok == "-i":
                 ci = True
-            elif tok in ("-E", "--color=never", "--no-messages") or tok.startswith("--binary-files="):
+            elif tok in (
+                "-E",
+                "--color=never",
+                "--no-messages",
+            ) or tok.startswith("--binary-files="):
                 pass
             elif tok.startswith("--include="):
                 include = tok.split("=", 1)[1]
@@ -259,7 +296,9 @@ class _PosixBox(LocalFsBackend):
             elif tok.startswith("--devices="):
                 pass
             else:
-                return ExecResult("", "grep: unrecognized option " + tok + "\n", 2)
+                return ExecResult(
+                    "", "grep: unrecognized option " + tok + "\n", 2
+                )
             i += 1
 
         targets = []
@@ -271,7 +310,9 @@ class _PosixBox(LocalFsBackend):
                     continue
                 for dirpath, dirnames, filenames in os.walk(p):
                     if exclude_dir:
-                        dirnames[:] = [d for d in dirnames if not fnmatch(d, exclude_dir)]
+                        dirnames[:] = [
+                            d for d in dirnames if not fnmatch(d, exclude_dir)
+                        ]
                     for f in sorted(filenames):
                         if include and not fnmatch(f, include):
                             continue
@@ -289,24 +330,34 @@ class _PosixBox(LocalFsBackend):
             for no, line in enumerate(content.splitlines(), start=1):
                 hay = line.lower() if ci else line
                 needle = pattern.lower() if ci else pattern
-                hit = (needle in hay) if fixed else bool(re.search(needle, hay))
+                hit = (
+                    (needle in hay) if fixed else bool(re.search(needle, hay))
+                )
                 if not hit:
                     continue
                 prefix = (name + name_sep) if show_name else ""
                 prefix += (str(no) + ":") if line_number else ""
                 out.append(prefix + line)
-        return ExecResult("\n".join(out) + ("\n" if out else ""), "", 0 if out else 1)
+        return ExecResult(
+            "\n".join(out) + ("\n" if out else ""), "", 0 if out else 1
+        )
 
 
 def _always_on_grep_flags():
     """Flags the shared builder emits for every production call (no hardcoding)."""
-    return set(build_grep_argv_flags(fixed=False)[1:]) & set(build_grep_argv_flags(fixed=True)[1:])
+    return set(build_grep_argv_flags(fixed=False)[1:]) & set(
+        build_grep_argv_flags(fixed=True)[1:]
+    )
 
 
 async def test_grep_probes_run_the_production_flags():
     """Probe argv must carry every always-on production flag, or it proves nothing."""
     always = _always_on_grep_flags()
-    for probe in (aprobe_has_grep, aprobe_grep_exclude_dir, aprobe_grep_include):
+    for probe in (
+        aprobe_has_grep,
+        aprobe_grep_exclude_dir,
+        aprobe_grep_include,
+    ):
         box = _PosixBox()
         assert await probe(box) is True
         assert box.grep_argvs
@@ -315,7 +366,9 @@ async def test_grep_probes_run_the_production_flags():
 
 
 async def test_grep_probe_smokes_fixed_and_case_insensitive_flags():
-    mode_flags = set(build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]) - set(build_grep_argv_flags()[1:])
+    mode_flags = set(
+        build_grep_argv_flags(fixed=True, case_insensitive=True)[1:]
+    ) - set(build_grep_argv_flags()[1:])
     box = _PosixBox()
 
     assert await aprobe_has_grep(box) is True
@@ -418,7 +471,9 @@ async def test_capable_box_reports_all_capabilities():
 def test_parse_find_printf_entries_reads_sizes_and_tolerates_two_columns():
     from gc_core.backends.capabilities import parse_find_printf_entries
 
-    rows = parse_find_printf_entries("src\td\t4096\nsrc/a.py\tf\t12\nold.txt\tf\n")
+    rows = parse_find_printf_entries(
+        "src\td\t4096\nsrc/a.py\tf\t12\nold.txt\tf\n"
+    )
     assert [(e.rel, e.is_dir, e.size) for e in rows] == [
         ("src", True, None),
         ("src/a.py", False, 12),

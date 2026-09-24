@@ -7,8 +7,13 @@ from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, wrap_technical_user_content
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_TECHNICAL,
+    wrap_technical_user_content,
+)
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 
 
 def files_word(n: int) -> str:
@@ -113,7 +118,9 @@ def build_undo_feedback_body(
     parts = ["User reverted pending file changes via Diff-UI undo."]
     if restored:
         lines = "\n".join(f"- {k}" for k in restored)
-        parts.append(f"Changes reverted — re-read these files from disk before assuming their contents:\n{lines}")
+        parts.append(
+            f"Changes reverted — re-read these files from disk before assuming their contents:\n{lines}"
+        )
     if deleted:
         lines = "\n".join(f"- {k}" for k in deleted)
         parts.append(f"Deleted previously created files:\n{lines}")

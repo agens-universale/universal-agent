@@ -81,7 +81,9 @@ def test_validate_judge_result_requires_risk_flags_for_dangerous_verdict():
 
 def test_decide_command_execution_matrix():
     safe = JudgeResult("safe", ["ok"], [], 1.0)
-    dangerous = JudgeResult("potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0)
+    dangerous = JudgeResult(
+        "potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0
+    )
 
     assert decide_command_execution("allow", None, False, None).allowed is True
     # Fail-CLOSED в deny; в ask — запрос подтверждения у пользователя.
@@ -94,7 +96,10 @@ def test_decide_command_execution_matrix():
     assert ask_no_judge.requires_confirmation is True
     assert ask_no_judge.reason_code == "judge_unavailable"
     assert decide_command_execution("ask", None, False, True).allowed is True
-    assert decide_command_execution("ask", None, False, False).error_type == "unsafe_command_cancelled_by_user"
+    assert (
+        decide_command_execution("ask", None, False, False).error_type
+        == "unsafe_command_cancelled_by_user"
+    )
     assert decide_command_execution("deny", safe, True, None).allowed is True
 
     denied = decide_command_execution("deny", dangerous, True, None)
@@ -116,16 +121,22 @@ def test_effective_command_cwd_exec_python_defaults_to_launch_root():
         launch_root="/repo/lr",
         write_guard=WriteGuardConfig(enabled=True, extra_paths=[]),
     )
-    assert effective_command_cwd("exec_python", {}, ctx) == os.path.abspath("/repo/lr")
+    assert effective_command_cwd("exec_python", {}, ctx) == os.path.abspath(
+        "/repo/lr"
+    )
 
 
-def test_effective_command_cwd_exec_command_defaults_to_getcwd(tmp_path, monkeypatch):
+def test_effective_command_cwd_exec_command_defaults_to_getcwd(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     ctx = ToolSecurityContext(
         launch_root=str(tmp_path / "lr"),
         write_guard=WriteGuardConfig(enabled=True, extra_paths=[]),
     )
-    assert effective_command_cwd("exec_command", {}, ctx) == os.path.abspath(os.getcwd())
+    assert effective_command_cwd("exec_command", {}, ctx) == os.path.abspath(
+        os.getcwd()
+    )
 
 
 def test_build_judge_payload_contains_runtime_context():
@@ -215,14 +226,18 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     assert result["error"]["risk_flags"] == ["privilege_escalation"]
 
 
-def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(tmp_path):
+def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(
+    tmp_path,
+):
     """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
     config_dict = {
         "launch_root": str(tmp_path),
         "command_moderation": {"enabled": True, "mode": "deny"},
     }
 
-    @moderate_command_execution(payload_arg="command", tool_name="exec_command")
+    @moderate_command_execution(
+        payload_arg="command", tool_name="exec_command"
+    )
     def run(command: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "command": command})
 
@@ -270,7 +285,9 @@ def test_moderate_command_execution_logs_judge_failure(tmp_path):
     assert "confidence must be numeric" in logger.warnings[0]
 
 
-def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(tmp_path, monkeypatch):
+def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(
+    tmp_path, monkeypatch
+):
     """В ask при недоступности судьи запрашиваем подтверждение у пользователя."""
     config_dict = {
         "launch_root": str(tmp_path),
@@ -282,7 +299,9 @@ def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(tmp_path,
         lambda *_args, **_kwargs: True,
     )
 
-    @moderate_command_execution(payload_arg="command", tool_name="exec_command")
+    @moderate_command_execution(
+        payload_arg="command", tool_name="exec_command"
+    )
     def run(command: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "command": command})
 
@@ -359,7 +378,9 @@ def test_parse_judge_json_regex_fallback_dangerous_on_malformed_json():
     parsed = command_moderation._parse_judge_json(raw)
 
     assert parsed["verdict"] == DANGEROUS_VERDICT
-    assert validate_judge_result(parsed).risk_flags == ["judge_response_malformed"]
+    assert validate_judge_result(parsed).risk_flags == [
+        "judge_response_malformed"
+    ]
 
 
 def test_parse_judge_json_regex_fallback_prefers_dangerous_when_both_present():
@@ -414,7 +435,9 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
         payload_arg="command",
         tool_name="exec_command",
         judge_client_extractor=lambda *_args, **_kwargs: (
-            lambda _payload: command_moderation._parse_judge_json("completely unparseable judge output")
+            lambda _payload: command_moderation._parse_judge_json(
+                "completely unparseable judge output"
+            )
         ),
     )
     def run(command: str, config_dict: dict) -> str:
@@ -427,7 +450,10 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
 
 
 def test_build_judge_payload_includes_denied_examples():
-    from gc_core.security.command_moderation import ModerationContext, build_judge_payload
+    from gc_core.security.command_moderation import (
+        ModerationContext,
+        build_judge_payload,
+    )
 
     ctx = ModerationContext(
         tool_name="exec_command",
@@ -449,7 +475,11 @@ def test_load_config_maps_denied_examples(tmp_path):
         yaml.safe_dump(
             {
                 "security": {
-                    "command_moderation": {"enabled": True, "mode": "deny", "denied_command_examples": ["rm -rf /"]}
+                    "command_moderation": {
+                        "enabled": True,
+                        "mode": "deny",
+                        "denied_command_examples": ["rm -rf /"],
+                    }
                 }
             }
         ),
@@ -465,7 +495,9 @@ def test_judge_prompt_documents_denied_examples_and_flag():
     from gc_core import config_modules
 
     src = Path(config_modules.__file__).resolve().parents[1]
-    text = (ASSETS / "prompts" / "security" / "command_judge_system.md").read_text(encoding="utf-8")
+    text = (
+        ASSETS / "prompts" / "security" / "command_judge_system.md"
+    ).read_text(encoding="utf-8")
     assert "How to use denied_command_examples" in text
     assert "operator_denied" in text
 
@@ -480,7 +512,9 @@ def test_judge_prompt_documents_denied_examples_and_flag():
 
 
 def _dangerous():
-    return JudgeResult("potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0)
+    return JudgeResult(
+        "potentially_dangerous", ["bad"], ["privilege_escalation"], 1.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -495,9 +529,13 @@ def _dangerous():
         ("ask", None, False, False),
     ],
 )
-def test_every_refusal_carries_no_workaround_guidance(mode, judge_result, judge_available, user_confirmation):
+def test_every_refusal_carries_no_workaround_guidance(
+    mode, judge_result, judge_available, user_confirmation
+):
     """Любой отказ доезжает до модели с явным запретом эквивалентной команды."""
-    decision = decide_command_execution(mode, judge_result, judge_available, user_confirmation)
+    decision = decide_command_execution(
+        mode, judge_result, judge_available, user_confirmation
+    )
     assert decision.allowed is False
     error = make_block_error(decision, mode)
     assert error["guidance"] == NO_WORKAROUND_NOTICE

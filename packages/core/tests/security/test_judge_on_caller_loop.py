@@ -24,7 +24,11 @@ async def test_async_judge_runs_on_the_callers_loop():
 
     async def _ajudge(_payload):
         seen.append(asyncio.get_running_loop())
-        return {"verdict": cm.SAFE_VERDICT, "confidence": 0.9, "risk_flags": []}
+        return {
+            "verdict": cm.SAFE_VERDICT,
+            "confidence": 0.9,
+            "risk_flags": [],
+        }
 
     def _flow(*_a, **_kw):
         result = yield from cm.judge_with_retry_flow(_ajudge, {}, retries=1)
@@ -37,7 +41,9 @@ async def test_async_judge_runs_on_the_callers_loop():
     guarded = dual_wrap(_tool, _flow)
     assert await guarded() == "ok"
 
-    assert seen == [asyncio.get_running_loop()], "судья ушёл на чужой loop — значит опять свой пул и своё рукопожатие"
+    assert seen == [asyncio.get_running_loop()], (
+        "судья ушёл на чужой loop — значит опять свой пул и своё рукопожатие"
+    )
 
 
 async def test_sync_judge_still_goes_to_a_thread():
@@ -48,7 +54,11 @@ async def test_sync_judge_still_goes_to_a_thread():
 
     def _judge(_payload):
         seen.append(threading.current_thread())
-        return {"verdict": cm.SAFE_VERDICT, "confidence": 0.9, "risk_flags": []}
+        return {
+            "verdict": cm.SAFE_VERDICT,
+            "confidence": 0.9,
+            "risk_flags": [],
+        }
 
     def _flow(*_a, **_kw):
         yield from cm.judge_with_retry_flow(_judge, {}, retries=1)
@@ -58,7 +68,9 @@ async def test_sync_judge_still_goes_to_a_thread():
         return "ok"
 
     assert await dual_wrap(_tool, _flow)() == "ok"
-    assert seen and seen[0] is not threading.current_thread(), "синхронный судья исполнился прямо на loop"
+    assert seen and seen[0] is not threading.current_thread(), (
+        "синхронный судья исполнился прямо на loop"
+    )
 
 
 async def test_judge_failure_lands_in_the_bodys_except():
@@ -97,8 +109,12 @@ def test_moderation_body_no_longer_owns_a_loop():
     src = inspect.getsource(cm)
     # Именно ВЫЗОВ, а не упоминание: разбор причины в комментарии полезен и
     # должен пережить этот тест.
-    assert "run_coro_blocking(" not in src, "модерация снова поднимает свой loop — это и есть лишнее рукопожатие"
-    assert "body_may_block=True" not in src, "тело снова уезжает в поток целиком, вместе с непереносимой работой"
+    assert "run_coro_blocking(" not in src, (
+        "модерация снова поднимает свой loop — это и есть лишнее рукопожатие"
+    )
+    assert "body_may_block=True" not in src, (
+        "тело снова уезжает в поток целиком, вместе с непереносимой работой"
+    )
 
 
 async def test_human_wait_still_leaves_the_loop_responsive():
@@ -135,7 +151,11 @@ async def test_await_on_caller_is_not_a_second_call_point():
     calls: list = []
 
     async def _judge(_p):
-        return {"verdict": cm.SAFE_VERDICT, "confidence": 0.5, "risk_flags": []}
+        return {
+            "verdict": cm.SAFE_VERDICT,
+            "confidence": 0.5,
+            "risk_flags": [],
+        }
 
     def _flow(*_a, **_kw):
         yield AwaitOnCaller(lambda: _judge({}))

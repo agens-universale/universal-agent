@@ -79,10 +79,14 @@ def test_refresh_bypasses_the_cache_and_rewrites_the_key():
 
     cached = make_cached_fetch(fetch)
     assert cached("http://a", None) == [1]
-    assert cached("http://a", None) == [1] and len(calls) == 1  # обычный вызов — кэш
+    assert (
+        cached("http://a", None) == [1] and len(calls) == 1
+    )  # обычный вызов — кэш
     assert cached("http://a", None, refresh=True) == [1, 2]
     assert len(calls) == 2, "refresh обязан сходить на сервер"
-    assert cached("http://a", None) == [1, 2], "свежий ответ должен лечь в ключ"
+    assert cached("http://a", None) == [1, 2], (
+        "свежий ответ должен лечь в ключ"
+    )
 
 
 def test_failed_refresh_keeps_the_cached_list():

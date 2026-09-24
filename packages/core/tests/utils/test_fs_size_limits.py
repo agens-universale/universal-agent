@@ -17,15 +17,30 @@ def test_defaults_and_config_keys():
     assert fs_mutate_max_bytes(None) == DEFAULT_FS_MUTATE_MAX_BYTES
     assert fs_read_max_bytes({"fs_tools": {"max_read_bytes": 100}}) == 100
     assert fs_mutate_max_bytes({"fs_tools": {"max_mutate_bytes": 200}}) == 200
-    assert fs_read_max_bytes({"fs_tools": {"max_read_bytes": 0}}) == DEFAULT_FS_READ_MAX_BYTES
-    assert fs_read_max_bytes({"fs_tools": {"max_read_bytes": "x"}}) == DEFAULT_FS_READ_MAX_BYTES
+    assert (
+        fs_read_max_bytes({"fs_tools": {"max_read_bytes": 0}})
+        == DEFAULT_FS_READ_MAX_BYTES
+    )
+    assert (
+        fs_read_max_bytes({"fs_tools": {"max_read_bytes": "x"}})
+        == DEFAULT_FS_READ_MAX_BYTES
+    )
 
 
 def test_find_in_files_max_bytes_defaults():
     assert DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES == 16 * 1024 * 1024
-    assert fs_find_in_files_max_bytes(None) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    assert fs_find_in_files_max_bytes({}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    assert fs_find_in_files_max_bytes({"fs_tools": {}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    assert (
+        fs_find_in_files_max_bytes(None)
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
+    assert (
+        fs_find_in_files_max_bytes({})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
+    assert (
+        fs_find_in_files_max_bytes({"fs_tools": {}})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
 
 
 def test_find_in_files_max_bytes_reads_nested_key():
@@ -34,7 +49,13 @@ def test_find_in_files_max_bytes_reads_nested_key():
 
 
 def test_find_in_files_max_bytes_ignores_read_mutate_keys():
-    cfg = {"fs_tools": {"max_read_bytes": 1, "max_mutate_bytes": 2, "find_in_files": {"max_file_bytes": 100}}}
+    cfg = {
+        "fs_tools": {
+            "max_read_bytes": 1,
+            "max_mutate_bytes": 2,
+            "find_in_files": {"max_file_bytes": 100},
+        }
+    }
     assert fs_find_in_files_max_bytes(cfg) == 100
     assert fs_read_max_bytes(cfg) == 1
     assert fs_mutate_max_bytes(cfg) == 2
@@ -42,26 +63,40 @@ def test_find_in_files_max_bytes_ignores_read_mutate_keys():
 
 def test_find_in_files_max_bytes_invalid_fallbacks():
     assert (
-        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": 0}}})
+        fs_find_in_files_max_bytes(
+            {"fs_tools": {"find_in_files": {"max_file_bytes": 0}}}
+        )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
     assert (
-        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}})
+        fs_find_in_files_max_bytes(
+            {"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}}
+        )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
     assert (
-        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {"max_file_bytes": -5}}})
+        fs_find_in_files_max_bytes(
+            {"fs_tools": {"find_in_files": {"max_file_bytes": -5}}}
+        )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
     # Non-mapping find_in_files section → default
-    assert fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": 42}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    assert (
+        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": 42}})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
     # find_in_files present but without max_file_bytes → default
-    assert fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {}}}) == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    assert (
+        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {}}})
+        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    )
 
 
 def test_check_file_size():
     assert check_file_size(10, 100) is None
     err = check_file_size(101, 100, operation="search_files")
-    assert err == file_too_large_error(actual_bytes=101, max_bytes=100, operation="search_files")
+    assert err == file_too_large_error(
+        actual_bytes=101, max_bytes=100, operation="search_files"
+    )
     assert err["type"] == "file_too_large"
     assert "search_files" in err["message"]

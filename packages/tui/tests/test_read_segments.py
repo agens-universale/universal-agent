@@ -37,14 +37,20 @@ def _write_file(d, name, records):
 def test_segments_two_compactions(tmp_path):
     # archive1 = [Seg0 raw];  archive2 = [summary1, Seg1 raw];  live = [summary2, Seg2 raw]
     _write_file(
-        tmp_path, f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl", [{"role": "user", "content": "вопрос-0"}]
+        tmp_path,
+        f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl",
+        [{"role": "user", "content": "вопрос-0"}],
     )
     _write_file(
         tmp_path,
         f"data_cli_{_TID}__pre_summary__20260603_110000.jsonl",
         [_sum_msg("СИНТЕЗ-1"), {"role": "user", "content": "вопрос-1"}],
     )
-    _write_file(tmp_path, f"data_cli_{_TID}.jsonl", [_sum_msg("СИНТЕЗ-2"), {"role": "user", "content": "вопрос-2"}])
+    _write_file(
+        tmp_path,
+        f"data_cli_{_TID}.jsonl",
+        [_sum_msg("СИНТЕЗ-2"), {"role": "user", "content": "вопрос-2"}],
+    )
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     segs = store.read_segments(_TID)
@@ -66,7 +72,10 @@ def test_segments_no_compaction(tmp_path):
     _write_file(
         tmp_path,
         f"data_cli_{_TID}.jsonl",
-        [{"role": "user", "content": "привет"}, {"role": "assistant", "content": "ответ"}],
+        [
+            {"role": "user", "content": "привет"},
+            {"role": "assistant", "content": "ответ"},
+        ],
     )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     segs = store.read_segments(_TID)
@@ -78,9 +87,15 @@ def test_segments_no_compaction(tmp_path):
 def test_segments_expose_chars_before_after(tmp_path):
     # seg0 raw = 10 символов; сжат → synthesis "abcde" = 5 символов
     _write_file(
-        tmp_path, f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl", [{"role": "user", "content": "0123456789"}]
+        tmp_path,
+        f"data_cli_{_TID}__pre_summary__20260603_100000.jsonl",
+        [{"role": "user", "content": "0123456789"}],
     )
-    _write_file(tmp_path, f"data_cli_{_TID}.jsonl", [_sum_msg("abcde"), {"role": "user", "content": "вопрос-2"}])
+    _write_file(
+        tmp_path,
+        f"data_cli_{_TID}.jsonl",
+        [_sum_msg("abcde"), {"role": "user", "content": "вопрос-2"}],
+    )
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     segs = store.read_segments(_TID)

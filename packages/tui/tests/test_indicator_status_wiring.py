@@ -6,7 +6,9 @@ async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         # смонтировать индикатор как при живом прогоне
         scr._thinking_started_at = 0.0
@@ -38,7 +40,9 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         # стор-двойник: фиксируем patch'и update_tui_meta
@@ -57,7 +61,9 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
         scr._store = _Store()
         scr._thinking_started_at = 0.0
         scr._was_running = True
-        monkeypatch.setattr(type(scr), "_update_terminal_title", lambda self: None)
+        monkeypatch.setattr(
+            type(scr), "_update_terminal_title", lambda self: None
+        )
 
         class _R:
             def is_running(self):
@@ -70,5 +76,9 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
         scr.app.last_stop_requested = True  # => stopped → cancelled
 
         scr._poll_active()
-        kinds = [p.get("last_indicator", {}).get("kind") for p in patches if "last_indicator" in p]
+        kinds = [
+            p.get("last_indicator", {}).get("kind")
+            for p in patches
+            if "last_indicator" in p
+        ]
         assert kinds == ["cancelled"], patches

@@ -6,17 +6,24 @@ gigacode/vLLM может вернуть HTTP 200 + SSE-событие ошибк
 Теперь error-событие поднимается с сообщением провайдера."""
 
 import pytest
-from gc_core.utils.chat_completions_stream import BackendStreamError, assemble_streamed_completion
+from gc_core.utils.chat_completions_stream import (
+    BackendStreamError,
+    assemble_streamed_completion,
+)
 
 
 def test_sse_error_event_is_surfaced():
-    payloads = ['{"error": {"message": "prompt blocked by content filter", "code": "content_filter"}}']
+    payloads = [
+        '{"error": {"message": "prompt blocked by content filter", "code": "content_filter"}}'
+    ]
     with pytest.raises(BackendStreamError) as ei:
         assemble_streamed_completion(payloads)
     msg = str(ei.value)
     assert "Backend stream error" in msg
     assert "content filter" in msg  # реальная причина провайдера видна
-    assert ei.value.status_code == "content_filter"  # код из error-события несётся
+    assert (
+        ei.value.status_code == "content_filter"
+    )  # код из error-события несётся
 
 
 def test_normal_content_stream_still_assembles():
@@ -38,7 +45,9 @@ def test_genuinely_empty_stream_unchanged():
 
 
 def test_choice_level_error_is_surfaced():
-    payloads = ['{"choices": [{"index": 0, "error": {"message": "safety block", "code": 400}}]}']
+    payloads = [
+        '{"choices": [{"index": 0, "error": {"message": "safety block", "code": 400}}]}'
+    ]
     with pytest.raises(BackendStreamError) as ei:
         assemble_streamed_completion(payloads)
     assert "safety block" in str(ei.value)

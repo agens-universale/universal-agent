@@ -34,7 +34,9 @@ def teardown_module(_module) -> None:
     proc = sys.modules.get("gc_core.processing_responses")
     if proc is not None:
         proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = real_tools.WrongFunctionArgumentsException
+        proc.WrongFunctionArgumentsException = (
+            real_tools.WrongFunctionArgumentsException
+        )
 
 
 processing_module = None
@@ -73,7 +75,9 @@ def _stub_tools_modules() -> None:
         tool_name = _kwargs.get("tool_name")
         arguments = _kwargs.get("arguments")
         try:
-            payload = json.loads(arguments) if isinstance(arguments, str) else {}
+            payload = (
+                json.loads(arguments) if isinstance(arguments, str) else {}
+            )
         except Exception:
             payload = {}
         if tool_name == "turn_finish":
@@ -99,7 +103,9 @@ def _stub_tools_modules() -> None:
 
     tools_pkg.aapply_tool = _apply_tool
     tools_pkg.abuild_tools_data = _build_tools_data
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     # Цикл импортирует ещё и распознаватель «неизвестный тул» — заглушка обязана
     # его отдавать, иначе импорт processing_responses падает на пустом месте.
     tools_pkg.is_unknown_tool_output = lambda *_a, **_k: False
@@ -167,7 +173,9 @@ def _expected_finish_return() -> str:
     return _submit_solution_call()["arguments"]
 
 
-def _generic_tool_call(*, call_id: str = "call_other", name: str = "memory_files"):
+def _generic_tool_call(
+    *, call_id: str = "call_other", name: str = "memory_files"
+):
     return {
         "type": "function_call",
         "name": name,
@@ -193,11 +201,17 @@ def _chat_response(content: str = "ok"):
 def _http_error(status_code: int = 500) -> httpx.HTTPStatusError:
     """Ошибка HTTP в форме httpx: requests ушёл из зависимостей ядра."""
     request = httpx.Request("POST", "http://backend.invalid/v1")
-    response = httpx.Response(status_code, text="backend failed", request=request)
-    return httpx.HTTPStatusError("backend failed", request=request, response=response)
+    response = httpx.Response(
+        status_code, text="backend failed", request=request
+    )
+    return httpx.HTTPStatusError(
+        "backend failed", request=request, response=response
+    )
 
 
-def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatch):
+def test_run_agent_calls_pre_backend_hook_before_user_message_backend(
+    monkeypatch,
+):
     order: list[str] = []
 
     async def _fake_process_user_ask(_messages, _state, _ctx):
@@ -207,7 +221,9 @@ def test_run_agent_calls_pre_backend_hook_before_user_message_backend(monkeypatc
     def _pre_backend_hook(_messages, _mode):
         order.append(f"pre:{_mode}")
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
     result = run_coro(
         arun_agent(
@@ -237,12 +253,18 @@ def test_first_poll_merges_pending_with_the_start_batch(monkeypatch):
     seen: list = []
 
     async def _fake_process_user_ask(messages, _state, _ctx):
-        seen.append([m.get("content") for m in messages if isinstance(m, dict)])
+        seen.append(
+            [m.get("content") for m in messages if isinstance(m, dict)]
+        )
         return [_submit_solution_call()], "resp_1"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
-    polls = [[{"role": "user", "content": "пришло во время прогона", "id": "m2"}]]
+    polls = [
+        [{"role": "user", "content": "пришло во время прогона", "id": "m2"}]
+    ]
 
     def _get_pending():
         return polls.pop(0) if polls else []
@@ -262,7 +284,9 @@ def test_first_poll_merges_pending_with_the_start_batch(monkeypatch):
     )
 
 
-def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch):
+def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(
+    monkeypatch,
+):
     order: list[str] = []
 
     async def _fake_process_tool_outputs(_messages, _state, _ctx):
@@ -272,7 +296,9 @@ def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(monkeypatch
     def _pre_backend_hook(_messages, _mode):
         order.append(f"pre:{_mode}")
 
-    monkeypatch.setattr(processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs)
+    monkeypatch.setattr(
+        processing_module, "aprocess_tool_outputs", _fake_process_tool_outputs
+    )
 
     result = run_coro(
         arun_agent(
@@ -304,7 +330,9 @@ def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
     async def _fake_process_user_ask(_messages, _state, _ctx):
         return [_submit_solution_call()], "resp_1"
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _fake_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
 
     result = run_coro(
         arun_agent(
@@ -319,7 +347,9 @@ def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
     assert hook_calls == []
 
 
-def test_chat_completions_http_error_retries_with_reduced_max_tokens(monkeypatch):
+def test_chat_completions_http_error_retries_with_reduced_max_tokens(
+    monkeypatch,
+):
     max_tokens_seen: list[int] = []
     use_retry_seen: list[bool] = []
 
@@ -362,7 +392,9 @@ def test_run_agent_propagates_backend_connection_error(monkeypatch):
     async def _failing_process_user_ask(_messages, _state, _ctx):
         raise httpx.ConnectError("network is down")
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _failing_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _failing_process_user_ask
+    )
 
     with pytest.raises(httpx.ConnectError, match="network is down"):
         run_coro(
@@ -378,7 +410,9 @@ def test_run_agent_propagates_backend_http_error(monkeypatch):
     async def _failing_process_user_ask(_messages, _state, _ctx):
         raise _http_error(503)
 
-    monkeypatch.setattr(processing_module, "aprocess_user_ask", _failing_process_user_ask)
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _failing_process_user_ask
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(
@@ -390,7 +424,9 @@ def test_run_agent_propagates_backend_http_error(monkeypatch):
         )
 
 
-def test_chat_completions_connection_error_does_not_lower_max_tokens(monkeypatch):
+def test_chat_completions_connection_error_does_not_lower_max_tokens(
+    monkeypatch,
+):
     max_tokens_seen: list[int] = []
 
     async def _fake_request_backend(data, *_args, **_kwargs):
@@ -440,7 +476,10 @@ def test_turn_finish_commits_current_user_intent_on_success():
         "уточнение",
     ]
     synthetic_outputs = [
-        m for m in state.messages if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        m
+        for m in state.messages
+        if m.get("type") == "function_call_output"
+        and m.get("call_id") == "call_finish"
     ]
     assert len(synthetic_outputs) == 1
     output_payload = json.loads(synthetic_outputs[0]["output"])
@@ -475,9 +514,14 @@ def test_turn_finish_validation_failure_fails_open(monkeypatch):
 
     assert result == _expected_finish_return()
     assert state.current_user_intent == []
-    assert intent_user_ask_texts(state.user_intent_log) == ["актуальный вопрос"]
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "актуальный вопрос"
+    ]
     synthetic_outputs = [
-        m for m in state.messages if m.get("type") == "function_call_output" and m.get("call_id") == "call_finish"
+        m
+        for m in state.messages
+        if m.get("type") == "function_call_output"
+        and m.get("call_id") == "call_finish"
     ]
     assert len(synthetic_outputs) == 1
 
@@ -493,7 +537,9 @@ def test_finish_batch_executes_neighbor_tools_not_cycle_stop_stubs():
     )
 
     assert result == _expected_finish_return()
-    outputs = [m for m in state.messages if m.get("type") == "function_call_output"]
+    outputs = [
+        m for m in state.messages if m.get("type") == "function_call_output"
+    ]
     by_call = {m.get("call_id"): m for m in outputs}
     assert "call_finish" in by_call
     assert "call_other" in by_call
@@ -509,7 +555,9 @@ def test_finish_batch_executes_neighbor_tools_not_cycle_stop_stubs():
     assert "skipped_on_cycle_stop" not in by_call["call_other"]["output"]
 
 
-def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
+def test_turn_finish_validation_receives_context_and_current_scope(
+    monkeypatch,
+):
     state = _make_state()
     seed_state_intent(
         state,
@@ -548,8 +596,12 @@ def test_turn_finish_validation_receives_context_and_current_scope(monkeypatch):
     )
 
     assert result == _expected_finish_return()
-    assert intent_user_ask_texts_from_jsonl(captured["current_user_requests"]) == ["актуальный вопрос", "уточнение"]
-    assert intent_user_ask_texts_from_jsonl(captured["context_user_messages"]) == ["старый вопрос"]
+    assert intent_user_ask_texts_from_jsonl(
+        captured["current_user_requests"]
+    ) == ["актуальный вопрос", "уточнение"]
+    assert intent_user_ask_texts_from_jsonl(
+        captured["context_user_messages"]
+    ) == ["старый вопрос"]
 
 
 def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
@@ -594,7 +646,9 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
             )
 
     mock_build.assert_called_once()
-    call_state = mock_build.call_args.kwargs.get("state") or mock_build.call_args[0][0]
+    call_state = (
+        mock_build.call_args.kwargs.get("state") or mock_build.call_args[0][0]
+    )
     assert call_state is state
 
 
@@ -648,9 +702,15 @@ def test_finish_gate_rejection_keeps_batch_outputs_in_trace(monkeypatch):
         )
     )
 
-    by_call = {m.get("call_id"): m for m in state.messages if m.get("type") == "function_call_output"}
+    by_call = {
+        m.get("call_id"): m
+        for m in state.messages
+        if m.get("type") == "function_call_output"
+    }
     assert "call_finish" in by_call
     assert "call_other" in by_call
     assert json.loads(by_call["call_other"]["output"])["ok"] is True
     assert "skipped_on_cycle_stop" not in by_call["call_other"]["output"]
-    assert json.loads(by_call["call_finish"]["output"])["status"] == ("rejected_by_finish_gate")
+    assert json.loads(by_call["call_finish"]["output"])["status"] == (
+        "rejected_by_finish_gate"
+    )

@@ -63,7 +63,9 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
                 return unfold_payload(parsed, max_depth - 1)
         return content
     if isinstance(content, dict):
-        return {k: unfold_payload(v, max_depth - 1) for k, v in content.items()}
+        return {
+            k: unfold_payload(v, max_depth - 1) for k, v in content.items()
+        }
     if isinstance(content, list):
         return [unfold_payload(v, max_depth - 1) for v in content]
     return content
@@ -72,7 +74,9 @@ def unfold_payload(content: Any, max_depth: int = _MAX_UNFOLD_DEPTH) -> Any:
 # Хвостовые обрезки оборванного JSON (все три — только НЕ-скобочные символы,
 # так что стек закрывашек после стрижки не меняется).
 _BARE_TAIL = re.compile(r'[^\s,:{}\[\]"]+$')  # голый литерал: 12 / tru / nul
-_KEY_TAIL = re.compile(r'"(?:[^"\\]|\\.)*"\s*:?\s*$')  # висящий ключ: "trunca" / "count":
+_KEY_TAIL = re.compile(
+    r'"(?:[^"\\]|\\.)*"\s*:?\s*$'
+)  # висящий ключ: "trunca" / "count":
 _SEP_TAIL = re.compile(r"[,:]\s*$")  # висящий разделитель
 
 

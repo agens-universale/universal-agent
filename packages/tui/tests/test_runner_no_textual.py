@@ -4,7 +4,9 @@ import builtins
 import sys
 
 
-def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys):
+def test_main_without_textual_returns_1_and_prints_to_stderr(
+    monkeypatch, capsys
+):
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):

@@ -43,7 +43,9 @@ def test_native_success_does_not_send_osc52(local_machine, monkeypatch):
     monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: True)
     app = FakeApp()
 
-    assert clipboard_ops.copy_out(app, "код", toast=True, blocking=True) is True
+    assert (
+        clipboard_ops.copy_out(app, "код", toast=True, blocking=True) is True
+    )
     assert app.osc_calls == []
 
 
@@ -69,10 +71,16 @@ def test_ssh_session_uses_osc52(monkeypatch):
     """В SSH нативная запись положила бы текст в буфер сервера, а не ваш."""
     monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: True)
     native_calls = []
-    monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda text: native_calls.append(text) or True)
+    monkeypatch.setattr(
+        clipboard_ops,
+        "write_clipboard",
+        lambda text: native_calls.append(text) or True,
+    )
     app = FakeApp()
 
-    assert clipboard_ops.copy_out(app, "код", toast=True, blocking=True) is True
+    assert (
+        clipboard_ops.copy_out(app, "код", toast=True, blocking=True) is True
+    )
     assert app.osc_calls == ["код"]
 
 

@@ -169,7 +169,10 @@ def _affix_or_pattern(body: str, effective_ci: bool) -> ScanPattern | None:
     if not (pre_ok or suf_ok):
         return None
     req = _pick_longer(pre if pre_ok else None, suf if suf_ok else None)
-    return ScanPattern(PatternMode.AFFIX_OR, Needles(req, _pure_or_branches(inner), effective_ci))
+    return ScanPattern(
+        PatternMode.AFFIX_OR,
+        Needles(req, _pure_or_branches(inner), effective_ci),
+    )
 
 
 def classify_scan_pattern(

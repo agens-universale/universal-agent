@@ -4,7 +4,11 @@ from typing import Any, Dict
 
 import yaml
 from gc_core.bundled_assets import bundled_root, repo_root
-from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
+from gc_core.config import (
+    apply_cli_overrides,
+    load_config,
+    sync_logging_flat_and_params,
+)
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.utils.user_text import read_user_text
 
@@ -68,7 +72,9 @@ def load_server_config() -> Dict[str, Any]:
         searched = [cfg_path]
     else:
         searched = _server_config_candidates()
-        cfg_path = next((c for c in searched if os.path.exists(c)), searched[-1])
+        cfg_path = next(
+            (c for c in searched if os.path.exists(c)), searched[-1]
+        )
     if not os.path.exists(cfg_path):
         # Минимальный дефолт, чтобы сервер мог стартовать и без файла. Раньше
         # эта ветка была молчаливой, и «конфиг не нашёлся» было не отличить от
@@ -187,7 +193,9 @@ def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
     return local
 
 
-def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def build_agent_config_for_server(
+    server_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
     """
     Построить config_dict для агента при запуске через REST-сервер.
 
@@ -221,7 +229,9 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     agent_cfg = server_cfg.get("agent") or {}
     server_agent_path = agent_cfg.get("server_agentmd_path")
     if isinstance(server_agent_path, str) and server_agent_path.strip():
-        server_agent_path = _resolve_server_agent_md(server_agent_path, server_cfg)
+        server_agent_path = _resolve_server_agent_md(
+            server_agent_path, server_cfg
+        )
         cfg["agent_md_path"] = server_agent_path
 
     overrides = server_cfg.get("agent_overrides") or {}
@@ -237,4 +247,8 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-__all__ = ["PROJECT_ROOT", "build_agent_config_for_server", "load_server_config"]
+__all__ = [
+    "PROJECT_ROOT",
+    "build_agent_config_for_server",
+    "load_server_config",
+]

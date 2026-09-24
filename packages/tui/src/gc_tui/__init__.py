@@ -20,7 +20,10 @@ from typing import Optional, Sequence
 def _missing_textual_msg() -> str:
     from gc_core.app_version import install_hint
 
-    return "TUI не установлен (нет пакета textual). Поставьте профиль с TUI: " + install_hint("gc-tui")
+    return (
+        "TUI не установлен (нет пакета textual). Поставьте профиль с TUI: "
+        + install_hint("gc-tui")
+    )
 
 
 def _interactive() -> bool:
@@ -93,11 +96,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         dest="auto_mcp",
         help="Не поднимать HTTP/SSE MCP-daemon'ы при старте",
     )
-    args, _unknown = parser.parse_known_args(list(argv) if argv is not None else sys.argv[1:])
+    args, _unknown = parser.parse_known_args(
+        list(argv) if argv is not None else sys.argv[1:]
+    )
 
     # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
     # project skills). Тихо игнорит отсутствие прав на запись в cwd.
-    from gc_core.config_modules.env_vars import ensure_project_gc_dir, project_local_config_path
+    from gc_core.config_modules.env_vars import (
+        ensure_project_gc_dir,
+        project_local_config_path,
+    )
 
     ensure_project_gc_dir()
 
@@ -136,7 +144,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # Лестница исчерпана: не собирается и шаблон — сломан слой, в
             # который мастер не пишет (оверлей). Чинить его мастером нечем: то
             # же объяснение, что на обычном старте, и код 1 — не трейсбек.
-            print(onboarding.explain_broken_config(str(onb_write_path), exc, program="gc-ua"), file=sys.stderr)
+            print(
+                onboarding.explain_broken_config(
+                    str(onb_write_path), exc, program="gc-ua"
+                ),
+                file=sys.stderr,
+            )
             return 1
         config_dict, profile_meta = loaded.config, loaded.meta
         if not _interactive():
@@ -147,7 +160,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"[gc] {loaded.message}", file=sys.stderr)
             print(
                 onboarding.setup_guide(
-                    str(onb_write_path), config_dict, program="gc-ua", just_created=just_created, repair=loaded
+                    str(onb_write_path),
+                    config_dict,
+                    program="gc-ua",
+                    just_created=just_created,
+                    repair=loaded,
                 ),
                 file=sys.stderr,
             )
@@ -168,7 +185,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             from gc_core.runtime_notices import push_runtime_notice
             from gc_core.startup_notices import Notice
 
-            push_runtime_notice(Notice("warning", "config_load_degraded", loaded.message, ("config.yml",)))
+            push_runtime_notice(
+                Notice(
+                    "warning",
+                    "config_load_degraded",
+                    loaded.message,
+                    ("config.yml",),
+                )
+            )
         # Ступень «без профиля» значит, что конфиг собрался только со снятым
         # профилем: финал мастера обязан снять и указатель, иначе гейт записи
         # отвергнет собранное (стек следующего старта поднимет тот же профиль) —
@@ -179,9 +203,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         onboarding_deactivate_profile = loaded.deactivate_profile
         onboarding_mode = "review"
     else:
-        just_created = _bootstrap_user_config() if args.config is None else False
+        just_created = (
+            _bootstrap_user_config() if args.config is None else False
+        )
         try:
-            config_dict, profile_meta = load_config_ex(args.config, profile_override=args.profile)
+            config_dict, profile_meta = load_config_ex(
+                args.config, profile_override=args.profile
+            )
         except ValueError as exc:
             # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый
             # traceback: падение здесь случается ДО создания TuiApp, так что
@@ -190,7 +218,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # описывало бы чужой стек.
             print(
                 onboarding.explain_broken_config(
-                    resolve_config_path(args.config), exc, program="gc-ua", profile_override=args.profile
+                    resolve_config_path(args.config),
+                    exc,
+                    program="gc-ua",
+                    profile_override=args.profile,
                 ),
                 file=sys.stderr,
             )
@@ -201,7 +232,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if not _interactive():
                 print(
                     onboarding.setup_guide(
-                        str(onb_write_path), config_dict, program="gc-ua", just_created=just_created
+                        str(onb_write_path),
+                        config_dict,
+                        program="gc-ua",
+                        just_created=just_created,
                     ),
                     file=sys.stderr,
                 )
@@ -218,16 +252,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     threads_dir = resolve_threads_dir(config_dict)
 
-    from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons, shutdown_mcp_daemons
+    from recommended_mcp.runtime.daemon_autostart import (
+        ensure_mcp_daemons,
+        shutdown_mcp_daemons,
+    )
 
     auto_mcp = args.auto_mcp
     if auto_mcp:
-        ensure_mcp_daemons(config_dict, disable_hint="отключить автозапуск целиком: `--no-auto-mcp`")
+        ensure_mcp_daemons(
+            config_dict,
+            disable_hint="отключить автозапуск целиком: `--no-auto-mcp`",
+        )
 
     voice_expected = False
     _release_voice = None
     try:
-        from gc_tui.voice_runtime.autostart import release_voice_service, url_is_ours
+        from gc_tui.voice_runtime.autostart import (
+            release_voice_service,
+            url_is_ours,
+        )
         from gc_tui.voice_runtime.state import load_state as _voice_state
 
         _release_voice = release_voice_service
@@ -247,7 +290,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         config=config_dict,
         profile_override=None if args.init_config else args.profile,
     )
-    app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
+    app.set_config_path(
+        onb_write_path if onboarding_mode else resolve_config_path(args.config)
+    )
     app._config_project_local = project_local_config_path()  # str | None
     # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
     # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
@@ -260,7 +305,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # (не сессионным переключением) — тот же notice, что и сессионный путь
     # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
     # единственном старте загрузки, до создания app/треда.
-    app._maybe_notice_profile_activation(profile_meta.active_name or "", profile_meta, config_dict)
+    app._maybe_notice_profile_activation(
+        profile_meta.active_name or "", profile_meta, config_dict
+    )
     app._onboarding_mode = onboarding_mode
     app._onboarding_deactivate_profile = onboarding_deactivate_profile
     app._onboarding_degraded = onboarding_degraded

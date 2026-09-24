@@ -58,7 +58,11 @@ def _primed_cwd(backend: Any) -> Optional[str]:
 def _cwd_from_pwd(res: Any) -> Optional[str]:
     """Разобрать ответ ``pwd``: абсолютный путь при нулевом коде возврата."""
     lines = (getattr(res, "stdout", "") or "").strip().splitlines()
-    if getattr(res, "return_code", 1) == 0 and lines and lines[0].startswith("/"):
+    if (
+        getattr(res, "return_code", 1) == 0
+        and lines
+        and lines[0].startswith("/")
+    ):
         return lines[0]
     return None
 
@@ -104,12 +108,18 @@ def discover_backend_cwd(backend: FsBackend) -> str:
     except Exception:  # env may be down; callers still need a root
         return "/"
     lines = (getattr(res, "stdout", "") or "").strip().splitlines()
-    if getattr(res, "return_code", 1) == 0 and lines and lines[0].startswith("/"):
+    if (
+        getattr(res, "return_code", 1) == 0
+        and lines
+        and lines[0].startswith("/")
+    ):
         return lines[0]
     return "/"
 
 
-async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = None) -> None:
+async def aprime_backend_cwd(
+    backend: Any, config: Optional[Dict[str, Any]] = None
+) -> None:
     """Узнать рабочий каталог окружения до сборки рабочей области.
 
     Песочнице рабочий каталог надо спросить у самого окружения, а это сеть —
@@ -169,7 +179,9 @@ async def aprime_backend_cwd(backend: Any, config: Optional[Dict[str, Any]] = No
 
     try:
         res = await asyncio.wait_for(
-            arun_backend_exec_raw(backend, "pwd", timeout=_CWD_PRIME_CEILING_SEC),
+            arun_backend_exec_raw(
+                backend, "pwd", timeout=_CWD_PRIME_CEILING_SEC
+            ),
             _CWD_PRIME_CEILING_SEC,
         )
         cwd = _cwd_from_pwd(res)
@@ -255,7 +267,9 @@ def resolve_root_writable(backend: FsBackend, root: str) -> bool:
     """Whether ``root`` is writable in the execution environment."""
     if getattr(backend, "is_sandbox", False):
         return True
-    from gc_core.utils.directory_write_access import directory_allows_probe_write
+    from gc_core.utils.directory_write_access import (
+        directory_allows_probe_write,
+    )
 
     return directory_allows_probe_write(root)
 

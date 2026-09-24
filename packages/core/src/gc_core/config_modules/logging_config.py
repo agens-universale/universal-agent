@@ -32,7 +32,9 @@ class LoggingConfig(BaseModel):
     # НИЧЕГО, потому что per-run логгер обрывает цепочку.
     propagate: bool = False
     # Маскировка секретов перед записью в лог (stdout и файл). По умолчанию выкл.
-    redact_secrets: RedactSecretsConfig = Field(default_factory=RedactSecretsConfig)
+    redact_secrets: RedactSecretsConfig = Field(
+        default_factory=RedactSecretsConfig
+    )
 
     @field_validator("format")
     @classmethod
@@ -47,5 +49,7 @@ class LoggingConfig(BaseModel):
     def _validate_log_level(cls, value: str) -> str:
         normalized = str(value).strip().lower()
         if normalized not in {"debug", "info", "warning", "error"}:
-            raise ValueError("logging.log_level должен быть 'debug', 'info', 'warning' или 'error'")
+            raise ValueError(
+                "logging.log_level должен быть 'debug', 'info', 'warning' или 'error'"
+            )
         return normalized

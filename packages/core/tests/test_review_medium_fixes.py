@@ -59,7 +59,9 @@ def test_ownerless_session_arms_an_exit_hook(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio as ps
 
     registered: list = []
-    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+    monkeypatch.setattr(
+        atexit, "register", lambda fn, *a, **kw: registered.append(fn)
+    )
 
     registry = ps.PersistentStdioRegistry()
     registry.get_or_create("srv", {"command": "true"})
@@ -82,7 +84,9 @@ def test_an_owned_session_arms_the_exit_hook_too(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio as ps
 
     registered: list = []
-    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+    monkeypatch.setattr(
+        atexit, "register", lambda fn, *a, **kw: registered.append(fn)
+    )
 
     registry = ps.PersistentStdioRegistry()
     token = set_owner("owner-with-a-run")
@@ -91,7 +95,9 @@ def test_an_owned_session_arms_the_exit_hook_too(monkeypatch):
     finally:
         reset_owner(token)
 
-    assert registered == [registry.close_everything], "у владельческой сессии нет подстраховки на выходе процесса"
+    assert registered == [registry.close_everything], (
+        "у владельческой сессии нет подстраховки на выходе процесса"
+    )
 
 
 def test_exit_hook_is_armed_once(monkeypatch):
@@ -101,7 +107,9 @@ def test_exit_hook_is_armed_once(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio as ps
 
     registered: list = []
-    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+    monkeypatch.setattr(
+        atexit, "register", lambda fn, *a, **kw: registered.append(fn)
+    )
 
     registry = ps.PersistentStdioRegistry()
     for name in ("a", "b", "c"):
@@ -137,7 +145,9 @@ async def test_simple_fetch_url_parses_html_off_the_loop(monkeypatch):
     import pathlib
 
     src = pathlib.Path(inspect.getsourcefile(mod)).read_text(encoding="utf-8")
-    assert "asyncio.to_thread(self._extract_simple_html_text" in src, "разбор HTML снова исполняется на loop"
+    assert "asyncio.to_thread(self._extract_simple_html_text" in src, (
+        "разбор HTML снова исполняется на loop"
+    )
 
 
 # --- L2: удалённый механизм не должен описываться как действующий ----------
@@ -165,4 +175,6 @@ def test_no_portal_left_in_core_sources():
             if "syncapiinsideeventloop" in low or "портал" in low:
                 offenders.append(f"{path.relative_to(root)}:{i}")
 
-    assert offenders == [], "вернулись упоминания снятого портала:\n  " + "\n  ".join(offenders)
+    assert offenders == [], (
+        "вернулись упоминания снятого портала:\n  " + "\n  ".join(offenders)
+    )

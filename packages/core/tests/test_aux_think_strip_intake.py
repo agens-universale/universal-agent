@@ -12,7 +12,9 @@ from gc_core.project_memory import compaction
 from gc_core.security import command_moderation
 from gc_core.summarize import llm as summary_llm
 from gc_core.summarize.summary_validation import merge_repaired_summary
-from gc_core.summarize.thread_summarizer import asummarize_dialog_via_chat_completions
+from gc_core.summarize.thread_summarizer import (
+    asummarize_dialog_via_chat_completions,
+)
 from gc_core.summarize.working_memory_gateway import parse_memory_deltas
 from gc_testkit import as_coro, run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
@@ -21,9 +23,15 @@ _DIRTY_EXTRA = "<think>t</think><redacted_thinking>r</redacted_thinking>"
 
 
 def test_fallback_aggregated_keeps_tool_output_as_is():
-    ctx = SimpleNamespace(intent_scope=SimpleNamespace(max_summary_chars=0, max_tool_output_chars=10_000))
+    ctx = SimpleNamespace(
+        intent_scope=SimpleNamespace(
+            max_summary_chars=0, max_tool_output_chars=10_000
+        )
+    )
     raw = "<think>hide</think>visible facts"
-    assert build_fallback_aggregated_content(ctx=ctx, tool_output_raw=raw) == raw
+    assert (
+        build_fallback_aggregated_content(ctx=ctx, tool_output_raw=raw) == raw
+    )
 
 
 def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
@@ -36,7 +44,9 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
         logged["output_text"] = output_text
         logged["label"] = label
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_request)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_request
+    )
     monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", _fake_log)
 
     ctx = SimpleNamespace(
@@ -70,10 +80,15 @@ def test_parse_memory_deltas_expects_projected_input():
 
 
 def test_merge_repaired_summary_on_clean_inputs():
-    from gc_core.summarize.summary_spec import assemble_summary_xml, section_tags
+    from gc_core.summarize.summary_spec import (
+        assemble_summary_xml,
+        section_tags,
+    )
 
     repaired = assemble_summary_xml({t: f"- {t}" for t in section_tags()})
-    merged = merge_repaired_summary(invalid_text=repaired, repaired_text=repaired)
+    merged = merge_repaired_summary(
+        invalid_text=repaired, repaired_text=repaired
+    )
     assert "<summary>" in merged
     assert "- task_and_context" in merged
 
@@ -87,7 +102,8 @@ def test_seed_subagent_keeps_assignment_as_is():
 
 def test_command_judge_uses_project_and_config_extra_tag():
     parsed = command_moderation._parse_judge_json(
-        _DIRTY_EXTRA + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
+        _DIRTY_EXTRA
+        + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
         tags=["redacted_thinking"],
     )
     assert parsed["verdict"] == "safe"
@@ -107,7 +123,9 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     )
     loaded = load_config(str(cfg_path))
 
-    monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None)
+    monkeypatch.setattr(
+        summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None
+    )
     ctx = SimpleNamespace(
         logger=object(),
         config_dict=loaded,
@@ -121,7 +139,9 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     async def _fake_summary(**kwargs):
         return _DIRTY_EXTRA + "one-line summary"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_summary)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_summary
+    )
     assert (
         run_coro(
             summary_llm.arequest_summary_text(
@@ -138,7 +158,9 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     async def _fake_compressed(**kwargs):
         return _DIRTY_EXTRA + "compressed"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_compressed)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_compressed
+    )
     compact_res = run_coro(compaction.acompact_text("long memory", ctx, state))
     assert compact_res.ok is True
     assert compact_res.text == "compressed"
@@ -156,7 +178,9 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     async def _fake_finish(**kwargs):
         return _DIRTY_EXTRA + json.dumps(finish_payload)
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_finish)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_finish
+    )
     projected_finish = run_coro(
         summary_llm.arequest_auxiliary_completion_text(
             ctx=ctx,
@@ -174,13 +198,16 @@ def test_load_config_extras_strip_on_aux_sinks(tmp_path, monkeypatch):
     assert parsed_finish.action == "accept"
 
     parsed_judge = command_moderation._parse_judge_json(
-        _DIRTY_EXTRA + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
+        _DIRTY_EXTRA
+        + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}',
         tags=loaded["strip_tags_projection"]["tags"],
     )
     assert parsed_judge["verdict"] == "safe"
 
 
-async def test_aux_always_strips_think_even_when_config_disables_it(tmp_path, monkeypatch):
+async def test_aux_always_strips_think_even_when_config_disables_it(
+    tmp_path, monkeypatch
+):
     """strip_think: false — только основной трейс; aux всегда режет <think>."""
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
@@ -195,7 +222,9 @@ async def test_aux_always_strips_think_even_when_config_disables_it(tmp_path, mo
     loaded = load_config(str(cfg_path))
     assert loaded["strip_tags_projection"]["strip_think"] is False
 
-    monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None)
+    monkeypatch.setattr(
+        summary_llm, "log_llm_prompt_and_result", lambda **kwargs: None
+    )
     ctx = SimpleNamespace(
         logger=object(),
         config_dict=loaded,
@@ -253,12 +282,15 @@ async def test_aux_always_strips_think_even_when_config_disables_it(tmp_path, mo
     assert parsed_finish.action == "accept"
 
     parsed_judge = command_moderation._parse_judge_json(
-        dirty + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}'
+        dirty
+        + '{"verdict":"safe","reasons":["ok"],"risk_flags":[],"confidence":0.9}'
     )
     assert parsed_judge["verdict"] == "safe"
 
 
-async def test_summarizer_history_strips_think_even_when_config_disables_it(monkeypatch):
+async def test_summarizer_history_strips_think_even_when_config_disables_it(
+    monkeypatch,
+):
     """История в промпте summarizer/patch — без ``<think>``, даже при strip_think: false."""
     seen_user_prompts: list[str] = []
 
@@ -268,14 +300,23 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(monk
             seen_user_prompts.append(str(messages[-1].get("content") or ""))
         return valid_summary_xml_for_tests(seed="clean-history")
 
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", _fake_request)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", _fake_request)
+    monkeypatch.setattr(
+        "gc_core.summarize.thread_summarizer.arequest_summary_text",
+        _fake_request,
+    )
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text",
+        _fake_request,
+    )
     empty = SimpleNamespace(request_messages=[], raw_response="")
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
         as_coro(lambda **_k: empty),
     )
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
 
     ctx = SimpleNamespace(
         logger=None,

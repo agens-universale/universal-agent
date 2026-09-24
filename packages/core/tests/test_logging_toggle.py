@@ -5,13 +5,19 @@ from gc_core.utils.logging_module import create_run_logger
 
 
 def _base(tmp_path, **over):
-    cfg = {"logs_dump_dir": str(tmp_path), "save_logs": True, "console_trace": False}
+    cfg = {
+        "logs_dump_dir": str(tmp_path),
+        "save_logs": True,
+        "console_trace": False,
+    }
     cfg.update(over)
     return cfg
 
 
 def test_text_default_writes_dot_log_plaintext(tmp_path):
-    logger, path, _ = create_run_logger(_base(tmp_path), run_id="r1", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _base(tmp_path), run_id="r1", agent_kind="main"
+    )
     assert path.endswith(".log")
     logger.info("hello world", extra={"event": "agent_start"})
     for h in logger.handlers:
@@ -23,7 +29,9 @@ def test_text_default_writes_dot_log_plaintext(tmp_path):
 
 
 def test_jsonl_writes_dot_jsonl_events(tmp_path):
-    logger, path, _ = create_run_logger(_base(tmp_path, logging_format="jsonl"), run_id="r2", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _base(tmp_path, logging_format="jsonl"), run_id="r2", agent_kind="main"
+    )
     assert path.endswith(".jsonl")
     logger.info("msg", extra={"event": "agent_start", "foo": 1})
     for h in logger.handlers:
@@ -37,10 +45,23 @@ def test_jsonl_writes_dot_jsonl_events(tmp_path):
 
 def test_jsonl_redaction_masks_payload(tmp_path):
     cfg = _base(
-        tmp_path, logging_format="jsonl", redact_secrets={"enabled": True, "extra_keys": [], "extra_patterns": []}
+        tmp_path,
+        logging_format="jsonl",
+        redact_secrets={
+            "enabled": True,
+            "extra_keys": [],
+            "extra_patterns": [],
+        },
     )
     logger, path, _ = create_run_logger(cfg, run_id="r3", agent_kind="main")
-    logger.info("x", extra={"event": "e", "Authorization": "Bearer zzz", "note": "Bearer abcdef.ghijk-123"})
+    logger.info(
+        "x",
+        extra={
+            "event": "e",
+            "Authorization": "Bearer zzz",
+            "note": "Bearer abcdef.ghijk-123",
+        },
+    )
     for h in logger.handlers:
         h.flush()
     line = open(path, encoding="utf-8").read()
@@ -60,7 +81,9 @@ def test_text_redaction_masks_line(tmp_path):
 
 
 def test_text_no_redaction_by_default_keeps_secret(tmp_path):
-    logger, path, _ = create_run_logger(_base(tmp_path), run_id="r5", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        _base(tmp_path), run_id="r5", agent_kind="main"
+    )
     logger.info("Bearer keepme-1234567890", extra={"event": "e"})
     for h in logger.handlers:
         h.flush()

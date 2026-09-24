@@ -33,7 +33,12 @@ def test_allow_returns_true_without_judge(monkeypatch):
         return True
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("allow"), _S(), "привет")).accept is True
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("allow"), _S(), "привет")
+        ).accept
+        is True
+    )
     assert judged["n"] == 0  # allow → судья не зван
 
 
@@ -46,7 +51,12 @@ def test_judge_accept_returns_true(monkeypatch):
         return SimpleNamespace(action="accept")
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "привет")).accept is True
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("judge"), _S(), "привет")
+        ).accept
+        is True
+    )
 
 
 def test_judge_reject_returns_false(monkeypatch):
@@ -70,7 +80,12 @@ def test_judge_reject_returns_false(monkeypatch):
         return _rej
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "сделай отчёт")).accept is False
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("judge"), _S(), "сделай отчёт")
+        ).accept
+        is False
+    )
 
 
 def test_deny_returns_false_without_judge(monkeypatch):
@@ -83,7 +98,12 @@ def test_deny_returns_false_without_judge(monkeypatch):
         return True
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("deny"), _S(), "привет")).accept is False
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("deny"), _S(), "привет")
+        ).accept
+        is False
+    )
     assert judged["n"] == 0
 
 
@@ -98,7 +118,10 @@ def test_no_key_returns_false_without_judge(monkeypatch):
         return True
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx(None), _S(), "привет")).accept is False
+    assert (
+        run_coro(ashould_return_text_answer(_ctx(None), _S(), "привет")).accept
+        is False
+    )
     assert judged["n"] == 0
 
 
@@ -119,7 +142,9 @@ def test_judge_gate_on_calls_judge(monkeypatch):
         return SimpleNamespace(action="accept")
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = run_coro(ashould_return_text_answer(_ctx("judge", strict=True), _S(), "привет"))
+    d = run_coro(
+        ashould_return_text_answer(_ctx("judge", strict=True), _S(), "привет")
+    )
     assert judged["n"] == 1 and d.accept is True
 
 
@@ -138,7 +163,9 @@ def test_judge_gate_off_still_calls_judge(monkeypatch):
         return SimpleNamespace(action="accept")
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    d = run_coro(ashould_return_text_answer(_ctx("judge", strict=False), _S(), "привет"))
+    d = run_coro(
+        ashould_return_text_answer(_ctx("judge", strict=False), _S(), "привет")
+    )
     assert judged["n"] == 1 and d.accept is True
 
 
@@ -154,13 +181,19 @@ def test_judge_without_chat_completions_is_strict(monkeypatch):
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert (
-        run_coro(ashould_return_text_answer(_ctx("judge", backend="responses", strict=True), _S(), "привет")).accept
+        run_coro(
+            ashould_return_text_answer(
+                _ctx("judge", backend="responses", strict=True), _S(), "привет"
+            )
+        ).accept
         is False
     )
     assert judged["n"] == 0
 
 
-def test_judge_without_chat_completions_is_strict_even_with_gate_off(monkeypatch):
+def test_judge_without_chat_completions_is_strict_even_with_gate_off(
+    monkeypatch,
+):
     """(e) backend != chat_completions + judge → deny без судьи, тоже при gate=off
     (инфраструктурное условие не подменяется пользовательской ручкой)."""
     from gc_core.intent_guard import text_answer_judge as taj
@@ -173,7 +206,13 @@ def test_judge_without_chat_completions_is_strict_even_with_gate_off(monkeypatch
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
     assert (
-        run_coro(ashould_return_text_answer(_ctx("judge", backend="responses", strict=False), _S(), "привет")).accept
+        run_coro(
+            ashould_return_text_answer(
+                _ctx("judge", backend="responses", strict=False),
+                _S(),
+                "привет",
+            )
+        ).accept
         is False
     )
     assert judged["n"] == 0
@@ -190,8 +229,22 @@ def test_allow_accepts_without_judge_regardless_of_gate(monkeypatch):
         return True
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("allow", strict=True), _S(), "привет")).accept is True
-    assert run_coro(ashould_return_text_answer(_ctx("allow", strict=False), _S(), "привет")).accept is True
+    assert (
+        run_coro(
+            ashould_return_text_answer(
+                _ctx("allow", strict=True), _S(), "привет"
+            )
+        ).accept
+        is True
+    )
+    assert (
+        run_coro(
+            ashould_return_text_answer(
+                _ctx("allow", strict=False), _S(), "привет"
+            )
+        ).accept
+        is True
+    )
     assert judged["n"] == 0
 
 
@@ -206,10 +259,36 @@ def test_deny_rejects_regardless_of_gate(monkeypatch):
         return True
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("deny", strict=True), _S(), "привет")).accept is False
-    assert run_coro(ashould_return_text_answer(_ctx("deny", strict=False), _S(), "привет")).accept is False
-    assert run_coro(ashould_return_text_answer(_ctx(None, strict=True), _S(), "привет")).accept is False
-    assert run_coro(ashould_return_text_answer(_ctx(None, strict=False), _S(), "привет")).accept is False
+    assert (
+        run_coro(
+            ashould_return_text_answer(
+                _ctx("deny", strict=True), _S(), "привет"
+            )
+        ).accept
+        is False
+    )
+    assert (
+        run_coro(
+            ashould_return_text_answer(
+                _ctx("deny", strict=False), _S(), "привет"
+            )
+        ).accept
+        is False
+    )
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx(None, strict=True), _S(), "привет")
+        ).accept
+        is False
+    )
+    assert (
+        run_coro(
+            ashould_return_text_answer(
+                _ctx(None, strict=False), _S(), "привет"
+            )
+        ).accept
+        is False
+    )
     assert judged["n"] == 0
 
 
@@ -224,8 +303,14 @@ def test_empty_text_bounces_in_all_modes(monkeypatch):
         return True
 
     monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
-    assert run_coro(ashould_return_text_answer(_ctx("allow"), _S(), "   ")).accept is False
-    assert run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "")).accept is False
+    assert (
+        run_coro(ashould_return_text_answer(_ctx("allow"), _S(), "   ")).accept
+        is False
+    )
+    assert (
+        run_coro(ashould_return_text_answer(_ctx("judge"), _S(), "")).accept
+        is False
+    )
     assert judged["n"] == 0
 
 
@@ -256,7 +341,13 @@ def _run_ctx(mode):
 
 
 def _text_msgs():
-    return [{"role": "assistant", "type": "message", "content": "Привет! Чем помочь?"}]
+    return [
+        {
+            "role": "assistant",
+            "type": "message",
+            "content": "Привет! Чем помочь?",
+        }
+    ]
 
 
 def test_run_agent_allow_returns_text():
@@ -285,7 +376,9 @@ def test_run_agent_judge_accept_returns_text(monkeypatch):
 def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
     """content_filter — отказ провайдера, не финальный текст; allow не принимает."""
     from gc_core import processing_responses as pr
-    from gc_core.message_policy.no_tool_call_bounce import CONTENT_FILTER_BOUNCE_MESSAGE
+    from gc_core.message_policy.no_tool_call_bounce import (
+        CONTENT_FILTER_BOUNCE_MESSAGE,
+    )
 
     captured = {}
 
@@ -295,11 +388,19 @@ def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
 
     def _fake_process_user_ask(messages, state, ctx):
         state.last_finish_reason = "stop"
-        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+        return [
+            {"role": "assistant", "type": "message", "content": "ok"}
+        ], "resp_2"
 
-    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
-    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
-    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
+    monkeypatch.setattr(
+        pr, "aprocess_user_ask", as_coro(_fake_process_user_ask)
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
 
     state = _state()
     state.last_finish_reason = "content_filter"
@@ -311,7 +412,9 @@ def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
 def test_run_agent_refusal_bounces_even_in_allow(monkeypatch):
     """refusal/safety — тот же blocked-kind, не финал в allow."""
     from gc_core import processing_responses as pr
-    from gc_core.message_policy.no_tool_call_bounce import PROVIDER_BLOCKED_BOUNCE_MESSAGE
+    from gc_core.message_policy.no_tool_call_bounce import (
+        PROVIDER_BLOCKED_BOUNCE_MESSAGE,
+    )
 
     captured = {}
 
@@ -321,17 +424,27 @@ def test_run_agent_refusal_bounces_even_in_allow(monkeypatch):
 
     def _fake_process_user_ask(messages, state, ctx):
         state.last_finish_reason = "stop"
-        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+        return [
+            {"role": "assistant", "type": "message", "content": "ok"}
+        ], "resp_2"
 
-    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
-    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
-    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
+    monkeypatch.setattr(
+        pr, "aprocess_user_ask", as_coro(_fake_process_user_ask)
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
 
     for blocked in ("refusal", "safety"):
         captured.clear()
         state = _state()
         state.last_finish_reason = blocked
-        result = run_coro(pr.arun_agent(_text_msgs(), state, _run_ctx("allow")))
+        result = run_coro(
+            pr.arun_agent(_text_msgs(), state, _run_ctx("allow"))
+        )
         assert result == "ok"
         assert captured["content"] == PROVIDER_BLOCKED_BOUNCE_MESSAGE
 
@@ -339,7 +452,9 @@ def test_run_agent_refusal_bounces_even_in_allow(monkeypatch):
 def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
     """length без tool call — truncation nudge; allow тоже не принимает финалом."""
     from gc_core import processing_responses as pr
-    from gc_core.message_policy.no_tool_call_bounce import LENGTH_BOUNCE_MESSAGE
+    from gc_core.message_policy.no_tool_call_bounce import (
+        LENGTH_BOUNCE_MESSAGE,
+    )
 
     captured = {}
 
@@ -351,11 +466,19 @@ def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
         # Следующий ход — валидный финал; иначе deny снова bounce'ит «ok».
         ctx.config_dict["text_answer_mode"] = "allow"
         state.last_finish_reason = "stop"
-        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+        return [
+            {"role": "assistant", "type": "message", "content": "ok"}
+        ], "resp_2"
 
-    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
-    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
-    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
+    monkeypatch.setattr(
+        pr, "aprocess_user_ask", as_coro(_fake_process_user_ask)
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
 
     for mode in ("deny", "allow"):
         captured.clear()
@@ -369,7 +492,9 @@ def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
 def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
     """Пустой output после content_filter — тот же rewrite-надж, не «нет tool call»."""
     from gc_core import processing_responses as pr
-    from gc_core.message_policy.no_tool_call_bounce import CONTENT_FILTER_BOUNCE_MESSAGE
+    from gc_core.message_policy.no_tool_call_bounce import (
+        CONTENT_FILTER_BOUNCE_MESSAGE,
+    )
 
     captured = {}
 
@@ -379,11 +504,19 @@ def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
 
     def _fake_process_user_ask(messages, state, ctx):
         state.last_finish_reason = "stop"
-        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+        return [
+            {"role": "assistant", "type": "message", "content": "ok"}
+        ], "resp_2"
 
-    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
-    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
-    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
+    monkeypatch.setattr(
+        pr, "aprocess_user_ask", as_coro(_fake_process_user_ask)
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
 
     state = _state()
     state.last_finish_reason = "content_filter"
@@ -394,7 +527,9 @@ def test_run_agent_empty_batch_content_filter_uses_filter_nudge(monkeypatch):
 
 def test_run_agent_empty_batch_length_uses_truncation_nudge(monkeypatch):
     from gc_core import processing_responses as pr
-    from gc_core.message_policy.no_tool_call_bounce import LENGTH_BOUNCE_MESSAGE
+    from gc_core.message_policy.no_tool_call_bounce import (
+        LENGTH_BOUNCE_MESSAGE,
+    )
 
     captured = {}
 
@@ -404,11 +539,19 @@ def test_run_agent_empty_batch_length_uses_truncation_nudge(monkeypatch):
 
     def _fake_process_user_ask(messages, state, ctx):
         state.last_finish_reason = "stop"
-        return [{"role": "assistant", "type": "message", "content": "ok"}], "resp_2"
+        return [
+            {"role": "assistant", "type": "message", "content": "ok"}
+        ], "resp_2"
 
-    monkeypatch.setattr(pr, "_make_technical_feedback_user_message", _fake_make_feedback)
-    monkeypatch.setattr(pr, "aprocess_user_ask", as_coro(_fake_process_user_ask))
-    monkeypatch.setattr(pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
+    monkeypatch.setattr(
+        pr, "aprocess_user_ask", as_coro(_fake_process_user_ask)
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
 
     state = _state()
     state.last_finish_reason = "length"

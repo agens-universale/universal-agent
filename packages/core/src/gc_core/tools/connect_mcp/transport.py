@@ -37,7 +37,9 @@ def _http_headers_for(headers: Dict[str, str]) -> Dict[str, str]:
     return headers
 
 
-def _parse_http_response(resp: "httpx.Response") -> Tuple[Dict[str, str], Dict[str, Any]]:
+def _parse_http_response(
+    resp: "httpx.Response",
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
     """Ответ обычного HTTP → ``(заголовки, тело)``. Общее для обеих форм.
 
     Тело может прийти В ДВУХ ФОРМАХ, и это не прихоть сервера: раз клиент
@@ -136,12 +138,17 @@ class _SseFirstJson:
         if line is None:
             return None
         if self._debug:
-            print(f"[MCP_DEBUG SSE] {line[:200]!r}" + ("..." if len(line) > 200 else ""))
+            print(
+                f"[MCP_DEBUG SSE] {line[:200]!r}"
+                + ("..." if len(line) > 200 else "")
+            )
         stripped = line.strip()
         if not stripped:
             return self._on_blank_line()
         if stripped.lower().startswith(_SSE_DATA_PREFIX):
-            return self._on_data_line(stripped[len(_SSE_DATA_PREFIX) :].strip())
+            return self._on_data_line(
+                stripped[len(_SSE_DATA_PREFIX) :].strip()
+            )
         if self._in_data and self._buffer:
             self._buffer.append(stripped)
             return self._parse_buffer()
@@ -189,7 +196,10 @@ def _fix_sse_encoding(resp: "httpx.Response") -> None:
     # httpx типизирует Response.encoding как `str | None`, хотя сам подставляет
     # utf-8, если сервер кодировку не прислал. Проверка на None — страховка от
     # смены этого поведения в httpx, а не мёртвая ветка; NOSONAR — на её строке.
-    if resp.encoding is None or resp.encoding.lower() in ("iso-8859-1", "ascii"):  # NOSONAR: S3403
+    if resp.encoding is None or resp.encoding.lower() in (
+        "iso-8859-1",
+        "ascii",
+    ):  # NOSONAR: S3403
         resp.encoding = "utf-8"
 
 
@@ -299,7 +309,9 @@ class _LineReader:
     def __init__(self, stream: "Any") -> None:
         self._stream = stream
         self._queue: queue.Queue[str | None] = queue.Queue()
-        self._thread = threading.Thread(target=self._pump, daemon=True, name="mcp-stdio-reader")
+        self._thread = threading.Thread(
+            target=self._pump, daemon=True, name="mcp-stdio-reader"
+        )
         self._thread.start()
 
     def _pump(self) -> None:
@@ -307,7 +319,11 @@ class _LineReader:
             for line in iter(self._stream.readline, ""):
                 if line in (b"", None):
                     break
-                text = line if isinstance(line, str) else line.decode("utf-8", "replace")
+                text = (
+                    line
+                    if isinstance(line, str)
+                    else line.decode("utf-8", "replace")
+                )
                 self._queue.put(text)
         except Exception:
             pass
@@ -370,7 +386,9 @@ def _readline_with_timeout(stream: "Any", timeout: float) -> "str | None":
     return None if reader is None else reader.readline(timeout)
 
 
-async def _areadline_with_timeout(stream: "Any", timeout: float) -> "str | None":
+async def _areadline_with_timeout(
+    stream: "Any", timeout: float
+) -> "str | None":
     """То же, не занимая поток на ожидании."""
     reader = _reader_for(stream)
     return None if reader is None else await reader.areadline(timeout)
@@ -395,7 +413,9 @@ def _resolve_command(command: str) -> str:
     return resolve_mcp_command(command)
 
 
-def _stdio_command(server_cfg: Dict[str, Any]) -> Tuple[List[str], Any, Dict[str, str]]:
+def _stdio_command(
+    server_cfg: Dict[str, Any],
+) -> Tuple[List[str], Any, Dict[str, str]]:
     """Разобрать конфиг stdio-сервера в ``(argv, cwd, env)``.
 
     Общее для обоих способов запуска — синхронного ``Popen`` (долгоживущая
@@ -452,7 +472,9 @@ async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):
     )
 
 
-async def _aread_response(proc, timeout: float, want_id: Any) -> Dict[str, Any]:
+async def _aread_response(
+    proc, timeout: float, want_id: Any
+) -> Dict[str, Any]:
     """Прочитать ответ С НУЖНЫМ id, пропуская всё остальное.
 
     Раньше здесь читалась ОДНА строка и считалась ответом — что бы в ней ни
@@ -481,12 +503,16 @@ async def _aread_response(proc, timeout: float, want_id: Any) -> Dict[str, Any]:
         if not raw:
             return {}  # EOF: процесс закрыл вывод
         line_in = raw.decode("utf-8", "replace").strip()
-        message = _parse_rpc_response_line(line_in, want_id) if line_in else None
+        message = (
+            _parse_rpc_response_line(line_in, want_id) if line_in else None
+        )
         if message is not None:
             return message
 
 
-def _parse_rpc_response_line(line_in: str, want_id: Any) -> Dict[str, Any] | None:
+def _parse_rpc_response_line(
+    line_in: str, want_id: Any
+) -> Dict[str, Any] | None:
     """JSON-RPC ответ на наш запрос из строки stdout; None — мусор, встречный запрос или чужой id."""
     try:
         message = json.loads(line_in)
@@ -521,7 +547,9 @@ async def _astdio_exchange(
             if not expect_response:
                 results.append({})
                 continue
-            results.append(await _aread_response(proc, timeout, payload.get("id")))
+            results.append(
+                await _aread_response(proc, timeout, payload.get("id"))
+            )
     finally:
         # Закрываем stdin ДО терминации: многие серверы по EOF корректно
         # завершают свой event loop сами, и тогда SIGTERM/SIGKILL не нужны
@@ -581,15 +609,26 @@ def _arequest_stdio(
     ) -> Tuple[Dict[str, str], Dict[str, Any]]:
         method = (json_payload or {}).get("method")
         if method == "initialize":
-            responses = await _astdio_exchange(cfg, timeout, [(json_payload, True)])
-            return ({"mcp-session-id": "stdio"}, responses[0] if responses else {})
+            responses = await _astdio_exchange(
+                cfg, timeout, [(json_payload, True)]
+            )
+            return (
+                {"mcp-session-id": "stdio"},
+                responses[0] if responses else {},
+            )
         if method == "notifications/initialized":
-            await _astdio_exchange(cfg, timeout, [(_INIT_PAYLOAD, True), (json_payload, False)])
+            await _astdio_exchange(
+                cfg, timeout, [(_INIT_PAYLOAD, True), (json_payload, False)]
+            )
             return ({}, {})
         responses = await _astdio_exchange(
             cfg,
             timeout,
-            [(_INIT_PAYLOAD, True), (_INITIALIZED_PAYLOAD, False), (json_payload, True)],
+            [
+                (_INIT_PAYLOAD, True),
+                (_INITIALIZED_PAYLOAD, False),
+                (json_payload, True),
+            ],
         )
         return ({}, responses[2] if len(responses) > 2 else {})
 
@@ -615,14 +654,18 @@ def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
     if transport == "http":
 
         async def arequest_http(url, headers, json_payload, timeout):
-            return await _arequest_http(url, headers, json_payload, timeout, verify=verify, cert=cert)
+            return await _arequest_http(
+                url, headers, json_payload, timeout, verify=verify, cert=cert
+            )
 
         return arequest_http
 
     if transport == "sse":
 
         async def arequest_sse(url, headers, json_payload, timeout):
-            return await _arequest_sse(url, headers, json_payload, timeout, verify=verify, cert=cert)
+            return await _arequest_sse(
+                url, headers, json_payload, timeout, verify=verify, cert=cert
+            )
 
         return arequest_sse
 

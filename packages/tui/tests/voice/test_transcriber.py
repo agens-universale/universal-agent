@@ -57,7 +57,9 @@ def test_openai_http_error(monkeypatch):
 
 
 def test_openai_empty_text_is_error(monkeypatch):
-    monkeypatch.setattr(tr, "voice_post", lambda url, **kw: FakeResponse(200, {"text": "  "}))
+    monkeypatch.setattr(
+        tr, "voice_post", lambda url, **kw: FakeResponse(200, {"text": "  "})
+    )
     with pytest.raises(VoiceError, match="ничего не распознано"):
         tr.transcribe(b"\x00", OPENAI_CFG)
 
@@ -79,7 +81,9 @@ def test_proxy_page_becomes_human_error(monkeypatch):
 
 def test_non_object_payload_becomes_human_error(monkeypatch):
     """JSON-список вместо объекта: `.get` на нём падал AttributeError'ом."""
-    monkeypatch.setattr(tr, "voice_post", lambda url, **kw: FakeResponse(200, ["oops"]))
+    monkeypatch.setattr(
+        tr, "voice_post", lambda url, **kw: FakeResponse(200, ["oops"])
+    )
     with pytest.raises(VoiceError, match="не по протоколу"):
         tr.transcribe(b"\x00", OPENAI_CFG)
 
@@ -108,7 +112,11 @@ def test_real_refused_connection_becomes_human_error():
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
 
-    cfg = dict(OPENAI_CFG, url=f"http://127.0.0.1:{port}/v1/audio/transcriptions", timeout_seconds=5)
+    cfg = dict(
+        OPENAI_CFG,
+        url=f"http://127.0.0.1:{port}/v1/audio/transcriptions",
+        timeout_seconds=5,
+    )
     with pytest.raises(VoiceError, match="STT недоступен"):
         tr.transcribe(b"\x00" * 320, cfg)
 

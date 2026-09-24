@@ -9,7 +9,10 @@ from gc_core.config_modules.agent import (
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
-from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
+from gc_core.tools.exec.exec_envelope import (
+    as_captured_stream,
+    build_exec_envelope,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
@@ -33,7 +36,10 @@ def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":
             }
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
-            return {}, {"type": "invalid_argument", "field": f"env_vars[{idx}].name"}
+            return {}, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}].name",
+            }
         value = item.get("value")
         if not isinstance(value, str):
             return {}, {
@@ -59,7 +65,9 @@ class ExecuteCommand(AbstractSimpleTool):
         description = {
             "type": "function",
             "name": "exec_command",
-            "description": ("Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."),
+            "description": (
+                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -204,7 +212,9 @@ Important Usage Rules:
             timed_out=timed_out,
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
-            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
+                self._config_dict
+            ),
             error=error,
             head_fields={"command": command, "cwd": cwd},
         )
@@ -235,7 +245,11 @@ Important Usage Rules:
         if not isinstance(cwd_used, str) or not cwd_used.strip():
             return {"type": "invalid_argument", "field": "cwd"}
         if not await self._backend.is_dir(cwd_used):
-            return {"type": "invalid_argument", "field": "cwd", "message": "Not a directory"}
+            return {
+                "type": "invalid_argument",
+                "field": "cwd",
+                "message": "Not a directory",
+            }
         return None
 
     async def _plan(
@@ -254,7 +268,9 @@ Important Usage Rules:
         """
         cwd_used = cwd if cwd is not None else self._backend.default_cwd()
 
-        def reject(error: dict, *, cmd: str = command, cwd_val: "str | None" = None) -> "tuple[str, dict]":
+        def reject(
+            error: dict, *, cmd: str = command, cwd_val: "str | None" = None
+        ) -> "tuple[str, dict]":
             return self._result(
                 ok=False,
                 command=cmd,
@@ -268,9 +284,18 @@ Important Usage Rules:
 
         # Input validation
         if not isinstance(command, str):
-            return reject({"type": "invalid_argument", "field": "command"}, cmd=str(command))
+            return reject(
+                {"type": "invalid_argument", "field": "command"},
+                cmd=str(command),
+            )
         if not command.strip():
-            return reject({"type": "invalid_argument", "field": "command", "message": "Empty command"})
+            return reject(
+                {
+                    "type": "invalid_argument",
+                    "field": "command",
+                    "message": "Empty command",
+                }
+            )
 
         if timeout is None:
             timeout = exec_timeout_from_config_dict(self._config_dict)
@@ -293,7 +318,9 @@ Important Usage Rules:
         }
 
     @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
-    @moderate_command_execution(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
+    @moderate_command_execution(
+        payload_arg="command", tool_name=EXEC_COMMAND_NAME
+    )
     async def acall(
         self,
         command: str,
@@ -419,7 +446,9 @@ Important Usage Rules:
             timed_out=False,
             stdout=as_captured_stream(""),
             stderr=as_captured_stream(""),
-            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
+                self._config_dict
+            ),
             error=None,
             head_fields={
                 "command": plan["command"],
@@ -451,8 +480,12 @@ Important Usage Rules:
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.
-        stdout_stream = as_captured_stream(getattr(res, "stdout_stream", None) or getattr(res, "stdout", ""))
-        stderr_stream = as_captured_stream(getattr(res, "stderr_stream", None) or getattr(res, "stderr", ""))
+        stdout_stream = as_captured_stream(
+            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
+        )
+        stderr_stream = as_captured_stream(
+            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
+        )
 
         if res.timed_out:
             return self._result(
@@ -463,12 +496,22 @@ Important Usage Rules:
                 timed_out=True,
                 stdout=stdout_stream,
                 stderr=stderr_stream,
-                error={"type": "timeout", "message": f"Command timed out after {timeout} seconds"},
+                error={
+                    "type": "timeout",
+                    "message": f"Command timed out after {timeout} seconds",
+                },
             )
 
         exit_code = res.return_code
         ok = exit_code == 0
-        error = None if ok else {"type": "non_zero_exit", "message": f"Command exited with status {exit_code}"}
+        error = (
+            None
+            if ok
+            else {
+                "type": "non_zero_exit",
+                "message": f"Command exited with status {exit_code}",
+            }
+        )
         return self._result(
             ok=ok,
             command=command,

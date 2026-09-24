@@ -86,7 +86,9 @@ def test_sync_close_with_close_tool_does_not_wait_out_the_timeout(session_cfg):
     )
 
 
-async def test_async_close_with_close_tool_does_not_wait_out_the_timeout(session_cfg):
+async def test_async_close_with_close_tool_does_not_wait_out_the_timeout(
+    session_cfg,
+):
     """То же для асинхронного входа — его и зовёт `arun` в своём finally."""
     session = _started(session_cfg)
 
@@ -117,7 +119,11 @@ def test_close_tool_answer_is_actually_read(session_cfg, monkeypatch):
 
     session.close()
 
-    answered = [b for b in seen.values() if "browser_close_all" in json.dumps(b, ensure_ascii=False)]
+    answered = [
+        b
+        for b in seen.values()
+        if "browser_close_all" in json.dumps(b, ensure_ascii=False)
+    ]
     assert answered, f"ответ close-тула не прочитан, видели: {seen}"
 
 

@@ -14,7 +14,9 @@ _PRICING = {
 def test_delta_from_isolates_this_run():
     cumulative = UsageAccount()
     cumulative.add(CATEGORY_MAIN, 100, 20)  # прошлый прогон
-    baseline = UsageAccount.from_meta(cumulative.to_meta())  # снимок до прогона
+    baseline = UsageAccount.from_meta(
+        cumulative.to_meta()
+    )  # снимок до прогона
     cumulative.add(CATEGORY_MAIN, 50, 10)  # текущий прогон
     cumulative.add(CATEGORY_SUMMARY, 30, 5)
 
@@ -57,9 +59,13 @@ def test_build_report_empty_returns_none():
 def test_build_report_fact_currency_follows_endpoint():
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 250_000, 40_000, 0, cost=12.5, billed=True)
-    ru = build_run_usage_report(acc, _PRICING, "m", "https://routerai.ru/api/v1/chat/completions")
+    ru = build_run_usage_report(
+        acc, _PRICING, "m", "https://routerai.ru/api/v1/chat/completions"
+    )
     assert "₽" in ru and "$" not in ru
-    usd = build_run_usage_report(acc, _PRICING, "m", "https://openrouter.ai/api/v1/chat/completions")
+    usd = build_run_usage_report(
+        acc, _PRICING, "m", "https://openrouter.ai/api/v1/chat/completions"
+    )
     assert "$" in usd
 
 
@@ -68,7 +74,9 @@ def test_build_dict_fact_currency_follows_endpoint():
 
     acc = UsageAccount()
     acc.add(CATEGORY_MAIN, 250_000, 40_000, 0, cost=12.5, billed=True)
-    d = build_run_usage_dict(acc, _PRICING, "m", "https://routerai.ru/api/v1/chat/completions")
+    d = build_run_usage_dict(
+        acc, _PRICING, "m", "https://routerai.ru/api/v1/chat/completions"
+    )
     assert d["categories"][CATEGORY_MAIN]["cost_parts"][0]["currency"] == "₽"
     assert "₽" in d["cost"]["by_currency"]
 

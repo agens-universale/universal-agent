@@ -86,7 +86,9 @@ def test_phrase_rotator_stable_within_period():
     from gc_tui.widgets.thinking_indicator import PhraseRotator
 
     t = [0.0]
-    r = PhraseRotator(["думаю", "размышляю", "соображаю"], period=3.0, clock=lambda: t[0])
+    r = PhraseRotator(
+        ["думаю", "размышляю", "соображаю"], period=3.0, clock=lambda: t[0]
+    )
     assert r.current() == "думаю"
     t[0] = 2.9
     assert r.current() == "думаю"
@@ -101,7 +103,12 @@ def test_phrase_rotator_changes_after_period_and_differs():
             return seq[0]
 
     t = [0.0]
-    r = PhraseRotator(["думаю", "размышляю", "соображаю"], period=3.0, rng=_RNG(), clock=lambda: t[0])
+    r = PhraseRotator(
+        ["думаю", "размышляю", "соображаю"],
+        period=3.0,
+        rng=_RNG(),
+        clock=lambda: t[0],
+    )
     assert r.current() == "думаю"
     t[0] = 3.0
     nxt = r.current()
@@ -125,12 +132,19 @@ def test_morph_frames_constant_shape():
     assert len(MORPH_FRAMES) >= 4
     # Компас × искра: курируемый набор глифов (narrow-искра + ambiguous-width
     # треугольники). Внутри цикла ширина консистентна — строка не дёргается.
-    assert all(c in {"·", "+", "✧", "✦", "✶", "▴", "▸", "▾", "◂"} for c in MORPH_FRAMES)
+    assert all(
+        c in {"·", "+", "✧", "✦", "✶", "▴", "▸", "▾", "◂"}
+        for c in MORPH_FRAMES
+    )
 
 
 def test_thinking_render_uses_morph_glyph_for_frame():
     pytest.importorskip("textual")
-    from gc_tui.widgets.thinking_indicator import FRAME_HOLD, MORPH_FRAMES, ThinkingIndicator
+    from gc_tui.widgets.thinking_indicator import (
+        FRAME_HOLD,
+        MORPH_FRAMES,
+        ThinkingIndicator,
+    )
 
     w = ThinkingIndicator()
     w._frame = 4
@@ -143,7 +157,10 @@ def test_thinking_render_uses_morph_glyph_for_frame():
 
 def test_thinking_glyph_uses_glow_shade_color():
     pytest.importorskip("textual")
-    from gc_tui.widgets.thinking_indicator import GLOW_SHADES, ThinkingIndicator
+    from gc_tui.widgets.thinking_indicator import (
+        GLOW_SHADES,
+        ThinkingIndicator,
+    )
 
     w = ThinkingIndicator()
     w._frame = 0
@@ -164,11 +181,16 @@ def test_validating_spark_breathes():
     """«завершаю…»: искра ✦ статична по форме (без ✧), а её цвет «дышит» по
     кадрам — серая рампа (та же техника, что пульс running-глифа ▸)."""
     pytest.importorskip("textual")
-    from gc_tui.widgets.thinking_indicator import _VALIDATING_SHADES, ThinkingIndicator
+    from gc_tui.widgets.thinking_indicator import (
+        _VALIDATING_SHADES,
+        ThinkingIndicator,
+    )
 
     def spark_color(w):
         t = w._render_text()
-        return next(str(s.style) for s in t.spans if "✦" in t.plain[s.start : s.end])
+        return next(
+            str(s.style) for s in t.spans if "✦" in t.plain[s.start : s.end]
+        )
 
     w = ThinkingIndicator(state="validating")
     w._frame = 0
@@ -208,7 +230,8 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -220,7 +243,9 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -242,7 +267,9 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path):
+async def test_indicator_shows_processing_after_agent_event_with_pause(
+    tmp_path,
+):
     """После event kind=agent и паузы ≥1.5с, пока runner ещё работает
     (intent_guard/policy продолжает), индикатор НЕ прячется, а показывает
     «сверяюсь…» — объясняет статус [running] (опция A)."""
@@ -261,7 +288,11 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
                         "type": "message",
                         "seq": 1,
                         "ts_utc": "2026-05-26T00:00:00+00:00",
-                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                        "payload": {
+                            "id": "u1",
+                            "role": "user",
+                            "content": messages[0],
+                        },
                     }
                 )
                 + "\n"
@@ -270,13 +301,20 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
                         "type": "message",
                         "seq": 2,
                         "ts_utc": "2026-05-26T00:00:01+00:00",
-                        "payload": {"id": "a1", "role": "assistant", "content": "вот ответ"},
+                        "payload": {
+                            "id": "a1",
+                            "role": "assistant",
+                            "content": "вот ответ",
+                        },
                     }
                 )
                 + "\n",
                 encoding="utf-8",
             )
-            meta_path.write_text(json.dumps({"thread_id": thread_id, "messages_count": 2}), encoding="utf-8")
+            meta_path.write_text(
+                json.dumps({"thread_id": thread_id, "messages_count": 2}),
+                encoding="utf-8",
+            )
             self._evt = threading.Event()
             self._evt.wait(timeout=5.0)
 
@@ -287,7 +325,9 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(tmp_path)
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -343,7 +383,8 @@ async def test_esc_stops_running_run(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -356,7 +397,9 @@ async def test_esc_stops_running_run(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

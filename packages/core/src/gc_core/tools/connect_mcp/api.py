@@ -9,7 +9,9 @@ from typing import Any, Dict, Optional
 
 from gc_core.config import load_config
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
+from gc_core.tools.connect_mcp.transport_policy import (
+    resolve_effective_transport,
+)
 from gc_core.tools.connect_mcp.validation import (
     _validate_tool_arguments,
     format_mcp_tool_result,
@@ -21,13 +23,17 @@ logger = logging.getLogger(__name__)
 
 def _sanitize_dict(value: Dict[Any, Any]) -> Dict[str, Any]:
     ctype = value.get("type")
-    strip_data = ctype in ("image", "audio") and isinstance(value.get("data"), str)
+    strip_data = ctype in ("image", "audio") and isinstance(
+        value.get("data"), str
+    )
     out: Dict[str, Any] = {}
     for k, v in value.items():
         # JSON keys must be strings
         key = k if isinstance(k, str) else str(k)
         if strip_data and k == "data":
-            out[key] = f"<{ctype} data stripped: {len(value['data'])} base64 chars>"
+            out[key] = (
+                f"<{ctype} data stripped: {len(value['data'])} base64 chars>"
+            )
         else:
             out[key] = _json_sanitize(v)
     return out
@@ -103,7 +109,11 @@ def _pick_filename(
     ext = _MIME_EXT.get((mime or "").lower(), ".bin")
     fname: Optional[str] = None
     if isinstance(arguments, dict):
-        raw_name = arguments.get("filename") or arguments.get("file") or arguments.get("path")
+        raw_name = (
+            arguments.get("filename")
+            or arguments.get("file")
+            or arguments.get("path")
+        )
         if isinstance(raw_name, str) and raw_name.strip():
             fname = os.path.basename(raw_name.strip())
     if not fname:
@@ -153,11 +163,18 @@ def _rewrite_media_blocks(
     """Рекурсивно обходит result, декодирует и сохраняет image/audio блоки,
     заменяя base64 `data` на ссылку `path` на хостовой ФС."""
     if isinstance(raw, dict):
-        if raw.get("type") in ("image", "audio") and isinstance(raw.get("data"), str):
+        if raw.get("type") in ("image", "audio") and isinstance(
+            raw.get("data"), str
+        ):
             return _save_media_block(raw, arguments, base_tool_name)
-        return {k: _rewrite_media_blocks(v, arguments, base_tool_name) for k, v in raw.items()}
+        return {
+            k: _rewrite_media_blocks(v, arguments, base_tool_name)
+            for k, v in raw.items()
+        }
     if isinstance(raw, list):
-        return [_rewrite_media_blocks(v, arguments, base_tool_name) for v in raw]
+        return [
+            _rewrite_media_blocks(v, arguments, base_tool_name) for v in raw
+        ]
     return raw
 
 
@@ -180,7 +197,10 @@ def _wrap_mcp_result(
     error: Optional[Dict[str, Any]] = None
 
     # Common MCP pattern: {"content": ..., "isError": bool}
-    if isinstance(formatted_sanitized, dict) and formatted_sanitized.get("isError") is True:
+    if (
+        isinstance(formatted_sanitized, dict)
+        and formatted_sanitized.get("isError") is True
+    ):
         ok = False
         error = {
             "type": "mcp_tool_error",
@@ -224,20 +244,26 @@ class _McpCallTarget:
     use_retry: bool
 
 
-def _coerce_mcp_arguments(full_tool_name: str, arguments: Dict[str, Any] | str) -> Any:
+def _coerce_mcp_arguments(
+    full_tool_name: str, arguments: Dict[str, Any] | str
+) -> Any:
     # Поддержка случая, когда arguments приходит как JSON-строка
     if not isinstance(arguments, str):
         return arguments or {}
     try:
         return json.loads(arguments) if arguments.strip() else {}
     except json.JSONDecodeError as e:
-        raise ValueError(f"Arguments for tool '{full_tool_name}' are not valid JSON: {e}") from e
+        raise ValueError(
+            f"Arguments for tool '{full_tool_name}' are not valid JSON: {e}"
+        ) from e
 
 
 def _split_legacy_tool_name(full_tool_name: str) -> tuple[str, str]:
     # Фоллбек на старый формат имени, если метаданных нет
     if "_" not in full_tool_name:
-        raise ValueError(f"Tool name '{full_tool_name}' does not contain server prefix '<server>_<tool>'.")
+        raise ValueError(
+            f"Tool name '{full_tool_name}' does not contain server prefix '<server>_<tool>'."
+        )
     server_key, base_tool_name = full_tool_name.split("_", 1)
     return server_key, base_tool_name
 
@@ -248,7 +274,9 @@ def _check_server_cfg(server_key: str, server_cfg: Dict[str, Any]) -> None:
     if not stdio_like and not (server_cfg.get("url") or ""):
         raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
     if stdio_like and not server_cfg.get("command"):
-        raise ValueError(f"MCP server '{server_key}' ({transport}) has no 'command' in config")
+        raise ValueError(
+            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
+        )
 
 
 def _prepare_mcp_call(
@@ -281,8 +309,14 @@ def _prepare_mcp_call(
     # Берём описание тулы и метаданные.
     # Ожидаемый формат: {"tool": {...}, "metadata": {...}}.
     raw_entry = tools_registry[full_tool_name]
-    tool_entry = raw_entry.get("tool") if isinstance(raw_entry, dict) and "tool" in raw_entry else raw_entry
-    metadata = raw_entry.get("metadata", {}) if isinstance(raw_entry, dict) else {}
+    tool_entry = (
+        raw_entry.get("tool")
+        if isinstance(raw_entry, dict) and "tool" in raw_entry
+        else raw_entry
+    )
+    metadata = (
+        raw_entry.get("metadata", {}) if isinstance(raw_entry, dict) else {}
+    )
 
     # Ключ сервера и реальное имя тулы на MCP‑сервере
     server_key = metadata.get("mcp_server_key")
@@ -310,7 +344,9 @@ def _prepare_mcp_call(
 
     # Правила выбора (persistent_session, депрекейт sse) — в transport_policy,
     # общем с registry: раньше они дублировались и разъезжались.
-    effective_transport = resolve_effective_transport(server_cfg, server_name=server_key)
+    effective_transport = resolve_effective_transport(
+        server_cfg, server_name=server_key
+    )
 
     client = resolve_mcp_client(server_key, server_cfg, os_backend=os_backend)
 
@@ -369,7 +405,9 @@ async def acall_mcp_tool(
         # поднимать сервер. Без него `execute_on: os_backend` считается
         # «нашим», и для stdio дискавери запускает команду сервера на хосте —
         # мимо песочницы, тогда как вызов тула строкой ниже уходит в неё.
-        tools_registry = await ToolsCache(cache_cfg, os_backend=os_backend).aget_tools()
+        tools_registry = await ToolsCache(
+            cache_cfg, os_backend=os_backend
+        ).aget_tools()
 
     target = _prepare_mcp_call(
         full_tool_name,
@@ -381,7 +419,9 @@ async def acall_mcp_tool(
     )
 
     @retry_with_backoff_async(
-        operation_name=(f"MCP tool call ({target.server_key}:{target.base_tool_name})"),
+        operation_name=(
+            f"MCP tool call ({target.server_key}:{target.base_tool_name})"
+        ),
         retry_log_level=logging.ERROR,
         no_more_retries_log_level=logging.ERROR,
     )
@@ -395,7 +435,9 @@ async def acall_mcp_tool(
         # только синхронным, и звать его отсюда значило морозить loop на всё
         # время обмена. SDK-транспорты внутри идут нативно, легаси и persistent
         # stdio — через `run_abandonable`, ровно как дискавери.
-        return await target.client.acall_tool(target.base_tool_name, target.arguments_obj, timeout=timeout)
+        return await target.client.acall_tool(
+            target.base_tool_name, target.arguments_obj, timeout=timeout
+        )
 
     data = await _ado_mcp_call(use_retry=target.use_retry, logger=logger)
 

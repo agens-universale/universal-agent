@@ -50,8 +50,12 @@ def _patch(monkeypatch, output):
     from gc_core import processing_responses as pr
 
     monkeypatch.setattr(pr, "aapply_tool", as_coro(lambda **_kw: output))
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **_kw: None)
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 
@@ -59,9 +63,16 @@ def _patch(monkeypatch, output):
 def _call(pr, state, name="fs_read_file"):
     ctx = SimpleNamespace(config_dict={}, logger=None)
     messages = [
-        {"type": "function_call", "name": name, "call_id": "c1", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": name,
+            "call_id": "c1",
+            "arguments": "{}",
+        },
     ]
-    return run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
+    return run_coro(
+        pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None)
+    )
 
 
 def test_detector_recognises_the_envelope():

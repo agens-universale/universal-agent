@@ -22,14 +22,24 @@ async def test_first_message_creates_task(tmp_path):
                         "type": "message",
                         "seq": 1,
                         "ts_utc": "2026-05-21T12:00:00+00:00",
-                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                        "payload": {
+                            "id": "u1",
+                            "role": "user",
+                            "content": messages[0],
+                        },
                     }
                 )
                 + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
+                json.dumps(
+                    {
+                        "thread_id": thread_id,
+                        "updated_at": "2026-05-21T12:00:00+00:00",
+                        "messages_count": 1,
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -39,7 +49,9 @@ async def test_first_message_creates_task(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
@@ -82,7 +94,9 @@ async def test_message_while_running_calls_add_message(tmp_path):
         def add_message(self, m):
             captured["added"].append(m)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
@@ -99,7 +113,9 @@ async def test_message_while_running_calls_add_message(tmp_path):
         await pilot.pause(0.2)
 
         assert captured["runs"] == 1  # NO new run
-        assert any(m.get("content") == "второе сообщение" for m in captured["added"])
+        assert any(
+            m.get("content") == "второе сообщение" for m in captured["added"]
+        )
 
 
 @pytest.mark.asyncio
@@ -122,14 +138,24 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
                         "type": "message",
                         "seq": 1,
                         "ts_utc": "...",
-                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                        "payload": {
+                            "id": "u1",
+                            "role": "user",
+                            "content": messages[0],
+                        },
                     }
                 )
                 + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "updated_at": "...", "messages_count": 1}),
+                json.dumps(
+                    {
+                        "thread_id": thread_id,
+                        "updated_at": "...",
+                        "messages_count": 1,
+                    }
+                ),
                 encoding="utf-8",
             )
             # Quick run — no blocking
@@ -140,7 +166,9 @@ async def test_message_after_stopped_restarts_same_thread(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
@@ -182,14 +210,24 @@ async def test_no_duplicate_user_reply(tmp_path):
                         "type": "message",
                         "seq": 1,
                         "ts_utc": "2026-05-21T12:00:00+00:00",
-                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                        "payload": {
+                            "id": "u1",
+                            "role": "user",
+                            "content": messages[0],
+                        },
                     }
                 )
                 + "\n",
                 encoding="utf-8",
             )
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "updated_at": "2026-05-21T12:00:00+00:00", "messages_count": 1}),
+                json.dumps(
+                    {
+                        "thread_id": thread_id,
+                        "updated_at": "2026-05-21T12:00:00+00:00",
+                        "messages_count": 1,
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -199,7 +237,9 @@ async def test_no_duplicate_user_reply(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
@@ -211,7 +251,9 @@ async def test_no_duplicate_user_reply(tmp_path):
         def _one_reply():
             return len(pilot.app.query(UserReplyContainer)) == 1
 
-        await wait_until(pilot, _one_reply, "ровно одна user-реплика после promote")
+        await wait_until(
+            pilot, _one_reply, "ровно одна user-реплика после promote"
+        )
         replies = pilot.app.query(UserReplyContainer)
         assert len(replies) == 1
         assert "привет" in str(replies[0].render())

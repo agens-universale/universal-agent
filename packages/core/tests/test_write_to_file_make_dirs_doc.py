@@ -6,7 +6,9 @@ from gc_core.tools.fs.write_to_file_tool import WriteToFile
 
 
 def test_tool_description_documents_make_dirs():
-    md = WriteToFile.tool_description()["parameters"]["properties"]["make_dirs"]["description"]
+    md = WriteToFile.tool_description()["parameters"]["properties"][
+        "make_dirs"
+    ]["description"]
     assert "parent" in md.lower()  # объясняет: создаёт родительские папки
     assert "missing" in md.lower() or "does not exist" in md.lower()
     assert "skill" not in md.lower()  # универсально, без костыля под кейс

@@ -11,7 +11,11 @@ import json
 import pytest
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.append_to_file import AppendToFile
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
+from gc_testkit.harbor_fakes import (
+    FakeBackend,
+    bind_os_backend,
+    strip_path_fields,
+)
 
 EXISTING_CONTENT = "hello world"
 
@@ -108,7 +112,9 @@ def test_identical_to_base(tmp_path, case):
         h = _harbor({})
         harbor_env = json.loads(h(path=harbor_path, **kw))
 
-        assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
+        assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+            base_env, "path"
+        ), _id
         return
 
     if _id == "missing_file_create_true":
@@ -127,7 +133,9 @@ def test_identical_to_base(tmp_path, case):
         harbor_env = json.loads(h(path="/work/f.txt", **kw))
         harbor_content = h._backend.files.get("/work/f.txt")
 
-        assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
+        assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+            base_env, "path"
+        ), _id
         assert harbor_content == base_content, _id
         return
 
@@ -140,18 +148,28 @@ def test_identical_to_base(tmp_path, case):
 
         t_base = _base()
         base_env = json.loads(t_base(path=base_path, **kw))
-        base_content = open(base_path, encoding="utf-8").read() if os.path.exists(base_path) else None
+        base_content = (
+            open(base_path, encoding="utf-8").read()
+            if os.path.exists(base_path)
+            else None
+        )
 
         h = _harbor({})
         harbor_env = json.loads(h(path=harbor_path, **kw))
         harbor_content = h._backend.files.get(harbor_path)
 
-        assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
+        assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+            base_env, "path"
+        ), _id
         assert harbor_content == base_content, _id
         return
 
-    b_env, b_content, h_env, h_content = _run_both(tmp_path, existing_content, **kw)
-    assert strip_path_fields(h_env, "path") == strip_path_fields(b_env, "path"), _id
+    b_env, b_content, h_env, h_content = _run_both(
+        tmp_path, existing_content, **kw
+    )
+    assert strip_path_fields(h_env, "path") == strip_path_fields(
+        b_env, "path"
+    ), _id
     assert h_content == b_content, _id
 
 
@@ -166,7 +184,9 @@ def test_default_separator_inserts_double_newline(tmp_path):
 
 def test_explicit_empty_separator_appends_flush(tmp_path):
     """Passing separator='' must join with no separator at all."""
-    b_env, b_content, h_env, h_content = _run_both(tmp_path, EXISTING_CONTENT, content="appended", separator="")
+    b_env, b_content, h_env, h_content = _run_both(
+        tmp_path, EXISTING_CONTENT, content="appended", separator=""
+    )
     assert h_content == EXISTING_CONTENT + "appended"
     assert h_content == b_content
 
@@ -183,7 +203,9 @@ def test_create_if_missing_creates_file():
     """create_if_missing=True must create the file with content when missing but parent exists."""
     # Seed a sentinel so is_dir("/work") returns True (parent "exists" in the container).
     h = _harbor({"/work/.keep": ""})
-    env = json.loads(h(path="/work/new.txt", content="hello", create_if_missing=True))
+    env = json.loads(
+        h(path="/work/new.txt", content="hello", create_if_missing=True)
+    )
     assert env["ok"] is True
     assert env["created"] is True
     assert h._backend.files["/work/new.txt"] == "\n\nhello"

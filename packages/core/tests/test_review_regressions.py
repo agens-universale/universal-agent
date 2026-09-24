@@ -46,7 +46,9 @@ def test_client_port_no_longer_pops_by_bare_server_name():
 
     src = pathlib.Path(client_port.__file__).read_text(encoding="utf-8")
 
-    assert "_MCP_SESSIONS.pop(" not in src, "в client_port вернулось снятие сессии мимо ключа (owner, server)"
+    assert "_MCP_SESSIONS.pop(" not in src, (
+        "в client_port вернулось снятие сессии мимо ключа (owner, server)"
+    )
 
 
 # --- F10: редиректы -----------------------------------------------------

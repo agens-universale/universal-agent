@@ -102,7 +102,9 @@ class _PersistentSessionManager:
             return None
         return self._sessions.get(key)
 
-    def set_session(self, server_key: str, session: Any, cm_stack: Any) -> None:
+    def set_session(
+        self, server_key: str, session: Any, cm_stack: Any
+    ) -> None:
         key = self._key(server_key)
         self._loops[key] = weakref.ref(asyncio.get_running_loop())
         # Задача-владелец: сессию надо закрывать там же, где открыли —
@@ -152,7 +154,9 @@ class _PersistentSessionManager:
             owner_task = None
         cms = self._take(server_key)
         if cms is not None:
-            await self._aclose_stack(cms, opened_in=owner_task() if owner_task is not None else None)
+            await self._aclose_stack(
+                cms, opened_in=owner_task() if owner_task is not None else None
+            )
 
     async def _aclose_stack(self, cms: Any, *, opened_in: Any = None) -> None:
         """Закрыть стек в обратном порядке, глотая ошибку по каждому.
@@ -201,7 +205,9 @@ class _PersistentSessionManager:
         except RuntimeError:
             return
         owner = current_owner()
-        keys = [k for k in self._cm_stacks if k[0] == owner and k[1] == loop_id]
+        keys = [
+            k for k in self._cm_stacks if k[0] == owner and k[1] == loop_id
+        ]
         for key in keys:
             cms = self._cm_stacks.pop(key, None)
             self._sessions.pop(key, None)
@@ -211,7 +217,14 @@ class _PersistentSessionManager:
                 # `shield` по той же причине, что и у stdio: teardown зовётся
                 # из `finally` цикла агента, и отмена посреди закрытия
                 # оставляет соединение и его anyio task group висеть.
-                await asyncio.shield(self._aclose_stack(cms, opened_in=owner_ref() if owner_ref is not None else None))
+                await asyncio.shield(
+                    self._aclose_stack(
+                        cms,
+                        opened_in=owner_ref()
+                        if owner_ref is not None
+                        else None,
+                    )
+                )
 
 
 _SESSION_MANAGER = _PersistentSessionManager()
@@ -287,9 +300,15 @@ def _make_httpx_factory(
     # MCP-демон мимо прокси» должно жить в одном месте, иначе прямой вызов
     # фабрики (тест, новый вызывающий) тихо отправит localhost через socks5h.
     use_env_proxy = bool(trust_env and url and _trust_env_for_url(url))
-    proxies = resolve_proxies(None, dict(os.environ), url) if use_env_proxy else None
+    proxies = (
+        resolve_proxies(None, dict(os.environ), url) if use_env_proxy else None
+    )
 
-    def factory(headers: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, auth: Any = None):
+    def factory(
+        headers: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        auth: Any = None,
+    ):
         ssl_context = build_ssl_context(verify, cert)
         kwargs: Dict[str, Any] = dict(
             headers=headers,
@@ -302,7 +321,9 @@ def _make_httpx_factory(
             # Тот же ssl-контекст, что и у основного клиента: прокси не повод
             # ослаблять проверку сертификата.
             kwargs["mounts"] = {
-                f"{scheme}://": httpx.AsyncHTTPTransport(proxy=proxy_url, verify=ssl_context, trust_env=False)
+                f"{scheme}://": httpx.AsyncHTTPTransport(
+                    proxy=proxy_url, verify=ssl_context, trust_env=False
+                )
                 for scheme, proxy_url in proxies.items()
                 if proxy_url
             }
@@ -334,7 +355,11 @@ def _make_stream_http_client(
     # (`trust_env=False`), прокси резолвим явно. Иначе `persistent_session`
     # молча менял бы поведение прокси и mTLS относительно одноразового
     # транспорта, у которого `trust_env=False` стоял всегда.
-    proxies = resolve_proxies(None, dict(os.environ), base_url) if (base_url and _trust_env_for_url(base_url)) else None
+    proxies = (
+        resolve_proxies(None, dict(os.environ), base_url)
+        if (base_url and _trust_env_for_url(base_url))
+        else None
+    )
 
     kwargs: Dict[str, Any] = dict(
         headers=headers or None,
@@ -344,7 +369,9 @@ def _make_stream_http_client(
     )
     if proxies:
         kwargs["mounts"] = {
-            f"{scheme}://": httpx.AsyncHTTPTransport(proxy=proxy_url, verify=ssl_context, trust_env=False)
+            f"{scheme}://": httpx.AsyncHTTPTransport(
+                proxy=proxy_url, verify=ssl_context, trust_env=False
+            )
             for scheme, proxy_url in proxies.items()
             if proxy_url
         }
@@ -366,10 +393,14 @@ def _build_endpoint(base_url: str, suffix: str) -> str:
     clean_suffix = suffix.rstrip("/")
 
     if path.endswith(clean_suffix):
-        return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, path, parts.query, parts.fragment)
+        )
 
     new_path = f"{path}{clean_suffix}" if path else clean_suffix
-    return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
+    return urlunsplit(
+        (parts.scheme, parts.netloc, new_path, parts.query, parts.fragment)
+    )
 
 
 def _stream_http_endpoints(base_url: str) -> List[str]:
@@ -426,7 +457,9 @@ async def _list_tools_stream_sse_async(
         for tool in tools_result.tools:
             # В SDK это pydantic-модель; приведём к dict с JSON-совместимыми ключами.
             if hasattr(tool, "model_dump"):
-                tool_dict = tool.model_dump(by_alias=True, mode="json", exclude_unset=True)
+                tool_dict = tool.model_dump(
+                    by_alias=True, mode="json", exclude_unset=True
+                )
             elif isinstance(tool, dict):
                 tool_dict = tool
             else:
@@ -507,7 +540,11 @@ async def _call_tool_stream_sse_async(
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
-                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+                content_items.append(
+                    item.model_dump(
+                        by_alias=True, mode="json", exclude_unset=True
+                    )
+                )
             else:
                 content_items.append(item)
 
@@ -527,7 +564,9 @@ def _is_session_terminated(exc: BaseException) -> bool:
     return _SESSION_TERMINATED_MARKER in str(exc)
 
 
-async def _enter_session(transport_cm: Any, *, read_timeout: Optional[float] = None) -> Tuple[Any, Any]:
+async def _enter_session(
+    transport_cm: Any, *, read_timeout: Optional[float] = None
+) -> Tuple[Any, Any]:
     """Войти в транспорт и ``ClientSession``, откатив всё при ошибке.
 
     ``initialize()`` падает не в теории: сервер отвечает не тем протоколом,
@@ -542,7 +581,9 @@ async def _enter_session(transport_cm: Any, *, read_timeout: Optional[float] = N
     session = ClientSession(
         read_stream,
         write_stream,
-        read_timeout_seconds=None if read_timeout is None else timedelta(seconds=read_timeout),
+        read_timeout_seconds=None
+        if read_timeout is None
+        else timedelta(seconds=read_timeout),
     )
     try:
         await session.__aenter__()
@@ -607,10 +648,17 @@ async def _call_tool_stream_sse_persistent(
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
-                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+                content_items.append(
+                    item.model_dump(
+                        by_alias=True, mode="json", exclude_unset=True
+                    )
+                )
             else:
                 content_items.append(item)
-        return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+        return {
+            "content": content_items,
+            "isError": bool(getattr(result, "isError", False)),
+        }
 
     if session is not None:
         try:
@@ -795,7 +843,11 @@ async def _call_tool_stream_http_async(
                 content_items: List[Any] = []
                 for item in getattr(result, "content", []) or []:
                     if hasattr(item, "model_dump"):
-                        content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+                        content_items.append(
+                            item.model_dump(
+                                by_alias=True, mode="json", exclude_unset=True
+                            )
+                        )
                     else:
                         content_items.append(item)
 
@@ -856,19 +908,28 @@ async def _aopen_persistent_http_session(
         await _exit_quietly(transport)
         await _exit_quietly(http_client)
         raise
-    _SESSION_MANAGER.set_session(server_key, new_session, (http_client, transport, new_session))
+    _SESSION_MANAGER.set_session(
+        server_key, new_session, (http_client, transport, new_session)
+    )
     return new_session
 
 
-async def _acall_tool_on_session(s: ClientSession, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+async def _acall_tool_on_session(
+    s: ClientSession, tool_name: str, arguments: Dict[str, Any]
+) -> Dict[str, Any]:
     result = await s.call_tool(tool_name, arguments or {})
     content_items: List[Any] = []
     for item in getattr(result, "content", []) or []:
         if hasattr(item, "model_dump"):
-            content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+            content_items.append(
+                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
+            )
         else:
             content_items.append(item)
-    return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+    return {
+        "content": content_items,
+        "isError": bool(getattr(result, "isError", False)),
+    }
 
 
 async def _call_tool_stream_http_persistent(
@@ -1008,7 +1069,11 @@ async def _list_tools_stream_stdio_async(
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=timeout)) as session,
+        ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=timedelta(seconds=timeout),
+        ) as session,
     ):
         await session.initialize()
         tools_result = await session.list_tools()
@@ -1016,7 +1081,9 @@ async def _list_tools_stream_stdio_async(
         tools: List[Dict[str, Any]] = []
         for tool in tools_result.tools:
             if hasattr(tool, "model_dump"):
-                tool_dict = tool.model_dump(by_alias=True, mode="json", exclude_unset=True)
+                tool_dict = tool.model_dump(
+                    by_alias=True, mode="json", exclude_unset=True
+                )
             elif isinstance(tool, dict):
                 tool_dict = tool
             else:
@@ -1063,7 +1130,11 @@ async def _call_tool_stream_stdio_async(
 
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=timeout)) as session,
+        ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=timedelta(seconds=timeout),
+        ) as session,
     ):
         await session.initialize()
 
@@ -1072,7 +1143,11 @@ async def _call_tool_stream_stdio_async(
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
-                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+                content_items.append(
+                    item.model_dump(
+                        by_alias=True, mode="json", exclude_unset=True
+                    )
+                )
             else:
                 content_items.append(item)
 
@@ -1109,7 +1184,9 @@ async def _call_tool_stream_stdio_persistent(
             cwd=server_cfg.get("cwd") or None,
         )
         transport_cm = stdio_client(params)
-        new_session, cm_stack = await _enter_session(transport_cm, read_timeout=timeout)
+        new_session, cm_stack = await _enter_session(
+            transport_cm, read_timeout=timeout
+        )
         _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
@@ -1118,10 +1195,17 @@ async def _call_tool_stream_stdio_persistent(
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
-                content_items.append(item.model_dump(by_alias=True, mode="json", exclude_unset=True))
+                content_items.append(
+                    item.model_dump(
+                        by_alias=True, mode="json", exclude_unset=True
+                    )
+                )
             else:
                 content_items.append(item)
-        return {"content": content_items, "isError": bool(getattr(result, "isError", False))}
+        return {
+            "content": content_items,
+            "isError": bool(getattr(result, "isError", False)),
+        }
 
     if session is not None:
         try:
@@ -1148,7 +1232,9 @@ async def acall_tool_stream_stdio(
     if bool(server_cfg.get("persistent_session")):
         # Ключ по команде+args, чтобы одинаковые сервера делили сессию.
         args = server_cfg.get("args") or []
-        args_key = ",".join(str(a) for a in (args if isinstance(args, list) else [args]))
+        args_key = ",".join(
+            str(a) for a in (args if isinstance(args, list) else [args])
+        )
         server_key = f"stream_stdio::{server_cfg.get('command')}::{args_key}"
         try:
             return await _call_tool_stream_stdio_persistent(

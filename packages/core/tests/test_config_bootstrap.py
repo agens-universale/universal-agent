@@ -25,7 +25,9 @@ def test_bootstrap_creates_user_config(tmp_path, monkeypatch):
 def test_bootstrap_does_not_clobber_existing(tmp_path, monkeypatch):
     cfg_dir = tmp_path / "gc"
     cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.yml").write_text("agent:\n  model: custom-x\n", encoding="utf-8")
+    (cfg_dir / "config.yml").write_text(
+        "agent:\n  model: custom-x\n", encoding="utf-8"
+    )
     monkeypatch.setattr(
         env_vars,
         "gc_paths",

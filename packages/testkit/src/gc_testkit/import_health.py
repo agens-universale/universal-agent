@@ -280,13 +280,17 @@ def check_dotted_binds(path: Path, tree: ast.AST) -> list[Finding]:
                 if alias.asname:
                     bound.add(alias.asname)
                 elif "." in alias.name:
-                    dotted.setdefault(alias.name.split(".")[-1], (alias.name, node.lineno))
+                    dotted.setdefault(
+                        alias.name.split(".")[-1], (alias.name, node.lineno)
+                    )
                 else:
                     bound.add(alias.name)
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 bound.add(alias.asname or alias.name)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        elif isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
             bound.add(node.name)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
@@ -346,7 +350,9 @@ def _module_bindings(mod_name: str) -> frozenset[str] | None:
 
     names: set[str] = set()
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
             if node.name == "__getattr__":
                 return None  # модуль сам решает, что у него есть
             names.add(node.name)
@@ -367,7 +373,9 @@ def _module_bindings(mod_name: str) -> frozenset[str] | None:
             # try/except ImportError и `if TYPE_CHECKING` — объявления внутри
             # всё равно попадают в модуль, обходим их тела на один уровень.
             for sub in ast.walk(node):
-                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if isinstance(
+                    sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                ):
                     names.add(sub.name)
                 elif isinstance(sub, ast.Import):
                     for alias in sub.names:
@@ -382,11 +390,17 @@ def _module_bindings(mod_name: str) -> frozenset[str] | None:
     return frozenset(names)
 
 
-def check_missing_names(path: Path, tree: ast.AST, ours: set[str]) -> list[Finding]:
+def check_missing_names(
+    path: Path, tree: ast.AST, ours: set[str]
+) -> list[Finding]:
     """`from gc_x.y import name` — существует ли `name` в модуле."""
     found: list[Finding] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.level or not node.module:
+        if (
+            not isinstance(node, ast.ImportFrom)
+            or node.level
+            or not node.module
+        ):
             continue
         if node.module.split(".")[0] not in ours:
             continue
@@ -462,7 +476,9 @@ def check_legacy_toplevel(path: Path, tree: ast.AST) -> list[Finding]:
                             f"дистрибутива (куда именно — module_map.json)",
                         )
                     )
-        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+        elif (
+            isinstance(node, ast.ImportFrom) and not node.level and node.module
+        ):
             top = node.module.split(".")[0]
             if top in LEGACY_TOPLEVEL:
                 found.append(
@@ -526,7 +542,13 @@ def main() -> int:
     findings = scan()
     skips = skipped()
     if args.json:
-        print(json.dumps({"findings": [asdict(f) for f in findings], "skipped": skips}, ensure_ascii=False, indent=1))
+        print(
+            json.dumps(
+                {"findings": [asdict(f) for f in findings], "skipped": skips},
+                ensure_ascii=False,
+                indent=1,
+            )
+        )
         return 1 if findings else 0
 
     # Хвост про пропуски — часть ОБОИХ вердиктов: «импорты здоровы» при

@@ -15,7 +15,9 @@ from typing import Any
 from gc_tui.services.os_ops import write_clipboard
 
 MSG_COPIED = "Скопировано"
-MSG_LINUX_DEPS = "системный буфер недоступен — установите wl-clipboard или xclip"
+MSG_LINUX_DEPS = (
+    "системный буфер недоступен — установите wl-clipboard или xclip"
+)
 MSG_SSH_OSC = "терминал должен разрешать OSC 52"
 
 

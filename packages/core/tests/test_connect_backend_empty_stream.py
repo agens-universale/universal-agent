@@ -25,7 +25,9 @@ def test_empty_stream_raises_retriable(monkeypatch):
             )
         )
 
-    assert ei.value.status_code is None  # None → is_retriable_backend_error True
+    assert (
+        ei.value.status_code is None
+    )  # None → is_retriable_backend_error True
     assert "empty" in str(ei.value).lower()
 
 
@@ -34,8 +36,24 @@ def test_nonempty_stream_returns_normally(monkeypatch):
         monkeypatch,
         stream_response(
             sse_body(
-                {"choices": [{"index": 0, "delta": {"role": "assistant", "content": "hi"}, "finish_reason": None}]},
-                {"choices": [{"index": 0, "delta": {"content": "!"}, "finish_reason": "stop"}]},
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": "hi"},
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "!"},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
             )
         ),
     )

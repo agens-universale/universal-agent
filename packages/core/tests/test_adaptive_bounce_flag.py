@@ -23,6 +23,8 @@ def test_flatten_exposes_tui_text_answer_mode(tmp_path):
     from gc_core import config as cfgmod
 
     conf = tmp_path / "config.yml"
-    conf.write_text("tui:\n  text_answer_mode: allow\n", encoding="utf-8")  # не дефолт → доказывает flatten
+    conf.write_text(
+        "tui:\n  text_answer_mode: allow\n", encoding="utf-8"
+    )  # не дефолт → доказывает flatten
     cfg = cfgmod.load_config(str(conf))
     assert cfg["tui_text_answer_mode"] == "allow"

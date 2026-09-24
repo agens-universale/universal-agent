@@ -160,8 +160,12 @@ def cleanup_threads(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--threads-dir", required=True, help="каталог swarm_threads/")
-    parser.add_argument("--sandbox-root-dir", required=True, help=".swarm_sandboxes/")
+    parser.add_argument(
+        "--threads-dir", required=True, help="каталог swarm_threads/"
+    )
+    parser.add_argument(
+        "--sandbox-root-dir", required=True, help=".swarm_sandboxes/"
+    )
     parser.add_argument(
         "--ttl-hours",
         type=float,

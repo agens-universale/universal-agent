@@ -112,14 +112,18 @@ class TestResolveProxies:
     def test_empty_config_and_empty_env_returns_none(self):
         from gc_core.utils.http_proxy import resolve_proxies
 
-        result = resolve_proxies("", {}, "https://api.openai.com/v1/chat/completions")
+        result = resolve_proxies(
+            "", {}, "https://api.openai.com/v1/chat/completions"
+        )
 
         assert result is None
 
     def test_none_config_and_empty_env_returns_none(self):
         from gc_core.utils.http_proxy import resolve_proxies
 
-        result = resolve_proxies(None, {}, "https://api.openai.com/v1/chat/completions")
+        result = resolve_proxies(
+            None, {}, "https://api.openai.com/v1/chat/completions"
+        )
 
         assert result is None
 

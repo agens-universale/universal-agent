@@ -7,7 +7,11 @@ from gc_tui.services.trace_mapper import map_message
 
 def test_read_file_shows_path():
     ev = map_message(
-        {"type": "function_call", "name": "read_file", "arguments": json.dumps({"path": "src/cli.py"})},
+        {
+            "type": "function_call",
+            "name": "read_file",
+            "arguments": json.dumps({"path": "src/cli.py"}),
+        },
         no=1,
         ts="t",
     )
@@ -33,7 +37,11 @@ def test_write_to_file_shows_path_and_chars():
 
 def test_search_files_query_or_pattern():
     ev = map_message(
-        {"type": "function_call", "name": "search_files", "arguments": json.dumps({"query": "AgentExecutor"})},
+        {
+            "type": "function_call",
+            "name": "search_files",
+            "arguments": json.dumps({"query": "AgentExecutor"}),
+        },
         no=3,
         ts="t",
     )
@@ -42,7 +50,11 @@ def test_search_files_query_or_pattern():
 
 def test_execute_command_shows_command():
     ev = map_message(
-        {"type": "function_call", "name": "execute_command", "arguments": json.dumps({"command": "pytest tests/"})},
+        {
+            "type": "function_call",
+            "name": "execute_command",
+            "arguments": json.dumps({"command": "pytest tests/"}),
+        },
         no=4,
         ts="t",
     )
@@ -51,7 +63,11 @@ def test_execute_command_shows_command():
 
 def test_fetch_url():
     ev = map_message(
-        {"type": "function_call", "name": "fetch_url", "arguments": json.dumps({"url": "https://example.com"})},
+        {
+            "type": "function_call",
+            "name": "fetch_url",
+            "arguments": json.dumps({"url": "https://example.com"}),
+        },
         no=5,
         ts="t",
     )
@@ -74,7 +90,11 @@ def test_memory_files_action_name():
 
 def test_unknown_tool_default():
     ev = map_message(
-        {"type": "function_call", "name": "mystery", "arguments": json.dumps({"foo": "bar", "baz": "qux"})},
+        {
+            "type": "function_call",
+            "name": "mystery",
+            "arguments": json.dumps({"foo": "bar", "baz": "qux"}),
+        },
         no=7,
         ts="t",
     )
@@ -103,7 +123,11 @@ def test_submit_solution_surfaces_task_report_as_agent():
 
 def test_function_call_output_ok():
     ev = map_message(
-        {"type": "function_call_output", "call_id": "fc_1", "output": json.dumps({"ok": True, "lines": 312})},
+        {
+            "type": "function_call_output",
+            "call_id": "fc_1",
+            "output": json.dumps({"ok": True, "lines": 312}),
+        },
         no=9,
         ts="t",
     )
@@ -113,7 +137,11 @@ def test_function_call_output_ok():
 
 def test_function_call_output_error():
     ev = map_message(
-        {"type": "function_call_output", "call_id": "fc_2", "output": json.dumps({"ok": False, "error": "ENOENT"})},
+        {
+            "type": "function_call_output",
+            "call_id": "fc_2",
+            "output": json.dumps({"ok": False, "error": "ENOENT"}),
+        },
         no=10,
         ts="t",
     )
@@ -143,7 +171,14 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         }
     )
     ev = map_message(
-        {"type": "function_call_output", "name": "exec_command", "call_id": "fc_x", "output": out}, no=1, ts="t"
+        {
+            "type": "function_call_output",
+            "name": "exec_command",
+            "call_id": "fc_x",
+            "output": out,
+        },
+        no=1,
+        ts="t",
     )
     assert ev.kind == "error"
     assert "unsafe_command_blocked" in ev.summary
@@ -166,7 +201,14 @@ def test_function_call_output_read_guard_block_is_error():
         }
     )
     ev = map_message(
-        {"type": "function_call_output", "name": "fs_read_file", "call_id": "fc_y", "output": out}, no=2, ts="t"
+        {
+            "type": "function_call_output",
+            "name": "fs_read_file",
+            "call_id": "fc_y",
+            "output": out,
+        },
+        no=2,
+        ts="t",
     )
     assert ev.kind == "error"
     assert "read_guard_violation" in ev.summary
@@ -180,7 +222,9 @@ def test_ask_human_call_returns_kind_ask_human():
         "type": "function_call",
         "name": "ask_human",
         "call_id": "c1",
-        "arguments": json.dumps({"question": "Какой тип отчёта?\nA) ...\nB) ..."}),
+        "arguments": json.dumps(
+            {"question": "Какой тип отчёта?\nA) ...\nB) ..."}
+        ),
     }
     ev = map_message(msg, no=5, ts="2026-05-21T12:00:00+00:00")
     assert ev is not None
@@ -217,7 +261,10 @@ def test_submit_solution_returns_agent_with_comment_attached():
     assert ev is not None
     assert ev.kind == "agent"
     assert ev.summary == "Проект проанализирован."
-    assert ev.full_payload["_submit_comment"] == "Найдена папка planner/ не упомянутая в README."
+    assert (
+        ev.full_payload["_submit_comment"]
+        == "Найдена папка planner/ не упомянутая в README."
+    )
 
 
 def test_submit_solution_output_with_name_returns_none():
@@ -236,7 +283,9 @@ def test_submit_solution_without_task_report_returns_none():
         "type": "function_call",
         "name": "submit_solution",
         "call_id": "c3",
-        "arguments": json.dumps({"solution_type": "answer_question", "task_report": ""}),
+        "arguments": json.dumps(
+            {"solution_type": "answer_question", "task_report": ""}
+        ),
     }
     ev = map_message(msg, no=10, ts="2026-05-21T12:00:00+00:00")
     assert ev is None
@@ -262,7 +311,12 @@ def test_submit_solution_no_comment_no_sidecar():
 
 def test_intermediate_reply_output_suppressed_by_name():
     ev = map_message(
-        {"type": "function_call_output", "name": "intermediate_reply", "call_id": "c1", "output": '{"ok": true}'},
+        {
+            "type": "function_call_output",
+            "name": "intermediate_reply",
+            "call_id": "c1",
+            "output": '{"ok": true}',
+        },
         no=1,
         ts="t",
     )
@@ -276,7 +330,9 @@ def test_intermediate_reply_output_suppressed_chat_mode_by_tool():
         {
             "type": "function_call_output",
             "call_id": "c1",
-            "output": json.dumps({"tool": "turn_intermediate_reply", "ok": True, "answer": "x"}),
+            "output": json.dumps(
+                {"tool": "turn_intermediate_reply", "ok": True, "answer": "x"}
+            ),
         },
         no=1,
         ts="t",
@@ -292,7 +348,9 @@ def test_summarize_output_total_lines():
     msg = {
         "type": "function_call_output",
         "call_id": "c1",
-        "output": json.dumps({"tool": "read_file", "ok": True, "total_lines": 312}),
+        "output": json.dumps(
+            {"tool": "read_file", "ok": True, "total_lines": 312}
+        ),
     }
     ev = map_message(msg, no=5, ts="2026-05-21T12:00:00+00:00")
     assert ev is not None
@@ -407,7 +465,14 @@ def test_intermediate_reply_output_filtered():
             "type": "function_call_output",
             "name": "intermediate_reply",
             "call_id": "c1",
-            "output": json.dumps({"tool": "intermediate_reply", "ok": True, "answer": "x", "error": None}),
+            "output": json.dumps(
+                {
+                    "tool": "intermediate_reply",
+                    "ok": True,
+                    "answer": "x",
+                    "error": None,
+                }
+            ),
         },
         no=2,
         ts="t",
@@ -436,7 +501,10 @@ def test_flat_error_code_falls_through_to_the_message():
         ensure_ascii=False,
     )
 
-    assert _summarize_output(raw, error=True) == "unexpected keyword argument 'reason'"
+    assert (
+        _summarize_output(raw, error=True)
+        == "unexpected keyword argument 'reason'"
+    )
 
 
 def test_nested_error_dict_still_wins_over_message():
@@ -446,7 +514,10 @@ def test_nested_error_dict_still_wins_over_message():
     raw = json.dumps(
         {
             "ok": False,
-            "error": {"type": "invalid_argument", "message": "path must be absolute"},
+            "error": {
+                "type": "invalid_argument",
+                "message": "path must be absolute",
+            },
             "message": "не должно использоваться",
         },
         ensure_ascii=False,
@@ -458,13 +529,22 @@ def test_nested_error_dict_still_wins_over_message():
 def test_function_call_output_invalid_arguments_is_error():
     """Конверт invalid_arguments (вызов с битыми аргументами больше не роняет батч)
     рендерится как error-строка того же вызова."""
-    from gc_core.tools.arguments_validation import WrongFunctionArgumentsException
+    from gc_core.tools.arguments_validation import (
+        WrongFunctionArgumentsException,
+    )
 
     exc = WrongFunctionArgumentsException(
-        "Unexpected field 'bogus'", received_args='{"bogus": 1}', tool_name="session_think"
+        "Unexpected field 'bogus'",
+        received_args='{"bogus": 1}',
+        tool_name="session_think",
     )
     ev = map_message(
-        {"type": "function_call_output", "name": "session_think", "call_id": "fc_bad", "output": exc.to_tool_output()},
+        {
+            "type": "function_call_output",
+            "name": "session_think",
+            "call_id": "fc_bad",
+            "output": exc.to_tool_output(),
+        },
         no=1,
         ts="t",
     )

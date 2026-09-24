@@ -141,7 +141,9 @@ def test_turn_finish_task_report_too_long():
     )
     assert bad["ok"] is False
     assert bad["error"]["type"] == "limit_exceeded"
-    assert bad["error"]["message"] == "task_report exceeds 10000 chars, got 10001"
+    assert (
+        bad["error"]["message"] == "task_report exceeds 10000 chars, got 10001"
+    )
 
 
 def test_turn_finish_task_report_schema_names_char_budget():
@@ -187,10 +189,23 @@ def test_turn_finish_schema_declares_task():
 def test_turn_finish_task_is_optional_passthrough():
     """task — подсказка модели: отсутствие/пустота не отклоняют ход."""
     tool = CallableTool(SubmitSolution())
-    out = json.loads(tool(solution_type="full_solution", task_report="Done", handoff='{"x":1}'))
+    out = json.loads(
+        tool(
+            solution_type="full_solution",
+            task_report="Done",
+            handoff='{"x":1}',
+        )
+    )
     assert out["ok"] is True
     assert "task" not in out
-    out = json.loads(tool(solution_type="full_solution", task="  ", task_report="Done", handoff='{"x":1}'))
+    out = json.loads(
+        tool(
+            solution_type="full_solution",
+            task="  ",
+            task_report="Done",
+            handoff='{"x":1}',
+        )
+    )
     assert out["ok"] is True
     assert "task" not in out
 

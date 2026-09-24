@@ -20,12 +20,20 @@ from gc_core.thread_store import (
     validate_thread_id,
 )
 from gc_core.trace_id import normalize_trace_id
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
-from gc_server.rest_api.server_config import build_agent_config_for_server, load_server_config
+from gc_server.rest_api.server_config import (
+    build_agent_config_for_server,
+    load_server_config,
+)
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
-from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup, register_swarm_cleanup_on_startup
+from gc_server.server_cleanup_threads import (
+    register_cleanup_threads_on_startup,
+    register_swarm_cleanup_on_startup,
+)
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
@@ -61,9 +69,13 @@ try:
     # тот же приём, что config_modules/env_vars.py уже применяет к битым
     # GC_*-переменным окружения.
     SERVER_CONFIG: Dict[str, Any] = load_server_config()
-    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(
+        SERVER_CONFIG
+    )
 except (ValueError, OSError, yaml.YAMLError) as exc:
-    raise SystemExit(f"[gc] сервер не стартовал: конфиг не загружается ({exc})") from exc
+    raise SystemExit(
+        f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
+    ) from exc
 if _SWARM_MODULES_AVAILABLE and build_swarm_config is not None:
     SWARM_CONFIG: Dict[str, Any] = build_swarm_config(SERVER_CONFIG)
 else:
@@ -197,7 +209,9 @@ async def _shutdown_swarm_processes() -> None:
                         },
                     )
         except Exception:
-            logger.exception("shutdown: failed to update meta for %s", swarm_id)
+            logger.exception(
+                "shutdown: failed to update meta for %s", swarm_id
+            )
 
         monitor.unregister_active(swarm_id)
 
@@ -232,7 +246,10 @@ async def auth_middleware(request: Request, call_next):
     if scheme.lower() != "bearer" or token != str(auth_token):
         return JSONResponse(
             status_code=403,
-            content={"status": "forbidden", "detail": "invalid or missing token"},
+            content={
+                "status": "forbidden",
+                "detail": "invalid or missing token",
+            },
         )
 
     return await call_next(request)
@@ -252,7 +269,9 @@ async def get_run_status(system: str, task_id: str):
     # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
     # завершённый с TTL 15 минут. Клиент, которому только что ответили
     # `queued`, иначе видел 404 или `completed` с результатом прошлого прогона.
-    building_since, run = agent_run_registry.get_status_snapshot(system=sys_norm, task_id=task_norm)
+    building_since, run = agent_run_registry.get_status_snapshot(
+        system=sys_norm, task_id=task_norm
+    )
     if building_since is not None:
         return {
             "status": "running",
@@ -356,7 +375,10 @@ async def events_webhook(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "JSON body must be an object"},
+            detail={
+                "status": "error",
+                "payload": "JSON body must be an object",
+            },
         )
 
     try:
@@ -450,11 +472,17 @@ async def events_webhook(request: Request):
         # источник с ретраем по таймауту получал шторм на ту же задачу.
         # По истечении — честный 503: сообщение не принято, повторять клиенту.
         if ceiling is None:
-            ceiling = _context_build_wait_s((SERVER_CONFIG.get("server") or {}).get("context_build_wait_seconds"))
+            ceiling = _context_build_wait_s(
+                (SERVER_CONFIG.get("server") or {}).get(
+                    "context_build_wait_seconds"
+                )
+            )
             deadline = asyncio.get_running_loop().time() + ceiling
         try:
             async with asyncio.timeout_at(deadline):
-                await agent_run_registry.await_build(system=system, task_id=task_id)
+                await agent_run_registry.await_build(
+                    system=system, task_id=task_id
+                )
         except TimeoutError:
             logger.warning(
                 "context_build_wait_timeout system=%s task_id=%s ceiling_s=%g",
@@ -490,12 +518,18 @@ async def events_webhook(request: Request):
         # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
         force_legacy = cli_forces_legacy_model(config_dict)
         if force_legacy:
-            logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
+            logger.warning(
+                "agent_overrides: уровни отключены на этот запуск (легаси-форс)"
+            )
         # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
         # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на
         # всё это время, а с переездом прогоны стали тасками на общем loop,
         # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
-        ctx = await acreate_run_context(config_dict, auth_connector=auth_connector, force_legacy=force_legacy)
+        ctx = await acreate_run_context(
+            config_dict,
+            auth_connector=auth_connector,
+            force_legacy=force_legacy,
+        )
 
         await agent_run_registry.astart_if_absent(
             system=system,
@@ -556,7 +590,10 @@ async def get_thread_logs(system: str, task_id: str):
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
+            detail={
+                "status": "error",
+                "payload": f"threads resolve error: {e!r}",
+            },
         )
 
     meta = load_thread_meta(threads_dir, sys_norm, task_norm)
@@ -587,12 +624,19 @@ async def get_all_thread_logs():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
+            detail={
+                "status": "error",
+                "payload": f"threads resolve error: {e!r}",
+            },
         )
 
     out: list[dict[str, Any]] = []
     try:
-        names = [n for n in os.listdir(threads_dir) if n.startswith("meta_") and n.endswith(".json")]
+        names = [
+            n
+            for n in os.listdir(threads_dir)
+            if n.startswith("meta_") and n.endswith(".json")
+        ]
     except FileNotFoundError:
         return {"status": "ok", "logs": []}
 
@@ -655,7 +699,10 @@ async def swarm_run(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "JSON body must be an object"},
+            detail={
+                "status": "error",
+                "payload": "JSON body must be an object",
+            },
         )
 
     # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
@@ -687,13 +734,17 @@ async def swarm_run(request: Request):
     # Здесь коэрсинг, а не отказ: в имени системы законны пробелы и регистр,
     # 400 сломал бы живых клиентов. У `task_id` наоборот отказ — коэрсинг
     # молча склеил бы разные задачи в один тред.
-    system = sanitize_system_id(normalize_system(source_value, default_system=default_system))
+    system = sanitize_system_id(
+        normalize_system(source_value, default_system=default_system)
+    )
     payload["system"] = system
     swarm_id = f"swarm_{system}_{task_id}"
 
     # AR-3: reuse_strategy MVP — поддерживаем только "reject".
     # "continue" и "fresh" — отдадим 501, чтобы клиент не зависел от непостроенной семантики.
-    reuse_strategy = str(payload.get("reuse_strategy") or "reject").strip().lower()
+    reuse_strategy = (
+        str(payload.get("reuse_strategy") or "reject").strip().lower()
+    )
     if reuse_strategy not in {"reject", ""}:
         return JSONResponse(
             status_code=501,
@@ -771,7 +822,10 @@ async def swarm_run(request: Request):
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail={"status": "error", "reason": f"swarm_start_failed: {e!r}"},
+                detail={
+                    "status": "error",
+                    "reason": f"swarm_start_failed: {e!r}",
+                },
             )
 
         if monitor is not None:
@@ -892,8 +946,12 @@ async def get_swarm_logs(system: str, task_id: str):
     sandbox_root_dir = str(SWARM_CONFIG.get("sandbox_root_dir", ""))
     meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
     # Канал E (шаг 1.9): messages.jsonl лежит внутри sandbox-каталога.
-    messages = swarm_storage.load_swarm_messages(threads_dir, swarm_id, sandbox_root_dir)
-    stdout_lines, stderr_lines = swarm_storage.load_swarm_stdout_stderr(threads_dir, swarm_id)
+    messages = swarm_storage.load_swarm_messages(
+        threads_dir, swarm_id, sandbox_root_dir
+    )
+    stdout_lines, stderr_lines = swarm_storage.load_swarm_stdout_stderr(
+        threads_dir, swarm_id
+    )
 
     if not meta and not messages and not stdout_lines and not stderr_lines:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
@@ -919,7 +977,9 @@ async def healthcheck():
 #: падает KeyError. До этой ветки `server.log_level` читался и НИКУДА не
 #: передавался, поэтому конфиг с `warn` работал; передав его в uvicorn, мы бы
 #: уронили такие установки на старте.
-_UVICORN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
+_UVICORN_LOG_LEVELS = frozenset(
+    {"critical", "error", "warning", "info", "debug", "trace"}
+)
 
 #: Написания, которые logging принимает как синонимы, а uvicorn — нет.
 _LOG_LEVEL_ALIASES = {"warn": "warning", "fatal": "critical"}
@@ -973,7 +1033,8 @@ def serve() -> int:
     # `SERVER_CONFIG["config_path"]`, читать файл заново не требуется.
     logger.info(
         "config_server.yml: %s",
-        SERVER_CONFIG.get("config_path") or "не найден, взят минимальный дефолт",
+        SERVER_CONFIG.get("config_path")
+        or "не найден, взят минимальный дефолт",
     )
 
     # Тревога по СОСТОЯНИЮ, а не по факту «файл не найден». Прежде она жила в
@@ -994,7 +1055,9 @@ def serve() -> int:
     # репозитория, а из wheel падала ModuleNotFoundError.
     # log_level передаётся явно — server.log_level из конфига читался и не
     # использовался нигде.
-    uvicorn.run("gc_server.server:app", host=host, port=port, log_level=log_level)
+    uvicorn.run(
+        "gc_server.server:app", host=host, port=port, log_level=log_level
+    )
     return 0
 
 

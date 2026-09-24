@@ -21,13 +21,18 @@ def _notices(*, warnings=0, infos=0):
     """Уведомления под бейдж — ровно столько, сколько просят по уровням."""
     from gc_core.startup_notices import Notice
 
-    return [Notice("warning", f"w{i}", "предупреждение") for i in range(warnings)] + [
-        Notice("info", f"i{i}", "сообщение") for i in range(infos)
-    ]
+    return [
+        Notice("warning", f"w{i}", "предупреждение") for i in range(warnings)
+    ] + [Notice("info", f"i{i}", "сообщение") for i in range(infos)]
 
 
 def _write_task(tmp_path, tid):
-    meta = {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-28T12:00:00+00:00", "messages_count": 0}
+    meta = {
+        "thread_id": tid,
+        "status": "stopped",
+        "updated_at": "2026-05-28T12:00:00+00:00",
+        "messages_count": 0,
+    }
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(meta),
         encoding="utf-8",
@@ -70,7 +75,9 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
 
     tid = "idle1"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.active_runner = None
         pilot.app.screen.attach_active_task(tid)
@@ -115,7 +122,9 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
     tid = "run1"
     _write_task(tmp_path, tid)
     for width in (200, 60):
-        app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+        app = TuiApp(
+            threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        )
         async with app.run_test(size=(width, 30)) as pilot:
             pilot.app._update_available = True  # непустой бейдж уведомлений
             pilot.app.screen.attach_active_task(tid)
@@ -123,10 +132,19 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
             # Footer обновляется в _poll_active каждые 250ms — подождём один тик.
             await pilot.pause(0.4)
 
-            rendered = str(pilot.app.query_one("#footer-left", Static).render())
+            rendered = str(
+                pilot.app.query_one("#footer-left", Static).render()
+            )
             assert "Ctrl+C/stop" in rendered, width
             assert "F4/notices" in rendered, width  # бейдж виден всегда
-            for key in ("F1/help", "F2/sessions", "F3/diff", "F5/config", "F6/settings", "F7/buffer"):
+            for key in (
+                "F1/help",
+                "F2/sessions",
+                "F3/diff",
+                "F5/config",
+                "F6/settings",
+                "F7/buffer",
+            ):
                 assert key not in rendered, (width, key)
             assert "/mcp" not in rendered
             assert "/skills" not in rendered
@@ -154,7 +172,9 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
 
     tid = "trans1"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         runner = _FakeRunner()
@@ -238,7 +258,9 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
         lines = text.split("\n")
         assert len(lines) == 2, f"блок не уехал вниз целиком: {text!r}"
         assert "F4/notices" in lines[1] and "notices" not in lines[0]
-        assert not lines[1].lstrip().startswith("·"), "ведущая точка на строке без соседа"
+        assert not lines[1].lstrip().startswith("·"), (
+            "ведущая точка на строке без соседа"
+        )
 
     # набор для футера содержит уведомление об обновлении, для карточки — нет
     async with TuiApp().run_test() as pilot:
@@ -270,17 +292,26 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
             await pilot.pause()
             foot = pilot.app.screen.query_one("#footer")
             right = pilot.app.screen.query_one("#footer-right")
-            strips = ["".join(seg.text for seg in strip) for strip in pilot.app.screen._compositor.render_strips()]
-            lines = [strips[foot.region.y + i] for i in range(foot.region.height)]
+            strips = [
+                "".join(seg.text for seg in strip)
+                for strip in pilot.app.screen._compositor.render_strips()
+            ]
+            lines = [
+                strips[foot.region.y + i] for i in range(foot.region.height)
+            ]
             for i, line in enumerate(lines):
                 head = line[: right.region.x]
                 if not head.strip():
                     continue
                 gap = len(head) - len(head.rstrip())
-                assert gap >= 2, f"ширина {width}, строка {i + 1}: зазор {gap} — колонки слиплись\n  [{line.rstrip()}]"
+                assert gap >= 2, (
+                    f"ширина {width}, строка {i + 1}: зазор {gap} — колонки слиплись\n  [{line.rstrip()}]"
+                )
             if len(lines) > 1 and lines[1][: right.region.x].strip():
                 wrapped_somewhere = True
-    assert wrapped_somewhere, "ни на одной ширине хвост левой части не перенёсся вниз"
+    assert wrapped_somewhere, (
+        "ни на одной ширине хвост левой части не перенёсся вниз"
+    )
 
 
 def _rendered_rows(text: str, width: int) -> int:
@@ -288,7 +319,10 @@ def _rendered_rows(text: str, width: int) -> int:
     from rich.text import Text
 
     console = Console(width=width)
-    return sum(max(1, len(Text(line).wrap(console, width))) for line in text.split("\n"))
+    return sum(
+        max(1, len(Text(line).wrap(console, width)))
+        for line in text.split("\n")
+    )
 
 
 def test_footer_left_never_renders_three_rows():
@@ -305,10 +339,15 @@ def test_footer_left_never_renders_three_rows():
 
     Порядок жертв: подсказка «F4/notices» уходит раньше счётчиков, счётчики —
     раньше команд."""
-    from gc_tui.services.notices_ui import footer_left_with_badge, format_notices_badge
+    from gc_tui.services.notices_ui import (
+        footer_left_with_badge,
+        format_notices_badge,
+    )
     from rich.cells import cell_len
 
-    commands = "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
+    commands = (
+        "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
+    )
     # Бейдж собирает прод (`format_notices_badge`), а не тест руками: склеенное
     # «⚠3 ℹ2» разошлось бы с «⚠ 3  ℹ 2» прода молча — сторож ширины остался бы
     # зелёным на строке, которой в футере не бывает.
@@ -318,9 +357,13 @@ def test_footer_left_never_renders_three_rows():
     for width in range(1, 91):
         text = footer_left_with_badge(commands, badge, width=width)
         rows = _rendered_rows(text, width)
-        assert rows <= 2, f"ширина {width}: {rows} ряда — третий обрежется: {text!r}"
+        assert rows <= 2, (
+            f"ширина {width}: {rows} ряда — третий обрежется: {text!r}"
+        )
         if width >= cell_len(counts):
-            assert counts in text, f"ширина {width}: счётчики потеряны: {text!r}"
+            assert counts in text, (
+                f"ширина {width}: счётчики потеряны: {text!r}"
+            )
 
 
 def test_footer_left_guard_keeps_stop_key_at_any_width():
@@ -331,7 +374,10 @@ def test_footer_left_guard_keeps_stop_key_at_any_width():
     без единственного способа остановить агента — и было хуже, чем на базе, где
     терялся хвост бейджа. Ужимается бейдж; команды — последнее, что снимается
     слева."""
-    from gc_tui.services.notices_ui import footer_left_with_badge, format_notices_badge
+    from gc_tui.services.notices_ui import (
+        footer_left_with_badge,
+        format_notices_badge,
+    )
     from rich.cells import cell_len
 
     commands = "Ctrl+C/stop"
@@ -340,5 +386,7 @@ def test_footer_left_guard_keeps_stop_key_at_any_width():
     # раскладке — там остаётся только потолок в два ряда (тест выше).
     for width in range(cell_len(commands), 91):
         text = footer_left_with_badge(commands, badge, width=width)
-        assert commands in text, f"ширина {width}: стоп-клавиша потеряна: {text!r}"
+        assert commands in text, (
+            f"ширина {width}: стоп-клавиша потеряна: {text!r}"
+        )
         assert _rendered_rows(text, width) <= 2, f"ширина {width}: {text!r}"

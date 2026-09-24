@@ -64,7 +64,9 @@ def _multiline_suggestions(
     if not search_lines or len(search_lines) > len(limited_lines):
         return [], 0
 
-    normalized_search = "\n".join(_normalize_spaces(line).lower().strip() for line in search_lines)
+    normalized_search = "\n".join(
+        _normalize_spaces(line).lower().strip() for line in search_lines
+    )
     if not normalized_search.strip():
         return [], 0
 
@@ -72,8 +74,12 @@ def _multiline_suggestions(
     window_size = len(search_lines)
     for start_idx in range(len(limited_lines) - window_size + 1):
         window_lines = limited_lines[start_idx : start_idx + window_size]
-        normalized_window = "\n".join(_normalize_spaces(line).lower().strip() for line in window_lines)
-        score = difflib.SequenceMatcher(None, normalized_search, normalized_window).ratio()
+        normalized_window = "\n".join(
+            _normalize_spaces(line).lower().strip() for line in window_lines
+        )
+        score = difflib.SequenceMatcher(
+            None, normalized_search, normalized_window
+        ).ratio()
         if score <= min_score:
             continue
         scored.append((score, start_idx + 1, "\n".join(window_lines)))
@@ -111,7 +117,9 @@ def _single_line_suggestions(
         normalized_line = _normalize_spaces(line).lower().strip()
         if not normalized_line:
             continue
-        score = difflib.SequenceMatcher(None, normalized_search, normalized_line).ratio()
+        score = difflib.SequenceMatcher(
+            None, normalized_search, normalized_line
+        ).ratio()
         if score <= min_score:
             continue
         scored.append((score, line_no, line))

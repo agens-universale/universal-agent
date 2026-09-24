@@ -25,7 +25,11 @@ def test_substring_filter_matches_id():
 
     p = SkillPicker(_SKILLS, initial_filter="super")
     ids = [s["id"] for s in p._visible_rows()]
-    assert ids == ["supercoder:planner", "supercoder:coder", "supercoder:critic"]
+    assert ids == [
+        "supercoder:planner",
+        "supercoder:coder",
+        "supercoder:critic",
+    ]
 
 
 def test_filter_case_insensitive():

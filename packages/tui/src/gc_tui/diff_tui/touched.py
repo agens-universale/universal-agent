@@ -27,7 +27,9 @@ except ImportError:  # pragma: no cover — Windows
 class TouchedJournal:
     """Журнал путей, которые агентский трейс ещё не принял/не откатил."""
 
-    def __init__(self, threads_dir: str, system_id: str, thread_id: str) -> None:
+    def __init__(
+        self, threads_dir: str, system_id: str, thread_id: str
+    ) -> None:
         self.path = touched_journal_path(threads_dir, system_id, thread_id)
         self._file = Path(self.path)
 
@@ -59,7 +61,9 @@ class TouchedJournal:
             )
             atomic_replace(str(tmp), str(self._file))
         except OSError as exc:
-            _logger.warning("touched journal write failed path=%s: %s", self.path, exc)
+            _logger.warning(
+                "touched journal write failed path=%s: %s", self.path, exc
+            )
 
     @contextmanager
     def _locked(self):
@@ -75,7 +79,9 @@ class TouchedJournal:
             fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
             yield
         except OSError as exc:
-            _logger.warning("touched journal lock failed path=%s: %s", self.path, exc)
+            _logger.warning(
+                "touched journal lock failed path=%s: %s", self.path, exc
+            )
             yield
         finally:
             if fd is not None:

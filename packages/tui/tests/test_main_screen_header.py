@@ -44,7 +44,9 @@ async def test_attach_active_task_mirrors_into_tui_state(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     (tmp_path / "meta_cli_t1.json").write_text(
         '{"thread_id":"t1","status":"stopped","updated_at":"...","messages_count":0}',
         encoding="utf-8",

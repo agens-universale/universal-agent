@@ -43,7 +43,9 @@ from gc_core.thread_store_base import CONTRACT_METHODS as CONTRACT_METHODS
 SYS = "cli"
 
 #: Шесть полей записи трассы. Форма замкнутая: её пишет и читает только ядро.
-TRACE_FIELDS = frozenset({"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"})
+TRACE_FIELDS = frozenset(
+    {"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"}
+)
 
 
 class ThreadStoreContractError(AssertionError):
@@ -70,7 +72,9 @@ def check_methods_present(store: Any) -> None:
     ядро ждёт их. Такой store падает ``AttributeError`` глубоко внутри чтения
     треда, где причина уже не видна.
     """
-    missing = [m for m in CONTRACT_METHODS if not callable(getattr(store, m, None))]
+    missing = [
+        m for m in CONTRACT_METHODS if not callable(getattr(store, m, None))
+    ]
     if not missing:
         return
     hint = ""
@@ -98,7 +102,11 @@ def check_methods_are_sync(store: Any) -> None:
     """
     # inspect, а не asyncio: asyncio.iscoroutinefunction объявлена устаревшей
     # (удаление в 3.16), ответы на всех значимых случаях совпадают.
-    bad = [m for m in CONTRACT_METHODS if inspect.iscoroutinefunction(getattr(store, m, None))]
+    bad = [
+        m
+        for m in CONTRACT_METHODS
+        if inspect.iscoroutinefunction(getattr(store, m, None))
+    ]
     if not bad:
         return
     _fail(
@@ -126,7 +134,9 @@ def check_signatures(store: Any) -> None:
         got = inspect.signature(getattr(store, name))
         want_p = [p for p in want.parameters.values() if p.name != "self"]
         got_p = list(got.parameters.values())
-        if [(p.name, p.kind) for p in want_p] != [(p.name, p.kind) for p in got_p]:
+        if [(p.name, p.kind) for p in want_p] != [
+            (p.name, p.kind) for p in got_p
+        ]:
             _fail(
                 f"{type(store).__name__}.{name}: сигнатура разошлась с контрактом",
                 f"контракт: ({', '.join(str(p) for p in want_p)})\n  у вас:    ({', '.join(str(p) for p in got_p)})",
@@ -146,9 +156,14 @@ def check_missing_thread_is_empty(store: Any) -> None:
 
 def check_roundtrip(store: Any) -> None:
     """Записали — прочитали, в порядке записи."""
-    written = store.append_messages(SYS, "t-round", [_msg("m1", "раз"), _msg("m2", "два")])
+    written = store.append_messages(
+        SYS, "t-round", [_msg("m1", "раз"), _msg("m2", "два")]
+    )
     if written != 2:
-        _fail("append_messages вернул не число записанных", f"вернул {written!r}, ждали 2")
+        _fail(
+            "append_messages вернул не число записанных",
+            f"вернул {written!r}, ждали 2",
+        )
     got = [m["content"] for m in store.load_messages(SYS, "t-round")]
     if got != ["раз", "два"]:
         _fail("история вернулась не в порядке записи", f"вернулось {got!r}")
@@ -168,7 +183,9 @@ def check_idempotent(store: Any) -> None:
         _fail("повтор батча записал снова", f"вернул {again!r}, ждали 0")
     n = len(store.load_messages(SYS, "t-idem"))
     if n != 2:
-        _fail("повтор батча задвоил историю", f"в треде {n} сообщений, ждали 2")
+        _fail(
+            "повтор батча задвоил историю", f"в треде {n} сообщений, ждали 2"
+        )
 
 
 def check_known_keys_mutated_in_place(store: Any) -> None:
@@ -208,12 +225,16 @@ def check_seq_is_a_number_not_a_count(store: Any) -> None:
     store.append_messages(SYS, "t-seq", [_msg("s1"), _msg("s2"), _msg("s3")])
     state = store.load_thread_state(SYS, "t-seq")
     if int(state[2]) != 3:
-        _fail("номер seq после трёх записей", f"вернулось {state[2]!r}, ждали 3")
+        _fail(
+            "номер seq после трёх записей", f"вернулось {state[2]!r}, ждали 3"
+        )
 
     store.discard_message(SYS, "t-seq", "s2")
     after = store.load_thread_state(SYS, "t-seq")
     if len(after[0]) != 2:
-        _fail("discard не убрал сообщение", f"в треде {len(after[0])} сообщений")
+        _fail(
+            "discard не убрал сообщение", f"в треде {len(after[0])} сообщений"
+        )
     if int(after[2]) != 3:
         _fail(
             "третий элемент load_thread_state оказался КОЛИЧЕСТВОМ, а не НОМЕРОМ",
@@ -231,7 +252,9 @@ def check_message_id_guaranteed_on_read(store: Any) -> None:
     нестабильную к любому изменению словаря: добавили ключ — и то же самое
     сообщение считается новым.
     """
-    store.append_messages(SYS, "t-noid", [{"role": "user", "content": "без id"}])
+    store.append_messages(
+        SYS, "t-noid", [{"role": "user", "content": "без id"}]
+    )
     got = store.load_messages(SYS, "t-noid")
     if not got:
         _fail("сообщение без id не сохранилось", "ждали одно сообщение")
@@ -247,7 +270,9 @@ def check_message_id_guaranteed_on_read(store: Any) -> None:
 
 def check_meta_roundtrip(store: Any) -> None:
     """Meta записалась и прочиталась, незнакомые секции целы."""
-    store.save_meta(SYS, "t-meta", {"token_usage": {"total": 7}, "чужое": {"x": 1}})
+    store.save_meta(
+        SYS, "t-meta", {"token_usage": {"total": 7}, "чужое": {"x": 1}}
+    )
     meta = store.load_meta(SYS, "t-meta")
     if meta.get("token_usage", {}).get("total") != 7:
         _fail("meta не сохранилась", f"прочиталось {meta!r}")
@@ -298,7 +323,9 @@ def check_meta_is_stamped_on_write(store: Any) -> None:
 
 def check_runtime_flag_is_pointwise(store: Any) -> None:
     """Флаг рантайма не затирает чужие секции, а снятие последнего убирает секцию."""
-    store.save_meta(SYS, "t-flag", {"token_usage": {"total": 7}, "runtime": {}})
+    store.save_meta(
+        SYS, "t-flag", {"token_usage": {"total": 7}, "runtime": {}}
+    )
     store.patch_runtime_flag(SYS, "t-flag", "summarizing", active=True)
 
     meta = store.load_meta(SYS, "t-flag")
@@ -328,7 +355,10 @@ def check_update_runtime_meta(store: Any) -> None:
     store.update_runtime_meta(SYS, "t-rt", {"trace_ids": ["a", "b"]})
     meta = store.load_meta(SYS, "t-rt")
     if meta.get("runtime", {}).get("trace_ids") != ["a", "b"]:
-        _fail("update_runtime_meta не записал", f"runtime={meta.get('runtime')!r}")
+        _fail(
+            "update_runtime_meta не записал",
+            f"runtime={meta.get('runtime')!r}",
+        )
     if meta.get("token_usage", {}).get("total") != 3:
         _fail("update_runtime_meta затёр чужую секцию", f"meta={meta!r}")
 
@@ -350,8 +380,18 @@ def check_every_write_path_stamps_meta(store: Any) -> None:
     # ``save_meta``. Иначе штампы достались бы в наследство от него, и
     # проверка стала бы пустой — ровно так расхождение и пряталось.
     for label, write in (
-        ("patch_runtime_flag", lambda tid: store.patch_runtime_flag(SYS, tid, "summarizing", active=True)),
-        ("update_runtime_meta", lambda tid: store.update_runtime_meta(SYS, tid, {"trace_ids": ["z"]})),
+        (
+            "patch_runtime_flag",
+            lambda tid: store.patch_runtime_flag(
+                SYS, tid, "summarizing", active=True
+            ),
+        ),
+        (
+            "update_runtime_meta",
+            lambda tid: store.update_runtime_meta(
+                SYS, tid, {"trace_ids": ["z"]}
+            ),
+        ),
     ):
         tid = f"t-stamp-{label}"
         write(tid)
@@ -418,7 +458,9 @@ def check_replace_messages_keeps_the_trace(store: Any) -> None:
 
     tid = "t-replace"
     store.save_meta(SYS, tid, {"token_usage": {"total": 5}})
-    store.append_messages(SYS, tid, [{"role": "user", "content": "старое", "id": "m1"}])
+    store.append_messages(
+        SYS, tid, [{"role": "user", "content": "старое", "id": "m1"}]
+    )
     for n in range(2):
         store.append_subagent_trace(
             SYS,
@@ -461,7 +503,10 @@ def check_replace_messages_keeps_the_trace(store: Any) -> None:
                     "повторным append — тот проставляет штампы заново",
                 )
     if not store.load_meta(SYS, tid).get("token_usage"):
-        _fail("replace_messages потерял meta", "секции meta не относятся к истории")
+        _fail(
+            "replace_messages потерял meta",
+            "секции meta не относятся к истории",
+        )
 
 
 def check_discard(store: Any) -> None:
@@ -627,7 +672,11 @@ def check_async_methods_present(store: Any) -> None:
     """Все одиннадцать ``a``-методов есть и корутинны."""
     from gc_core.thread_store_async import ASYNC_CONTRACT_METHODS
 
-    missing = [m for m in ASYNC_CONTRACT_METHODS if not inspect.iscoroutinefunction(getattr(store, m, None))]
+    missing = [
+        m
+        for m in ASYNC_CONTRACT_METHODS
+        if not inspect.iscoroutinefunction(getattr(store, m, None))
+    ]
     if not missing:
         return
     present_sync = [m for m in missing if callable(getattr(store, m, None))]

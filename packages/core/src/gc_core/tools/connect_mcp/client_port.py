@@ -75,7 +75,9 @@ class McpClientPort(ABC):
         """
 
     @abstractmethod
-    async def acall_tool(self, tool_name: str, arguments: Dict[str, Any], *, timeout: float) -> Any:
+    async def acall_tool(
+        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
+    ) -> Any:
         """Сырой ответ ``tools/call`` — ровно как его отдал транспорт.
 
         Не приводится к dict: легаси-транспорты отвечают списком или строкой,
@@ -96,7 +98,9 @@ def _effective_transport(server_cfg: Dict[str, Any]) -> str:
 
     Единственный источник правил — ``transport_policy.resolve_effective_transport``.
     """
-    from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
+    from gc_core.tools.connect_mcp.transport_policy import (
+        resolve_effective_transport,
+    )
 
     return resolve_effective_transport(server_cfg)
 
@@ -134,13 +138,17 @@ class AgentRuntimeClient(McpClientPort):
                 f"MCP server '{self.server_name}': синхронная форма осталась "
                 "только для persistent stdio; остальное — alist_tools/acall_tool"
             )
-        session = PersistentStdioRegistry.instance().get_or_create(self.server_name, self.server_cfg)
+        session = PersistentStdioRegistry.instance().get_or_create(
+            self.server_name, self.server_cfg
+        )
         resp = session.call("tools/list", {}, timeout)
         result = resp.get("result") if isinstance(resp, dict) else None
         tools = result.get("tools", []) if isinstance(result, dict) else []
         return tools if isinstance(tools, list) else []
 
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any], *, timeout: float) -> Any:
+    def call_tool(
+        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
+    ) -> Any:
         """Только долгоживущий stdio — см. :meth:`list_tools`."""
         self._require_transport()
         if not is_persistent_stdio(self.server_cfg):
@@ -148,8 +156,12 @@ class AgentRuntimeClient(McpClientPort):
                 f"MCP server '{self.server_name}': синхронная форма осталась "
                 "только для persistent stdio; остальное — alist_tools/acall_tool"
             )
-        session = PersistentStdioRegistry.instance().get_or_create(self.server_name, self.server_cfg)
-        return session.call("tools/call", {"name": tool_name, "arguments": arguments}, timeout)
+        session = PersistentStdioRegistry.instance().get_or_create(
+            self.server_name, self.server_cfg
+        )
+        return session.call(
+            "tools/call", {"name": tool_name, "arguments": arguments}, timeout
+        )
 
     async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
         transport = self._require_transport()
@@ -158,11 +170,23 @@ class AgentRuntimeClient(McpClientPort):
         token = self._token()
 
         if effective == "stream_sse":
-            return await alist_tools_stream_sse(url=url, server_cfg=self.server_cfg, token=token, timeout=timeout)
+            return await alist_tools_stream_sse(
+                url=url,
+                server_cfg=self.server_cfg,
+                token=token,
+                timeout=timeout,
+            )
         if effective == "stream_http":
-            return await alist_tools_stream_http(url=url, server_cfg=self.server_cfg, token=token, timeout=timeout)
+            return await alist_tools_stream_http(
+                url=url,
+                server_cfg=self.server_cfg,
+                token=token,
+                timeout=timeout,
+            )
         if transport == "stream_stdio":
-            return await alist_tools_stream_stdio(server_cfg=self.server_cfg, timeout=timeout)
+            return await alist_tools_stream_stdio(
+                server_cfg=self.server_cfg, timeout=timeout
+            )
         if is_persistent_stdio(self.server_cfg):
             # Долгоживущая сессия сидит на `subprocess.Popen` СОЗНАТЕЛЬНО:
             # asyncio-подпроцесс привязан к создавшему его loop, а эту сессию
@@ -170,19 +194,39 @@ class AgentRuntimeClient(McpClientPort):
             # loop. Прервать блокирующий обмен нечем, поэтому поток-демон.
             return await run_abandonable(self.list_tools, timeout=timeout)
 
-        session_id = await _aget_or_init_session_id(self.server_name, url, self.server_cfg, token=token)
+        session_id = await _aget_or_init_session_id(
+            self.server_name, url, self.server_cfg, token=token
+        )
         if not session_id:
-            raise RuntimeError(f"Failed to initialize MCP session for server '{self.server_name}'")
+            raise RuntimeError(
+                f"Failed to initialize MCP session for server '{self.server_name}'"
+            )
         try:
-            return await _atools_list_request(url, session_id=session_id, server_cfg=self.server_cfg, token=token)
+            return await _atools_list_request(
+                url,
+                session_id=session_id,
+                server_cfg=self.server_cfg,
+                token=token,
+            )
         except httpx.HTTPStatusError:
             forget_session(self.server_name)
-            session_id = await _aget_or_init_session_id(self.server_name, url, self.server_cfg, token=token)
+            session_id = await _aget_or_init_session_id(
+                self.server_name, url, self.server_cfg, token=token
+            )
             if not session_id:
-                raise RuntimeError(f"Failed to re-initialize MCP session for server '{self.server_name}'")
-            return await _atools_list_request(url, session_id=session_id, server_cfg=self.server_cfg, token=token)
+                raise RuntimeError(
+                    f"Failed to re-initialize MCP session for server '{self.server_name}'"
+                )
+            return await _atools_list_request(
+                url,
+                session_id=session_id,
+                server_cfg=self.server_cfg,
+                token=token,
+            )
 
-    async def acall_tool(self, tool_name: str, arguments: Dict[str, Any], *, timeout: float) -> Any:
+    async def acall_tool(
+        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
+    ) -> Any:
         transport = self._require_transport()
         effective = _effective_transport(self.server_cfg)
         url = self._url()
@@ -215,13 +259,21 @@ class AgentRuntimeClient(McpClientPort):
             )
         if is_persistent_stdio(self.server_cfg):
             # См. `alist_tools`: сессия на `Popen` — сознательное ограничение.
-            return await run_abandonable(self.call_tool, tool_name, arguments, timeout=timeout)
+            return await run_abandonable(
+                self.call_tool, tool_name, arguments, timeout=timeout
+            )
 
         session_id = await _aget_or_init_session_id(
-            self.server_name, url, self.server_cfg, token=token, timeout=timeout
+            self.server_name,
+            url,
+            self.server_cfg,
+            token=token,
+            timeout=timeout,
         )
         if not session_id:
-            raise RuntimeError(f"Failed to initialize MCP session for server '{self.server_name}'")
+            raise RuntimeError(
+                f"Failed to initialize MCP session for server '{self.server_name}'"
+            )
 
         async def ado_call(sid: str) -> Any:
             return await _acall_mcp_tool(
@@ -240,16 +292,26 @@ class AgentRuntimeClient(McpClientPort):
         except httpx.HTTPStatusError:
             forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token, timeout=timeout
+                self.server_name,
+                url,
+                self.server_cfg,
+                token=token,
+                timeout=timeout,
             )
             if not session_id:
-                raise RuntimeError(f"Failed to re-initialize MCP session for server '{self.server_name}'")
+                raise RuntimeError(
+                    f"Failed to re-initialize MCP session for server '{self.server_name}'"
+                )
             data = await ado_call(session_id)
 
         if data == {} and transport == "sse":
             forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token, timeout=timeout
+                self.server_name,
+                url,
+                self.server_cfg,
+                token=token,
+                timeout=timeout,
             )
             if session_id:
                 data = await ado_call(session_id)

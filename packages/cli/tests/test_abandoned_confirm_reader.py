@@ -20,7 +20,10 @@ import pytest
 pty = pytest.importorskip("pty")
 
 from gc_cli.ask_human_port import make_cli_ask_human_port
-from gc_core.security.confirm_port import CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER
+from gc_core.security.confirm_port import (
+    CONFIRM_ALLOW_ONCE,
+    CONFIRM_ALLOW_REMEMBER,
+)
 from gc_core.security.path_policy import prompt_user_confirmation_choice
 
 _THREAD = "test-abandoned-yn"
@@ -105,9 +108,13 @@ async def test_an_abandoned_yes_no_prompt_leaves_the_next_line_alone(terminal):
     # «брошен».
     os.write(terminal, "ответ-на-второй\n\n".encode())
     await asyncio.sleep(0.4)
-    answer = await asyncio.wait_for(make_cli_ask_human_port()("второй вопрос?"), 5)
+    answer = await asyncio.wait_for(
+        make_cli_ask_human_port()("второй вопрос?"), 5
+    )
 
-    assert answer == "ответ-на-второй", f"строку забрал брошенный вопрос y/n, следующему досталось {answer!r}"
+    assert answer == "ответ-на-второй", (
+        f"строку забрал брошенный вопрос y/n, следующему досталось {answer!r}"
+    )
 
 
 async def test_a_line_for_a_cancelled_question_does_not_answer_the_confirmation(
@@ -136,12 +143,16 @@ async def test_a_line_for_a_cancelled_question_does_not_answer_the_confirmation(
 
     confirm = _ask_yes_no()
     await asyncio.sleep(0.5)
-    assert not confirm.done(), f"подтверждение ответило само: {confirm.result()!r}"
+    assert not confirm.done(), (
+        f"подтверждение ответило само: {confirm.result()!r}"
+    )
     os.write(terminal, b"n\n")  # отвечает человек — уже сам
     assert await asyncio.wait_for(confirm, 5) not in _ALLOWED
 
 
-async def test_input_typed_before_the_confirmation_does_not_answer_it(terminal):
+async def test_input_typed_before_the_confirmation_does_not_answer_it(
+    terminal,
+):
     """Набранное заранее — пока вопроса y/n ещё не было — на него не отвечает.
 
     Подтверждение безопасности принимает только ввод, сделанный ПОСЛЕ того, как
@@ -153,6 +164,8 @@ async def test_input_typed_before_the_confirmation_does_not_answer_it(terminal):
 
     confirm = _ask_yes_no()
     await asyncio.sleep(0.5)
-    assert not confirm.done(), f"подтверждение ответило само: {confirm.result()!r}"
+    assert not confirm.done(), (
+        f"подтверждение ответило само: {confirm.result()!r}"
+    )
     os.write(terminal, b"n\n")
     assert await asyncio.wait_for(confirm, 5) not in _ALLOWED

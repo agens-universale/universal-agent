@@ -25,7 +25,10 @@ def resolve_placeholders(value: Any, *, npx: str, cache: str) -> Any:
     if isinstance(value, str):
         return value.replace("{npx}", npx).replace("{cache}", cache)
     if isinstance(value, dict):
-        return {k: resolve_placeholders(v, npx=npx, cache=cache) for k, v in value.items()}
+        return {
+            k: resolve_placeholders(v, npx=npx, cache=cache)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
         return [resolve_placeholders(v, npx=npx, cache=cache) for v in value]
     return value
@@ -55,7 +58,10 @@ def load_managed() -> dict[str, Any]:
 def save_managed(data: dict[str, Any]) -> None:
     path = mcp_paths.managed_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    path.write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
 def wired_servers() -> dict[str, Any]:
@@ -63,12 +69,16 @@ def wired_servers() -> dict[str, Any]:
     return (load_managed().get("mcp") or {}).get("servers") or {}
 
 
-def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[str]:
+def wire_snippet(
+    name: str, recipe_dir: Path, *, npx: str, cache: str
+) -> list[str]:
     """Upsert mcp.servers.<name> из сниппета в managed-файл. Возвращает список
     оставшихся неизвестных плейсхолдеров (для warn)."""
     snippet = read_snippet(recipe_dir)
     if len(snippet) != 1:
-        raise ValueError(f"snippet должен иметь ровно одну запись, найдено {len(snippet)}: {list(snippet)}")
+        raise ValueError(
+            f"snippet должен иметь ровно одну запись, найдено {len(snippet)}: {list(snippet)}"
+        )
     # сниппет — {server_key: config}; берём единственный config-блок
     config_block = next(iter(snippet.values()))
     resolved = resolve_placeholders(config_block, npx=npx, cache=cache)
@@ -77,7 +87,13 @@ def wire_snippet(name: str, recipe_dir: Path, *, npx: str, cache: str) -> list[s
     data.setdefault("mcp", {}).setdefault("servers", {})[name] = resolved
     save_managed(data)
 
-    leftover = sorted({m for v in _iter_strings(resolved) for m in _PLACEHOLDER_RE.findall(v)})
+    leftover = sorted(
+        {
+            m
+            for v in _iter_strings(resolved)
+            for m in _PLACEHOLDER_RE.findall(v)
+        }
+    )
     return leftover
 
 

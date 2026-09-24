@@ -46,7 +46,9 @@ class IntermediateReply(AbstractSimpleTool):
         return logger or _logger
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_intermediate_reply",
@@ -63,7 +65,9 @@ class IntermediateReply(AbstractSimpleTool):
                     },
                     "artifact_path": {
                         "type": "string",
-                        "description": ("Path to a detailed user-facing artifact when long content lives in a file."),
+                        "description": (
+                            "Path to a detailed user-facing artifact when long content lives in a file."
+                        ),
                     },
                 },
                 "required": ["answer"],
@@ -73,7 +77,9 @@ class IntermediateReply(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: turn_intermediate_reply
 
 Overview:
@@ -91,12 +97,16 @@ Usage:
 - Hard limit: 4096 characters in `answer`.
 """
 
-    async def acall(self, answer: str, artifact_path: str | None = None, **kwargs) -> str:
+    async def acall(
+        self, answer: str, artifact_path: str | None = None, **kwargs
+    ) -> str:
         if not isinstance(answer, str):
             return self._result(
                 ok=False,
                 answer=str(answer),
-                artifact_path=artifact_path if isinstance(artifact_path, str) else None,
+                artifact_path=artifact_path
+                if isinstance(artifact_path, str)
+                else None,
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
@@ -109,7 +119,9 @@ Usage:
             return self._result(
                 ok=False,
                 answer="",
-                artifact_path=artifact_path if isinstance(artifact_path, str) else None,
+                artifact_path=artifact_path
+                if isinstance(artifact_path, str)
+                else None,
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
@@ -121,7 +133,9 @@ Usage:
             return self._result(
                 ok=False,
                 answer=answer,
-                artifact_path=artifact_path if isinstance(artifact_path, str) else None,
+                artifact_path=artifact_path
+                if isinstance(artifact_path, str)
+                else None,
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
@@ -156,7 +170,9 @@ Usage:
         print("-" * 60, file=sys.stderr)
         print(answer, file=sys.stderr)
         if normalized_artifact:
-            print(f"\nDetailed artifact: {normalized_artifact}", file=sys.stderr)
+            print(
+                f"\nDetailed artifact: {normalized_artifact}", file=sys.stderr
+            )
         print("=" * 60 + "\n", file=sys.stderr)
 
         self._run_logger().info(

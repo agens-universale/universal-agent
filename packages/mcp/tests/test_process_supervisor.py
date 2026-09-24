@@ -29,7 +29,11 @@ def test_build_command_argv() -> None:
         "recommended_mcp.process_supervisor.resolve_mcp_command",
         return_value="science-mcp",
     ):
-        assert build_command_argv(run) == ["science-mcp", "--transport", "http"]
+        assert build_command_argv(run) == [
+            "science-mcp",
+            "--transport",
+            "http",
+        ]
 
 
 def test_pid_file_roundtrip(tmp_path: Path) -> None:
@@ -47,7 +51,9 @@ def test_is_pid_alive_current_process() -> None:
 def test_start_if_needed_skips_running_process(tmp_path: Path) -> None:
     write_pid("science", os.getpid(), tmp_path)
     supervisor = RunSupervisor(pids_dir=tmp_path)
-    run = RunSpec(type="command", command="science-mcp", args=("--transport", "http"))
+    run = RunSpec(
+        type="command", command="science-mcp", args=("--transport", "http")
+    )
     with patch("subprocess.Popen") as popen:
         started = supervisor.start_if_needed("science", run)
     assert started is False
@@ -56,7 +62,9 @@ def test_start_if_needed_skips_running_process(tmp_path: Path) -> None:
 
 def test_start_if_needed_starts_when_no_pid(tmp_path: Path) -> None:
     supervisor = RunSupervisor(pids_dir=tmp_path)
-    run = RunSpec(type="command", command="science-mcp", args=("--transport", "http"))
+    run = RunSpec(
+        type="command", command="science-mcp", args=("--transport", "http")
+    )
     proc = MagicMock()
     proc.pid = 5555
     proc.poll.return_value = None
@@ -67,7 +75,9 @@ def test_start_if_needed_starts_when_no_pid(tmp_path: Path) -> None:
     assert read_pid("science", tmp_path) == 5555
 
 
-def test_stop_command_daemons(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_command_daemons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     write_pid("science", os.getpid(), tmp_path)
     terminated: list[int] = []
     monkeypatch.setattr(

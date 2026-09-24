@@ -29,7 +29,9 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
     Навигация (`set_filter` / `move_selection`), `compose` и `_rebuild` — общие
     с `SkillPicker`, в `PaletteRowsMixin`."""
 
-    DEFAULT_CSS = ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    DEFAULT_CSS = (
+        ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    )
 
     def __init__(
         self,
@@ -63,9 +65,15 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
             children.append(
-                Static(self._hint_text(self.selected_value()), classes="palette-hint palette-keys", markup=False)
+                Static(
+                    self._hint_text(self.selected_value()),
+                    classes="palette-hint palette-keys",
+                    markup=False,
+                )
             )
-        children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
+        children.append(
+            Static(_HINT, classes="palette-hint palette-keys", markup=False)
+        )
         return Vertical(*children, classes="palette-footer")
 
     def _value_col_w(self) -> int:
@@ -98,13 +106,18 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             value, desc, status = opt
             if not desc and not status:
                 return Text(f" {value}")
-            t = Text(f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}")
+            t = Text(
+                f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}"
+            )
             if status:
                 # Цвет — по смыслу статуса: ✗-отказ («не применится») зелёным
                 # цветом достижения читался бы как «всё в порядке». Правило по
                 # глифу, а не по литералу: пикер не знает ни про профили, ни про
                 # их тексты.
-                t.append(status, style=_pal.ERR if status.startswith("✗") else _pal.OK)
+                t.append(
+                    status,
+                    style=_pal.ERR if status.startswith("✗") else _pal.OK,
+                )
             return t
         value, desc = opt
         if not desc:
@@ -173,7 +186,9 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         flow = len(rows) if rows else 1
         footer = 1 + self._footer_line_count(_HINT)
         if self._hint_provider is not None:
-            footer += 1 + self._footer_line_count(self._hint_text(self.selected_value()))
+            footer += 1 + self._footer_line_count(
+                self._hint_text(self.selected_value())
+            )
         return flow + 2 + footer
 
     def selected_value(self) -> Optional[str]:

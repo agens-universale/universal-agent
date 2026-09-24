@@ -31,9 +31,13 @@ LINE_ENDING_CHANGE_REFUSED = "line_ending_change_refused"
 class EditLineEndings:
     search: str
     replace: str
-    file_line_ending: str | None  # "\r\n" | "\n" | None when the file has no newlines
+    file_line_ending: (
+        str | None
+    )  # "\r\n" | "\n" | None when the file has no newlines
     first_index: int  # -1 when the anchor was not found in any style
-    eol_adapted: bool  # search and/or replace bytes were converted to the matched style
+    eol_adapted: (
+        bool  # search and/or replace bytes were converted to the matched style
+    )
 
 
 def line_ending_change_refused_error() -> dict[str, str]:
@@ -55,7 +59,9 @@ def match_span(content: str, search: str, idx: int) -> tuple[int, int, int]:
     return idx, start_line, end_line
 
 
-def collect_literal_matches(content: str, search: str, first_index: int) -> list[tuple[int, int, int]]:
+def collect_literal_matches(
+    content: str, search: str, first_index: int
+) -> list[tuple[int, int, int]]:
     """All non-overlapping matches of ``search``, starting from a known first hit."""
     if first_index < 0:
         return []
@@ -70,7 +76,9 @@ def collect_literal_matches(content: str, search: str, first_index: int) -> list
     return entries
 
 
-def _find_search_any_eol(content: str, search: str, file_eol: str) -> tuple[str, int]:
+def _find_search_any_eol(
+    content: str, search: str, file_eol: str
+) -> tuple[str, int]:
     """``(search_как_в_файле, idx)``: искать как есть, затем с переводами строк файла."""
     idx = content.find(search)
     if idx != -1:
@@ -88,7 +96,9 @@ def _find_search_any_eol(content: str, search: str, file_eol: str) -> tuple[str,
     return search, -1
 
 
-def resolve_edit_line_endings(content: str, search: str, replace: str) -> EditLineEndings:
+def resolve_edit_line_endings(
+    content: str, search: str, replace: str
+) -> EditLineEndings:
     file_eol = detect_line_ending(content)
     if file_eol is None:
         idx = content.find(search)
@@ -99,7 +109,13 @@ def resolve_edit_line_endings(content: str, search: str, replace: str) -> EditLi
         # Miss in every style: hand the anchor back untouched for the miss report.
         return EditLineEndings(search, replace, file_eol, -1, False)
 
-    target_eol = detect_line_ending(resolved_search) or line_ending_at(content, idx) or file_eol
+    target_eol = (
+        detect_line_ending(resolved_search)
+        or line_ending_at(content, idx)
+        or file_eol
+    )
     resolved_replace = convert_line_endings(replace, target_eol)
     eol_adapted = resolved_search != search or resolved_replace != replace
-    return EditLineEndings(resolved_search, resolved_replace, file_eol, idx, eol_adapted)
+    return EditLineEndings(
+        resolved_search, resolved_replace, file_eol, idx, eol_adapted
+    )

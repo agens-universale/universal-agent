@@ -81,12 +81,16 @@ def _mcp_headers(
     if session_id is not None:
         headers["mcp-session-id"] = session_id
     extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
-    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
+    headers.update(
+        _merge_mcp_headers(token=token, extra_headers=extra_headers)
+    )
     return headers
 
 
 def _session_id_from(resp_headers: Dict[str, str]) -> Optional[str]:
-    return resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
+    return resp_headers.get("mcp-session-id") or resp_headers.get(
+        "MCP-Session-Id"
+    )
 
 
 def _tools_from(data: Any) -> List[Dict[str, Any]]:
@@ -129,7 +133,9 @@ def _tools_list_payload() -> Dict[str, Any]:
     }
 
 
-def _tools_call_payload(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def _tools_call_payload(
+    tool_name: str, arguments: Dict[str, Any]
+) -> Dict[str, Any]:
     return {
         "jsonrpc": "2.0",
         "id": "tools-call-1",
@@ -147,7 +153,9 @@ async def _asend_initialized_notification(
 ) -> None:
     """Асинхронный двойник: отличается ровно транспортом."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    await aget_transport(server_cfg)(url, headers, _NOTIFICATION_PAYLOAD, timeout)
+    await aget_transport(server_cfg)(
+        url, headers, _NOTIFICATION_PAYLOAD, timeout
+    )
 
 
 async def _ainit_mcp_session(
@@ -158,11 +166,15 @@ async def _ainit_mcp_session(
 ) -> Optional[str]:
     """Асинхронный двойник :func:`_init_mcp_session`; порядок шагов общий."""
     headers = _mcp_headers(server_cfg, token, session_id=None)
-    resp_headers, _body = await aget_transport(server_cfg)(url, headers, _initialize_payload(), timeout)
+    resp_headers, _body = await aget_transport(server_cfg)(
+        url, headers, _initialize_payload(), timeout
+    )
     session_id = _session_id_from(resp_headers)
     if not session_id:
         return None
-    await _asend_initialized_notification(url, session_id, server_cfg, token=token, timeout=timeout)
+    await _asend_initialized_notification(
+        url, session_id, server_cfg, token=token, timeout=timeout
+    )
     return session_id
 
 
@@ -175,11 +187,15 @@ async def _atools_list_request(
 ) -> List[Dict[str, Any]]:
     """Асинхронный двойник :func:`_tools_list_request`; разбор общий."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    _resp_headers, data = await aget_transport(server_cfg)(url, headers, _tools_list_payload(), timeout)
+    _resp_headers, data = await aget_transport(server_cfg)(
+        url, headers, _tools_list_payload(), timeout
+    )
     return _tools_from(data)
 
 
-def _remember_session(resp_headers: Dict[str, str], server_key: Optional[str]) -> None:
+def _remember_session(
+    resp_headers: Dict[str, str], server_key: Optional[str]
+) -> None:
     """Сервер прислал новый mcp-session-id — запомнить его для этого владельца."""
     if not server_key:
         return
@@ -232,7 +248,9 @@ async def _aget_or_init_session_id(
     if session_id:
         return session_id
 
-    session_id = await _ainit_mcp_session(url, server_cfg, token=token, timeout=timeout)
+    session_id = await _ainit_mcp_session(
+        url, server_cfg, token=token, timeout=timeout
+    )
     if session_id:
         _MCP_SESSIONS[(current_owner(), server_key)] = session_id
 

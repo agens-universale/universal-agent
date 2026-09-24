@@ -47,5 +47,8 @@ def test_start_with_technical_sends_pair():
     )
     _wait_idle(r)
     messages, mids = ex.calls[0]
-    assert messages == ["почини баг", '<technical type="technical">attached</technical>']
+    assert messages == [
+        "почини баг",
+        '<technical type="technical">attached</technical>',
+    ]
     assert mids == ["m1", None]

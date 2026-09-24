@@ -22,7 +22,11 @@ import threading
 import pytest
 from gc_testkit.paths import REPO
 
-_CFG = {"stop_tools": [], "backend_api_mode": "chat_completions", "save_logs": False}
+_CFG = {
+    "stop_tools": [],
+    "backend_api_mode": "chat_completions",
+    "save_logs": False,
+}
 
 
 @pytest.mark.asyncio
@@ -76,7 +80,9 @@ async def test_loop_stays_free_during_build(monkeypatch):
     from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
     cfg = dict(_CFG)
-    cfg["mcp-servers"] = {"srv": {"transport": "stream_http", "url": "http://x"}}
+    cfg["mcp-servers"] = {
+        "srv": {"transport": "stream_http", "url": "http://x"}
+    }
     # Сборщик глушится на окне: порог абсолютный, а пауза поколения 2 на куче
     # полного набора (180–220 мс) — почти весь бюджет в 0,25 с, и тест судил
     # бы её, а не сборку.
@@ -89,7 +95,9 @@ async def test_loop_stays_free_during_build(monkeypatch):
         async with LoopPulse(step=0.005) as pulse:
             await acreate_run_context(cfg)
 
-    assert pulse.worst() < 0.25, f"loop залипал на {pulse.worst():.3f}с при сборке контекста ({pulse.report()})"
+    assert pulse.worst() < 0.25, (
+        f"loop залипал на {pulse.worst():.3f}с при сборке контекста ({pulse.report()})"
+    )
 
 
 def test_acreate_is_not_a_thread_wrapper():
@@ -98,11 +106,20 @@ def test_acreate_is_not_a_thread_wrapper():
     Поведенческие проверки выше зависят от того, какие транспорты в конфиге;
     эта краснеет на самой попытке вернуть обёртку над потоком.
     """
-    src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(encoding="utf-8")
+    src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(src)
-    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef)
+        and n.name == "acreate_run_context"
+    )
     calls = {
-        getattr(c.func, "attr", None) or getattr(c.func, "id", None) for c in ast.walk(fn) if isinstance(c, ast.Call)
+        getattr(c.func, "attr", None) or getattr(c.func, "id", None)
+        for c in ast.walk(fn)
+        if isinstance(c, ast.Call)
     }
     assert "to_thread" not in calls, (
         "acreate_run_context снова обёртка над потоком — 8 loop'ов и 10 потоков на сборку вместо одного"
@@ -124,19 +141,32 @@ def test_context_assembly_has_exactly_one_form():
     первого хода. Настоящая причина была в том, что фабрика исполнителя в TUI
     — обычная функция без своего loop; теперь она заводит его сама.
     """
-    src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(encoding="utf-8")
+    src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(
+        encoding="utf-8"
+    )
     tree = ast.parse(src)
 
     sync_forms = [
         n.name
         for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and "run_context" in n.name and not n.name.startswith("_")
+        if isinstance(n, ast.FunctionDef)
+        and "run_context" in n.name
+        and not n.name.startswith("_")
     ]
-    assert sync_forms == [], f"вернулась синхронная сборка контекста: {sync_forms}"
+    assert sync_forms == [], (
+        f"вернулась синхронная сборка контекста: {sync_forms}"
+    )
 
-    build = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
+    build = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef)
+        and n.name == "acreate_run_context"
+    )
     calls = {
-        getattr(c.func, "id", None) or getattr(c.func, "attr", None) for c in ast.walk(build) if isinstance(c, ast.Call)
+        getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+        for c in ast.walk(build)
+        if isinstance(c, ast.Call)
     }
     for helper in ("_prepare_run_context", "_finish_run_context"):
         assert helper in calls, f"acreate_run_context не зовёт {helper}"
@@ -153,8 +183,16 @@ def test_subagent_builds_use_the_async_form():
     Синхронная форма там подняла бы ещё один loop в отдельном потоке
     (``run_coro_blocking``), а это ровно то, от чего уходили.
     """
-    src = (REPO / "packages/core/src/gc_core/tools/subagents/runner.py").read_text(encoding="utf-8")
+    src = (
+        REPO / "packages/core/src/gc_core/tools/subagents/runner.py"
+    ).read_text(encoding="utf-8")
     tree = ast.parse(src)
-    names = {getattr(c.func, "id", None) for c in ast.walk(tree) if isinstance(c, ast.Call)}
+    names = {
+        getattr(c.func, "id", None)
+        for c in ast.walk(tree)
+        if isinstance(c, ast.Call)
+    }
     assert "abuild_tools_data" in names
-    assert "build_tools_data" not in names, "спавн субагента зовёт синхронную сборку тулов из-под работающего loop"
+    assert "build_tools_data" not in names, (
+        "спавн субагента зовёт синхронную сборку тулов из-под работающего loop"
+    )

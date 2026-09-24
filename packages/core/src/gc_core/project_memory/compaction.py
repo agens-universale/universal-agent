@@ -19,7 +19,9 @@ from gc_core.summarize.llm import arequest_auxiliary_completion_text
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_COMPACTION_PROMPT_PATH = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+_COMPACTION_PROMPT_PATH = (
+    bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+)
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,9 @@ def _load_prompt() -> str:
     return _COMPACTION_PROMPT_PATH.read_text(encoding="utf-8")
 
 
-async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
+async def acompact_text(
+    text: str, ctx: Any, state: Any = None
+) -> CompactionResult:
     """Сжать `text` бэкендным LLM по промпту компакции long_memory.
 
     Основная и единственная реализация; синхронный ``compact_text`` — шим над ней.
@@ -84,7 +88,12 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             consumer="memory_compaction",
         )
     except Exception as exc:  # caller wants explicit ok=false, not exception.
-        return CompactionResult(ok=False, text="", error_type="backend_error", error_message=str(exc))
+        return CompactionResult(
+            ok=False,
+            text="",
+            error_type="backend_error",
+            error_message=str(exc),
+        )
 
     if not compressed:
         return CompactionResult(
@@ -93,4 +102,6 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             error_type="empty_response",
             error_message="backend returned empty compaction response.",
         )
-    return CompactionResult(ok=True, text=compressed, error_type=None, error_message=None)
+    return CompactionResult(
+        ok=True, text=compressed, error_type=None, error_message=None
+    )

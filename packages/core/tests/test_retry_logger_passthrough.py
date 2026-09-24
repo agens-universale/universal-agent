@@ -60,7 +60,9 @@ def test_logger_forwarded_during_retry_loop_too():
     received_loggers = []
     call_count = {"n": 0}
 
-    @retry_with_backoff(max_attempts=3, initial_delay_sec=0.0, operation_name="test")
+    @retry_with_backoff(
+        max_attempts=3, initial_delay_sec=0.0, operation_name="test"
+    )
     def func(*, payload, logger=None):
         received_loggers.append(logger)
         call_count["n"] += 1

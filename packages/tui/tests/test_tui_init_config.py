@@ -39,12 +39,18 @@ def test_tui_init_config_runs_review_and_exits(tmp_path, monkeypatch):
 
     from gc_core import thread_store as ts_mod
 
-    monkeypatch.setattr(ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads"))
+    monkeypatch.setattr(
+        ts_mod, "resolve_threads_dir", lambda cfg: str(tmp_path / "threads")
+    )
 
     from recommended_mcp.runtime import daemon_autostart as mcp_da_mod
 
-    monkeypatch.setattr(mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False)
-    monkeypatch.setattr(mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False)
+    monkeypatch.setattr(
+        mcp_da_mod, "ensure_mcp_daemons", lambda cfg, **kw: None, raising=False
+    )
+    monkeypatch.setattr(
+        mcp_da_mod, "shutdown_mcp_daemons", lambda: None, raising=False
+    )
 
     captured = {}
 
@@ -77,7 +83,9 @@ def test_tui_stop_guide_on_unconfigured(tmp_path, monkeypatch, capsys):
     _isolate(tmp_path, monkeypatch)
     rc = tui.main([])
     assert rc == 0
-    assert "gc-ua --init-config" in capsys.readouterr().err  # стоп-гайд с помощником, program=gc-ua
+    assert (
+        "gc-ua --init-config" in capsys.readouterr().err
+    )  # стоп-гайд с помощником, program=gc-ua
     assert (tmp_path / "gc" / "config.yml").is_file()
 
 

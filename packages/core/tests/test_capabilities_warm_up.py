@@ -128,4 +128,6 @@ async def test_context_build_does_not_warm_the_probes(tmp_path, monkeypatch):
     ctx = await acreate_run_context(cfg, os_backend=backend)
 
     assert ctx.os_backend is backend
-    assert backend._has_grep_cache is None, "сборка контекста прогрела пробы — значит платит за них каждый прогон"
+    assert backend._has_grep_cache is None, (
+        "сборка контекста прогрела пробы — значит платит за них каждый прогон"
+    )

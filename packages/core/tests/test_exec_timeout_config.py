@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 import yaml
 from gc_core.backends.factory import resolve_os_backend
-from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS, ExecResult
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+    ExecResult,
+)
 from gc_core.config import load_config
 from gc_core.config_modules.agent import (
     DEFAULT_EXEC_TIMEOUT_SEC,
@@ -36,12 +39,17 @@ def test_agent_config_timeout_must_be_positive():
 
 
 def test_agent_config_capture_max_default():
-    assert AgentConfig().exec_output_capture_max_chars == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    assert (
+        AgentConfig().exec_output_capture_max_chars
+        == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    )
     assert DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS == 40_000
 
 
 def test_agent_config_capture_max_custom():
-    cfg = AgentConfig(exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=100)
+    cfg = AgentConfig(
+        exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=100
+    )
     assert cfg.exec_output_capture_max_chars == 1000
 
 
@@ -58,13 +66,15 @@ def test_agent_config_preview_edge_is_clamped_to_capture_tail():
     """P <= L - floor(L / 2); превышение зажимается, как и на плоском пути."""
     assert (
         AgentConfig(
-            exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=500
+            exec_output_capture_max_chars=1000,
+            exec_output_preview_edge_chars=500,
         ).exec_output_preview_edge_chars
         == 500
     )
     assert (
         AgentConfig(
-            exec_output_capture_max_chars=1000, exec_output_preview_edge_chars=501
+            exec_output_capture_max_chars=1000,
+            exec_output_preview_edge_chars=501,
         ).exec_output_preview_edge_chars
         == 500
     )
@@ -72,7 +82,9 @@ def test_agent_config_preview_edge_is_clamped_to_capture_tail():
 
 def test_agent_config_zero_capture_clamps_preview_to_zero():
     assert (
-        AgentConfig(exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1).exec_output_preview_edge_chars
+        AgentConfig(
+            exec_output_capture_max_chars=0, exec_output_preview_edge_chars=1
+        ).exec_output_preview_edge_chars
         == 0
     )
 
@@ -87,7 +99,9 @@ def test_load_config_maps_exec_timeout_sec(tmp_path: Path):
     cfg_path.write_text(
         yaml.dump(
             {
-                "backend": {"completions_url": "http://localhost/v1/chat/completions"},
+                "backend": {
+                    "completions_url": "http://localhost/v1/chat/completions"
+                },
                 "agent": {"exec_timeout_sec": 600},
             }
         ),
@@ -102,7 +116,9 @@ def test_load_config_maps_exec_output_capture_max_chars(tmp_path: Path):
     cfg_path.write_text(
         yaml.dump(
             {
-                "backend": {"completions_url": "http://localhost/v1/chat/completions"},
+                "backend": {
+                    "completions_url": "http://localhost/v1/chat/completions"
+                },
                 "agent": {"exec_output_capture_max_chars": 12_000},
             }
         ),
@@ -115,23 +131,40 @@ def test_load_config_maps_exec_output_capture_max_chars(tmp_path: Path):
 def test_load_config_timeout_default_when_omitted(tmp_path: Path):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
-        yaml.dump({"backend": {"completions_url": "http://localhost/v1/chat/completions"}}),
+        yaml.dump(
+            {
+                "backend": {
+                    "completions_url": "http://localhost/v1/chat/completions"
+                }
+            }
+        ),
         encoding="utf-8",
     )
     cfg = load_config(str(cfg_path))
     assert cfg["exec_timeout_sec"] == DEFAULT_EXEC_TIMEOUT_SEC
-    assert cfg["exec_output_capture_max_chars"] == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    assert AppConfig.model_validate({}).agent.exec_timeout_sec == DEFAULT_EXEC_TIMEOUT_SEC
+    assert (
+        cfg["exec_output_capture_max_chars"]
+        == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    )
+    assert (
+        AppConfig.model_validate({}).agent.exec_timeout_sec
+        == DEFAULT_EXEC_TIMEOUT_SEC
+    )
 
 
 def test_factory_applies_capture_max_from_config():
     backend = resolve_os_backend({"exec_output_capture_max_chars": 1500})
     assert backend.exec_output_capture_max_chars == 1500
-    assert exec_output_capture_max_chars_from_config_dict({}) == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    assert (
+        exec_output_capture_max_chars_from_config_dict({})
+        == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    )
 
 
 def test_local_ctx_applies_capture_max_from_config():
-    tool = with_local_ctx(ExecuteCommand, config_dict={"exec_output_capture_max_chars": 777})
+    tool = with_local_ctx(
+        ExecuteCommand, config_dict={"exec_output_capture_max_chars": 777}
+    )
     assert tool._backend.exec_output_capture_max_chars == 777
 
 
@@ -141,15 +174,27 @@ def test_execute_command_uses_config_default(monkeypatch):
     # Подменяем АСИНХРОННУЮ форму: запуск процесса нативно асинхронный, и
     # `acall` зовёт именно её. Подмена синхронной оставляла бы тест зелёным на
     # настоящей команде, ничего не проверяя.
-    async def _fake_exec(self, command, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    async def _fake_exec(
+        self,
+        command,
+        *,
+        cwd=None,
+        timeout=None,
+        env=None,
+        capture_max_chars=None,
+    ):
         seen["timeout"] = timeout
-        return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
+        return ExecResult(
+            stdout="ok", stderr="", return_code=0, timed_out=False
+        )
 
     monkeypatch.setattr(
         "gc_core.backends.local.LocalFsBackend.aexec",
         _fake_exec,
     )
-    tool = with_local_ctx(ExecuteCommand, config_dict={"exec_timeout_sec": 600})
+    tool = with_local_ctx(
+        ExecuteCommand, config_dict={"exec_timeout_sec": 600}
+    )
     env = json.loads(tool(command="true"))
     assert env["ok"] is True
     assert seen["timeout"] == 600
@@ -158,9 +203,13 @@ def test_execute_command_uses_config_default(monkeypatch):
 def test_run_python_uses_config_default(monkeypatch):
     seen = {}
 
-    async def _fake_run_python(self, code, *, cwd=None, timeout=None, env=None):
+    async def _fake_run_python(
+        self, code, *, cwd=None, timeout=None, env=None
+    ):
         seen["timeout"] = timeout
-        return ExecResult(stdout="ok", stderr="", return_code=0, timed_out=False)
+        return ExecResult(
+            stdout="ok", stderr="", return_code=0, timed_out=False
+        )
 
     monkeypatch.setattr(
         "gc_core.backends.local.LocalFsBackend.arun_python",
@@ -179,10 +228,15 @@ def test_tool_schema_timeout_default_comes_from_config():
         assert timeout["default"] == 600
         assert "600" in timeout["description"]
         assert "120" not in timeout["description"]
-        assert '"default": 600' in cls.prompt_description({"exec_timeout_sec": 600})
+        assert '"default": 600' in cls.prompt_description(
+            {"exec_timeout_sec": 600}
+        )
 
         omitted = cls.tool_description()
-        assert omitted["parameters"]["properties"]["timeout"]["default"] == DEFAULT_EXEC_TIMEOUT_SEC
+        assert (
+            omitted["parameters"]["properties"]["timeout"]["default"]
+            == DEFAULT_EXEC_TIMEOUT_SEC
+        )
 
 
 def test_tool_descriptions_stay_lean():
@@ -198,12 +252,22 @@ def test_tool_descriptions_stay_lean():
 
 def test_preview_edge_from_flat_config_is_clamped_to_capture_tail():
     """Плоский config_dict приходит мимо AgentConfig — P дожимается на чтении."""
-    from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict
+    from gc_core.config_modules.agent import (
+        exec_output_preview_edge_chars_from_config_dict,
+    )
 
-    cfg = {"exec_output_capture_max_chars": 1000, "exec_output_preview_edge_chars": 3000}
+    cfg = {
+        "exec_output_capture_max_chars": 1000,
+        "exec_output_preview_edge_chars": 3000,
+    }
     assert exec_output_preview_edge_chars_from_config_dict(cfg) == 500
     assert exec_output_preview_edge_chars_from_config_dict({}) == 3000
-    assert exec_output_preview_edge_chars_from_config_dict({"exec_output_capture_max_chars": 0}) == 0
+    assert (
+        exec_output_preview_edge_chars_from_config_dict(
+            {"exec_output_capture_max_chars": 0}
+        )
+        == 0
+    )
 
 
 def test_exec_result_requires_return_code():
@@ -212,5 +276,8 @@ def test_exec_result_requires_return_code():
 
     with pytest.raises(TypeError):
         ExecResult(stdout="out", stderr="")
-    assert ExecResult(stdout="out", stderr="", return_code=None).return_code is None
+    assert (
+        ExecResult(stdout="out", stderr="", return_code=None).return_code
+        is None
+    )
     assert ExecResult("out", "", 0).return_code == 0

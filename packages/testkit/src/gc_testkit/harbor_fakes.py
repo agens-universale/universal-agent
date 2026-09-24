@@ -58,7 +58,9 @@ class FakeBackend(FlatWalkMixin):
         return p in self.files
 
     async def is_dir(self, p):
-        return any(k != p and k.startswith(p.rstrip("/") + "/") for k in self.files)
+        return any(
+            k != p and k.startswith(p.rstrip("/") + "/") for k in self.files
+        )
 
     async def getsize(self, p):
         return len(self.files[p].encode("utf-8"))
@@ -92,7 +94,9 @@ class FakeBackend(FlatWalkMixin):
             for i in range(1, len(parts)):
                 dirs.add("/".join(parts[:i]))
             files.append(rel)
-        return [(d, True) for d in sorted(dirs)] + [(f, False) for f in sorted(files)]
+        return [(d, True) for d in sorted(dirs)] + [
+            (f, False) for f in sorted(files)
+        ]
 
     async def walk_entries(self, p, *, prune_names=(), prune_dot_dirs=False):
         """Sized rows like `find -printf %s`; prune like `( -type d -name … ) -prune`."""
@@ -101,15 +105,28 @@ class FakeBackend(FlatWalkMixin):
             WalkEntry(
                 rel,
                 is_dir,
-                None if is_dir else len(self.files[base + rel].encode("utf-8")),
+                None
+                if is_dir
+                else len(self.files[base + rel].encode("utf-8")),
             )
             for rel, is_dir in await self.walk(p)
         ]
-        return prune_flat_entries(entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+        return prune_flat_entries(
+            entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+        )
 
-    async def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+    async def iter_walk_entries(
+        self,
+        path,
+        *,
+        should_descend=None,
+        prune_names=(),
+        prune_dot_dirs=False,
+    ):
         for _item in iter_walk_entries_from_flat(
-            await self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+            await self.walk_entries(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            ),
             should_descend=should_descend,
             join=self.join,
             root=path,
@@ -201,9 +218,13 @@ class FakeBackend(FlatWalkMixin):
         return None
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
-        raise NotImplementedError("exec parity tests use their own recording fake")
+        raise NotImplementedError(
+            "exec parity tests use their own recording fake"
+        )
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    def run_python(
+        self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None
+    ):
         raise NotImplementedError
 
 

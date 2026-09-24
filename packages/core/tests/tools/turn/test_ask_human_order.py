@@ -27,7 +27,9 @@ def events(monkeypatch):
 
     seen: list = []
     mod = importlib.import_module("gc_core.tools.subagents.progress")
-    monkeypatch.setattr(mod, "emit_progress", lambda ctx, state, kind, **kw: seen.append(kind))
+    monkeypatch.setattr(
+        mod, "emit_progress", lambda ctx, state, kind, **kw: seen.append(kind)
+    )
     return seen
 
 
@@ -41,7 +43,11 @@ async def test_question_is_announced_before_the_answer_is_awaited(events):
     out = json.loads(await AskHuman(ctx=ctx).acall(question="Любимый цвет?"))
 
     assert out["ok"] is True
-    assert events.index("ask_human") < events.index("port") < events.index("ask_human_done"), events
+    assert (
+        events.index("ask_human")
+        < events.index("port")
+        < events.index("ask_human_done")
+    ), events
 
 
 async def test_cancelled_question_is_closed_too(events):
@@ -69,7 +75,9 @@ async def test_cancelled_question_is_closed_too(events):
 @pytest.mark.parametrize("question", ["", "   ", "x" * 5000])
 async def test_invalid_question_is_rejected_without_waiting(events, question):
     async def port(_question):
-        raise AssertionError("ждали ввода ради вопроса, который всё равно отклонят")
+        raise AssertionError(
+            "ждали ввода ради вопроса, который всё равно отклонят"
+        )
 
     ctx = local_ctx()
     ctx.ask_human = port

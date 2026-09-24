@@ -53,7 +53,11 @@ def _dotted_imports(path) -> set[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 found.add(alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module
+        ):
             found.add(node.module)
     return found
 
@@ -138,9 +142,12 @@ def test_suite_does_not_import_packages_above_it(dist):
     # сменили маску, сломали rglob — и сетка навсегда зелёная, хотя не
     # проверяет уже ничего. У соседей (`module_literals`, пины рецептов MCP,
     # снапшот-гейт) такой счётчик есть, здесь его забыли.
-    assert scanned, f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — сетка ничего не проверяет"
+    assert scanned, (
+        f"в {suite.relative_to(REPO)} не просмотрено ни одного файла — сетка ничего не проверяет"
+    )
 
     assert not offenders, (
         f"набор пакета {dist} импортирует чужие пакеты — автономный прогон "
-        f"проходит только потому, что они есть в общем окружении:\n  " + "\n  ".join(offenders)
+        f"проходит только потому, что они есть в общем окружении:\n  "
+        + "\n  ".join(offenders)
     )

@@ -53,7 +53,9 @@ class FakeVoiceSetup:
         self.calls.append("wire_cloud")
         self.wired = dict(url=url, token=token, model=model, language=language)
 
-    def probe_endpoint(self, url, token, model, timeout=10, config_proxy=None, verify=True):
+    def probe_endpoint(
+        self, url, token, model, timeout=10, config_proxy=None, verify=True
+    ):
         self.calls.append("probe_endpoint")
         self.probe_calls.append((url, token, model))
         self.probe_proxies.append(config_proxy)
@@ -74,12 +76,26 @@ class FakeVoiceSetup:
         return self.status.installed
 
 
-LOCAL = VoiceStatus(installed=True, service_alive=True, port=8735, model="Systran/faster-whisper-small", mode="local")
+LOCAL = VoiceStatus(
+    installed=True,
+    service_alive=True,
+    port=8735,
+    model="Systran/faster-whisper-small",
+    mode="local",
+)
 LOCAL_INSTALLED_CLOUD = VoiceStatus(
-    installed=True, service_alive=False, port=8735, model="Systran/faster-whisper-small", mode="cloud"
+    installed=True,
+    service_alive=False,
+    port=8735,
+    model="Systran/faster-whisper-small",
+    mode="cloud",
 )
 LOCAL_DEAD = VoiceStatus(
-    installed=True, service_alive=False, port=8735, model="Systran/faster-whisper-small", mode="local"
+    installed=True,
+    service_alive=False,
+    port=8735,
+    model="Systran/faster-whisper-small",
+    mode="local",
 )
 # Движок отстал от версии сборки — единственное состояние, в котором секция обещает
 # Ctrl+U и рисует «· доступно …».
@@ -91,8 +107,12 @@ LOCAL_OUTDATED = VoiceStatus(
     mode="local",
     available_version="v0.9.0",
 )
-CLOUD = VoiceStatus(installed=False, service_alive=False, port=None, model=None, mode="cloud")
-OFF = VoiceStatus(installed=False, service_alive=False, port=None, model=None, mode="off")
+CLOUD = VoiceStatus(
+    installed=False, service_alive=False, port=None, model=None, mode="cloud"
+)
+OFF = VoiceStatus(
+    installed=False, service_alive=False, port=None, model=None, mode="off"
+)
 
 _URL = "https://s.x/v1/audio/transcriptions"
 _OURS = "http://127.0.0.1:8735/v1/audio/transcriptions"
@@ -104,18 +124,24 @@ def _mk_screen(tmp_path, status, on_apply=None, config_text="model: m\n"):
     cfg = tmp_path / "config.yml"
     cfg.write_text(config_text, encoding="utf-8")
     fake = FakeVoiceSetup(status)
-    scr = SettingsScreen(config={"voice": {}}, config_path=str(cfg), on_apply=on_apply or (lambda: None), voice=fake)
+    scr = SettingsScreen(
+        config={"voice": {}},
+        config_path=str(cfg),
+        on_apply=on_apply or (lambda: None),
+        voice=fake,
+    )
     return scr, fake
 
 
-CLOUD_CONFIG = (
-    "model: m\nvoice:\n  url: https://old.x/v1/audio/transcriptions\n  token: old-token\n  model: whisper-old\n"
-)
+CLOUD_CONFIG = "model: m\nvoice:\n  url: https://old.x/v1/audio/transcriptions\n  token: old-token\n  model: whisper-old\n"
 
 
 def _no_state(monkeypatch, tmp_path):
     """Батарейка не установлена → current_model_short() = DEFAULT_MODEL."""
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "nowhere" / "state.json")
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "nowhere" / "state.json",
+    )
 
 
 def _rows(scr):
@@ -160,7 +186,11 @@ async def _expand_list(pilot):
         await pilot.pause()
 
 
-_LIST_HINT_CLASSES = ("voice-url-preset-hint", "voice-model-hint", "voice-lang-hint")
+_LIST_HINT_CLASSES = (
+    "voice-url-preset-hint",
+    "voice-model-hint",
+    "voice-lang-hint",
+)
 
 
 def _field_labels(ed) -> list[str]:
@@ -168,7 +198,11 @@ def _field_labels(ed) -> list[str]:
 
     Строки-подсказки списков носят тот же класс `onb-hint` и с канона 2026-08-20 стоят
     под полями с первого кадра — в перечень подписей они не входят."""
-    return [str(w.render()) for w in ed.query(".onb-hint") if not any(c in w.classes for c in _LIST_HINT_CLASSES)]
+    return [
+        str(w.render())
+        for w in ed.query(".onb-hint")
+        if not any(c in w.classes for c in _LIST_HINT_CLASSES)
+    ]
 
 
 async def _open_voice(app, scr, pilot):
@@ -259,7 +293,9 @@ async def test_menu_preview_names_the_cloud_endpoint(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_status_lives_in_the_local_row_without_a_duplicate_head(tmp_path):
+async def test_status_lives_in_the_local_row_without_a_duplicate_head(
+    tmp_path,
+):
     """Статус — приглушённый хвост строки режима, а не отдельная шапка: шапка
     дублировала бы и название режима, и модель (её показывает поле «Модель»)."""
     from gc_tui.app import TuiApp
@@ -412,11 +448,16 @@ async def test_cloud_pane_fields_prefilled_and_editable(tmp_path):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, _ = _mk_screen(tmp_path, LOCAL, config_text=CLOUD_CONFIG + "  language: en\n")
+        scr, _ = _mk_screen(
+            tmp_path, LOCAL, config_text=CLOUD_CONFIG + "  language: en\n"
+        )
         await _open_cloud(app, scr, pilot)
         ed = scr.query_one(VoiceEndpointEditor)
         assert _field_labels(ed) == ["URL", "Токен", "Модель", "Язык"]
-        assert scr.query_one("#voice-url", Input).value == "https://old.x/v1/audio/transcriptions"
+        assert (
+            scr.query_one("#voice-url", Input).value
+            == "https://old.x/v1/audio/transcriptions"
+        )
         assert scr.query_one("#voice-model", Input).value == "whisper-old"
         assert scr.query_one("#voice-lang", Input).value == "en"
         assert scr.query_one("#voice-token", Input).value == ""
@@ -444,17 +485,27 @@ async def test_local_pane_fields_are_facts_only_language_editable(tmp_path):
         # адрес не собираем сами — берём у владельца формата (voice_runtime.wire)
         from gc_tui.voice_runtime.wire import voice_wire_section
 
-        assert scr.query_one("#voice-url", Input).value == voice_wire_section(8735, "m")["url"]
-        assert scr.query_one("#voice-model", Input).value == "Systran/faster-whisper-small"
+        assert (
+            scr.query_one("#voice-url", Input).value
+            == voice_wire_section(8735, "m")["url"]
+        )
+        assert (
+            scr.query_one("#voice-model", Input).value
+            == "Systran/faster-whisper-small"
+        )
         assert scr.query_one("#voice-lang", Input).value == "en"
         for wid in ("#voice-url", "#voice-token", "#voice-model"):
             assert scr.query_one(wid, Input).disabled is True, wid
         assert scr.query_one("#voice-lang", Input).disabled is False
-        assert not scr.query(".set-probe")  # проверять нечего: адрес не вводится
+        assert not scr.query(
+            ".set-probe"
+        )  # проверять нечего: адрес не вводится
 
 
 @pytest.mark.asyncio
-async def test_local_pane_without_battery_shows_install_hint_instead_of_fields(tmp_path):
+async def test_local_pane_without_battery_shows_install_hint_instead_of_fields(
+    tmp_path,
+):
     """Батарейки нет — показывать в полях нечего: вместо них строка с ценой действия."""
     from gc_tui.app import TuiApp
 
@@ -463,7 +514,10 @@ async def test_local_pane_without_battery_shows_install_hint_instead_of_fields(t
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_voice(app, scr, pilot)
         assert not scr.query(".set-framed")
-        assert str(scr.query_one(".set-voiceinstall").render()) == "Enter — установить"
+        assert (
+            str(scr.query_one(".set-voiceinstall").render())
+            == "Enter — установить"
+        )
 
 
 @pytest.mark.asyncio
@@ -478,9 +532,13 @@ async def test_cursor_starts_on_the_active_mode_row(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
         await _open_voice(app, scr, pilot)
-        assert (scr._voice_cursor_position(), _cursor_row(scr)) == (_VOICE_ROW_CLOUD, 1)
+        assert (scr._voice_cursor_position(), _cursor_row(scr)) == (
+            _VOICE_ROW_CLOUD,
+            1,
+        )
         assert (
-            scr.query_one("#voice-url", Input).value == "https://old.x/v1/audio/transcriptions"
+            scr.query_one("#voice-url", Input).value
+            == "https://old.x/v1/audio/transcriptions"
         )  # видны СВОИ настройки
         app.pop_screen()
         await pilot.pause()
@@ -488,7 +546,10 @@ async def test_cursor_starts_on_the_active_mode_row(tmp_path):
         for status in (LOCAL, OFF):
             scr2, _ = _mk_screen(tmp_path, status)
             await _open_voice(app, scr2, pilot)
-            assert (scr2._voice_cursor_position(), _cursor_row(scr2)) == (_VOICE_ROW_LOCAL, 0)
+            assert (scr2._voice_cursor_position(), _cursor_row(scr2)) == (
+                _VOICE_ROW_LOCAL,
+                0,
+            )
             app.pop_screen()
             await pilot.pause()
 
@@ -508,7 +569,10 @@ async def test_pane_follows_the_cursor_row(tmp_path):
         await pilot.press("down")
         await pilot.pause()
         assert _rows(scr)[0].startswith("  (●)")  # ● не поехал
-        assert scr.query_one("#voice-url", Input).value == "https://old.x/v1/audio/transcriptions"
+        assert (
+            scr.query_one("#voice-url", Input).value
+            == "https://old.x/v1/audio/transcriptions"
+        )
         assert scr.query_one("#voice-url", Input).disabled is False
         await pilot.press("up")
         await pilot.pause()
@@ -527,7 +591,9 @@ async def test_fields_entered_from_a_row_keep_its_pane(tmp_path):
         await _open_voice(app, scr, pilot)
         await _to_field(pilot)  # с локальной строки — в её поля
         assert _focused_id(scr) == "voice-lang"
-        assert scr.query_one("#voice-url", Input).value == _OURS  # панель осталась локальной
+        assert (
+            scr.query_one("#voice-url", Input).value == _OURS
+        )  # панель осталась локальной
         await pilot.press("escape")  # свернуть список языков
         await pilot.press("tab")  # обратно на строку режима
         await pilot.pause()
@@ -548,7 +614,9 @@ def _overlay(monkeypatch, tmp_path, managed=None, project=None):
 
         path = tmp_path / "project.yml"
         path.write_text(project, encoding="utf-8")
-        monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(path))
+        monkeypatch.setattr(
+            env_vars, "project_local_config_path", lambda: str(path)
+        )
 
 
 @pytest.mark.asyncio
@@ -566,13 +634,19 @@ async def test_no_override_warning_in_plain_local_mode(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_override_warning_when_project_overlay_wins(tmp_path, monkeypatch):
+async def test_override_warning_when_project_overlay_wins(
+    tmp_path, monkeypatch
+):
     """Перекрыл не наш managed, а проектный .gc/config.yml — это неожиданно: поля
     показывают одно, а диктовка пойдёт на другое."""
     from gc_tui.app import TuiApp
     from textual.widgets import Static
 
-    _overlay(monkeypatch, tmp_path, project="voice:\n  url: https://proj.x/v1/audio/transcriptions\n")
+    _overlay(
+        monkeypatch,
+        tmp_path,
+        project="voice:\n  url: https://proj.x/v1/audio/transcriptions\n",
+    )
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, LOCAL, config_text=CLOUD_CONFIG)
@@ -582,16 +656,24 @@ async def test_override_warning_when_project_overlay_wins(tmp_path, monkeypatch)
         assert "⚠ действует https://proj.x/v1/audio/transcriptions" in warns[0]
         assert "перекрыто .gc/config.yml в проекте" in warns[0]
         node = scr.query_one(".set-warnflash", Static)
-        assert "set-hint" in node.classes and "set-dyn" in node.classes  # канон, не свой стиль
+        assert (
+            "set-hint" in node.classes and "set-dyn" in node.classes
+        )  # канон, не свой стиль
 
 
 @pytest.mark.asyncio
-async def test_override_warning_when_managed_points_elsewhere(tmp_path, monkeypatch):
+async def test_override_warning_when_managed_points_elsewhere(
+    tmp_path, monkeypatch
+):
     """managed есть, но ведёт НЕ на наш локальный сервис (чужой порт/хост) — молчать
     нельзя: это уже не «так работает локальный режим»."""
     from gc_tui.app import TuiApp
 
-    _overlay(monkeypatch, tmp_path, managed="voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n")
+    _overlay(
+        monkeypatch,
+        tmp_path,
+        managed="voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n",
+    )
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, LOCAL, config_text=CLOUD_CONFIG)
@@ -602,7 +684,9 @@ async def test_override_warning_when_managed_points_elsewhere(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_override_line_remounts_after_removal_in_one_tick(tmp_path, monkeypatch):
+async def test_override_line_remounts_after_removal_in_one_tick(
+    tmp_path, monkeypatch
+):
     """`remove()` у Textual отложенный: снесённая в этом же такте строка ещё в дереве,
     и обновление легло бы в труп — ⚠ не появился бы вовсе (канон `_singleton`)."""
     from gc_tui.app import TuiApp
@@ -613,19 +697,27 @@ async def test_override_line_remounts_after_removal_in_one_tick(tmp_path, monkey
         await _open_voice(app, scr, pilot)
         assert not scr.query(".set-voiceoverride")
         texts = ["⚠ первое", None, "⚠ третье"]
-        monkeypatch.setattr(scr, "_voice_override_text", lambda: texts.pop(0), raising=False)
+        monkeypatch.setattr(
+            scr, "_voice_override_text", lambda: texts.pop(0), raising=False
+        )
         scr._refresh_voice_override()  # смонтировать
         scr._refresh_voice_override()  # снести (удаление отложено)
         scr._refresh_voice_override()  # завести заново, а не оживлять обречённую
         await pilot.pause()
-        assert [str(w.render()) for w in scr.query(".set-voiceoverride")] == ["⚠ третье"]
+        assert [str(w.render()) for w in scr.query(".set-voiceoverride")] == [
+            "⚠ третье"
+        ]
 
 
 @pytest.mark.asyncio
-async def test_no_override_hint_when_effective_matches_file(tmp_path, monkeypatch):
+async def test_no_override_hint_when_effective_matches_file(
+    tmp_path, monkeypatch
+):
     from gc_tui.app import TuiApp
 
-    _overlay(monkeypatch, tmp_path, managed="model: m\n")  # оверлей есть, voice.* не трогает
+    _overlay(
+        monkeypatch, tmp_path, managed="model: m\n"
+    )  # оверлей есть, voice.* не трогает
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
@@ -660,7 +752,9 @@ async def test_token_placeholder_masks_the_saved_secret(tmp_path):
 
         scr2, _ = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr2, pilot)
-        assert scr2.query_one("#voice-token", Input).placeholder == "***"  # короткий не режем
+        assert (
+            scr2.query_one("#voice-token", Input).placeholder == "***"
+        )  # короткий не режем
 
 
 @pytest.mark.asyncio
@@ -682,18 +776,24 @@ async def test_ctrl_u_clears_the_saved_voice_token(tmp_path):
         await _to_field(pilot, 1, expand=False)  # курсор на «Токен»
         assert _focused_id(scr) == "voice-token"
         token = scr.query_one("#voice-token", Input)
-        assert token.value == "" and token.placeholder == "***"  # маска сохранённого
+        assert (
+            token.value == "" and token.placeholder == "***"
+        )  # маска сохранённого
         assert _footer(scr) == _VOICE_FOOTER_CLOUD_TOKEN
 
         await pilot.press("ctrl+u")
         await pilot.pause()
         assert token.placeholder == ""  # стирать больше нечего
-        assert _footer(scr) != _VOICE_FOOTER_CLOUD_TOKEN  # и клавишу больше не обещаем
+        assert (
+            _footer(scr) != _VOICE_FOOTER_CLOUD_TOKEN
+        )  # и клавишу больше не обещаем
 
         await pilot.press("enter")  # сохранить форму
         await pilot.pause()
         assert fake.calls == ["wire_cloud"]
-        assert fake.wired["token"] == "", "сохранённый токен обязан уйти из конфига"
+        assert fake.wired["token"] == "", (
+            "сохранённый токен обязан уйти из конфига"
+        )
 
 
 @pytest.mark.asyncio
@@ -730,7 +830,9 @@ async def test_token_placeholder_shows_env_ref_as_is(tmp_path):
             ),
         )
         await _open_cloud(app, scr, pilot)
-        assert scr.query_one("#voice-token", Input).placeholder.startswith("${ENV:VOICE_TOKEN}")
+        assert scr.query_one("#voice-token", Input).placeholder.startswith(
+            "${ENV:VOICE_TOKEN}"
+        )
 
 
 @pytest.mark.asyncio
@@ -802,9 +904,14 @@ async def test_cloud_field_placeholders_and_default_language(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF)
         await _open_cloud(app, scr, pilot)
-        assert scr.query_one("#voice-url", Input).placeholder == "https://…/v1/audio/transcriptions"
+        assert (
+            scr.query_one("#voice-url", Input).placeholder
+            == "https://…/v1/audio/transcriptions"
+        )
         assert scr.query_one("#voice-model", Input).placeholder == "whisper-1"
-        assert scr.query_one("#voice-lang", Input).value == "ru"  # дефолт схемы
+        assert (
+            scr.query_one("#voice-lang", Input).value == "ru"
+        )  # дефолт схемы
 
 
 def _footer(scr):
@@ -933,7 +1040,9 @@ async def test_footer_follows_the_pane_and_the_cursor(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_footer_turns_tab_around_when_the_cursor_enters_a_field(tmp_path):
+async def test_footer_turns_tab_around_when_the_cursor_enters_a_field(
+    tmp_path,
+):
     """Единственное, чем футер поля отличается от футера строки режима, — направление
     Tab: со строки он ведёт в поля, из поля — обратно к режиму. Без этого разворота
     вошедший в поля не знает, чем выйти: стрелки ходят только внутри группы.
@@ -945,21 +1054,29 @@ async def test_footer_turns_tab_around_when_the_cursor_enters_a_field(tmp_path):
     Конфиг здесь БЕЗ сохранённого токена: с ним футер обещал бы ещё и `Ctrl+U`
     (`_VOICE_FOOTER_CLOUD_TOKEN`), а тест — про разворот Tab, не про очистку."""
     from gc_tui.app import TuiApp
-    from gc_tui.screens.settings import _TAB_TO_FIELDS, _TAB_TO_VARIANTS, _VOICE_FOOTER_CLOUD_FIELD
+    from gc_tui.screens.settings import (
+        _TAB_TO_FIELDS,
+        _TAB_TO_VARIANTS,
+        _VOICE_FOOTER_CLOUD_FIELD,
+    )
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(
             tmp_path,
             CLOUD,
-            config_text=("model: m\nvoice:\n  url: https://old.x/v1/audio/transcriptions\n  model: whisper-old\n"),
+            config_text=(
+                "model: m\nvoice:\n  url: https://old.x/v1/audio/transcriptions\n  model: whisper-old\n"
+            ),
         )
         await _open_cloud(app, scr, pilot)
         assert _TAB_TO_FIELDS in _footer(scr)
         await _to_field(pilot, 1)  # Tab → «URL», ↓ → «Токен»
         assert scr._voice_cursor_field() == "token"
         assert _footer(scr) == _VOICE_FOOTER_CLOUD_FIELD
-        assert _TAB_TO_VARIANTS in _footer(scr) and _TAB_TO_FIELDS not in _footer(scr)
+        assert _TAB_TO_VARIANTS in _footer(
+            scr
+        ) and _TAB_TO_FIELDS not in _footer(scr)
         await pilot.press("tab")  # обратно на строку режима
         await pilot.pause()
         assert _TAB_TO_FIELDS in _footer(scr)
@@ -973,11 +1090,21 @@ def test_voice_footers_say_the_right_thing_about_lists_and_del():
     только на строке «Локальный сервис». Сама ширина стережётся отдельно, переносом на
     самом узком окне (`test_footer_contract.test_all_footers_fit_the_two_line_budget`)."""
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
-    from gc_tui.screens.settings import _VOICE_FOOTER_CLOUD, _VOICE_FOOTER_CLOUD_LIST, _VOICE_FOOTER_LOCAL_FRESH
+    from gc_tui.screens.settings import (
+        _VOICE_FOOTER_CLOUD,
+        _VOICE_FOOTER_CLOUD_LIST,
+        _VOICE_FOOTER_LOCAL_FRESH,
+    )
 
     assert LIST_CLOSED_HINT in _VOICE_FOOTER_CLOUD_LIST
-    for footer in (_VOICE_FOOTER_CLOUD, _VOICE_FOOTER_CLOUD_LIST, _VOICE_FOOTER_LOCAL_FRESH):
-        assert "Del" not in footer  # облако + непоставленный сервис: сносить нечего
+    for footer in (
+        _VOICE_FOOTER_CLOUD,
+        _VOICE_FOOTER_CLOUD_LIST,
+        _VOICE_FOOTER_LOCAL_FRESH,
+    ):
+        assert (
+            "Del" not in footer
+        )  # облако + непоставленный сервис: сносить нечего
 
 
 @pytest.mark.asyncio
@@ -1023,7 +1150,9 @@ async def test_footer_follows_a_mouse_click_into_the_field(tmp_path):
         scr.query_one("#voice-lang", Input).focus()
         await pilot.pause()
         await _expand_list(pilot)  # код задан — раскрываем Alt+↓
-        assert "Enter — включить" not in _footer(scr)  # футер строки режима ушёл
+        assert "Enter — включить" not in _footer(
+            scr
+        )  # футер строки режима ушёл
         assert "Esc — свернуть" in _footer(scr)
         await pilot.press("escape")
         await pilot.pause()
@@ -1091,7 +1220,9 @@ async def test_status_snapshot_refreshed_after_remove(tmp_path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert "установлен" not in _rows(scr)[0]  # статус перечитан, а не из кэша
+        assert (
+            "установлен" not in _rows(scr)[0]
+        )  # статус перечитан, а не из кэша
 
 
 # --- навигация курсора и фокус ----------------------------------------------
@@ -1178,7 +1309,9 @@ async def test_arrows_walk_the_rows_then_tab_walks_all_cloud_fields(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert (_cursor_row(scr), _focused_id(scr)) == (1, "voice-url")
-        await pilot.press("escape")  # пустой адрес раскрыл список пресетов — свернуть
+        await pilot.press(
+            "escape"
+        )  # пустой адрес раскрыл список пресетов — свернуть
         for focus in ("voice-token", "voice-model", "voice-lang"):
             await pilot.press("down")
             await pilot.pause()
@@ -1242,15 +1375,24 @@ async def test_local_fields_group_stops_only_on_the_editable_field(tmp_path):
         scr, _ = _mk_screen(tmp_path, LOCAL)
         await _open_voice(app, scr, pilot)
         await _to_field(pilot)
-        assert (_cursor_row(scr), _focused_id(scr)) == (0, "voice-lang")  # ▸ — у владельца
+        assert (_cursor_row(scr), _focused_id(scr)) == (
+            0,
+            "voice-lang",
+        )  # ▸ — у владельца
         await pilot.press("escape")  # свернуть раскрытый список языков
         await pilot.press("up")
         await pilot.pause()
-        assert (_cursor_row(scr), _focused_id(scr)) == (0, "voice-lang")  # поле одно
+        assert (_cursor_row(scr), _focused_id(scr)) == (
+            0,
+            "voice-lang",
+        )  # поле одно
         await pilot.press("tab")
         await pilot.press("up")
         await pilot.pause()
-        assert (_cursor_row(scr), _focused_id(scr)) == (1, None)  # строка «Свой endpoint»
+        assert (_cursor_row(scr), _focused_id(scr)) == (
+            1,
+            None,
+        )  # строка «Свой endpoint»
 
 
 @pytest.mark.asyncio
@@ -1299,7 +1441,9 @@ async def test_reentering_section_starts_from_the_default_cursor(tmp_path):
         assert scr._view == _VOICE
         assert _focused_id(scr) is None  # курсор в строках режима
         assert scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS
-        assert not _model_rows(scr) and not _lang_rows(scr)  # и ни один список не раскрыт
+        assert not _model_rows(scr) and not _lang_rows(
+            scr
+        )  # и ни один список не раскрыт
         assert app.is_running
 
 
@@ -1317,8 +1461,14 @@ async def test_mouse_click_into_field_moves_the_cursor(tmp_path):
         scr.query_one("#voice-lang", Input).focus()  # эмуляция клика по полю
         await pilot.pause()
         await _expand_list(pilot)  # код задан — раскрываем Alt+↓
-        assert (scr._voice_cursor_group(), scr._voice_cursor_field()) == ("fields", "language")
-        assert (_cursor_row(scr), _selected_rows(scr)) == (1, [])  # ▸ у владельца, фон снят
+        assert (scr._voice_cursor_group(), scr._voice_cursor_field()) == (
+            "fields",
+            "language",
+        )
+        assert (_cursor_row(scr), _selected_rows(scr)) == (
+            1,
+            [],
+        )  # ▸ у владельца, фон снят
         await pilot.press("escape")  # свернуть раскрытый список
         await pilot.press("up")
         await pilot.pause()
@@ -1360,7 +1510,9 @@ async def test_walking_the_groups_keeps_all_drafts(tmp_path):
         scr.query_one("#voice-token", Input).value = "sk-draft"
         scr.query_one("#voice-model", Input).value = "wh-draft"
         await _to_field(pilot, 3)  # по полям — до «Языка»
-        await pilot.press("escape")  # там раскрыт список: вернуть стрелки полям
+        await pilot.press(
+            "escape"
+        )  # там раскрыт список: вернуть стрелки полям
         await pilot.press("tab")  # из полей — на строку режима
         await pilot.press("up")  # круг через локальную панель…
         await pilot.press("down")  # …и обратно в облачную
@@ -1380,13 +1532,18 @@ async def test_draft_survives_a_trip_to_the_local_row(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, LOCAL)
         await _open_cloud(app, scr, pilot)
-        scr.query_one("#voice-url", Input).value = "https://draft.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://draft.x/v1/audio/transcriptions"
         await pilot.press("up")  # на «Локальный сервис» — поля другие
         await pilot.pause()
         assert scr.query_one("#voice-url", Input).value == _OURS
         await pilot.press("down")
         await pilot.pause()
-        assert scr.query_one("#voice-url", Input).value == "https://draft.x/v1/audio/transcriptions"
+        assert (
+            scr.query_one("#voice-url", Input).value
+            == "https://draft.x/v1/audio/transcriptions"
+        )
 
 
 @pytest.mark.asyncio
@@ -1417,7 +1574,9 @@ async def test_pagedown_from_live_cloud_fields_not_stuck(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_enter_on_local_installs_then_reloads_then_starts_service(tmp_path, monkeypatch):
+async def test_enter_on_local_installs_then_reloads_then_starts_service(
+    tmp_path, monkeypatch
+):
     """Батарейки нет: Enter ставит её (под suspend), затем hot-reload и подъём сервиса
     УЖЕ по перечитанному конфигу (гейт автостарта смотрит именно туда)."""
     from gc_tui.app import TuiApp
@@ -1426,7 +1585,11 @@ async def test_enter_on_local_installs_then_reloads_then_starts_service(tmp_path
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: seen.append(cfg) or True)
+        monkeypatch.setattr(
+            autostart,
+            "ensure_voice_service",
+            lambda cfg: seen.append(cfg) or True,
+        )
         new_cfg = {"voice": {"url": _OURS}}
 
         def _apply():
@@ -1444,7 +1607,9 @@ async def test_enter_on_local_installs_then_reloads_then_starts_service(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_enter_on_local_when_installed_but_cloud_switches_back(tmp_path, monkeypatch):
+async def test_enter_on_local_when_installed_but_cloud_switches_back(
+    tmp_path, monkeypatch
+):
     """Батарейка есть, режим — свой endpoint: Enter возвращает локальный (wire+reload),
     без второй установки."""
     from gc_tui.app import TuiApp
@@ -1455,9 +1620,15 @@ async def test_enter_on_local_when_installed_but_cloud_switches_back(tmp_path, m
     # объекта. Раньше носителем был конфиг экрана, и тест сверял словари целиком.
     app = TuiApp(config={"model": "M", "voice": {"language": "en"}})
     async with app.run_test() as pilot:
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: True)
+        monkeypatch.setattr(
+            autostart, "ensure_voice_service", lambda cfg: True
+        )
         applied = []
-        scr, fake = _mk_screen(tmp_path, LOCAL_INSTALLED_CLOUD, on_apply=lambda: applied.append("apply"))
+        scr, fake = _mk_screen(
+            tmp_path,
+            LOCAL_INSTALLED_CLOUD,
+            on_apply=lambda: applied.append("apply"),
+        )
         await _open_local(app, scr, pilot)
         await pilot.press("enter")
         await pilot.pause()
@@ -1466,11 +1637,15 @@ async def test_enter_on_local_when_installed_but_cloud_switches_back(tmp_path, m
         # Действующий конфиг доезжает до фасада: из него берётся язык, когда
         # managed-секции уже нет — её снёс переезд на свой endpoint. Проверяем именно
         # это, а не совпадение словарей: чей объект доедет — деталь реализации.
-        assert (fake.switch_config or {}).get("voice", {}).get("language") == "en"
+        assert (fake.switch_config or {}).get("voice", {}).get(
+            "language"
+        ) == "en"
 
 
 @pytest.mark.asyncio
-async def test_switching_to_installed_local_does_not_leave_the_tui(tmp_path, monkeypatch):
+async def test_switching_to_installed_local_does_not_leave_the_tui(
+    tmp_path, monkeypatch
+):
     """Включение УЖЕ установленной батарейки — это запись секции в config.local.yml:
     мгновенно и молча. Нырять за этим в терминал незачем: на живом смоке каждое
     переключение режима мигало alt-screen'ом и добавляло строку «Включаю…»."""
@@ -1479,7 +1654,9 @@ async def test_switching_to_installed_local_does_not_leave_the_tui(tmp_path, mon
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: True)
+        monkeypatch.setattr(
+            autostart, "ensure_voice_service", lambda cfg: True
+        )
         log = []
         scr, fake = _mk_screen(tmp_path, LOCAL_INSTALLED_CLOUD)
 
@@ -1517,7 +1694,9 @@ async def test_install_still_runs_under_suspend(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_enter_on_local_with_dead_service_starts_it(tmp_path, monkeypatch):
+async def test_enter_on_local_with_dead_service_starts_it(
+    tmp_path, monkeypatch
+):
     """Режим локальный, а сервис лежит — Enter обязан поднять его: иначе строка тупик
     (переключать нечего, «уже включён» врёт, поднять из UI больше нечем)."""
     from gc_tui.app import TuiApp
@@ -1526,7 +1705,11 @@ async def test_enter_on_local_with_dead_service_starts_it(tmp_path, monkeypatch)
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: seen.append(cfg) or True)
+        monkeypatch.setattr(
+            autostart,
+            "ensure_voice_service",
+            lambda cfg: seen.append(cfg) or True,
+        )
         scr, fake = _mk_screen(tmp_path, LOCAL_DEAD)
         await _open_voice(app, scr, pilot)
         await pilot.press("enter")
@@ -1569,14 +1752,18 @@ async def test_install_keeps_endpoint_draft(tmp_path, monkeypatch):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: True)
+        monkeypatch.setattr(
+            autostart, "ensure_voice_service", lambda cfg: True
+        )
         _overlay(monkeypatch, tmp_path)  # managed-оверлея ещё нет
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
 
         def _switch(echo=print, config=None):
             fake.calls.append("switch_to_local")
             fake.status = LOCAL  # батарейка появилась и включилась
-            (tmp_path / "config.local.yml").write_text(  # ...и перекрыла voice.url
+            (
+                tmp_path / "config.local.yml"
+            ).write_text(  # ...и перекрыла voice.url
                 f"voice:\n  url: {_OURS}\n", encoding="utf-8"
             )
             return True
@@ -1591,7 +1778,9 @@ async def test_install_keeps_endpoint_draft(tmp_path, monkeypatch):
         assert fake.calls == ["switch_to_local"]
         assert _rows(scr)[0].startswith("▸ (●)")  # ● переехал на локальный
         assert "установлен · запущен · порт 8735" in _rows(scr)[0]
-        assert not scr.query(".set-warnflash")  # штатный локальный режим — молчим
+        assert not scr.query(
+            ".set-warnflash"
+        )  # штатный локальный режим — молчим
         await pilot.press("down")  # вернулись к своему endpoint
         await pilot.pause()
         _assert_draft(scr, draft)
@@ -1619,7 +1808,9 @@ async def test_remove_drops_the_fields_with_the_battery(tmp_path):
         await pilot.pause()
         assert fake.calls == ["remove_local"]
         assert not scr.query(".set-framed")  # поля ушли вместе с батарейкой
-        assert "установлен" not in _rows(scr)[0]  # батарейки нет — и хвоста нет
+        assert (
+            "установлен" not in _rows(scr)[0]
+        )  # батарейки нет — и хвоста нет
         assert "(●)" not in " ".join(_rows(scr))  # режим больше не локальный
         assert "Enter — удалить" not in _hint(scr)  # confirm-баннер снят
 
@@ -1637,7 +1828,9 @@ async def test_enter_on_already_local_is_noop_with_note(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert fake.calls == []
-        assert "уже включён" in str(scr.query_one("#set-title", Static).render())
+        assert "уже включён" in str(
+            scr.query_one("#set-title", Static).render()
+        )
 
 
 @pytest.mark.asyncio
@@ -1649,14 +1842,18 @@ async def test_enter_on_cloud_row_saves_and_reloads(tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         applied = []
-        scr, fake = _mk_screen(tmp_path, OFF, on_apply=lambda: applied.append("apply"))
+        scr, fake = _mk_screen(
+            tmp_path, OFF, on_apply=lambda: applied.append("apply")
+        )
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-url", Input).value = _URL
         scr.query_one("#voice-token", Input).value = "sk"
         scr.query_one("#voice-model", Input).value = "wh"
         await pilot.press("enter")
         await pilot.pause()
-        assert fake.wired == dict(url=_URL, token="sk", model="wh", language="ru")
+        assert fake.wired == dict(
+            url=_URL, token="sk", model="wh", language="ru"
+        )
         assert applied == ["apply"]
 
 
@@ -1675,7 +1872,9 @@ async def test_cloud_save_blocked_on_a_readonly_config(tmp_path, monkeypatch):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF)
-        monkeypatch.setattr(config_mod, "_default_config_path", lambda: scr._config_path)
+        monkeypatch.setattr(
+            config_mod, "_default_config_path", lambda: scr._config_path
+        )
         fake.wire_cloud = _readonly
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-url", Input).value = _URL
@@ -1714,7 +1913,9 @@ async def test_cloud_save_survives_a_filesystem_refusal(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_enter_on_cloud_without_url_shows_error_and_focuses_url(tmp_path):
+async def test_enter_on_cloud_without_url_shows_error_and_focuses_url(
+    tmp_path,
+):
     """Пустой URL: не сохраняем, ошибка — внутри редактора (канон EndpointEditor),
     фокус уходит в URL — правят там же, где сказано."""
     from gc_tui.app import TuiApp
@@ -1729,7 +1930,9 @@ async def test_enter_on_cloud_without_url_shows_error_and_focuses_url(tmp_path):
         await pilot.pause()
         assert fake.calls == []
         ed = scr.query_one(VoiceEndpointEditor)
-        assert any("введите адрес" in str(w.render()) for w in ed.query(".onb-warn"))
+        assert any(
+            "введите адрес" in str(w.render()) for w in ed.query(".onb-warn")
+        )
         assert scr.focused is scr.query_one("#voice-url", Input)
 
 
@@ -1755,7 +1958,9 @@ async def test_cloud_save_language_empty_falls_back_to_ru(tmp_path):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG + "  language: en\n")
+        scr, fake = _mk_screen(
+            tmp_path, OFF, config_text=CLOUD_CONFIG + "  language: en\n"
+        )
         await _open_cloud(app, scr, pilot)
         assert scr.query_one("#voice-lang", Input).value == "en"
         scr.query_one("#voice-lang", Input).value = ""
@@ -1800,7 +2005,9 @@ async def test_enter_on_local_language_saves_it_to_managed(tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         applied = []
-        scr, fake = _mk_screen(tmp_path, LOCAL, on_apply=lambda: applied.append("apply"))
+        scr, fake = _mk_screen(
+            tmp_path, LOCAL, on_apply=lambda: applied.append("apply")
+        )
         await _open_voice(app, scr, pilot)
         await _to_field(pilot)  # в единственное правимое поле
         assert _focused_id(scr) == "voice-lang"
@@ -1828,7 +2035,9 @@ async def test_local_language_save_does_not_touch_the_endpoint(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert "wire_cloud" not in fake.calls
-        assert (tmp_path / "config.yml").read_text(encoding="utf-8") == CLOUD_CONFIG
+        assert (tmp_path / "config.yml").read_text(
+            encoding="utf-8"
+        ) == CLOUD_CONFIG
 
 
 @pytest.mark.asyncio
@@ -1894,13 +2103,17 @@ async def test_lang_list_opens_when_the_cursor_enters_the_field(tmp_path):
         assert not _lang_rows(scr)  # на строке режима списка нет
         await _to_field(pilot)  # в поле «Язык»
         assert _focused_id(scr) == "voice-lang"
-        assert _lang_hint(scr) == ("языки · печать — фильтр/свой код · Enter — подставить · Esc — свернуть")
+        assert _lang_hint(scr) == (
+            "языки · печать — фильтр/свой код · Enter — подставить · Esc — свернуть"
+        )
         assert len(_lang_rows(scr)) == 100
         assert _lang_selected(scr) == ["▸ en    английский"]
 
 
 @pytest.mark.asyncio
-async def test_lang_list_rows_sit_between_the_field_and_the_probe_line(tmp_path):
+async def test_lang_list_rows_sit_between_the_field_and_the_probe_line(
+    tmp_path,
+):
     """Список приклеен к своему полю: строки — в рамке группы «Языка», хинт — сразу под
     ней, probe-строка секции остаётся под редактором."""
     from gc_tui.app import TuiApp
@@ -1916,12 +2129,17 @@ async def test_lang_list_rows_sit_between_the_field_and_the_probe_line(tmp_path)
         group = scr.query_one("#voice-lang-group")
         assert scr.query_one("#voice-lang", Input).parent is group
         scroll = group.children[-1]
-        assert "voice-lang-scroll" in scroll.classes and "dropdown-scroll" in scroll.classes
+        assert (
+            "voice-lang-scroll" in scroll.classes
+            and "dropdown-scroll" in scroll.classes
+        )
         assert all("voice-lang-row" in w.classes for w in scroll.children)
         children = list(ed.children)
         assert "voice-lang-hint" in children[children.index(group) + 1].classes
         frame = scr.query_one("#set-frame")
-        assert "set-probe" in frame.children[-1].classes  # probe — ниже редактора
+        assert (
+            "set-probe" in frame.children[-1].classes
+        )  # probe — ниже редактора
 
 
 @pytest.mark.asyncio
@@ -1937,13 +2155,19 @@ async def test_lang_list_arrows_walk_the_list_not_the_cursor(tmp_path):
         place = (scr._voice_cursor_group(), scr._voice_cursor_position())
         await pilot.press("down")
         await pilot.pause()
-        assert (scr._voice_cursor_group(), scr._voice_cursor_position()) == place
+        assert (
+            scr._voice_cursor_group(),
+            scr._voice_cursor_position(),
+        ) == place
         assert _focused_id(scr) == "voice-lang"
         assert _lang_selected(scr) == ["▸ en    английский"]
         await pilot.press("up")
         await pilot.press("up")
         await pilot.pause()
-        assert (scr._voice_cursor_group(), scr._voice_cursor_position()) == place
+        assert (
+            scr._voice_cursor_group(),
+            scr._voice_cursor_position(),
+        ) == place
         assert _focused_id(scr) == "voice-lang"
         assert _lang_selected(scr) == ["▸ yue   кантонский"]
         assert _cursor_row(scr) == 0  # ▸ у владельца полей
@@ -2032,7 +2256,9 @@ async def test_enter_picks_the_code_and_saves_the_cloud_endpoint(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_escape_collapses_the_list_and_keeps_the_cursor_in_the_field(tmp_path):
+async def test_escape_collapses_the_list_and_keeps_the_cursor_in_the_field(
+    tmp_path,
+):
     """Esc сворачивает список и оставляет курсор в поле (из секции НЕ выходим); после
     него стрелки снова водят ленту, а на месте списка остаётся строка о том, чем его
     раскрыть обратно."""
@@ -2050,7 +2276,10 @@ async def test_escape_collapses_the_list_and_keeps_the_cursor_in_the_field(tmp_p
         await pilot.pause()
         assert not _lang_rows(scr) and _lang_hint(scr) == _LIST_CLOSED_HINT
         assert scr._view == _VOICE
-        assert (scr._voice_cursor_group(), scr._voice_cursor_position()) == place
+        assert (
+            scr._voice_cursor_group(),
+            scr._voice_cursor_position(),
+        ) == place
         assert _focused_id(scr) == "voice-lang"
         await pilot.press("tab")  # курсор снова свободен
         await pilot.press("up")
@@ -2077,7 +2306,10 @@ async def test_own_code_is_saved_as_typed(tmp_path):
         await pilot.pause()
         await _type(pilot, "zz")
         assert _lang_rows(scr) == []
-        assert _lang_hint(scr) == "свой код · Enter — сохранить как есть · Esc — свернуть"
+        assert (
+            _lang_hint(scr)
+            == "свой код · Enter — сохранить как есть · Esc — свернуть"
+        )
         await pilot.press("enter")
         await pilot.pause()
         assert fake.language == "zz"
@@ -2149,11 +2381,15 @@ async def test_leaving_the_section_collapses_the_list(tmp_path):
         await pilot.pause()
         assert scr._view == _VOICE
         assert not _lang_rows(scr)  # вернулись — свёрнут
-        assert scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS  # и курсор на дефолте
+        assert (
+            scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS
+        )  # и курсор на дефолте
 
 
 @pytest.mark.asyncio
-async def test_escape_returns_the_previous_code_and_no_filter_leaks_into_the_config(tmp_path):
+async def test_escape_returns_the_previous_code_and_no_filter_leaks_into_the_config(
+    tmp_path,
+):
     """Esc возвращает в поле прежний код: остаток фильтра («нем») — не язык, и следующий
     Enter не имеет права записать его в конфиг."""
     from gc_tui.app import TuiApp
@@ -2169,7 +2405,9 @@ async def test_escape_returns_the_previous_code_and_no_filter_leaks_into_the_con
         await _type(pilot, "нем")
         await pilot.press("escape")
         await pilot.pause()
-        assert scr.query_one("#voice-lang", Input).value == "ru"  # фильтр отменён
+        assert (
+            scr.query_one("#voice-lang", Input).value == "ru"
+        )  # фильтр отменён
         await pilot.press("enter")
         await pilot.pause()
         assert fake.calls == ["set_local_language"] and fake.language == "ru"
@@ -2196,7 +2434,9 @@ async def test_a_bad_language_code_is_not_saved_locally(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert fake.calls == [] and fake.language == "ru"
-        assert "2-3 латинские буквы" in str(scr.query_one("#set-flash", Static).render())
+        assert "2-3 латинские буквы" in str(
+            scr.query_one("#set-flash", Static).render()
+        )
 
 
 @pytest.mark.asyncio
@@ -2214,7 +2454,9 @@ async def test_a_bad_language_code_is_not_saved_to_the_cloud(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert fake.calls == [] and fake.wired == {}
-        assert "2-3 латинские буквы" in str(scr.query_one("#set-flash", Static).render())
+        assert "2-3 латинские буквы" in str(
+            scr.query_one("#set-flash", Static).render()
+        )
 
 
 @pytest.mark.asyncio
@@ -2258,7 +2500,9 @@ async def test_arrows_work_again_when_the_filter_matches_nothing(tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, LOCAL, config_text=CLOUD_CONFIG)
-        await _open_cloud(app, scr, pilot)  # в облаке полей четыре — ходьба видна
+        await _open_cloud(
+            app, scr, pilot
+        )  # в облаке полей четыре — ходьба видна
         await _to_field(pilot, 3)  # поле «Язык», список раскрыт
         scr.query_one("#voice-lang", Input).value = ""
         await pilot.pause()
@@ -2266,7 +2510,9 @@ async def test_arrows_work_again_when_the_filter_matches_nothing(tmp_path):
         assert _lang_rows(scr) == []
         await pilot.press("up")
         await pilot.pause()
-        assert _focused_id(scr) == "voice-model"  # стрелка досталась группе полей
+        assert (
+            _focused_id(scr) == "voice-model"
+        )  # стрелка досталась группе полей
         assert not scr.query(".voice-lang-row")
 
 
@@ -2282,7 +2528,9 @@ async def test_the_filter_does_not_leak_into_the_endpoint_draft(tmp_path):
         scr, _ = _mk_screen(tmp_path, LOCAL, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
         await _to_field(pilot, 3)
-        scr.query_one("#voice-lang", Input).value = "ниме"  # опечатка в фильтре — совпадений нет
+        scr.query_one(
+            "#voice-lang", Input
+        ).value = "ниме"  # опечатка в фильтре — совпадений нет
         await pilot.pause()
         assert _lang_rows(scr) == []
         await pilot.press("tab")  # из полей на строку режима
@@ -2308,11 +2556,15 @@ async def test_footer_matches_the_hint_when_nothing_matches(tmp_path):
         scr.query_one("#voice-lang", Input).value = ""
         await pilot.pause()
         await _type(pilot, "zz")
-        assert _footer(scr) == ("↑/↓ · Enter — сохранить как есть · Esc — свернуть · PgUp/PgDn — секции")
+        assert _footer(scr) == (
+            "↑/↓ · Enter — сохранить как есть · Esc — свернуть · PgUp/PgDn — секции"
+        )
         await pilot.press("backspace")
         await pilot.press("backspace")  # вернули совпадения — футер списочный
         await pilot.pause()
-        assert _lang_rows(scr) and "Enter — подставить и сохранить" in _footer(scr)
+        assert _lang_rows(scr) and "Enter — подставить и сохранить" in _footer(
+            scr
+        )
 
 
 @pytest.mark.asyncio
@@ -2335,14 +2587,19 @@ async def test_footer_talks_about_the_list_while_it_is_open(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_lang_list_footer_promises_the_probe_only_in_the_cloud_pane(tmp_path):
+async def test_lang_list_footer_promises_the_probe_only_in_the_cloud_pane(
+    tmp_path,
+):
     """Список языка — единственное поле, общее у local и cloud панели (спека 2026-08-06
     §4.2): модели и URL раскрываются только у облака. Тот же раскрытый список в двух
     панелях обязан звать Ctrl+Space по-разному — проба есть лишь в облаке (§2.5 спеки,
     §9.2 канона) — ради этого константа и раздвоена на `_VOICE_FOOTER_LANG_LIST_LOCAL`/
     `_VOICE_FOOTER_LANG_LIST_CLOUD`."""
     from gc_tui.app import TuiApp
-    from gc_tui.screens.settings import _VOICE_FOOTER_LANG_LIST_CLOUD, _VOICE_FOOTER_LANG_LIST_LOCAL
+    from gc_tui.screens.settings import (
+        _VOICE_FOOTER_LANG_LIST_CLOUD,
+        _VOICE_FOOTER_LANG_LIST_LOCAL,
+    )
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
@@ -2398,7 +2655,9 @@ async def _open_model_field(app, scr, pilot, tries=100):
     if ctrl is not None and not ctrl.is_open:
         await pilot.press("alt+down")
         await pilot.pause()
-    await _wait(pilot, lambda: _model_hint(scr) != "загружаю модели…", tries=tries)
+    await _wait(
+        pilot, lambda: _model_hint(scr) != "загружаю модели…", tries=tries
+    )
 
 
 @pytest.mark.asyncio
@@ -2421,15 +2680,25 @@ async def test_model_list_opens_on_alt_down_over_a_saved_id(tmp_path):
         assert not _model_rows(scr)
         await _open_cloud(app, scr, pilot)
         await _to_field(pilot, _TO_MODEL_FIELD, expand=False)
-        assert not _model_rows(scr), "вход на заполненное поле список не раскрывает"
+        assert not _model_rows(scr), (
+            "вход на заполненное поле список не раскрывает"
+        )
         assert fake.model_calls == [], "и в сеть за списком не ходит"
         await pilot.press("alt+down")  # явная просьба показать список
         await _wait(pilot, lambda: _model_hint(scr) != "загружаю модели…")
         assert _focused_id(scr) == "voice-model"
-        assert _model_rows(scr) == ["  whisper-large-v3-turbo", "  Systran/faster-whisper-small"]
-        assert _model_hint(scr) == "свой id · Enter — сохранить как есть · Esc — свернуть"
+        assert _model_rows(scr) == [
+            "  whisper-large-v3-turbo",
+            "  Systran/faster-whisper-small",
+        ]
+        assert (
+            _model_hint(scr)
+            == "свой id · Enter — сохранить как есть · Esc — свернуть"
+        )
         # адрес и сохранённый токен — из полей/файла, verify — дефолт схемы
-        assert fake.model_calls == [("https://old.x/v1/audio/transcriptions", "old-token", True)]
+        assert fake.model_calls == [
+            ("https://old.x/v1/audio/transcriptions", "old-token", True)
+        ]
 
 
 @pytest.mark.asyncio
@@ -2453,7 +2722,9 @@ async def test_model_list_says_nothing_without_a_url(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_alt_down_on_empty_url_model_field_explains_instead_of_silence(tmp_path):
+async def test_alt_down_on_empty_url_model_field_explains_instead_of_silence(
+    tmp_path,
+):
     """Находка B финального ревью 2026-08-06 (риск §6 спеки): раньше явный Alt+↓ на
     «Модели» с пустым URL молчал — `_load` сворачивал только что смонтированный хинт
     тем же тактом, клавиша съедалась, а на экране ничего не менялось. Автовход курсора
@@ -2467,17 +2738,25 @@ async def test_alt_down_on_empty_url_model_field_explains_instead_of_silence(tmp
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake = _mk_screen(tmp_path, OFF)  # voice-секции в файле нет — URL пуст
+        scr, fake = _mk_screen(
+            tmp_path, OFF
+        )  # voice-секции в файле нет — URL пуст
         await _open_cloud(app, scr, pilot)
-        await pilot.press("tab")  # в группу полей, на «URL» (список раскрыт сам)
+        await pilot.press(
+            "tab"
+        )  # в группу полей, на «URL» (список раскрыт сам)
         await pilot.pause()
-        await pilot.press("escape")  # свернуть список адреса, курсор остаётся на поле
+        await pilot.press(
+            "escape"
+        )  # свернуть список адреса, курсор остаётся на поле
         await pilot.pause()
         await pilot.press("down", "down")  # URL → Токен → Модель
         await pilot.pause()
         from gc_tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
 
-        assert _focused_id(scr) == "voice-model"  # предусловие: курсор на «Модели»
+        assert (
+            _focused_id(scr) == "voice-model"
+        )  # предусловие: курсор на «Модели»
         # Предусловие: автовход тих — строк нет и в сеть не ходили. Под полем при этом
         # стоит обещание клавиши (канон 2026-08-20), а не объяснение: отчитывать
         # человека за то, что он просто дошёл до поля, не за что.
@@ -2520,7 +2799,10 @@ async def test_model_list_failure_does_not_break_the_section(tmp_path):
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.models = None  # не достучались
         await _open_model_field(app, scr, pilot)
-        assert _model_hint(scr) == "не удалось получить список — можно вписать вручную"
+        assert (
+            _model_hint(scr)
+            == "не удалось получить список — можно вписать вручную"
+        )
         scr.query_one("#voice-model", Input).value = "my-own-stt"
         await pilot.pause()
         await pilot.press("enter")
@@ -2572,7 +2854,9 @@ async def test_enter_on_a_model_row_saves_the_endpoint(tmp_path):
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.models = _MODELS
         await _open_model_field(app, scr, pilot)
-        scr.query_one("#voice-model", Input).value = ""  # очистить сохранённый id
+        scr.query_one(
+            "#voice-model", Input
+        ).value = ""  # очистить сохранённый id
         await pilot.pause()
         await _type(pilot, "faster")
         assert _model_rows(scr) == ["▸ Systran/faster-whisper-small"]
@@ -2584,17 +2868,23 @@ async def test_enter_on_a_model_row_saves_the_endpoint(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_saved_model_is_highlighted_and_kept_by_a_trusting_enter(tmp_path):
+async def test_saved_model_is_highlighted_and_kept_by_a_trusting_enter(
+    tmp_path,
+):
     """В поле уже лежит id, которого сервер не отдал: подсвеченной строки нет, и Enter
     сразу после входа сохраняет ЕГО, а не первую строку списка."""
     from gc_tui.app import TuiApp
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)  # model: whisper-old
+        scr, fake = _mk_screen(
+            tmp_path, OFF, config_text=CLOUD_CONFIG
+        )  # model: whisper-old
         fake.models = _MODELS
         await _open_model_field(app, scr, pilot)
-        assert len(_model_rows(scr)) == 2 and not [r for r in _model_rows(scr) if r.startswith("▸")]
+        assert len(_model_rows(scr)) == 2 and not [
+            r for r in _model_rows(scr) if r.startswith("▸")
+        ]
         await pilot.press("enter")
         await pilot.pause()
         assert fake.wired["model"] == "whisper-old"
@@ -2617,7 +2907,9 @@ async def test_leaving_the_model_field_collapses_its_list(tmp_path):
         fake.models = _MODELS
         await _open_model_field(app, scr, pilot)
         assert _model_rows(scr)
-        scr.query_one("#voice-url", Input).focus()  # как клик мышью по соседнему полю
+        scr.query_one(
+            "#voice-url", Input
+        ).focus()  # как клик мышью по соседнему полю
         await pilot.pause()
         assert not _model_rows(scr)  # строки ушли со списком
         assert _model_hint(scr) == _MODEL_RELOAD_HINT  # строка-способ осталась
@@ -2692,7 +2984,9 @@ async def test_footer_follows_the_model_field_and_its_list(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_alt_down_over_a_filtered_model_list_keeps_the_saved_id(tmp_path):
+async def test_alt_down_over_a_filtered_model_list_keeps_the_saved_id(
+    tmp_path,
+):
     """Сквозная трасса живыми клавишами: перечитывание списка (Alt+↓) не имеет права
     сделать остаток фильтра значением поля — иначе Esc вернёт «faster», а доверчивый
     Enter запишет его в voice.model вместо сохранённой модели."""
@@ -2701,7 +2995,9 @@ async def test_alt_down_over_a_filtered_model_list_keeps_the_saved_id(tmp_path):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)  # model: whisper-old
+        scr, fake = _mk_screen(
+            tmp_path, OFF, config_text=CLOUD_CONFIG
+        )  # model: whisper-old
         fake.models = _MODELS
         await _open_model_field(app, scr, pilot)
         scr.query_one("#voice-model", Input).value = ""
@@ -2746,9 +3042,14 @@ async def test_picking_a_model_from_the_list_drops_the_probe_verdict(tmp_path):
         # дальше сохранение переносит эталон сравнения на новые значения и вердикт,
         # доживший до него, уже никем не гасится)
         assert scr._voice_pick_from_list() is True
-        assert scr.query_one("#voice-model", Input).value == "whisper-large-v3-turbo"
+        assert (
+            scr.query_one("#voice-model", Input).value
+            == "whisper-large-v3-turbo"
+        )
         assert scr._voice_probe_result is None  # ✓ не про эту модель
-        assert "не проверено" in str(scr.query_one(".set-probe", Static).render())
+        assert "не проверено" in str(
+            scr.query_one(".set-probe", Static).render()
+        )
 
 
 @pytest.mark.asyncio
@@ -2768,7 +3069,9 @@ async def test_ctrl_space_on_a_plain_voice_field_reprobes(tmp_path):
         await _to_field(pilot, 1)  # в поле «Токен» — списка у него нет
         assert not fake.probe_calls
         await pilot.press("ctrl+space")
-        assert await _wait(pilot, lambda: fake.probe_calls), "ручная проверка должна уйти"
+        assert await _wait(pilot, lambda: fake.probe_calls), (
+            "ручная проверка должна уйти"
+        )
 
 
 @pytest.mark.asyncio
@@ -2786,7 +3089,9 @@ async def test_ctrl_space_reprobe_ignores_the_debounce_snapshot(tmp_path):
         await pilot.press("ctrl+space")
         assert await _wait(pilot, lambda: len(fake.probe_calls) == 1)
         await pilot.press("ctrl+space")  # поля не трогали
-        assert await _wait(pilot, lambda: len(fake.probe_calls) == 2), "снимок против дребезга не должен глушить ручную"
+        assert await _wait(pilot, lambda: len(fake.probe_calls) == 2), (
+            "снимок против дребезга не должен глушить ручную"
+        )
 
 
 @pytest.mark.asyncio
@@ -2806,8 +3111,12 @@ async def test_alt_down_on_the_model_field_reloads_without_probing(tmp_path):
         # Безгоночный сторож: `_voice_probe_in_flight` взводится СИНХРОННО, до
         # run_worker, а `probe_calls` пишет поток — пустой журнал сразу после нажатия
         # доказывал бы разве что «поток не успел».
-        assert not scr._voice_probe_in_flight, "проба не имеет права стартовать"
-        assert await _wait(pilot, lambda: len(fake.model_calls) > loads), "список должен перечитаться"
+        assert not scr._voice_probe_in_flight, (
+            "проба не имеет права стартовать"
+        )
+        assert await _wait(pilot, lambda: len(fake.model_calls) > loads), (
+            "список должен перечитаться"
+        )
         assert not fake.probe_calls, "второй запрос (проба) здесь не нужен"
 
 
@@ -2827,7 +3136,9 @@ async def test_ctrl_space_probes_even_when_the_model_list_is_open(tmp_path):
         assert _model_rows(scr), "предусловие: список раскрыт"
         loads = len(fake.model_calls)
         await pilot.press("ctrl+space")
-        assert await _wait(pilot, lambda: fake.probe_calls), "проба обязана уйти"
+        assert await _wait(pilot, lambda: fake.probe_calls), (
+            "проба обязана уйти"
+        )
         assert len(fake.model_calls) == loads, "список трогать не должны"
         assert _model_rows(scr), "проба не имеет права закрыть список"
 
@@ -2854,8 +3165,12 @@ async def test_alt_down_model_list_reload_does_not_touch_the_verdict(tmp_path):
         # Тот же безгоночный сторож: вердикт меняет только осевшая проба, а её старт
         # виден синхронно — сравнение самого вердикта поймало бы подмену лишь после
         # того, как поток успеет ответить.
-        assert not scr._voice_probe_in_flight, "проба не имеет права стартовать"
-        assert await _wait(pilot, lambda: len(fake.model_calls) > loads), "список должен перечитаться"
+        assert not scr._voice_probe_in_flight, (
+            "проба не имеет права стартовать"
+        )
+        assert await _wait(pilot, lambda: len(fake.model_calls) > loads), (
+            "список должен перечитаться"
+        )
         assert scr._voice_probe_result is verdict, "вердикт трогать нельзя"
 
 
@@ -2883,12 +3198,16 @@ def _url_hint(scr):
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
     editors = list(scr.query(VoiceEndpointEditor))
-    hints = list(editors[-1].query(".voice-url-preset-hint")) if editors else []
+    hints = (
+        list(editors[-1].query(".voice-url-preset-hint")) if editors else []
+    )
     return str(hints[-1].render()) if hints else None
 
 
 @pytest.mark.asyncio
-async def test_preset_url_opens_only_on_alt_down_and_highlights_the_match(tmp_path):
+async def test_preset_url_opens_only_on_alt_down_and_highlights_the_match(
+    tmp_path,
+):
     """Адрес из каталога — список всё равно не раскрывается на входе (канон форм
     2026-08-17: пресет-лист помощник, а не содержание поля, и раскрыт он, только пока
     значение складывается). Alt+↓ раскрывает его целиком, ▸ — на совпавшем пресете.
@@ -2901,10 +3220,16 @@ async def test_preset_url_opens_only_on_alt_down_and_highlights_the_match(tmp_pa
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         groq = "https://api.groq.com/openai/v1/audio/transcriptions"
-        scr, _ = _mk_screen(tmp_path, OFF, config_text=f"model: m\nvoice:\n  url: {groq}\n  model: whisper-1\n")
+        scr, _ = _mk_screen(
+            tmp_path,
+            OFF,
+            config_text=f"model: m\nvoice:\n  url: {groq}\n  model: whisper-1\n",
+        )
         await _open_cloud(app, scr, pilot)
         assert not _url_rows(scr)  # на строке режима списка нет
-        await _to_field(pilot, expand=False)  # в поле «URL», как это делает человек
+        await _to_field(
+            pilot, expand=False
+        )  # в поле «URL», как это делает человек
         assert _focused_id(scr) == "voice-url"
         assert not _url_rows(scr)  # адрес задан — список свёрнут
         await pilot.press("alt+down")  # явная просьба показать список
@@ -2924,7 +3249,9 @@ async def test_own_url_does_not_auto_open_but_alt_down_opens_it(tmp_path):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)  # url: https://old.x/…
+        scr, _ = _mk_screen(
+            tmp_path, OFF, config_text=CLOUD_CONFIG
+        )  # url: https://old.x/…
         await _open_cloud(app, scr, pilot)
         await _to_field(pilot, expand=False)
         assert not _url_rows(scr)
@@ -2934,7 +3261,9 @@ async def test_own_url_does_not_auto_open_but_alt_down_opens_it(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ctrl_space_probes_the_url_field_regardless_of_the_list_state(tmp_path):
+async def test_ctrl_space_probes_the_url_field_regardless_of_the_list_state(
+    tmp_path,
+):
     """Ctrl+Space на «URL» проверяет связь независимо от состояния списка пресетов
     (§2.2 спеки 2026-08-06: клавиши не конкурируют, порядок любой) — список свёрнут,
     раскрыт Alt+↓ явно или так и остаётся раскрытым, проба уходит в обоих случаях."""
@@ -2945,21 +3274,33 @@ async def test_ctrl_space_probes_the_url_field_regardless_of_the_list_state(tmp_
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.probe_result = ProbeResult(ok=True, latency_ms=10, error=None)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot, expand=False)  # url: чужой адрес, список свёрнут
+        await _to_field(
+            pilot, expand=False
+        )  # url: чужой адрес, список свёрнут
         await pilot.press("ctrl+space")  # порядок 1: проба раньше раскрытия
-        assert await _wait(pilot, lambda: fake.probe_calls), "ручная проверка должна уйти со свёрнутым списком"
+        assert await _wait(pilot, lambda: fake.probe_calls), (
+            "ручная проверка должна уйти со свёрнутым списком"
+        )
         assert not _url_rows(scr), "проба не имеет права раскрыть список"
         fake.probe_calls.clear()
-        await pilot.press("alt+down")  # раскрыть явно — списку клавиши не мешают
+        await pilot.press(
+            "alt+down"
+        )  # раскрыть явно — списку клавиши не мешают
         await pilot.pause()
         assert len(_url_rows(scr)) == 3
-        await pilot.press("ctrl+space")  # порядок 2: проба поверх раскрытого списка
-        assert await _wait(pilot, lambda: fake.probe_calls), "ручная проверка должна уйти"
+        await pilot.press(
+            "ctrl+space"
+        )  # порядок 2: проба поверх раскрытого списка
+        assert await _wait(pilot, lambda: fake.probe_calls), (
+            "ручная проверка должна уйти"
+        )
         assert len(_url_rows(scr)) == 3, "проба не имеет права закрыть список"
 
 
 @pytest.mark.asyncio
-async def test_picking_a_foreign_url_preset_blocks_the_save_until_a_model_is_chosen(tmp_path):
+async def test_picking_a_foreign_url_preset_blocks_the_save_until_a_model_is_chosen(
+    tmp_path,
+):
     """Пресет другого провайдера сносит «Модель» (спека §4.1: старое имя больше не
     гарантия для нового сервера) — тот же Enter, что подставил адрес, тут же пытается
     сохранить панель и натыкается на пустое поле: ошибка формы, конфиг не тронут.
@@ -2986,15 +3327,22 @@ async def test_picking_a_foreign_url_preset_blocks_the_save_until_a_model_is_cho
         await pilot.pause()
         assert scr.query_one("#voice-model", Input).value == ""
         assert fake.calls == []
-        assert any("выберите модель" in str(w.render()) for w in scr.query(".onb-warn"))
-        assert (tmp_path / "config.yml").read_text(encoding="utf-8") == CLOUD_CONFIG
+        assert any(
+            "выберите модель" in str(w.render())
+            for w in scr.query(".onb-warn")
+        )
+        assert (tmp_path / "config.yml").read_text(
+            encoding="utf-8"
+        ) == CLOUD_CONFIG
         # Курсор ленты и фокус — на названном поле, не на URL.
         assert scr._voice_cursor_field() == "model"
         assert _focused_id(scr) == "voice-model"
         # Список моделей раскрылся сам, как на любом честном входе в поле (гейт не
         # съел автораскрытие — он взведён тем же Enter'ом, но погашен ДО переноса
         # курсора, см. `_voice_cloud_save`).
-        assert await _wait(pilot, lambda: fake.model_calls), "список моделей должен был сам уйти за данными"
+        assert await _wait(pilot, lambda: fake.model_calls), (
+            "список моделей должен был сам уйти за данными"
+        )
 
 
 @pytest.mark.asyncio
@@ -3031,7 +3379,9 @@ async def test_footer_follows_the_url_field_and_its_list(tmp_path):
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot, expand=False)  # url: чужой адрес, список свёрнут
+        await _to_field(
+            pilot, expand=False
+        )  # url: чужой адрес, список свёрнут
         assert _footer(scr) == _VOICE_FOOTER_CLOUD_LIST
         await pilot.press("alt+down")  # раскрыть явно — поверх своего адреса
         await pilot.pause()
@@ -3057,7 +3407,10 @@ async def test_footer_follows_the_url_field_and_its_list(tmp_path):
         # есть», обе строки видны разом). Enter здесь и правда сохраняет панель
         # (`_voice_cloud_save`), набранное остаётся в поле — «сохранить как есть»
         # верно для обоих смыслов разом.
-        assert _url_hint(scr) == "свой адрес · Enter — сохранить как есть · Esc — свернуть"
+        assert (
+            _url_hint(scr)
+            == "свой адрес · Enter — сохранить как есть · Esc — свернуть"
+        )
         assert "сохранить как есть" in _footer(scr)
 
 
@@ -3074,7 +3427,10 @@ async def test_configured_url_presets_override_the_default_three(tmp_path):
         config={
             "model": "M",
             "voice_endpoint_presets": [
-                {"name": "Мой сервис", "url": "https://stt.example.local/v1/audio/transcriptions"}
+                {
+                    "name": "Мой сервис",
+                    "url": "https://stt.example.local/v1/audio/transcriptions",
+                }
             ],
         }
     )
@@ -3260,7 +3616,13 @@ async def test_probe_uses_the_saved_token_when_the_field_is_empty(tmp_path):
         await _open_cloud(app, scr, pilot)
         await pilot.press("ctrl+space")
         await pilot.pause()
-        assert fake.probe_calls == [("https://old.x/v1/audio/transcriptions", "old-token", "whisper-old")]
+        assert fake.probe_calls == [
+            (
+                "https://old.x/v1/audio/transcriptions",
+                "old-token",
+                "whisper-old",
+            )
+        ]
 
 
 @pytest.mark.asyncio
@@ -3410,7 +3772,9 @@ async def test_probe_without_url_says_what_to_do(tmp_path):
         await _open_cloud(app, scr, pilot)
         await pilot.press("ctrl+space")
         await pilot.pause()
-        assert "сначала укажите адрес endpoint" in str(scr.query_one(".set-probe", Static).render())
+        assert "сначала укажите адрес endpoint" in str(
+            scr.query_one(".set-probe", Static).render()
+        )
         assert fake.calls == []
 
 
@@ -3428,7 +3792,9 @@ async def test_probe_with_an_unselected_filter_says_what_to_do(tmp_path):
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
         await _to_field(pilot)  # url: чужой адрес, список свёрнут
-        scr.query_one("#voice-url", Input).value = "gr"  # непустой невалидный текст
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "gr"  # непустой невалидный текст
         await pilot.pause()
         await pilot.press("ctrl+space")
         await pilot.pause()
@@ -3480,9 +3846,13 @@ async def test_probe_verdict_dropped_when_values_change(tmp_path):
         scr._render_view()  # пересоздание полей — не правка
         await pilot.pause()
         assert "42" in str(scr.query_one(".set-probe", Static).render())
-        scr.query_one("#voice-url", Input).value = "https://other.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://other.x/v1/audio/transcriptions"
         await pilot.pause()
-        assert "не проверено" in str(scr.query_one(".set-probe", Static).render())
+        assert "не проверено" in str(
+            scr.query_one(".set-probe", Static).render()
+        )
         assert scr._voice_probe_result is None
 
 
@@ -3546,7 +3916,9 @@ async def test_probe_verdict_dropped_on_leaving_section(tmp_path):
         scr._open_section(_MODES)
         scr._open_section(_VOICE)
         await pilot.pause()
-        assert scr._voice_probe_result is None and not scr._voice_probe_in_flight
+        assert (
+            scr._voice_probe_result is None and not scr._voice_probe_in_flight
+        )
         assert scr._voice_probe_gen > gen
 
 
@@ -3579,7 +3951,9 @@ async def test_save_while_probe_in_flight_leaves_single_probe_line(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_save_flash_visible_after_install_and_mouse_click(tmp_path, monkeypatch):
+async def test_save_flash_visible_after_install_and_mouse_click(
+    tmp_path, monkeypatch
+):
     """Преамбула on_key гасит прошлую плашку через remove() (отложенный), и следующая
     плашка того же такта ложилась в обречённый виджет — исчезала вместе с ним. Путь без
     промежуточной клавиши (мышью в поле) вскрывает это: подтверждение сохранения не видно."""
@@ -3590,7 +3964,11 @@ async def test_save_flash_visible_after_install_and_mouse_click(tmp_path, monkey
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         seen = []
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: seen.append(cfg) or True)
+        monkeypatch.setattr(
+            autostart,
+            "ensure_voice_service",
+            lambda cfg: seen.append(cfg) or True,
+        )
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
 
         def _switch(echo=print, config=None):
@@ -3601,12 +3979,16 @@ async def test_save_flash_visible_after_install_and_mouse_click(tmp_path, monkey
         fake.switch_to_local = _switch
         await _open_voice(app, scr, pilot)
         await _install_local(pilot)  # установка → своя плашка
-        assert await _wait(pilot, lambda: bool(seen)), "воркер подъёма не стартовал"
+        assert await _wait(pilot, lambda: bool(seen)), (
+            "воркер подъёма не стартовал"
+        )
         await _wait_flash(pilot, scr, "локальный сервис подключён")
 
         await pilot.press("down")  # к своему endpoint
         await pilot.pause()
-        scr.query_one("#voice-url", Input).focus()  # клик мышью — БЕЗ нажатия клавиши
+        scr.query_one(
+            "#voice-url", Input
+        ).focus()  # клик мышью — БЕЗ нажатия клавиши
         await pilot.pause()
         await pilot.press("enter")  # сохранить endpoint
         await pilot.pause()
@@ -3628,7 +4010,9 @@ async def test_second_save_flash_visible_without_keys_in_between(tmp_path):
         await _open_cloud(app, scr, pilot)
         await pilot.press("enter")
         await pilot.pause()
-        assert "свой endpoint подключён" in str(scr.query_one("#set-flash", Static).render())
+        assert "свой endpoint подключён" in str(
+            scr.query_one("#set-flash", Static).render()
+        )
         await pilot.press("enter")  # второе сохранение подряд
         await pilot.pause()
         await pilot.pause()
@@ -3683,7 +4067,9 @@ async def test_remove_runs_under_suspend(tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         log = []
-        scr, fake = await _confirmed_remove(pilot, app, tmp_path, _FakeSuspend(log))
+        scr, fake = await _confirmed_remove(
+            pilot, app, tmp_path, _FakeSuspend(log)
+        )
         assert log == ["enter", "exit"]
         assert fake.calls == ["remove_local"]
 
@@ -3697,12 +4083,19 @@ async def test_suspend_failing_after_operation_does_not_repeat_it(tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         log = []
-        scr, fake = await _confirmed_remove(pilot, app, tmp_path, _FakeSuspend(log, on_exit=RuntimeError("no suspend")))
+        scr, fake = await _confirmed_remove(
+            pilot,
+            app,
+            tmp_path,
+            _FakeSuspend(log, on_exit=RuntimeError("no suspend")),
+        )
         assert fake.calls == ["remove_local"]
 
 
 @pytest.mark.asyncio
-async def test_suspend_unsupported_falls_back_once_and_survives_failure(tmp_path):
+async def test_suspend_unsupported_falls_back_once_and_survives_failure(
+    tmp_path,
+):
     """Драйвер без suspend: операция выполняется один раз, её падение экран не роняет."""
     from gc_tui.app import TuiApp
     from textual.widgets import Static
@@ -3730,7 +4123,9 @@ async def test_suspend_unsupported_falls_back_once_and_survives_failure(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_install_suspend_failing_after_operation_does_not_repeat(tmp_path):
+async def test_install_suspend_failing_after_operation_does_not_repeat(
+    tmp_path,
+):
     """Тот же контракт для установки, где цена повтора максимальна (~0.9 ГБ)."""
     from gc_tui.app import TuiApp
 
@@ -3802,7 +4197,9 @@ async def test_service_start_does_not_block_ui(tmp_path, monkeypatch):
         scr._voice_confirm_install()  # и только оно запускает установку с подъёмом
         elapsed = time.monotonic() - t0
         assert elapsed < 1.0, "UI-поток ждал подъёма сервиса"
-        assert await _wait(pilot, entered.is_set), "воркер подъёма не стартовал"
+        assert await _wait(pilot, entered.is_set), (
+            "воркер подъёма не стартовал"
+        )
         assert len(calls) == 1
 
         release.set()
@@ -3819,7 +4216,9 @@ async def test_service_not_started_flashes_hint(tmp_path, monkeypatch):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: False)
+        monkeypatch.setattr(
+            autostart, "ensure_voice_service", lambda cfg: False
+        )
         scr, fake = _mk_screen(tmp_path, OFF)
         await _open_voice(app, scr, pilot)
         await _install_local(pilot)
@@ -3827,7 +4226,9 @@ async def test_service_not_started_flashes_hint(tmp_path, monkeypatch):
         assert "gc-voice status" in flash
 
 
-async def _install_with_slow_service(pilot, app, tmp_path, monkeypatch, status=OFF):
+async def _install_with_slow_service(
+    pilot, app, tmp_path, monkeypatch, status=OFF
+):
     """Секция «Голосовой ввод» с летящим (заблокированным) подъёмом сервиса."""
     import threading
 
@@ -3845,14 +4246,18 @@ async def _install_with_slow_service(pilot, app, tmp_path, monkeypatch, status=O
     scr, fake = _mk_screen(tmp_path, status)
     await _open_local(app, scr, pilot)  # установка — действие локальной строки
     scr._voice_enter()
-    if scr._voice_awaiting_install:  # батарейки нет — Enter спросил, подтверждаем
+    if (
+        scr._voice_awaiting_install
+    ):  # батарейки нет — Enter спросил, подтверждаем
         scr._voice_confirm_install()
     assert await _wait(pilot, entered.is_set), "воркер подъёма не стартовал"
     return scr, fake, release
 
 
 @pytest.mark.asyncio
-async def test_service_callback_does_not_rerender_while_typing(tmp_path, monkeypatch):
+async def test_service_callback_does_not_rerender_while_typing(
+    tmp_path, monkeypatch
+):
     """Вердикт подъёма кладём точечно: поля endpoint не пересоздаются, набранное и
     каретка целы — человек мог печатать все эти 15 секунд."""
     from gc_tui.app import TuiApp
@@ -3860,7 +4265,9 @@ async def test_service_callback_does_not_rerender_while_typing(tmp_path, monkeyp
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake, release = await _install_with_slow_service(pilot, app, tmp_path, monkeypatch)
+        scr, fake, release = await _install_with_slow_service(
+            pilot, app, tmp_path, monkeypatch
+        )
         await pilot.press("down")  # к своему endpoint
         await pilot.pause()
         url = scr.query_one("#voice-url", Input)
@@ -3874,12 +4281,17 @@ async def test_service_callback_does_not_rerender_while_typing(tmp_path, monkeyp
         assert app.is_running  # TUI жив (не упал на DuplicateIds)
         assert scr._voice_editor() is editor_before  # поля НЕ пересобирались
         assert len(scr.query("#voice-url")) == 1  # второго комплекта полей нет
-        assert scr.query_one("#voice-url", Input).value == "https://draft.x/v1/audio/transcriptions"  # черновик цел
+        assert (
+            scr.query_one("#voice-url", Input).value
+            == "https://draft.x/v1/audio/transcriptions"
+        )  # черновик цел
         assert scr.focused is url  # фокус не сбит
 
 
 @pytest.mark.asyncio
-async def test_service_callback_does_not_touch_foreign_section(tmp_path, monkeypatch):
+async def test_service_callback_does_not_touch_foreign_section(
+    tmp_path, monkeypatch
+):
     """Юзер ушёл в соседнюю секцию: колбэк не перерисовывает ЧУЖУЮ секцию."""
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import _MODES
@@ -3887,30 +4299,45 @@ async def test_service_callback_does_not_touch_foreign_section(tmp_path, monkeyp
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         toasts = []
-        monkeypatch.setattr(app, "notify", lambda msg, **kw: toasts.append(msg), raising=False)
-        scr, fake, release = await _install_with_slow_service(pilot, app, tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            app, "notify", lambda msg, **kw: toasts.append(msg), raising=False
+        )
+        scr, fake, release = await _install_with_slow_service(
+            pilot, app, tmp_path, monkeypatch
+        )
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._view == _MODES
         renders = []
         orig = scr._render_view
-        monkeypatch.setattr(scr, "_render_view", lambda: renders.append(1) or orig(), raising=False)
+        monkeypatch.setattr(
+            scr,
+            "_render_view",
+            lambda: renders.append(1) or orig(),
+            raising=False,
+        )
 
         release.set()
-        assert await _wait(pilot, lambda: bool(toasts)), "итог подъёма не показан"
+        assert await _wait(pilot, lambda: bool(toasts)), (
+            "итог подъёма не показан"
+        )
         assert renders == []
         assert scr._view == _MODES
 
 
 @pytest.mark.asyncio
-async def test_service_callback_does_not_rerender_under_confirm(tmp_path, monkeypatch):
+async def test_service_callback_does_not_rerender_under_confirm(
+    tmp_path, monkeypatch
+):
     """Висит confirm удаления — ре-рендер снёс бы баннер из-под руки: только toast."""
     from gc_tui.app import TuiApp
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         toasts = []
-        monkeypatch.setattr(app, "notify", lambda msg, **kw: toasts.append(msg), raising=False)
+        monkeypatch.setattr(
+            app, "notify", lambda msg, **kw: toasts.append(msg), raising=False
+        )
         # Батарейка уже стоит, режим был облачный: Enter вернул локальный, подъём летит,
         # и Del по видимой строке «установлен» открывает confirm ровно как обычно.
         scr, fake, release = await _install_with_slow_service(
@@ -3921,13 +4348,17 @@ async def test_service_callback_does_not_rerender_under_confirm(tmp_path, monkey
         assert scr._voice_awaiting_remove
 
         release.set()
-        assert await _wait(pilot, lambda: bool(toasts)), "итог подъёма не показан"
+        assert await _wait(pilot, lambda: bool(toasts)), (
+            "итог подъёма не показан"
+        )
         assert scr._voice_awaiting_remove  # баннер на месте
         assert "Enter — удалить" in _hint(scr)
 
 
 @pytest.mark.asyncio
-async def test_service_callback_updates_status_in_place_keeping_draft(tmp_path, monkeypatch):
+async def test_service_callback_updates_status_in_place_keeping_draft(
+    tmp_path, monkeypatch
+):
     """Гейт по фокусу не спасает черновик: курсор мог уйти со строки полей (фокус снят),
     а набранное в них осталось — и до 15 с ждёт вердикта подъёма. Колбэк обязан обновлять
     статус/строки/подсказку НА МЕСТЕ, а не пересобирать секцию: поля не пересоздаются."""
@@ -3936,19 +4367,28 @@ async def test_service_callback_updates_status_in_place_keeping_draft(tmp_path, 
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake, release = await _install_with_slow_service(pilot, app, tmp_path, monkeypatch)
+        scr, fake, release = await _install_with_slow_service(
+            pilot, app, tmp_path, monkeypatch
+        )
         await pilot.press("down")  # к своему endpoint
         await _to_field(pilot)  # в поля
-        scr.query_one("#voice-url", Input).value = "https://draft.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://draft.x/v1/audio/transcriptions"
         editor_before = scr._voice_editor()
 
         fake.status = LOCAL  # установка завершилась, сервис жив
         release.set()
         await _wait_flash(pilot, scr, "подключён")
         assert scr._voice_editor() is editor_before  # поля НЕ пересобирались
-        assert scr.query_one("#voice-url", Input).value == "https://draft.x/v1/audio/transcriptions"  # черновик цел
+        assert (
+            scr.query_one("#voice-url", Input).value
+            == "https://draft.x/v1/audio/transcriptions"
+        )  # черновик цел
         assert len(scr.query("#voice-url")) == 1
-        assert "установлен · запущен · порт 8735" in _rows(scr)[0]  # статус обновился
+        assert (
+            "установлен · запущен · порт 8735" in _rows(scr)[0]
+        )  # статус обновился
         assert len(_rows(scr)) == 2
 
 
@@ -4042,12 +4482,16 @@ async def test_escape_after_typing_reopen_restores_the_pre_edit_code(tmp_path):
         assert _lang_rows(scr) == ["▸ de    немецкий"]
         await pilot.press("escape")
         await pilot.pause()
-        assert scr.query_one("#voice-lang", Input).value == "ru"  # не "нем", не ""
+        assert (
+            scr.query_one("#voice-lang", Input).value == "ru"
+        )  # не "нем", не ""
         assert not _lang_rows(scr)
 
 
 @pytest.mark.asyncio
-async def test_footer_hints_alt_down_when_collapsed_on_the_local_language_field(tmp_path):
+async def test_footer_hints_alt_down_when_collapsed_on_the_local_language_field(
+    tmp_path,
+):
     from gc_tui.app import TuiApp
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
 
@@ -4056,18 +4500,26 @@ async def test_footer_hints_alt_down_when_collapsed_on_the_local_language_field(
         scr, _ = _mk_screen(tmp_path, LOCAL)
         await _open_local(app, scr, pilot)
         await _to_field(pilot)
-        assert LIST_CLOSED_HINT not in _footer(scr)  # раскрыт — футер про список
+        assert LIST_CLOSED_HINT not in _footer(
+            scr
+        )  # раскрыт — футер про список
         await pilot.press("escape")
         await pilot.pause()
         assert LIST_CLOSED_HINT in _footer(scr)
-        assert "Enter — сохранить язык" in _footer(scr)  # прежний текст никуда не делся
+        assert "Enter — сохранить язык" in _footer(
+            scr
+        )  # прежний текст никуда не делся
         await pilot.press("alt+down")
         await pilot.pause()
-        assert LIST_CLOSED_HINT not in _footer(scr)  # снова раскрыт — футер списочный
+        assert LIST_CLOSED_HINT not in _footer(
+            scr
+        )  # снова раскрыт — футер списочный
 
 
 @pytest.mark.asyncio
-async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_language_field(tmp_path):
+async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_language_field(
+    tmp_path,
+):
     """Сохранённый адрес — чужой пресетам (`CLOUD_CONFIG`), и вход на «URL» список сам
     не раскрывает (`can_open` гейтит автораскрытие, спека 2026-08-05 §3) — хинт «Ctrl+Space
     — раскрыть список» там честен и должен быть виден сразу, как и у языка ниже. У
@@ -4085,7 +4537,9 @@ async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_
     async with app.run_test() as pilot:
         scr, _ = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
-        await _to_field(pilot, expand=False)  # url — чужой адрес, список свёрнут
+        await _to_field(
+            pilot, expand=False
+        )  # url — чужой адрес, список свёрнут
         assert LIST_CLOSED_HINT in _footer(scr)
         await pilot.press("down")  # token — списка у него нет вовсе
         await pilot.pause()
@@ -4102,7 +4556,9 @@ async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_
         await pilot.pause()
         assert LIST_CLOSED_HINT in _footer(scr)
         assert "Enter — сохранить" in _footer(scr)
-        assert "Ctrl+Space — проверить связь" in _footer(scr)  # проба работает и здесь
+        assert "Ctrl+Space — проверить связь" in _footer(
+            scr
+        )  # проба работает и здесь
 
 
 @pytest.mark.asyncio
@@ -4193,7 +4649,9 @@ def test_open_list_hint_offers_refresh_not_reopen():
 
     assert "Alt+↓ — перечитать список" in _MODEL_HINT
     assert "Ctrl+Space" not in _MODEL_HINT
-    assert "Ctrl+Space" not in _LANG_HINT  # локальный список перечитывать неоткуда
+    assert (
+        "Ctrl+Space" not in _LANG_HINT
+    )  # локальный список перечитывать неоткуда
     assert _LIST_CLOSED_HINT == "Alt+↓ — показать список"
 
 
@@ -4201,7 +4659,11 @@ def _hint_widgets(scr, cls):
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
     editors = list(scr.query(VoiceEndpointEditor))
-    return [w for w in editors[-1].query(f".{cls}") if not w._pruning] if editors else []
+    return (
+        [w for w in editors[-1].query(f".{cls}") if not w._pruning]
+        if editors
+        else []
+    )
 
 
 @pytest.mark.asyncio
@@ -4233,7 +4695,9 @@ async def test_reopening_replaces_the_hint_instead_of_stacking(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_footer_offers_del_only_when_there_is_something_to_delete(tmp_path):
+async def test_footer_offers_del_only_when_there_is_something_to_delete(
+    tmp_path,
+):
     """Сервиса нет — Del не обещаем: он и сам no-op (`_voice_request_remove` требует
     installed), а футер, зовущий в никуда, читается как поломка."""
     from gc_tui.app import TuiApp
@@ -4269,7 +4733,9 @@ async def test_both_modes_report_being_switched_on_the_same_way(tmp_path):
         scr.query_one("#voice-url", Input).value = _URL
         await pilot.press("enter")
         await pilot.pause()
-        assert "свой endpoint подключён" in str(scr.query_one("#set-flash", Static).render())
+        assert "свой endpoint подключён" in str(
+            scr.query_one("#set-flash", Static).render()
+        )
 
 
 @pytest.mark.asyncio
@@ -4310,7 +4776,9 @@ async def test_escape_cancels_the_install_confirm(tmp_path):
         await pilot.press("escape")
         await pilot.pause()
         assert scr._view == _VOICE and fake.calls == []
-        assert "Esc — отмена" not in str(scr.query_one(".set-voicehint", Static).render())
+        assert "Esc — отмена" not in str(
+            scr.query_one(".set-voicehint", Static).render()
+        )
 
 
 @pytest.mark.asyncio
@@ -4352,13 +4820,17 @@ async def test_tab_moves_between_groups(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
-        assert scr._voice_cursor_position() == row_before, "позиция должна помниться"
+        assert scr._voice_cursor_position() == row_before, (
+            "позиция должна помниться"
+        )
         # Клавиша съедена секцией, а не отдана focus_next: тот увёл бы фокус в соседнее
         # поле, а курсор в строках режима фокуса в полях не держит вовсе (спека §4.2.6).
         assert pilot.app.focused is None
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._voice_cursor_field() == "token", "позиция группы полей тоже помнится"
+        assert scr._voice_cursor_field() == "token", (
+            "позиция группы полей тоже помнится"
+        )
 
 
 @pytest.mark.asyncio
@@ -4403,13 +4875,17 @@ async def test_tab_is_swallowed_when_there_is_no_second_group(tmp_path):
     всё равно съедает, иначе её заберёт штатный focus_next Textual (спека §4.2.6)."""
     from form_harness import settings_voice_section
 
-    async with settings_voice_section(tmp_path, mode="local", installed=False) as (pilot, scr):
+    async with settings_voice_section(
+        tmp_path, mode="local", installed=False
+    ) as (pilot, scr):
         focused_before = pilot.app.focused
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
         assert scr._voice_cursor_position() == 0
-        assert pilot.app.focused is focused_before, "Tab не должен водить фокус мимо курсора"
+        assert pilot.app.focused is focused_before, (
+            "Tab не должен водить фокус мимо курсора"
+        )
 
 
 @pytest.mark.asyncio
@@ -4419,7 +4895,9 @@ async def test_tab_collapses_the_open_list_before_leaving(tmp_path):
     from form_harness import settings_voice_section
 
     async with settings_voice_section(tmp_path, mode="cloud") as (pilot, scr):
-        scr._set_voice_cursor(group="fields", position=3)  # «Язык» — поле со списком
+        scr._set_voice_cursor(
+            group="fields", position=3
+        )  # «Язык» — поле со списком
         await pilot.pause()
         await _expand_list(pilot)  # код задан — раскрываем Alt+↓
         ctrl = scr._voice_list_ctrl()
@@ -4438,7 +4916,9 @@ async def test_remembered_field_position_is_clamped(tmp_path):
     # сервисе, иначе полей там нет вовсе и клэмпать нечего.
     from form_harness import settings_voice_section
 
-    async with settings_voice_section(tmp_path, mode="cloud", installed=True) as (pilot, scr):
+    async with settings_voice_section(
+        tmp_path, mode="cloud", installed=True
+    ) as (pilot, scr):
         await pilot.press("tab")  # в поля cloud, курсор на url
         # Дальнее поле ставим напрямую: пройти туда стрелками нельзя — на поле со
         # списком он раскрывается сам и забирает ↑/↓ себе (спека §4.2.3).
@@ -4449,8 +4929,12 @@ async def test_remembered_field_position_is_clamped(tmp_path):
         await pilot.press("up")  # выбрать «Локальный сервис»
         await pilot.press("tab")  # снова в поля — их там меньше
         await pilot.pause()
-        assert scr._voice_cursor_position() == 0, "позиция должна зажаться в диапазон"
-        assert scr._voice_cursor_field() is not None, "курсор обязан стоять на поле"
+        assert scr._voice_cursor_position() == 0, (
+            "позиция должна зажаться в диапазон"
+        )
+        assert scr._voice_cursor_field() is not None, (
+            "курсор обязан стоять на поле"
+        )
 
 
 @pytest.mark.asyncio
@@ -4493,7 +4977,9 @@ class _GatedProbe(FakeVoiceSetup):
     def probe_alive(self):
         import threading
 
-        self.probe_on_main.append(threading.current_thread() is threading.main_thread())
+        self.probe_on_main.append(
+            threading.current_thread() is threading.main_thread()
+        )
         self.gate.wait(5)
         return self.status.service_alive
 
@@ -4504,7 +4990,12 @@ def _mk_gated_screen(tmp_path, status):
     cfg = tmp_path / "config.yml"
     cfg.write_text("model: m\n", encoding="utf-8")
     fake = _GatedProbe(status)
-    scr = SettingsScreen(config={"voice": {}}, config_path=str(cfg), on_apply=lambda: None, voice=fake)
+    scr = SettingsScreen(
+        config={"voice": {}},
+        config_path=str(cfg),
+        on_apply=lambda: None,
+        voice=fake,
+    )
     return scr, fake
 
 
@@ -4520,10 +5011,12 @@ async def test_alive_is_measured_by_a_worker_and_lands_in_the_row(tmp_path):
         await _open_voice(app, scr, pilot)
         assert "установлен · … · порт 8735" in _rows(scr)[0]
         fake.gate.set()
-        assert await _wait(pilot, lambda: "установлен · запущен · порт 8735" in _rows(scr)[0]), (
-            "живость воркера не доехала до строки"
+        assert await _wait(
+            pilot, lambda: "установлен · запущен · порт 8735" in _rows(scr)[0]
+        ), "живость воркера не доехала до строки"
+        assert fake.probe_on_main and not any(fake.probe_on_main), (
+            "probe_alive обязан звучать только из воркер-потока"
         )
-        assert fake.probe_on_main and not any(fake.probe_on_main), "probe_alive обязан звучать только из воркер-потока"
 
 
 @pytest.mark.asyncio
@@ -4548,7 +5041,9 @@ async def test_alive_delivery_updates_the_menu_glyph(tmp_path):
 
         assert "✓" not in _voice_glyph()  # живость ещё не мерялась
         fake.gate.set()
-        assert await _wait(pilot, lambda: "✓" in _voice_glyph()), "глиф меню не обновился после доставки живости"
+        assert await _wait(pilot, lambda: "✓" in _voice_glyph()), (
+            "глиф меню не обновился после доставки живости"
+        )
 
 
 @pytest.mark.asyncio
@@ -4569,7 +5064,9 @@ async def test_menu_navigation_never_probes_synchronously(tmp_path):
         for _ in range(6):
             await pilot.press("up")
         await pilot.pause()
-        assert len(fake.probe_on_main) == started, "навигация по меню не имеет права запускать пробы порта"
+        assert len(fake.probe_on_main) == started, (
+            "навигация по меню не имеет права запускать пробы порта"
+        )
         assert not any(fake.probe_on_main)
 
 
@@ -4599,7 +5096,9 @@ async def test_alive_delivery_updates_menu_rows_in_place(tmp_path):
             return str(rows[_VOICE].query_one(".set-glyph", Static).render())
 
         fake.gate.set()
-        assert await _wait(pilot, lambda: "✓" in _voice_glyph()), "живость не доехала до глифа"
+        assert await _wait(pilot, lambda: "✓" in _voice_glyph()), (
+            "живость не доехала до глифа"
+        )
         rows_after = list(scr.query(".set-menurow"))
         assert [id(w) for w in rows_after] == [id(w) for w in rows_before], (
             "доставка живости пересобрала меню вместо точечного обновления строк"
@@ -4644,7 +5143,9 @@ async def test_leaving_to_the_menu_and_coming_back_opens_no_list(tmp_path):
 
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
-        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG + "  language: en\n")
+        scr, fake = _mk_screen(
+            tmp_path, OFF, config_text=CLOUD_CONFIG + "  language: en\n"
+        )
         fake.models = _MODELS
         await _open_cloud(app, scr, pilot)
         await _to_field(pilot, _TO_MODEL_FIELD)  # курсор в поле «Модель»
@@ -4659,7 +5160,9 @@ async def test_leaving_to_the_menu_and_coming_back_opens_no_list(tmp_path):
         await pilot.pause()
         assert scr._voice_cursor_group() == _VOICE_GROUP_VARIANTS
         assert _focused_id(scr) is None
-        assert not _model_rows(scr) and not _lang_rows(scr) and not _url_rows(scr)
+        assert (
+            not _model_rows(scr) and not _lang_rows(scr) and not _url_rows(scr)
+        )
 
 
 @pytest.mark.asyncio
@@ -4698,7 +5201,9 @@ async def test_suspended_never_repeats_a_failed_action(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_suspended_falls_back_when_the_driver_cannot_suspend(tmp_path, monkeypatch):
+async def test_suspended_falls_back_when_the_driver_cannot_suspend(
+    tmp_path, monkeypatch
+):
     """Драйвер не умеет suspend — действие всё равно выполняется, ровно один раз."""
     from gc_tui.app import TuiApp
 
@@ -4716,12 +5221,17 @@ async def test_suspended_falls_back_when_the_driver_cannot_suspend(tmp_path, mon
 
         monkeypatch.setattr(pilot.app, "suspend", lambda: _NoSuspend())
         calls = []
-        assert scr._suspended(lambda: calls.append(1) or True, "\nставлю…\n") is True
+        assert (
+            scr._suspended(lambda: calls.append(1) or True, "\nставлю…\n")
+            is True
+        )
         assert calls == [1]
 
 
 @pytest.mark.asyncio
-async def test_list_hints_stand_under_every_field_from_the_first_frame(tmp_path):
+async def test_list_hints_stand_under_every_field_from_the_first_frame(
+    tmp_path,
+):
     """Строка «чем раскрыть список» стоит под КАЖДЫМ полем со списком сразу.
 
     Живой смок 2026-08-20: строку монтировал сам контроллер — при первом раскрытии.
@@ -4737,7 +5247,9 @@ async def test_list_hints_stand_under_every_field_from_the_first_frame(tmp_path)
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.models = _MODELS
-        await _open_cloud(app, scr, pilot)  # курсор на строке режима, в поля не заходили
+        await _open_cloud(
+            app, scr, pilot
+        )  # курсор на строке режима, в поля не заходили
         await pilot.pause()
         assert _url_hint(scr) == LIST_CLOSED_HINT
         assert _lang_hint(scr) == LIST_CLOSED_HINT

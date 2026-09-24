@@ -56,7 +56,11 @@ def _tool(registry):
 
 async def test_acall_runs_the_script_and_returns_its_output(skill_with_script):
     """Базовое: нативный вход делает ту же работу, что и синхронный."""
-    out = json.loads(await _tool(skill_with_script).acall(skill_id="sleeper", script_name="nap.py"))
+    out = json.loads(
+        await _tool(skill_with_script).acall(
+            skill_id="sleeper", script_name="nap.py"
+        )
+    )
 
     assert out["ok"] is True, out
     assert out["script_ok"] is True, out
@@ -81,9 +85,13 @@ async def test_loop_stays_responsive_while_the_script_runs(skill_with_script):
     # сна в начале `acall` тест пропускал — проверено подменой.
     with quiet_gc_for_loop_timing():
         async with LoopPulse(step=TICK) as pulse:
-            await _tool(skill_with_script).acall(skill_id="sleeper", script_name="nap.py")
+            await _tool(skill_with_script).acall(
+                skill_id="sleeper", script_name="nap.py"
+            )
 
-    assert len(pulse.gaps) > 10, f"пульс почти не тикал: {len(pulse.gaps)} тиков"
+    assert len(pulse.gaps) > 10, (
+        f"пульс почти не тикал: {len(pulse.gaps)} тиков"
+    )
     assert pulse.worst() < SCRIPT_SLEEP / 2, (
         f"loop залипал на {pulse.worst():.3f}с, пока шёл скрипт — запуск не асинхронный ({pulse.report()})"
     )
@@ -113,7 +121,9 @@ def test_no_sync_entry(skill_with_script):
     assert not callable(tool), "у тула скиллов снова появился синхронный вход"
 
 
-async def test_bad_json_args_return_an_error_not_a_broken_await(skill_with_script):
+async def test_bad_json_args_return_an_error_not_a_broken_await(
+    skill_with_script,
+):
     """Отказ разбора аргументов приходит значением, а не ломает ``await``.
 
     ``acall`` обёрнут ``parse_json_object_argument``, и на ошибочной ветке тот

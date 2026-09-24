@@ -6,20 +6,34 @@ from gc_core.message_format.dialog_history import (
     split_turns_into_char_batches,
 )
 from gc_core.message_policy.user_message_policy import append_user_log_entries
-from gc_core.summarize.summary_validation import is_valid_summary_text, validate_summary_text
+from gc_core.summarize.summary_validation import (
+    is_valid_summary_text,
+    validate_summary_text,
+)
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 class ThreadSummarizerTest(unittest.TestCase):
-    def test_append_user_log_entries_skips_technical_user_message(self) -> None:
+    def test_append_user_log_entries_skips_technical_user_message(
+        self,
+    ) -> None:
         messages = [
             {
                 "role": "user",
                 "content": 'client has non-empty thread notes; call `thread_notes` with action="read" to load them.',
             },
-            {"role": "user", "content": "There is no tool call in Agent response. Please send appropriate tool call"},
-            {"role": "user", "content": "❌ Tool Argument Validation Failed. Expected schema: {...}"},
-            {"role": "user", "content": "<dialog_summary>\n...\n</dialog_summary>"},
+            {
+                "role": "user",
+                "content": "There is no tool call in Agent response. Please send appropriate tool call",
+            },
+            {
+                "role": "user",
+                "content": "❌ Tool Argument Validation Failed. Expected schema: {...}",
+            },
+            {
+                "role": "user",
+                "content": "<dialog_summary>\n...\n</dialog_summary>",
+            },
             {"role": "user", "content": "Сделай рефакторинг parser слоя"},
             {"role": "assistant", "content": "ok"},
         ]
@@ -32,10 +46,16 @@ class ThreadSummarizerTest(unittest.TestCase):
         ok, reason = validate_summary_text("[assistant] raw transcript")
         self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))
         self.assertEqual(reason, "missing_structure")
-        self.assertFalse(is_valid_summary_text("TASK_AND_CONTEXT:\n- short prose"))
+        self.assertFalse(
+            is_valid_summary_text("TASK_AND_CONTEXT:\n- short prose")
+        )
         preamble = "[assistant] preamble\n\n"
-        self.assertTrue(is_valid_summary_text(preamble + valid_summary_xml_for_tests()))
-        ok, reason = validate_summary_text("<summary><task_and_context>x</task_and_context></summary>")
+        self.assertTrue(
+            is_valid_summary_text(preamble + valid_summary_xml_for_tests())
+        )
+        ok, reason = validate_summary_text(
+            "<summary><task_and_context>x</task_and_context></summary>"
+        )
         self.assertFalse(ok)
         self.assertEqual(reason, "missing_structure")
 
@@ -49,11 +69,22 @@ class ThreadSummarizerTest(unittest.TestCase):
         self.assertIn('<cutted_envelope truncated="true"', steps)
         self.assertNotIn("TEXT CUTTED", steps)
 
-    def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(self) -> None:
+    def test_format_last_dialog_steps_keeps_tool_call_and_output_in_one_turn(
+        self,
+    ) -> None:
         steps = format_last_dialog_steps(
             [
-                {"type": "function_call", "call_id": "c1", "name": "fs_read_file", "arguments": {"path": "/tmp/a.txt"}},
-                {"type": "function_call_output", "call_id": "c1", "output": {"ok": True}},
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "fs_read_file",
+                    "arguments": {"path": "/tmp/a.txt"},
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": {"ok": True},
+                },
             ],
             max_steps=5,
             message_max_chars=5000,
@@ -65,7 +96,12 @@ class ThreadSummarizerTest(unittest.TestCase):
     def test_group_into_turns_supports_tool_call_aliases(self) -> None:
         turns = group_into_turns(
             [
-                {"type": "tool_call", "call_id": "c1", "name": "fs_read_file", "arguments": "{}"},
+                {
+                    "type": "tool_call",
+                    "call_id": "c1",
+                    "name": "fs_read_file",
+                    "arguments": "{}",
+                },
                 {"type": "tool_call_output", "call_id": "c1", "output": "ok"},
             ]
         )
@@ -84,10 +120,17 @@ class ThreadSummarizerTest(unittest.TestCase):
         self.assertEqual(len(batches[0]), 1)
         self.assertEqual(len(batches[1]), 1)
 
-    def test_group_into_turns_keeps_function_call_and_output_together(self) -> None:
+    def test_group_into_turns_keeps_function_call_and_output_together(
+        self,
+    ) -> None:
         messages = [
             {"role": "user", "content": "do x"},
-            {"type": "function_call", "call_id": "c1", "name": "tool", "arguments": "{}"},
+            {
+                "type": "function_call",
+                "call_id": "c1",
+                "name": "tool",
+                "arguments": "{}",
+            },
             {"type": "function_call_output", "call_id": "c1", "output": "ok"},
         ]
         turns = group_into_turns(messages)

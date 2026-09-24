@@ -12,7 +12,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gc_core.intent_guard.final_report_consistency import _load_guard_prompt, avalidate_final_report_vs_user_intent
+from gc_core.intent_guard.final_report_consistency import (
+    _load_guard_prompt,
+    avalidate_final_report_vs_user_intent,
+)
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit import run_coro
@@ -80,7 +83,9 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_string_object_becomes_dict(self) -> None:
         """JSON-строка объекта в `handoff` парсится в dict; остальные поля args не трогаем."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         args = {
             "solution_type": "full_solution",
@@ -94,14 +99,18 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_empty_object_string_is_valid(self) -> None:
         """`handoff: "{}"` — валидная пустая форма по схеме тула → становится `{}`."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         out = _normalize_handoff_in_finish_args({"handoff": "{}"})
         assert out["handoff"] == {}
 
     def test_already_object_unchanged(self) -> None:
         """Если `handoff` уже dict (как в tool output) — оставляем как есть."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         handoff = {"artifacts": ["a.md"]}
         out = _normalize_handoff_in_finish_args({"handoff": handoff})
@@ -109,7 +118,9 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_unparseable_string_left_as_is(self) -> None:
         """Битый JSON не парсим: строка уходит в payload как есть (валидатор может ругаться)."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         raw = '{"artifacts": '
         out = _normalize_handoff_in_finish_args({"handoff": raw})
@@ -117,7 +128,9 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_json_array_string_left_as_is(self) -> None:
         """JSON-массив — не object по контракту тула; не превращаем в dict, оставляем строку."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         raw = '["not","an","object"]'
         out = _normalize_handoff_in_finish_args({"handoff": raw})
@@ -125,7 +138,9 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_json_scalar_string_left_as_is(self) -> None:
         """Скаляры (string/number/null/bool) — не object; нормализация их не трогает."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         for raw in ('"just a string"', "42", "null", "true"):
             out = _normalize_handoff_in_finish_args({"handoff": raw})
@@ -133,7 +148,9 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_missing_handoff_unchanged(self) -> None:
         """Нет ключа `handoff` — args возвращаем без изменений, ключ не добавляем."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         args = {"solution_type": "direct_answer", "task_report": "hi"}
         out = _normalize_handoff_in_finish_args(args)
@@ -142,7 +159,9 @@ class TestNormalizeHandoffInFinishArgs:
 
     def test_does_not_mutate_input(self) -> None:
         """Функция не мутирует входной dict: исходный `handoff` остаётся строкой."""
-        from gc_core.intent_guard.final_report_consistency import _normalize_handoff_in_finish_args
+        from gc_core.intent_guard.final_report_consistency import (
+            _normalize_handoff_in_finish_args,
+        )
 
         args = {"handoff": '{"x":1}'}
         out = _normalize_handoff_in_finish_args(args)
@@ -158,7 +177,9 @@ class TestValidatorPayloadHandoffNormalized:
     """Интеграция: `validate_final_report_vs_user_intent` кладёт в LLM-payload object."""
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_string_handoff_in_args_becomes_object_in_payload(self, mock_llm) -> None:
+    def test_string_handoff_in_args_becomes_object_in_payload(
+        self, mock_llm
+    ) -> None:
         """В payload к LLM `handoff` уже dict, а не JSON-строка — нет ложного string vs object."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
@@ -276,7 +297,9 @@ class TestStringVsObjectEquivalence:
     """Одинаковое содержимое, разная форма → после A1 валидатор видит object↔object."""
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_payload_does_not_expose_handoff_as_json_string(self, mock_llm) -> None:
+    def test_payload_does_not_expose_handoff_as_json_string(
+        self, mock_llm
+    ) -> None:
         """В `finish_handoff_arguments` поле `handoff` — nested object, не JSON-строка."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
@@ -302,7 +325,9 @@ class TestStringVsObjectEquivalence:
         assert '"handoff": "{' not in args_block
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_normalized_args_handoff_matches_digest_object_content(self, mock_llm) -> None:
+    def test_normalized_args_handoff_matches_digest_object_content(
+        self, mock_llm
+    ) -> None:
         """Цель 2: после нормализации args.handoff == содержимому object в digest (эквивалентность форм)."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest(digest_handoff=_DIGEST_HANDOFF)
@@ -323,8 +348,12 @@ class TestStringVsObjectEquivalence:
         args_handoff = payload["finish_handoff_arguments"]["handoff"]
         assert isinstance(args_handoff, dict)
         assert args_handoff == _DIGEST_HANDOFF
-        digest_handoff_json = json.dumps(_DIGEST_HANDOFF, ensure_ascii=False, separators=(",", ":"))
-        assert digest_handoff_json in payload["trace_digest_text"].replace(" ", "")
+        digest_handoff_json = json.dumps(
+            _DIGEST_HANDOFF, ensure_ascii=False, separators=(",", ":")
+        )
+        assert digest_handoff_json in payload["trace_digest_text"].replace(
+            " ", ""
+        )
 
 
 # --- Приёмка 2: расхождение содержимого по-прежнему видно и отклоняется --------
@@ -334,10 +363,14 @@ class TestContentMismatchStillRejected:
     """Фикс формы не должен ломать Axis B: content-mismatch всё ещё виден и reject'ится."""
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_content_divergence_preserved_in_normalized_payload(self, mock_llm) -> None:
+    def test_content_divergence_preserved_in_normalized_payload(
+        self, mock_llm
+    ) -> None:
         """A1 не подменяет содержимое: wrong.md в args остаётся в payload, digest держит report.md."""
         mock_llm.return_value = _validator_json()
-        ctx, state, digest = _ctx_state_digest(digest_handoff={"artifacts": ["report.md"]})
+        ctx, state, digest = _ctx_state_digest(
+            digest_handoff={"artifacts": ["report.md"]}
+        )
         run_coro(
             avalidate_final_report_vs_user_intent(
                 ctx=ctx,
@@ -364,9 +397,13 @@ class TestContentMismatchStillRejected:
             action="fix_report",
             trace_ok=True,
             report_ok=False,
-            report_mismatches=["handoff.artifacts claims wrong.md but digest shows report.md"],
+            report_mismatches=[
+                "handoff.artifacts claims wrong.md but digest shows report.md"
+            ],
         )
-        ctx, state, digest = _ctx_state_digest(digest_handoff={"artifacts": ["report.md"]})
+        ctx, state, digest = _ctx_state_digest(
+            digest_handoff={"artifacts": ["report.md"]}
+        )
         result = run_coro(
             avalidate_final_report_vs_user_intent(
                 ctx=ctx,
@@ -383,10 +420,15 @@ class TestContentMismatchStillRejected:
         assert result.ok is False
         assert result.action == "fix_report"
         assert result.report_ok is False
-        assert any("wrong.md" in m or "artifacts" in m for m in result.report_mismatches)
+        assert any(
+            "wrong.md" in m or "artifacts" in m
+            for m in result.report_mismatches
+        )
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_form_only_mismatch_claim_is_not_forced_by_payload(self, mock_llm) -> None:
+    def test_form_only_mismatch_claim_is_not_forced_by_payload(
+        self, mock_llm
+    ) -> None:
         """Приёмка 1: при корректном string-handoff payload уже object — нет повода для form-only mismatch."""
         mock_llm.return_value = _validator_json()
         ctx, state, digest = _ctx_state_digest()
@@ -413,7 +455,9 @@ class TestContentMismatchStillRejected:
 
 def test_turn_finish_handoff_schema_stays_string():
     """Non-goal спеки: схема `turn_finish.handoff` остаётся `type: string`, не nested object."""
-    handoff = SubmitSolution.tool_description()["parameters"]["properties"]["handoff"]
+    handoff = SubmitSolution.tool_description()["parameters"]["properties"][
+        "handoff"
+    ]
     assert handoff["type"] == "string"
 
 
@@ -433,7 +477,11 @@ def test_guard_prompt_string_vs_object_handoff_rule():
         or "string-encoded" in lower
         or "json string encoding an object" in lower
     )
-    assert "do not treat" in lower or "not treat" in lower or "do **not** treat" in lower
+    assert (
+        "do not treat" in lower
+        or "not treat" in lower
+        or "do **not** treat" in lower
+    )
     assert "decoded content" in lower or "content contradicts" in lower
 
 

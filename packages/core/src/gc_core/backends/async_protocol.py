@@ -27,7 +27,12 @@ class AsyncExecPort(Protocol):
     """Что нужно циклу от бэкенда, чтобы запускать команды не блокируя loop."""
 
     async def aexec(
-        self, command: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None, env: Optional[dict] = None
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
     ) -> ExecResult: ...
 
     async def aexec_raw(
@@ -53,7 +58,12 @@ class AsyncExecPort(Protocol):
     ) -> ExecResult: ...
 
     async def arun_python(
-        self, code: str, *, cwd: Optional[str] = None, timeout: Optional[int] = None, env: Optional[dict] = None
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
     ) -> ExecResult: ...
 
 
@@ -110,17 +120,24 @@ class SyncExecAdapter:
     async def _off_loop(fn: Any, *args: Any, **kwargs: Any) -> ExecResult:
         from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
-        return await run_abandonable_in(_EXEC_SLOTS, fn, *args, _thread_name="sync-exec", **kwargs)
+        return await run_abandonable_in(
+            _EXEC_SLOTS, fn, *args, _thread_name="sync-exec", **kwargs
+        )
 
 
 def aexec_port(backend: Any) -> AsyncExecPort:
     """Асинхронный порт для бэкенда: свой, если он есть, иначе адаптер."""
-    if all(callable(getattr(backend, name, None)) for name in ("aexec", "aexec_argv", "arun_python")):
+    if all(
+        callable(getattr(backend, name, None))
+        for name in ("aexec", "aexec_argv", "arun_python")
+    ):
         return backend
     return SyncExecAdapter(backend)
 
 
-async def arun_backend_exec_raw(backend: Any, command: str, **kwargs: Any) -> ExecResult:
+async def arun_backend_exec_raw(
+    backend: Any, command: str, **kwargs: Any
+) -> ExecResult:
     """Сырой POSIX-канал для ВНУТРЕННИХ вызывающих: пробы, grep, обход, MCP.
 
     Канал модели (``aexec``) может предварять команду инициализацией окружения
@@ -139,4 +156,9 @@ async def arun_backend_exec_raw(backend: Any, command: str, **kwargs: Any) -> Ex
     return await fn(command, **kwargs)
 
 
-__all__ = ["AsyncExecPort", "SyncExecAdapter", "aexec_port", "arun_backend_exec_raw"]
+__all__ = [
+    "AsyncExecPort",
+    "SyncExecAdapter",
+    "aexec_port",
+    "arun_backend_exec_raw",
+]

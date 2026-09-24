@@ -91,7 +91,9 @@ def test_flag_raised_during_judge_call_and_cleared_after_accept(monkeypatch):
         assert calls == [True]
         return _accept_validation()
 
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept)
+    monkeypatch.setattr(
+        intent_guard_guard, "avalidate_final_report_vs_user_intent", _accept
+    )
 
     from gc_core.processing_responses import arun_agent
 
@@ -118,7 +120,11 @@ def test_flag_not_raised_on_smart_skip(monkeypatch):
         judge_calls.append(1)
         return _accept_validation()
 
-    monkeypatch.setattr(intent_guard_guard, "avalidate_final_report_vs_user_intent", _should_not_run)
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _should_not_run,
+    )
 
     from gc_core.processing_responses import arun_agent
 
@@ -176,11 +182,15 @@ def test_flag_absent_when_callback_not_wired():
     from gc_core.intent_guard import guard as guard_mod
 
     orig = guard_mod.avalidate_final_report_vs_user_intent
-    guard_mod.avalidate_final_report_vs_user_intent = lambda **_kwargs: _accept_validation()
+    guard_mod.avalidate_final_report_vs_user_intent = lambda **_kwargs: (
+        _accept_validation()
+    )
     try:
         from gc_core.processing_responses import arun_agent
 
-        result = run_coro(arun_agent([_submit_solution_call()], _make_state(), _make_ctx()))
+        result = run_coro(
+            arun_agent([_submit_solution_call()], _make_state(), _make_ctx())
+        )
     finally:
         guard_mod.avalidate_final_report_vs_user_intent = orig
 

@@ -18,7 +18,9 @@ from gc_core.tools import (
 )
 
 
-def _tools_data(name: str, fabric, *, injected_fields=None, properties=None, required=None):
+def _tools_data(
+    name: str, fabric, *, injected_fields=None, properties=None, required=None
+):
     props = properties if properties is not None else {}
     req = required if required is not None else list(props.keys())
     return {
@@ -71,26 +73,40 @@ class TestFormatInternalToolErrorOutput:
             assert banned not in raw
 
     def test_omits_empty_tool_and_call_id(self):
-        payload = json.loads(format_internal_tool_error_output(tool_name="", exc=RuntimeError("x")))
+        payload = json.loads(
+            format_internal_tool_error_output(
+                tool_name="", exc=RuntimeError("x")
+            )
+        )
         assert "tool" not in payload
         assert "call_id" not in payload
         assert payload["message"] == "x"
         assert payload["exception_type"] == "RuntimeError"
 
     def test_empty_str_exc_falls_back_to_type_name(self):
-        payload = json.loads(format_internal_tool_error_output(tool_name="t", exc=RuntimeError()))
+        payload = json.loads(
+            format_internal_tool_error_output(
+                tool_name="t", exc=RuntimeError()
+            )
+        )
         assert payload["message"] == "RuntimeError"
 
     def test_message_truncated(self):
         long = "x" * 600
-        payload = json.loads(format_internal_tool_error_output(tool_name="t", exc=ValueError(long)))
+        payload = json.loads(
+            format_internal_tool_error_output(
+                tool_name="t", exc=ValueError(long)
+            )
+        )
         assert len(payload["message"]) == 500
         assert payload["message"].endswith("...")
 
 
 class TestIsInternalToolErrorOutput:
     def test_positive(self):
-        raw = format_internal_tool_error_output(tool_name="t", exc=TypeError("boom"))
+        raw = format_internal_tool_error_output(
+            tool_name="t", exc=TypeError("boom")
+        )
         assert is_internal_tool_error_output(raw) is True
         assert is_unknown_tool_output(raw) is False
 
@@ -112,7 +128,10 @@ class TestIsInternalToolErrorOutput:
                 json.dumps(
                     {
                         "ok": False,
-                        "error": {"type": "invalid_argument", "message": "bad"},
+                        "error": {
+                            "type": "invalid_argument",
+                            "message": "bad",
+                        },
                     }
                 )
             )
@@ -150,7 +169,9 @@ class TestApplyToolInternalError:
         with caplog.at_level(logging.ERROR, logger=logger.name):
             raw = await aapply_tool(
                 tool_name="fs_find_in_files",
-                arguments=json.dumps({"path": "/tmp/x", "pattern": "def test_"}),
+                arguments=json.dumps(
+                    {"path": "/tmp/x", "pattern": "def test_"}
+                ),
                 ctx=ctx,
                 call_id="b4zQxElPLq4I0jqTKnW5UeTWH5URyawf",
             )
@@ -169,7 +190,9 @@ class TestApplyToolInternalError:
         assert is_internal_tool_error_output(raw) is True
 
         assert any(
-            "apply_tool internal error" in rec.getMessage() and rec.exc_info is not None for rec in caplog.records
+            "apply_tool internal error" in rec.getMessage()
+            and rec.exc_info is not None
+            for rec in caplog.records
         )
 
     async def test_async_entry_gives_the_same_slim_envelope(self, caplog):
@@ -203,7 +226,9 @@ class TestApplyToolInternalError:
         with caplog.at_level(logging.ERROR, logger=logger.name):
             raw = await aapply_tool(
                 tool_name="fs_find_in_files",
-                arguments=json.dumps({"path": "/tmp/x", "pattern": "def test_"}),
+                arguments=json.dumps(
+                    {"path": "/tmp/x", "pattern": "def test_"}
+                ),
                 ctx=ctx,
                 call_id="b4zQxElPLq4I0jqTKnW5UeTWH5URyawf",
             )
@@ -219,7 +244,9 @@ class TestApplyToolInternalError:
         assert is_internal_tool_error_output(raw) is True
 
         assert any(
-            "apply_tool internal error" in rec.getMessage() and rec.exc_info is not None for rec in caplog.records
+            "apply_tool internal error" in rec.getMessage()
+            and rec.exc_info is not None
+            for rec in caplog.records
         )
 
     async def test_domain_ok_false_return_not_rewrapped(self):

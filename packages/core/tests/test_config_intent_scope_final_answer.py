@@ -12,10 +12,16 @@ def test_default_final_answer_threshold_is_2000():
 
 
 def test_final_answer_summary_prompt_path_default_none():
-    assert IntentScopeConfig().intent_scope_final_answer_summary_prompt_path is None
+    assert (
+        IntentScopeConfig().intent_scope_final_answer_summary_prompt_path
+        is None
+    )
 
 
 def test_normalize_fixes_nonpositive_threshold():
     cfg = IntentScopeConfig(max_final_answer_raw_chars=0)
     normalize_intent_scope_config(cfg)
-    assert cfg.max_final_answer_raw_chars == DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS
+    assert (
+        cfg.max_final_answer_raw_chars
+        == DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS
+    )

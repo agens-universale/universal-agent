@@ -92,13 +92,19 @@ class SubmitSolution(AbstractSimpleTool):
 
         if decision.outcome == "reject" and decision.validation is not None:
             validation = decision.validation
-            feedback = (decision.feedback_text or "").strip() or build_finish_gate_feedback(validation)
+            feedback = (
+                decision.feedback_text or ""
+            ).strip() or build_finish_gate_feedback(validation)
             payload["ok"] = False
             payload["status"] = "rejected_by_finish_gate"
             payload["message"] = feedback
-            payload["finish_gate"] = cls._finish_gate_block_from_validation(validation)
+            payload["finish_gate"] = cls._finish_gate_block_from_validation(
+                validation
+            )
         elif decision.validation is not None:
-            payload["finish_gate"] = cls._finish_gate_block_from_validation(decision.validation)
+            payload["finish_gate"] = cls._finish_gate_block_from_validation(
+                decision.validation
+            )
             if decision.outcome == "accept":
                 payload.setdefault("ok", True)
                 payload.setdefault("status", "submitted")
@@ -106,13 +112,19 @@ class SubmitSolution(AbstractSimpleTool):
                 payload["finish_gate"]["runtime_outcome"] = "fail_open_limit"
             elif decision.outcome == "fail_open_error":
                 payload["finish_gate"]["runtime_outcome"] = "fail_open_error"
-        elif decision.outcome in ("fail_open_limit", "fail_open_error", "skipped"):
+        elif decision.outcome in (
+            "fail_open_limit",
+            "fail_open_error",
+            "skipped",
+        ):
             payload["finish_gate"] = {"runtime_outcome": decision.outcome}
 
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_finish",
@@ -153,7 +165,9 @@ class SubmitSolution(AbstractSimpleTool):
                     },
                     "comment": {
                         "type": "string",
-                        "description": ("Caveats, risks, unresolved items, or suggested next steps for the user."),
+                        "description": (
+                            "Caveats, risks, unresolved items, or suggested next steps for the user."
+                        ),
                     },
                     "handoff": {
                         "type": "string",
@@ -165,14 +179,21 @@ class SubmitSolution(AbstractSimpleTool):
                         ),
                     },
                 },
-                "required": ["solution_type", "task", "task_report", "handoff"],
+                "required": [
+                    "solution_type",
+                    "task",
+                    "task_report",
+                    "handoff",
+                ],
                 "additionalProperties": False,
             },
             "strict": True,
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return (
             """Tool name: turn_finish
 Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.
@@ -253,7 +274,9 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
             **kwargs,
         )
 
-    @parse_json_object_argument(source_arg="handoff", target_arg="handoff_data")
+    @parse_json_object_argument(
+        source_arg="handoff", target_arg="handoff_data"
+    )
     def _submit(
         self,
         solution_type: str,
@@ -328,7 +351,9 @@ Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rej
                 error={
                     "type": "limit_exceeded",
                     "field": "task_report",
-                    "message": (f"task_report exceeds {TASK_REPORT_MAX_CHARS} chars, got {report_len}"),
+                    "message": (
+                        f"task_report exceeds {TASK_REPORT_MAX_CHARS} chars, got {report_len}"
+                    ),
                 },
             )
 

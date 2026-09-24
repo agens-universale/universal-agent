@@ -14,7 +14,9 @@ def _parse_updated_at(value: str, now: datetime) -> Optional[datetime]:
         dt = datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
-    if dt.tzinfo is None:  # naive → считаем локальной зоной (как cleanup-скрипт)
+    if (
+        dt.tzinfo is None
+    ):  # naive → считаем локальной зоной (как cleanup-скрипт)
         dt = dt.replace(tzinfo=now.tzinfo)
     return dt
 

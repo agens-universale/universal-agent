@@ -12,10 +12,17 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import gc_paths, project_slug
-from gc_core.config_modules.project_memory import project_memory_limits_from_config_dict
+from gc_core.config_modules.project_memory import (
+    project_memory_limits_from_config_dict,
+)
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
-from gc_core.message_policy.project_memory_notice.policy import touch_project_memory_baseline
+from gc_core.loop_detector.constants import (
+    GENERIC_PROFILE,
+    loop_warn_on_repeat,
+)
+from gc_core.message_policy.project_memory_notice.policy import (
+    touch_project_memory_baseline,
+)
 from gc_core.project_memory import compaction, storage
 from gc_core.project_memory.status import fill_percent
 from gc_core.project_memory.storage import ProjectMemoryError
@@ -35,9 +42,7 @@ def backup_path(*, cwd: str | None = None) -> Path:
 
 _FILE_NAME = "project_memory.md"
 
-_READ_EMPTY_HINT = (
-    "long memory is empty. Use action=write to seed it with important facts you want to remember across sessions."
-)
+_READ_EMPTY_HINT = "long memory is empty. Use action=write to seed it with important facts you want to remember across sessions."
 _AUTO_COMPACTION_HINT = "Memory was compacted to fit the limit. Call action=read if you want to see what was kept."
 _HIGH_FILL_THRESHOLD_PERCENT = 70
 _HIGH_FILL_HINT = (
@@ -52,12 +57,16 @@ _HIGH_FILL_HINT = (
 class ProjectMemory(AbstractSimpleTool):
     tool_name = PROJECT_MEMORY_TOOL_NAME
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
         gc_dir: Optional[Path] = getattr(ctx, "project_gc_dir", None)
-        self._path: Optional[Path] = (Path(gc_dir) / _FILE_NAME) if gc_dir else None
+        self._path: Optional[Path] = (
+            (Path(gc_dir) / _FILE_NAME) if gc_dir else None
+        )
         # Backup path: mirrors primary outside the project tree so it survives rm -rf .gc.
         # cwd is the parent of .gc (project root).
         if gc_dir is not None:
@@ -65,12 +74,16 @@ class ProjectMemory(AbstractSimpleTool):
             self._backup: Optional[Path] = backup_path(cwd=cwd)
         else:
             self._backup = None
-        limits = project_memory_limits_from_config_dict(getattr(ctx, "config_dict", None) if ctx is not None else None)
+        limits = project_memory_limits_from_config_dict(
+            getattr(ctx, "config_dict", None) if ctx is not None else None
+        )
         self._max_chars = limits["max_chars"]
         self._max_append_chars = limits["max_append_chars"]
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "project_memory",
@@ -111,7 +124,9 @@ class ProjectMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.
@@ -159,11 +174,16 @@ Return format (JSON string):
         return info.chars if info.exists else 0
 
     def _high_fill_hint(self, length: int) -> Optional[str]:
-        if fill_percent(length, self._max_chars) > _HIGH_FILL_THRESHOLD_PERCENT:
+        if (
+            fill_percent(length, self._max_chars)
+            > _HIGH_FILL_THRESHOLD_PERCENT
+        ):
             return _HIGH_FILL_HINT
         return None
 
-    def _resolve_hint(self, length: int, hint: Optional[str] = None) -> Optional[str]:
+    def _resolve_hint(
+        self, length: int, hint: Optional[str] = None
+    ) -> Optional[str]:
         hints = [part for part in (hint, self._high_fill_hint(length)) if part]
         return "\n\n".join(hints) if hints else None
 
@@ -209,7 +229,9 @@ Return format (JSON string):
             payload["hint"] = resolved_hint
         return json.dumps(payload, ensure_ascii=False)
 
-    async def acall(self, action: str, content: str = "", **kwargs: Any) -> str:
+    async def acall(
+        self, action: str, content: str = "", **kwargs: Any
+    ) -> str:
         """Инлайн на loop: нативного async у файлов нет (docs/async.md).
 
         Файловые ветки исполняются прямо здесь — оборачивать нечего. Отличается
@@ -272,7 +294,10 @@ Return format (JSON string):
         early, combined = self._append_prepare(content)
         if early is not None:
             return early
-        return self._append_finish(combined, await compaction.acompact_text(combined, self._ctx, self._state))
+        return self._append_finish(
+            combined,
+            await compaction.acompact_text(combined, self._ctx, self._state),
+        )
 
     def _append_prepare(self, content: str) -> tuple[Optional[str], str]:
         """``(готовый ответ, текст для компакции)`` — ровно одно из двух значимо.
@@ -301,14 +326,27 @@ Return format (JSON string):
             ), ""
         existing = storage.read(self._path, backup=self._backup)
         existing_stripped = existing.strip()
-        combined = f"{existing_stripped}\n\n{delta_stripped}" if existing_stripped else delta_stripped
+        combined = (
+            f"{existing_stripped}\n\n{delta_stripped}"
+            if existing_stripped
+            else delta_stripped
+        )
         if len(combined) <= self._max_chars:
             try:
-                info = storage.append(self._path, delta_stripped, max_chars=self._max_chars, backup=self._backup)
+                info = storage.append(
+                    self._path,
+                    delta_stripped,
+                    max_chars=self._max_chars,
+                    backup=self._backup,
+                )
             except ProjectMemoryError as e:
-                return self._err(action="append", error_type=e.code, message=e.message), ""
+                return self._err(
+                    action="append", error_type=e.code, message=e.message
+                ), ""
             self._sync_baseline_after_mutation()
-            return self._ok(action="append", length=info.chars, lines=info.lines), ""
+            return self._ok(
+                action="append", length=info.chars, lines=info.lines
+            ), ""
         # Overflow path: compact existing + delta together; LLM decides what to keep.
         return None, combined
 
@@ -327,9 +365,16 @@ Return format (JSON string):
                 message="content too large even after compaction.",
             )
         try:
-            info = storage.write(self._path, result.text, max_chars=self._max_chars, backup=self._backup)
+            info = storage.write(
+                self._path,
+                result.text,
+                max_chars=self._max_chars,
+                backup=self._backup,
+            )
         except ProjectMemoryError as e:
-            return self._err(action="append", error_type=e.code, message=e.message)
+            return self._err(
+                action="append", error_type=e.code, message=e.message
+            )
         self._sync_baseline_after_mutation()
         return self._ok(
             action="append",
@@ -361,9 +406,16 @@ Return format (JSON string):
                 ),
             )
         try:
-            info = storage.write(self._path, text_stripped, max_chars=self._max_chars, backup=self._backup)
+            info = storage.write(
+                self._path,
+                text_stripped,
+                max_chars=self._max_chars,
+                backup=self._backup,
+            )
         except ProjectMemoryError as e:
-            return self._err(action="write", error_type=e.code, message=e.message)
+            return self._err(
+                action="write", error_type=e.code, message=e.message
+            )
         self._sync_baseline_after_mutation()
         return self._ok(action="write", length=info.chars, lines=info.lines)
 

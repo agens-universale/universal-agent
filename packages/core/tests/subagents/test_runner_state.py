@@ -9,7 +9,9 @@ from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state(**overrides):
-    shared = overrides.pop("shared", SharedStateData(working_memory={"state": "test"}))
+    shared = overrides.pop(
+        "shared", SharedStateData(working_memory={"state": "test"})
+    )
     state = State(
         verbose=False,
         model="test-model",
@@ -91,9 +93,13 @@ class TestBuildChildState:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("test role")
-        child_tool_names = {t.get("name") for t in child.tools if isinstance(t, dict)}
+        child_tool_names = {
+            t.get("name") for t in child.tools if isinstance(t, dict)
+        }
         for name in child_tool_names:
-            assert not is_subagent_tool(name), f"Subagent tool {name} should NOT be in child state tools"
+            assert not is_subagent_tool(name), (
+                f"Subagent tool {name} should NOT be in child state tools"
+            )
 
     @pytest.mark.asyncio
     async def test_backend_api_mode_is_chat_completions(self):

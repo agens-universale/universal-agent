@@ -103,10 +103,14 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._event_no = event_no
         self._result: Optional[str] = None
         self._is_error: bool = False
-        self._interrupted: bool = False  # терминальное «прервано» (стоп/обрыв run)
+        self._interrupted: bool = (
+            False  # терминальное «прервано» (стоп/обрыв run)
+        )
         self._waiting: bool = bool(waiting)
         self._nested: bool = bool(nested)
-        self._live_status: Optional[str] = None  # step/last для корневого субагента
+        self._live_status: Optional[str] = (
+            None  # step/last для корневого субагента
+        )
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
@@ -123,7 +127,9 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def compose(self) -> ComposeResult:
         with Horizontal():
-            self._prefix_static = Static(self._render_prefix(), classes="trace-prefix", markup=False)
+            self._prefix_static = Static(
+                self._render_prefix(), classes="trace-prefix", markup=False
+            )
             yield self._prefix_static
             self._content_static = Static(
                 self._render_content(),
@@ -208,7 +214,12 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def pause(self) -> None:
         """Заморозить elapsed на человеко-ожидании. Waiting/done — no-op."""
-        if self._paused_at is None and self._result is None and not self._interrupted and not self._waiting:
+        if (
+            self._paused_at is None
+            and self._result is None
+            and not self._interrupted
+            and not self._waiting
+        ):
             self._paused_at = time.monotonic()
 
     def resume(self) -> None:
@@ -217,7 +228,11 @@ class ToolCallRow(ClickModelMixin, Widget):
             self._paused_at = None
 
     def _elapsed_s(self) -> int:
-        now = self._paused_at if self._paused_at is not None else time.monotonic()
+        now = (
+            self._paused_at
+            if self._paused_at is not None
+            else time.monotonic()
+        )
         return int(now - self._start_monotonic - self._paused_total)
 
     def _status_glyph(self) -> tuple[str, str]:
@@ -255,7 +270,9 @@ class ToolCallRow(ClickModelMixin, Widget):
                 text.append(f"· {self._live_status} · ", style=_DIM)
                 text.append(format_duration(self._elapsed_s()), style=_RUN)
             else:
-                text.append(f"· {format_duration(self._elapsed_s())}", style=_RUN)
+                text.append(
+                    f"· {format_duration(self._elapsed_s())}", style=_RUN
+                )
             return text
         text.append(")", style=_DIM)
         if self._is_error or self._result:

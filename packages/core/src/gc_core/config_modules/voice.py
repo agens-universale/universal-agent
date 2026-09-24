@@ -15,7 +15,9 @@ class VoiceConfig(BaseModel):
     # значение, не ломая конфиги, где оно уже прописано.
     provider: Literal["openai"] = "openai"
     url: str = ""  # полный endpoint /v1/audio/transcriptions
-    token: str = ""  # Bearer; локальному сервису и открытым endpoint'ам не нужен
+    token: str = (
+        ""  # Bearer; локальному сервису и открытым endpoint'ам не нужен
+    )
     model: str = "whisper-1"
     language: str = "ru"
     max_seconds: int = 120  # предохранитель: авто-стоп записи
@@ -37,7 +39,9 @@ def voice_enabled(voice: dict) -> bool:
     return bool(voice.get("url"))
 
 
-def overridden_user_voice(user_voice: Optional[dict], managed_url: str) -> Optional[str]:
+def overridden_user_voice(
+    user_voice: Optional[dict], managed_url: str
+) -> Optional[str]:
     """Юзерская voice-секция, которую перекрывает managed-слой, или None.
 
     Единственный владелец правила на всех, кто об этом перекрытии сообщает: установка

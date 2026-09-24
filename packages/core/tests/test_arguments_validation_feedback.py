@@ -6,7 +6,9 @@ def test_anyof_object_shown_as_object_not_any():
         "parameters": {
             "type": "object",
             "properties": {
-                "attributes": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+                "attributes": {
+                    "anyOf": [{"type": "object"}, {"type": "null"}]
+                },
             },
             "required": [],
             "additionalProperties": False,

@@ -107,7 +107,11 @@ async def test_the_gate_would_catch_a_regression(monkeypatch):
 
     payload = json.loads(json.dumps(_INIT_PAYLOAD))
     payload["params"]["capabilities"] = {"roots": {"listChanged": True}}
-    monkeypatch.setitem(transport_mod._INIT_PAYLOAD["params"], "capabilities", payload["params"]["capabilities"])
+    monkeypatch.setitem(
+        transport_mod._INIT_PAYLOAD["params"],
+        "capabilities",
+        payload["params"]["capabilities"],
+    )
 
     request = aget_transport(_stdio_cfg())
     started = time.monotonic()
@@ -140,7 +144,9 @@ async def test_unsolicited_notification_is_not_mistaken_for_the_answer():
     request = aget_transport(_stdio_cfg(CHATTY="1"))
     _headers, body = await request("", {}, dict(_INIT_PAYLOAD), 30.0)
 
-    assert body.get("method") != "notifications/message", "уведомление сервера принято за ответ на initialize"
+    assert body.get("method") != "notifications/message", (
+        "уведомление сервера принято за ответ на initialize"
+    )
     assert body.get("result"), f"настоящий ответ не прочитан: {body!r}"
     assert body.get("id") == _INIT_PAYLOAD["id"], "ответ с чужим id"
 
@@ -162,9 +168,18 @@ def test_response_to_a_foreign_id_is_skipped():
 
     proc = _Proc(
         [
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/message"}).encode() + b"\n",
-            json.dumps({"jsonrpc": "2.0", "id": 77, "result": {"чужое": True}}).encode() + b"\n",
-            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"наше": True}}).encode() + b"\n",
+            json.dumps(
+                {"jsonrpc": "2.0", "method": "notifications/message"}
+            ).encode()
+            + b"\n",
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 77, "result": {"чужое": True}}
+            ).encode()
+            + b"\n",
+            json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "result": {"наше": True}}
+            ).encode()
+            + b"\n",
         ]
     )
     got = asyncio.run(_aread_response(proc, 5.0, 1))
@@ -191,7 +206,9 @@ async def test_closing_does_not_touch_a_neighbours_session():
     закрытие из нашей задачи отменило бы его anyio-scope. Ошибка при этом
     вылезает не там, где сделана.
     """
-    from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
+    from gc_core.tools.connect_mcp.stream_client import (
+        _PersistentSessionManager,
+    )
 
     registry = _PersistentSessionManager()
     mine, theirs = _FakeStack(), _FakeStack()
@@ -220,7 +237,9 @@ async def test_sessions_of_different_owners_do_not_collide():
     Без токена владельца оба агента получили бы одну сессию, и закрытие одним
     рвало бы работу второго.
     """
-    from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
+    from gc_core.tools.connect_mcp.stream_client import (
+        _PersistentSessionManager,
+    )
 
     registry = _PersistentSessionManager()
     first, second = object(), object()
@@ -271,7 +290,9 @@ def test_missing_transport_is_rejected():
         aget_transport({})
 
 
-async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch):
+async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(
+    monkeypatch,
+):
     """Дискавери без готового реестра не должна морозить loop вызывающего.
 
     ``acall_mcp_tool(tools_registry=None)`` шёл в синхронный ``get_all_tools``,
@@ -295,7 +316,9 @@ async def test_acall_mcp_tool_does_not_freeze_the_loop_on_discovery(monkeypatch)
     monkeypatch.setattr(mcp_registry.ToolsCache, "aget_tools", _slow_discovery)
 
     for name in ("get_all_tools", "_build_tools_registry"):
-        assert not hasattr(mcp_registry, name), f"{name} вернулся в реестр — это синхронный вход в дискавери"
+        assert not hasattr(mcp_registry, name), (
+            f"{name} вернулся в реестр — это синхронный вход в дискавери"
+        )
     assert not hasattr(mcp_api, "get_all_tools")
 
     ticks = 0

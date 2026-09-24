@@ -18,7 +18,10 @@ async def test_url_prefilled_token_empty():
     """Адрес предзаполнен сырым значением; поле токена пустое (секрет не заезжает)."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://old/v1/chat/completions", auth_header="Bearer sk-SECRET")
+    ed = ConnectionEditor(
+        url_current="http://old/v1/chat/completions",
+        auth_header="Bearer sk-SECRET",
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -59,11 +62,15 @@ async def test_submit_valid_pair():
     """Валидный адрес + токен (галка ○, нет активной авторизации) → (url, header, None)."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://old/v1/chat/completions", auth_header=None)
+    ed = ConnectionEditor(
+        url_current="http://old/v1/chat/completions", auth_header=None
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
-        ed.query_one("#conn-url", Input).value = "https://new/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://new/v1/chat/completions"
         ed.move(1)  # курсор → токен
         await pilot.pause()
         ed.query_one("#conn-token", Input).value = "sk-NEW"
@@ -78,7 +85,9 @@ async def test_bearer_selected_without_token_asks_for_token():
     введён → submit просит «введите токен», а не молчит «ничего не изменено»."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1", auth_header="")  # действует «без авторизации»
+    ed = ConnectionEditor(
+        url_current="http://h/v1", auth_header=""
+    )  # действует «без авторизации»
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -95,7 +104,9 @@ async def test_bearer_active_empty_field_is_noop():
     не меняет (не ошибка): действующий токен остаётся."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1", auth_header="Bearer sk-OLD")
+    ed = ConnectionEditor(
+        url_current="http://h/v1", auth_header="Bearer sk-OLD"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -109,7 +120,9 @@ async def test_no_auth_toggle_writes_empty_header():
     """Действовал Bearer; галку включили (Space, ●) → submit снимает авторизацию."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1", auth_header="Bearer sk-OLD")
+    ed = ConnectionEditor(
+        url_current="http://h/v1", auth_header="Bearer sk-OLD"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -151,7 +164,9 @@ async def test_navigation_past_galka_does_not_toggle():
     секцию «изменено» — переключение только явным toggle_no_auth()/Space."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://old/v1", auth_header="Bearer x")  # действует Bearer, галка ○
+    ed = ConnectionEditor(
+        url_current="http://old/v1", auth_header="Bearer x"
+    )  # действует Bearer, галка ○
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -179,12 +194,16 @@ async def test_return_to_address_clears_the_checkbox_ghost():
         ed.move(1)
         ed.move(1)  # курсор ушёл на галку
         await pilot.pause()
-        assert ed.query_one("#conn-noauth", Static).has_class("selected")  # предусловие
+        assert ed.query_one("#conn-noauth", Static).has_class(
+            "selected"
+        )  # предусловие
         ed.move(-1)
         ed.move(-1)  # и вернулся на адрес
         await pilot.pause()
         assert not ed.query_one("#conn-noauth", Static).has_class("selected")
-        assert ed.query_one("#conn-url", Input).has_focus  # фокус вернулся на адрес
+        assert ed.query_one(
+            "#conn-url", Input
+        ).has_focus  # фокус вернулся на адрес
 
 
 async def test_token_field_placeholder_shows_masked_current():
@@ -192,13 +211,17 @@ async def test_token_field_placeholder_shows_masked_current():
     но НЕ заезжает в значение — секретная безопасность сохранена."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1", auth_header="Bearer sk-SECRETVALUE")
+    ed = ConnectionEditor(
+        url_current="http://h/v1", auth_header="Bearer sk-SECRETVALUE"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
         tok = ed.query_one("#conn-token", Input)
         assert tok.value == ""  # значение пустое — секрет не заезжает
-        assert "SECRETVALUE" not in tok.placeholder  # чувствительная часть под маской
+        assert (
+            "SECRETVALUE" not in tok.placeholder
+        )  # чувствительная часть под маской
         assert "***" in tok.placeholder  # но поле визуально не пустое
 
 
@@ -237,7 +260,9 @@ async def test_toggle_no_auth_freezes_token_input_empty():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
-        ed.query_one("#conn-token", Input).value = "typed"  # введённое очищается при ●
+        ed.query_one(
+            "#conn-token", Input
+        ).value = "typed"  # введённое очищается при ●
         ed.move(1)
         ed.move(1)  # курсор → галка
         assert ed.toggle_no_auth() is True
@@ -276,7 +301,10 @@ async def test_create_mode_has_no_galka_and_create_hint():
         await pilot.pause()
         assert not ed.query(".onb-option")  # ни одной галки/опции
         ph = ed.query_one("#conn-token", Input).placeholder
-        assert ph == "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
+        assert (
+            ph
+            == "если не указать — запрос пойдёт без токена (подходит, если сервер его не требует)"
+        )
         ed.move(1)
         ed.move(1)  # url -> token -> proxy (3 позиции)
         await pilot.pause()
@@ -301,15 +329,25 @@ async def test_create_mode_empty_token_submits_without_header():
 async def test_create_mode_empty_url_shows_variant_preset_hint():
     """Minor-6: онбординг (create_mode, поле адреса пустое) — первичный хинт
     пресет-листа отличается от канонного settings-варианта (спека §2.1)."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="", auth_header=None, create_mode=True, presets=default_endpoint_presets())
+    ed = ConnectionEditor(
+        url_current="",
+        auth_header=None,
+        create_mode=True,
+        presets=default_endpoint_presets(),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
         status = str(ed.query_one(".conn-url-preset-hint").render())
-        assert status == "выберите провайдера или впишите свой адрес · Enter — подставить"
+        assert (
+            status
+            == "выберите провайдера или впишите свой адрес · Enter — подставить"
+        )
 
 
 async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
@@ -318,7 +356,9 @@ async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
     Непустой адрес — любой, хоть совпавший с пресетом — список не поднимает, и строка
     называет способ вызвать его вручную. Раскрыли явно (`Alt+↓`) — строка становится
     канонной подсказкой списка."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(
@@ -329,12 +369,18 @@ async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert str(ed.query_one(".conn-url-preset-hint").render()) == "Alt+↓ — показать список"
+        assert (
+            str(ed.query_one(".conn-url-preset-hint").render())
+            == "Alt+↓ — показать список"
+        )
 
         ed.reload_presets()  # Alt+↓
         await pilot.pause()
         status = str(ed.query_one(".conn-url-preset-hint").render())
-        assert status == "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
+        assert (
+            status
+            == "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
+        )
 
 
 async def test_no_match_collapses_the_list_and_says_so():
@@ -347,20 +393,29 @@ async def test_no_match_collapses_the_list_and_says_so():
     пустого поля список висел раскрытым, с заполненного — не поднимался вовсе. Канон
     в редакции 2026-08-18: раскрыт, пока значение складывается И есть из чего
     выбирать."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="", auth_header=None, presets=default_endpoint_presets())
+    ed = ConnectionEditor(
+        url_current="", auth_header=None, presets=default_endpoint_presets()
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
         assert ed.presets_open  # пустое поле — подходит всё
 
-        ed.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://my-own-host.internal/v1"
         await pilot.pause()
 
         assert not ed.presets_open
-        assert _hint_under_address(ed) == "в списке такого нет · Alt+↓ — показать список"
+        assert (
+            _hint_under_address(ed)
+            == "в списке такого нет · Alt+↓ — показать список"
+        )
 
         # Стрелка — обычная навигация формы, список её не забирает.
         ed.move(1)
@@ -368,19 +423,29 @@ async def test_no_match_collapses_the_list_and_says_so():
         assert ed.query_one("#conn-token", Input).has_focus
         # Набранное осталось: пресет-лист адреса печать не откатывает
         # (`restore_on_close=False`) — она тут ввод своего значения, а не фильтр.
-        assert ed.query_one("#conn-url", Input).value == "https://my-own-host.internal/v1"
+        assert (
+            ed.query_one("#conn-url", Input).value
+            == "https://my-own-host.internal/v1"
+        )
         # Набранное осталось в поле: пресет-лист адреса печать не откатывает
         # (`restore_on_close=False`) — она тут ввод своего значения, а не фильтр.
-        assert ed.query_one("#conn-url", Input).value == "https://my-own-host.internal/v1"
+        assert (
+            ed.query_one("#conn-url", Input).value
+            == "https://my-own-host.internal/v1"
+        )
 
 
 async def test_arrow_keeps_walking_the_preset_list_while_it_has_rows():
     """Пока в списке есть что выбирать, стрелка — его: курсор формы остаётся на
     адресе до Enter/Esc (модальность списка, канон §4.2.2)."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="", auth_header=None, presets=default_endpoint_presets())
+    ed = ConnectionEditor(
+        url_current="", auth_header=None, presets=default_endpoint_presets()
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -420,11 +485,15 @@ async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():
     прилетающий `Input.Changed` уходит в `apply_filter`, где это no-op; к моменту
     `Alt+↓` список открывается с пустым фильтром. Тест остаётся проверкой того, что
     форсированное раскрытие даёт ПОЛНЫЙ список с подсветкой совпавшего пресета."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     presets = default_endpoint_presets()
-    ed = ConnectionEditor(url_current=presets[1].url, auth_header=None, presets=presets)
+    ed = ConnectionEditor(
+        url_current=presets[1].url, auth_header=None, presets=presets
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -432,8 +501,12 @@ async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():
         ed.reload_presets()  # Alt+↓ — раскрыть поверх значения
         await pilot.pause()
         visible = [w for w in ed.query(".conn-preset-row") if w.display]
-        assert len(visible) == len(presets), f"список раскрылся суженным: {[str(w.render()) for w in visible]}"
-        assert str(visible[1].render()).startswith("▸ "), "▸ не на совпавшем пресете"
+        assert len(visible) == len(presets), (
+            f"список раскрылся суженным: {[str(w.render()) for w in visible]}"
+        )
+        assert str(visible[1].render()).startswith("▸ "), (
+            "▸ не на совпавшем пресете"
+        )
         # Печать поверх — уже настоящий фильтр, а не «значение поля».
         ed.query_one("#conn-url", Input).value = presets[0].name.lower()
         await pilot.pause()
@@ -453,10 +526,14 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
     (мутация на ревью 2026-08-18 проходит). Проверяется полнота списка на боевом пути
     раскрытия секции."""
     from form_harness import settings_connection
-    from gc_core.config_modules.endpoint_presets import DEFAULT_ENDPOINT_PRESETS
+    from gc_core.config_modules.endpoint_presets import (
+        DEFAULT_ENDPOINT_PRESETS,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
-    async with settings_connection(tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url) as (pilot, scr):
+    async with settings_connection(
+        tmp_path, url=DEFAULT_ENDPOINT_PRESETS[1].url
+    ) as (pilot, scr):
         ed = scr.query_one(ConnectionEditor)
         ed.reload_presets()  # Alt+↓
         await pilot.pause()
@@ -465,7 +542,9 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
         assert len(visible) == len(DEFAULT_ENDPOINT_PRESETS), (
             f"список раскрылся суженным: {[str(w.render()) for w in visible]}"
         )
-        assert str(visible[1].render()).startswith("▸ "), "▸ не на совпавшем пресете"
+        assert str(visible[1].render()).startswith("▸ "), (
+            "▸ не на совпавшем пресете"
+        )
 
 
 # --- Ctrl+U: очистка сохранённого токена ---------------------------------------
@@ -480,7 +559,9 @@ async def test_clear_token_marks_saved_for_removal():
     сообщает, что сохранённый токен будет удалён."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old")
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -500,7 +581,9 @@ async def test_clear_token_is_a_noop_without_saved_token():
     """Стирать нечего — клавиша не наша, пусть её обработает кто-то ещё."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header=None)
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header=None
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -514,7 +597,9 @@ async def test_clear_token_is_a_noop_off_the_token_field():
     строку). Иначе сохранённый токен помечается к удалению незаметно."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old")
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -528,7 +613,9 @@ async def test_typing_a_token_cancels_the_clear():
     иначе набранное молча не сохранилось бы."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old")
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -544,7 +631,9 @@ async def test_cleared_token_is_saved_as_empty_header():
     галки «без авторизации», но без переключения режима."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old")
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -557,7 +646,11 @@ async def test_cleared_token_is_saved_as_empty_header():
 
 def _hint_under_address(ed) -> str:
     """Текст живой строки-подсказки под полем адреса («» — строки нет)."""
-    live = [w for w in ed.query(Static) if "conn-url-preset-hint" in " ".join(w.classes) and not w._pruning]
+    live = [
+        w
+        for w in ed.query(Static)
+        if "conn-url-preset-hint" in " ".join(w.classes) and not w._pruning
+    ]
     return str(live[-1].render()) if live else ""
 
 
@@ -568,11 +661,15 @@ async def test_hint_stays_when_cursor_leaves_the_address():
     ловит мельтешение там, где ничего не произошло. `Alt+↓` под свёрнутым списком —
     ярлык способа, а не команда момента, как `Space — переключить` у галки, которая
     тоже работает только со своей позиции. Что нажимать сейчас, отвечает футер."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(
-        url_current="https://own-host/v1/chat/completions", auth_header="Bearer x", presets=default_endpoint_presets()
+        url_current="https://own-host/v1/chat/completions",
+        auth_header="Bearer x",
+        presets=default_endpoint_presets(),
     )
     app = _harness(ed)
     async with app.run_test() as pilot:
@@ -591,13 +688,17 @@ async def test_canon_table_of_list_states():
 
     Врозь эти проверки дают ложное спокойствие: исходный дефект был ровно в том, что
     два состояния из пяти выпадали, а каждое по отдельности выглядело правильным."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     presets = default_endpoint_presets()
 
     # 1. пусто → раскрыт, строка — подсказка списка
-    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
+    ed = ConnectionEditor(
+        url_current="", auth_header="Bearer x", presets=presets
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -606,7 +707,9 @@ async def test_canon_table_of_list_states():
 
     # 2-4. пресетный и свой ведут себя ОДИНАКОВО — в этом и суть канона
     for url in (presets[0].url, "https://own-host/v1/chat/completions"):
-        ed = ConnectionEditor(url_current=url, auth_header="Bearer x", presets=presets)
+        ed = ConnectionEditor(
+            url_current=url, auth_header="Bearer x", presets=presets
+        )
         async with _harness(ed).run_test() as pilot:
             await pilot.pause()
             await pilot.pause()
@@ -614,11 +717,18 @@ async def test_canon_table_of_list_states():
             assert "показать список" in _hint_under_address(ed), url
             ed.move(1)
             await pilot.pause()
-            assert ed._positions[ed._idx] == "conn-token", url  # ↓ уводит с адреса
+            assert ed._positions[ed._idx] == "conn-token", (
+                url
+            )  # ↓ уводит с адреса
 
     # 6-7. Alt+↓ поверх значения: своё — без подсветки, пресетное — с подсветкой
-    for url, selected in (("https://own-host/v1/chat/completions", False), (presets[0].url, True)):
-        ed = ConnectionEditor(url_current=url, auth_header="Bearer x", presets=presets)
+    for url, selected in (
+        ("https://own-host/v1/chat/completions", False),
+        (presets[0].url, True),
+    ):
+        ed = ConnectionEditor(
+            url_current=url, auth_header="Bearer x", presets=presets
+        )
         async with _harness(ed).run_test() as pilot:
             await pilot.pause()
             await pilot.pause()
@@ -628,7 +738,9 @@ async def test_canon_table_of_list_states():
             assert ed._presets_ctrl.has_selection is selected, url
 
     # 9. адрес-ссылка ${ENV:...} — непустое значение, ведёт себя как свой адрес
-    ed = ConnectionEditor(url_current="${ENV:GC_URL}", auth_header="Bearer x", presets=presets)
+    ed = ConnectionEditor(
+        url_current="${ENV:GC_URL}", auth_header="Bearer x", presets=presets
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -643,7 +755,9 @@ async def test_canon_table_of_list_states():
         assert not ed._presets_ctrl.is_open
 
     # 11. Esc при заполненном адресе списку не адресован — хозяин обработает сам
-    ed = ConnectionEditor(url_current=presets[0].url, auth_header="Bearer x", presets=presets)
+    ed = ConnectionEditor(
+        url_current=presets[0].url, auth_header="Bearer x", presets=presets
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -656,12 +770,16 @@ async def test_hint_survives_pick_and_zero_filter():
 
     Именно эти два состояния выпадали из первой редакции правки — их нашло независимое
     ревью, замерив таблицу вместо того, чтобы поверить описанию."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     presets = default_endpoint_presets()
 
-    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
+    ed = ConnectionEditor(
+        url_current="", auth_header="Bearer x", presets=presets
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -671,11 +789,15 @@ async def test_hint_survives_pick_and_zero_filter():
         assert not ed._presets_ctrl.is_open
         assert "показать список" in _hint_under_address(ed)
 
-    ed = ConnectionEditor(url_current="", auth_header="Bearer x", presets=presets)
+    ed = ConnectionEditor(
+        url_current="", auth_header="Bearer x", presets=presets
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
-        ed.query_one("#conn-url", Input).value = "https://nothing-matches-this/v1"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://nothing-matches-this/v1"
         await pilot.pause()
         ed.move(1)  # фильтр в ноль → ↓ сворачивает
         await pilot.pause()
@@ -691,11 +813,15 @@ async def test_clearing_the_address_reopens_the_list():
     свёрнутый список до ухода-возврата или Alt+↓ (живой смок 2026-08-18). Юнит-тесты
     этого не видели структурно: все конструировали редактор с готовым значением,
     а не редактировали поле."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(
-        url_current="https://own-host/v1/chat/completions", auth_header="Bearer x", presets=default_endpoint_presets()
+        url_current="https://own-host/v1/chat/completions",
+        auth_header="Bearer x",
+        presets=default_endpoint_presets(),
     )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
@@ -707,7 +833,9 @@ async def test_clearing_the_address_reopens_the_list():
 
         assert ed._presets_ctrl.is_open
         rows = [w for w in ed.query(".conn-preset-row") if w.display]
-        assert len(rows) == len(default_endpoint_presets())  # весь список, не сужен
+        assert len(rows) == len(
+            default_endpoint_presets()
+        )  # весь список, не сужен
 
 
 async def test_editing_the_address_reopens_the_list_as_a_filter():
@@ -722,11 +850,15 @@ async def test_editing_the_address_reopens_the_list_as_a_filter():
     Правильная формулировка — над ПРОЦЕССОМ: список раскрыт, пока значение
     складывается (пусто ИЛИ человек прямо сейчас правит поле), и свёрнут, когда оно
     сложилось (вошли с готовым значением и не трогаем)."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     presets = default_endpoint_presets()
-    ed = ConnectionEditor(url_current=presets[1].url, auth_header="Bearer x", presets=presets)
+    ed = ConnectionEditor(
+        url_current=presets[1].url, auth_header="Bearer x", presets=presets
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
@@ -746,16 +878,22 @@ async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():
     """Набран свой адрес — совпадений нет, и раскрытый фильтром список не имеет права
     запереть ↑/↓ на поле: ходить по нему нечем. Стрелка уводит курсор дальше по форме,
     список сворачивается сам (контракт `FieldListController.move`)."""
-    from gc_core.config_modules.endpoint_presets import default_endpoint_presets
+    from gc_core.config_modules.endpoint_presets import (
+        default_endpoint_presets,
+    )
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(
-        url_current="https://own-host/v1/chat/completions", auth_header="Bearer x", presets=default_endpoint_presets()
+        url_current="https://own-host/v1/chat/completions",
+        auth_header="Bearer x",
+        presets=default_endpoint_presets(),
     )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         await pilot.pause()
-        ed.query_one("#conn-url", Input).value = "https://my-own-host.internal/v1"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://my-own-host.internal/v1"
         await pilot.pause()
         assert ed._presets_ctrl.has_matches is False
 
@@ -774,7 +912,9 @@ async def test_probe_snapshot_follows_the_cleared_token():
     вердикт про токен, которого уже нет."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old")
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -788,7 +928,9 @@ async def test_probe_snapshot_follows_the_no_auth_toggle():
     """Галка «без авторизации» тоже не поле: она решает, пойдёт ли токен вообще."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old")
+    ed = ConnectionEditor(
+        url_current="http://h/v1/chat/completions", auth_header="Bearer sk-old"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -806,10 +948,14 @@ async def test_a_mouse_click_lands_the_cursor_like_the_arrows_do():
     (живой смок 2026-09-04, тот же класс, что у формы записи реестра)."""
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://host/v1/chat/completions", auth_header="Bearer tok")
+    ed = ConnectionEditor(
+        url_current="http://host/v1/chat/completions", auth_header="Bearer tok"
+    )
     async with _harness(ed).run_test() as pilot:
         await pilot.pause()
         assert ed._positions[ed._idx] == "conn-url"  # предусловие
         await pilot.click("#conn-token")
         await pilot.pause()
-        assert ed._positions[ed._idx] == "conn-token", "клик не приземлил курсор"
+        assert ed._positions[ed._idx] == "conn-token", (
+            "клик не приземлил курсор"
+        )

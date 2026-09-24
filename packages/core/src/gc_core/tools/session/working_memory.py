@@ -7,14 +7,29 @@ and yaml ``working_memory:`` limits — unchanged for saved-thread compatibility
 import json
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_CONSTRAINTS as _DEFAULT_MAX_CHARS_CONSTRAINTS
-from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_GOAL as _DEFAULT_MAX_CHARS_GOAL
-from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_KNOWLEDGE as _DEFAULT_MAX_CHARS_KNOWLEDGE
-from gc_core.config_modules.working_memory import DEFAULT_MAX_CHARS_STATE as _DEFAULT_MAX_CHARS_STATE
-from gc_core.config_modules.working_memory import DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS
-from gc_core.config_modules.working_memory import working_memory_limits_from_params
+from gc_core.config_modules.working_memory import (
+    DEFAULT_MAX_CHARS_CONSTRAINTS as _DEFAULT_MAX_CHARS_CONSTRAINTS,
+)
+from gc_core.config_modules.working_memory import (
+    DEFAULT_MAX_CHARS_GOAL as _DEFAULT_MAX_CHARS_GOAL,
+)
+from gc_core.config_modules.working_memory import (
+    DEFAULT_MAX_CHARS_KNOWLEDGE as _DEFAULT_MAX_CHARS_KNOWLEDGE,
+)
+from gc_core.config_modules.working_memory import (
+    DEFAULT_MAX_CHARS_STATE as _DEFAULT_MAX_CHARS_STATE,
+)
+from gc_core.config_modules.working_memory import (
+    DEFAULT_TOTAL_BUDGET_CHARS as _DEFAULT_TOTAL_BUDGET_CHARS,
+)
+from gc_core.config_modules.working_memory import (
+    working_memory_limits_from_params,
+)
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
+from gc_core.loop_detector.constants import (
+    GENERIC_PROFILE,
+    loop_warn_on_repeat,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 REGISTER_GOAL = "goal"
@@ -44,7 +59,9 @@ def _registers_summary(
     limits: Dict[str, int],
 ) -> Dict[str, str]:
     return {
-        name: (f"Length - {len(registers.get(name, ''))} chars (limit: {limits.get(name, 0)} chars)")
+        name: (
+            f"Length - {len(registers.get(name, ''))} chars (limit: {limits.get(name, 0)} chars)"
+        )
         for name in REGISTER_ORDER
     }
 
@@ -57,28 +74,43 @@ def _total_chars(registers: Dict[str, str]) -> int:
 class WorkingMemory(AbstractSimpleTool):
     tool_name = SESSION_MEMORY_TOOL_NAME
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
         cfg = getattr(ctx, "config_dict", None) or {}
-        limits_cfg = working_memory_limits_from_params(cfg.get("working_memory_params")) or {}
+        limits_cfg = (
+            working_memory_limits_from_params(cfg.get("working_memory_params"))
+            or {}
+        )
 
         self._register_limits = {
-            REGISTER_GOAL: self._cfg_int(limits_cfg, "max_chars_goal", DEFAULT_REGISTER_LIMITS[REGISTER_GOAL]),
+            REGISTER_GOAL: self._cfg_int(
+                limits_cfg,
+                "max_chars_goal",
+                DEFAULT_REGISTER_LIMITS[REGISTER_GOAL],
+            ),
             REGISTER_CONSTRAINTS: self._cfg_int(
                 limits_cfg,
                 "max_chars_constraints",
                 DEFAULT_REGISTER_LIMITS[REGISTER_CONSTRAINTS],
             ),
-            REGISTER_STATE: self._cfg_int(limits_cfg, "max_chars_state", DEFAULT_REGISTER_LIMITS[REGISTER_STATE]),
+            REGISTER_STATE: self._cfg_int(
+                limits_cfg,
+                "max_chars_state",
+                DEFAULT_REGISTER_LIMITS[REGISTER_STATE],
+            ),
             REGISTER_KNOWLEDGE: self._cfg_int(
                 limits_cfg,
                 "max_chars_knowledge",
                 DEFAULT_REGISTER_LIMITS[REGISTER_KNOWLEDGE],
             ),
         }
-        self._total_budget_chars = self._cfg_int(limits_cfg, "total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS)
+        self._total_budget_chars = self._cfg_int(
+            limits_cfg, "total_budget_chars", DEFAULT_TOTAL_BUDGET_CHARS
+        )
 
     @staticmethod
     def _cfg_int(cfg: Dict[str, Any], key: str, default: int) -> int:
@@ -88,7 +120,9 @@ class WorkingMemory(AbstractSimpleTool):
         return default
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "session_memory",
@@ -133,7 +167,9 @@ class WorkingMemory(AbstractSimpleTool):
                     "register": {
                         "type": "string",
                         "enum": list(REGISTER_ORDER),
-                        "description": ("Target memory register. Required for every action (ignored for list)."),
+                        "description": (
+                            "Target memory register. Required for every action (ignored for list)."
+                        ),
                     },
                     "reason": {
                         "type": "string",
@@ -159,7 +195,9 @@ class WorkingMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: session_memory
 Tool description: Thread/session memory for THIS dialogue only — not project-wide remember-forever.
 Persistent per-thread operational memory for the agent.
@@ -214,10 +252,17 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
         raw = getattr(shared, "working_memory", None)
         if not isinstance(raw, dict):
             return {}
-        return {name: str(raw.get(name, "")) if isinstance(raw.get(name, ""), str) else "" for name in REGISTER_ORDER}
+        return {
+            name: str(raw.get(name, ""))
+            if isinstance(raw.get(name, ""), str)
+            else ""
+            for name in REGISTER_ORDER
+        }
 
     def _set_registers(self, registers: Dict[str, str]) -> None:
-        self._state.shared.working_memory = {name: registers.get(name, "") for name in REGISTER_ORDER}
+        self._state.shared.working_memory = {
+            name: registers.get(name, "") for name in REGISTER_ORDER
+        }
 
     def _result(
         self,
@@ -236,7 +281,9 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             "action": action,
             "error": error,
             "registers": _registers_summary(current, self._register_limits),
-            "total_chars": _total_chars(current) if total_chars is None else total_chars,
+            "total_chars": _total_chars(current)
+            if total_chars is None
+            else total_chars,
         }
         if content is not None:
             payload["content"] = content
@@ -295,17 +342,23 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             return self._error(
                 action=action,
                 error_type="missing_register",
-                message=(f"register is required for {action}; one of: goal, constraints, state, knowledge."),
+                message=(
+                    f"register is required for {action}; one of: goal, constraints, state, knowledge."
+                ),
             )
         if register not in REGISTER_SET:
             return self._error(
                 action=action,
                 error_type="invalid_register",
-                message=("register must be one of: goal, constraints, state, knowledge."),
+                message=(
+                    "register must be one of: goal, constraints, state, knowledge."
+                ),
             )
         return None
 
-    def _validate_reason_and_content(self, action: str, reason: str, content: str) -> Optional[str]:
+    def _validate_reason_and_content(
+        self, action: str, reason: str, content: str
+    ) -> Optional[str]:
         if reason is not None and not isinstance(reason, str):
             return self._error(
                 action=action,
@@ -345,11 +398,15 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             error=None,
         )
 
-    def _action_append(self, register: str, reason: str, content: str, **_: Any) -> str:
+    def _action_append(
+        self, register: str, reason: str, content: str, **_: Any
+    ) -> str:
         register_err = self._validate_register(register, "append")
         if register_err:
             return register_err
-        validation_err = self._validate_reason_and_content("append", reason, content)
+        validation_err = self._validate_reason_and_content(
+            "append", reason, content
+        )
         if validation_err:
             return validation_err
 
@@ -369,13 +426,19 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
 
         registers[register] = new_text
         self._set_registers(registers)
-        return self._result(ok=True, action="append", registers=registers, error=None)
+        return self._result(
+            ok=True, action="append", registers=registers, error=None
+        )
 
-    def _action_write(self, register: str, reason: str, content: str, **_: Any) -> str:
+    def _action_write(
+        self, register: str, reason: str, content: str, **_: Any
+    ) -> str:
         register_err = self._validate_register(register, "write")
         if register_err:
             return register_err
-        validation_err = self._validate_reason_and_content("write", reason, content)
+        validation_err = self._validate_reason_and_content(
+            "write", reason, content
+        )
         if validation_err:
             return validation_err
 
@@ -392,7 +455,9 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
 
         registers[register] = new_text
         self._set_registers(registers)
-        return self._result(ok=True, action="write", registers=registers, error=None)
+        return self._result(
+            ok=True, action="write", registers=registers, error=None
+        )
 
     def _check_limits(
         self,
@@ -412,10 +477,14 @@ Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["
             return self._error(
                 action=action,
                 error_type="register_limit_exceeded",
-                message=(f"Register '{target_register}' would exceed {register_limit} chars. {hint}"),
+                message=(
+                    f"Register '{target_register}' would exceed {register_limit} chars. {hint}"
+                ),
             )
 
-        projected_total = sum(len(v) for k, v in registers.items() if k != target_register) + len(new_text)
+        projected_total = sum(
+            len(v) for k, v in registers.items() if k != target_register
+        ) + len(new_text)
         if projected_total > self._total_budget_chars:
             return self._error(
                 action=action,

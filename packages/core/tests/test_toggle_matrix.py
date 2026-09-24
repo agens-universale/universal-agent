@@ -78,7 +78,11 @@ from toggle_matrix import ALL_CASES, run_case
 #: turn_finish — сначала вся work, закрытие по output»): матрица начала ловить
 #: ЧУЖУЮ правку и краснела 144 случаями. Эталон обязан идти с той ветки, с
 #: которой сравниваем, иначе гейт меряет не то, что заявляет.
-REFERENCE = Path(__file__).parent / "fixtures" / "toggle_matrix_reference_e66a1e90.json"
+REFERENCE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "toggle_matrix_reference_e66a1e90.json"
+)
 
 #: Поля, по которым идёт сверка.
 COMPARED = ("answer", "dump", "meta", "backend_calls", "error")
@@ -116,14 +120,18 @@ def test_reference_covers_every_case(reference):
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=lambda c: c.id)
-async def test_toggle_matches_pre_async(case, reference, tmp_path, monkeypatch):
+async def test_toggle_matches_pre_async(
+    case, reference, tmp_path, monkeypatch
+):
     """Один прогон на положение переключателей — против до-async эталона."""
     expected = reference[case.id]
     actual = await run_case(case, tmp_path, monkeypatch)
 
     for field in COMPARED:
-        assert _normalize(actual.get(field)) == _normalize(expected.get(field)), (
-            f"{case.id}: поле {field!r} разошлось с до-async прогоном" + (f"\n  ({case.note})" if case.note else "")
+        assert _normalize(actual.get(field)) == _normalize(
+            expected.get(field)
+        ), f"{case.id}: поле {field!r} разошлось с до-async прогоном" + (
+            f"\n  ({case.note})" if case.note else ""
         )
 
 

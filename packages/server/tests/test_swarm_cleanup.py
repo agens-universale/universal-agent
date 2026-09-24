@@ -103,7 +103,9 @@ def test_orphan_sandbox_removed(tmp_path):
     old_time = time.time() - 48 * 3600
     os.utime(orphan, (old_time, old_time))
 
-    stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
+    stats = cleanup_mod.cleanup_threads(
+        str(threads), str(sandbox), ttl_hours=24
+    )
     assert stats["sandboxes_removed"] == 1
     assert not os.path.exists(orphan)
 
@@ -116,7 +118,9 @@ def test_orphan_sandbox_kept_when_fresh(tmp_path):
     fresh_orphan = sandbox / "fresh_orphan"
     fresh_orphan.mkdir()
 
-    stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
+    stats = cleanup_mod.cleanup_threads(
+        str(threads), str(sandbox), ttl_hours=24
+    )
     assert stats["sandboxes_removed"] == 0
     assert os.path.exists(fresh_orphan)
 
@@ -132,7 +136,9 @@ def test_missing_meta_uses_mtime_fallback(tmp_path):
     old_time = time.time() - 48 * 3600
     os.utime(no_meta, (old_time, old_time))
 
-    stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
+    stats = cleanup_mod.cleanup_threads(
+        str(threads), str(sandbox), ttl_hours=24
+    )
     assert stats["threads_removed"] == 1
 
 
@@ -147,7 +153,9 @@ def test_corrupted_meta_uses_mtime_fallback(tmp_path):
     old_time = time.time() - 48 * 3600
     os.utime(corrupted, (old_time, old_time))
 
-    stats = cleanup_mod.cleanup_threads(str(threads), str(sandbox), ttl_hours=24)
+    stats = cleanup_mod.cleanup_threads(
+        str(threads), str(sandbox), ttl_hours=24
+    )
     assert stats["threads_removed"] == 1
 
 

@@ -15,7 +15,9 @@ class _FakeExecutor:
         self.stopped = False
         self.messages_added: list[dict] = []
         self._event = threading.Event()
-        self.started = threading.Event()  # выставляется, когда run реально начался
+        self.started = (
+            threading.Event()
+        )  # выставляется, когда run реально начался
 
     async def arun(
         self,
@@ -365,7 +367,11 @@ def test_warm_builds_executor_in_background():
         def stop_run(self):
             pass
 
-    r = AgentRunner(executor_factory=lambda: calls.__setitem__("n", calls["n"] + 1) or _Ex())
+    r = AgentRunner(
+        executor_factory=lambda: (
+            calls.__setitem__("n", calls["n"] + 1) or _Ex()
+        )
+    )
     r.warm()
     for _ in range(100):
         if r._executor is not None:
@@ -386,7 +392,11 @@ def test_warm_idempotent():
         def stop_run(self):
             pass
 
-    r = AgentRunner(executor_factory=lambda: calls.__setitem__("n", calls["n"] + 1) or _Ex())
+    r = AgentRunner(
+        executor_factory=lambda: (
+            calls.__setitem__("n", calls["n"] + 1) or _Ex()
+        )
+    )
     r.warm()
     for _ in range(100):
         if r._executor is not None:

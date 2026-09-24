@@ -4,7 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.intent_guard import guard as intent_guard_guard_module
-from gc_core.intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
+from gc_core.intent_guard.guard import (
+    FinishGateGuard,
+    resolve_finish_gate_max_rejections,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import ACTION_USER_ASK, append_user_ask, flush
 from gc_testkit import run_coro
@@ -14,14 +17,21 @@ class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
     def test_main_vs_subagent_key(self) -> None:
         main_state = SimpleNamespace(parent_state_id=None)
         sub_state = SimpleNamespace(parent_state_id="p1")
-        cfg = {"finish_gate_max_iterations": 7, "subagent_finish_gate_max_iterations": 2}
-        self.assertEqual(resolve_finish_gate_max_rejections(cfg, main_state), 7)
+        cfg = {
+            "finish_gate_max_iterations": 7,
+            "subagent_finish_gate_max_iterations": 2,
+        }
+        self.assertEqual(
+            resolve_finish_gate_max_rejections(cfg, main_state), 7
+        )
         self.assertEqual(resolve_finish_gate_max_rejections(cfg, sub_state), 2)
 
     def test_invalid_falls_back(self) -> None:
         state = SimpleNamespace(parent_state_id=None)
         self.assertEqual(
-            resolve_finish_gate_max_rejections({"finish_gate_max_iterations": 0}, state),
+            resolve_finish_gate_max_rejections(
+                {"finish_gate_max_iterations": 0}, state
+            ),
             10,
         )
 
@@ -30,7 +40,9 @@ class JudgeAvailableTest(unittest.TestCase):
     def test_matches_backend_only(self) -> None:
         from gc_core.intent_guard.guard import judge_available
 
-        self.assertTrue(judge_available({"backend_api_mode": "chat_completions"}))
+        self.assertTrue(
+            judge_available({"backend_api_mode": "chat_completions"})
+        )
         self.assertFalse(judge_available({"backend_api_mode": "responses"}))
         self.assertFalse(judge_available({}))
         self.assertFalse(judge_available(None))
@@ -64,7 +76,9 @@ class FinishGateGuardEnabledMatrixTest(unittest.TestCase):
         self.assertTrue(self._enabled(strict=True, backend="chat_completions"))
 
     def test_strict_false_chat_completions_disabled(self) -> None:
-        self.assertFalse(self._enabled(strict=False, backend="chat_completions"))
+        self.assertFalse(
+            self._enabled(strict=False, backend="chat_completions")
+        )
 
     def test_strict_true_other_backend_disabled(self) -> None:
         self.assertFalse(self._enabled(strict=True, backend="responses"))
@@ -141,7 +155,9 @@ class FinishGateGuardTest(unittest.TestCase):
             _reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
+            d = run_coro(
+                guard.aevaluate_turn_finish(finish_handoff_arguments={})
+            )
             self.assertEqual(d.outcome, "reject")
             self.assertEqual(state.finish_gate_rejection_count, 1)
 
@@ -169,7 +185,9 @@ class FinishGateGuardTest(unittest.TestCase):
             _raise,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
+            d = run_coro(
+                guard.aevaluate_turn_finish(finish_handoff_arguments={})
+            )
 
         self.assertEqual(d.outcome, "fail_open_error")
         self.assertEqual(state.finish_gate_rejection_count, 0)
@@ -194,8 +212,12 @@ class FinishGateGuardTest(unittest.TestCase):
         captured: dict[str, list[str]] = {}
 
         async def _capture(**kwargs):
-            captured["current"] = list(kwargs.get("current_user_requests") or [])
-            captured["context"] = list(kwargs.get("context_user_messages") or [])
+            captured["current"] = list(
+                kwargs.get("current_user_requests") or []
+            )
+            captured["context"] = list(
+                kwargs.get("context_user_messages") or []
+            )
             return ValidationResult(
                 ok=True,
                 action="accept",
@@ -214,7 +236,11 @@ class FinishGateGuardTest(unittest.TestCase):
             "avalidate_final_report_vs_user_intent",
             _capture,
         ):
-            run_coro(FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(finish_handoff_arguments={}))
+            run_coro(
+                FinishGateGuard(ctx=ctx, state=state).aevaluate_turn_finish(
+                    finish_handoff_arguments={}
+                )
+            )
 
         assert len(captured["current"]) == 1
         row = json.loads(captured["current"][0])

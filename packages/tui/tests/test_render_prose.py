@@ -35,11 +35,18 @@ def test_empty_text_empty():
 def test_heading_is_accent_bold():
     t = render_prose("# Заголовок")
     assert t.plain == "Заголовок"
-    assert any("54b3a6" in str(s.style).lower() and "bold" in str(s.style).lower() for s in t.spans)
+    assert any(
+        "54b3a6" in str(s.style).lower() and "bold" in str(s.style).lower()
+        for s in t.spans
+    )
 
 
 def test_para_bold_and_code_styled_spans():
     t = render_prose("есть **bold** и `code`")
     assert "**" not in t.plain and "`" not in t.plain
-    assert any("54b3a6" in str(s.style).lower() for s in t.spans)  # accent (bold)
-    assert any("afbdff" in str(s.style).lower() for s in t.spans)  # code (slate)
+    assert any(
+        "54b3a6" in str(s.style).lower() for s in t.spans
+    )  # accent (bold)
+    assert any(
+        "afbdff" in str(s.style).lower() for s in t.spans
+    )  # code (slate)

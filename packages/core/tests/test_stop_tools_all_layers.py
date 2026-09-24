@@ -22,7 +22,9 @@ def _mcp_entry(name: str) -> dict:
 
 
 def test_stop_tools_removes_skills_and_mcp_from_spec(monkeypatch):
-    async def fake_mcp(_config_dict, on_progress=None, tools_cache=None, os_backend=None):
+    async def fake_mcp(
+        _config_dict, on_progress=None, tools_cache=None, os_backend=None
+    ):
         return (
             {"mcp_jira_search": _mcp_entry("mcp_jira_search")},
             {"jira": {"status": "connected"}},
@@ -39,7 +41,9 @@ def test_stop_tools_removes_skills_and_mcp_from_spec(monkeypatch):
         "stop_tools": ["skills_list", "mcp_jira_search"],
         "backend_api_mode": "responses",
     }
-    data, spec, _, _ = run_coro(abuild_tools_data(cfg, registered_names=registered))
+    data, spec, _, _ = run_coro(
+        abuild_tools_data(cfg, registered_names=registered)
+    )
     spec_names = {item.get("name") for item in spec}
 
     assert "skills_list" not in data

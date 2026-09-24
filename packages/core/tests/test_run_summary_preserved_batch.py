@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_CURRENT_CONTEXT, wrap_technical_user_content
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
+    wrap_technical_user_content,
+)
 from gc_core.run_summary_coordinator import (
     build_preserved_batch,
     filter_messages_not_in_state,
@@ -13,7 +16,9 @@ from gc_core.thread_store import make_message_key
 
 
 def test_user_ask_keeps_prior_non_technical_users_skips_technical():
-    tech = wrap_technical_user_content("ctx...", technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT)
+    tech = wrap_technical_user_content(
+        "ctx...", technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+    )
     current_messages = [
         {"role": "user", "content": "старый смысловой запрос"},
         {"role": "user", "content": tech},
@@ -30,7 +35,9 @@ def test_user_ask_keeps_prior_non_technical_users_skips_technical():
         current_messages=current_messages,
         mode="user_ask",
         state_messages=[],
-        message_keys_already_persisted=frozenset({make_message_key(current_messages[0])}),
+        message_keys_already_persisted=frozenset(
+            {make_message_key(current_messages[0])}
+        ),
     )
     assert batch_incoming_only == [current_messages[-1]]
 
@@ -47,7 +54,11 @@ def test_user_ask_multiple_plain_users():
         mode="user_ask",
         state_messages=[],
     )
-    assert batch == [current_messages[0], current_messages[2], current_messages[3]]
+    assert batch == [
+        current_messages[0],
+        current_messages[2],
+        current_messages[3],
+    ]
 
     batch_incoming = build_preserved_batch(
         current_messages=current_messages,
@@ -65,8 +76,13 @@ def test_user_ask_multiple_plain_users():
 
 
 def test_user_ask_last_message_technical_still_preserved():
-    tech = wrap_technical_user_content("x", technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT)
-    current_messages = [{"role": "user", "content": "norm"}, {"role": "user", "content": tech}]
+    tech = wrap_technical_user_content(
+        "x", technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+    )
+    current_messages = [
+        {"role": "user", "content": "norm"},
+        {"role": "user", "content": tech},
+    ]
     batch = build_preserved_batch(
         current_messages=current_messages,
         mode="user_ask",
@@ -138,11 +154,38 @@ def test_function_call_output_skips_orphan():
 
 
 def test_function_call_output_mixed_multiple_outputs_dedupes():
-    c1 = {"type": "function_call", "call_id": "a", "name": "t1", "arguments": "{}", "id": "1"}
-    o1 = {"type": "function_call_output", "call_id": "a", "output": "1", "id": "o1"}
-    c2 = {"type": "function_call", "call_id": "b", "name": "t2", "arguments": "{}", "id": "2"}
-    o2 = {"type": "function_call_output", "call_id": "b", "output": "2", "id": "o2"}
-    o1_dup = {"type": "function_call_output", "call_id": "a", "output": "repeat", "id": "o3"}
+    c1 = {
+        "type": "function_call",
+        "call_id": "a",
+        "name": "t1",
+        "arguments": "{}",
+        "id": "1",
+    }
+    o1 = {
+        "type": "function_call_output",
+        "call_id": "a",
+        "output": "1",
+        "id": "o1",
+    }
+    c2 = {
+        "type": "function_call",
+        "call_id": "b",
+        "name": "t2",
+        "arguments": "{}",
+        "id": "2",
+    }
+    o2 = {
+        "type": "function_call_output",
+        "call_id": "b",
+        "output": "2",
+        "id": "o2",
+    }
+    o1_dup = {
+        "type": "function_call_output",
+        "call_id": "a",
+        "output": "repeat",
+        "id": "o3",
+    }
     batch = build_preserved_batch(
         current_messages=[c1, o1, c2, o2, o1_dup],
         mode="function_call_output",
@@ -155,8 +198,19 @@ def test_function_call_output_pairing_passes_repair():
     msg_list = []
     batch = []
     for i in ("x", "y"):
-        call = {"type": "function_call", "call_id": i, "name": "n", "arguments": "{}", "id": f"f{i}"}
-        out = {"type": "function_call_output", "call_id": i, "output": "{}", "id": f"o{i}"}
+        call = {
+            "type": "function_call",
+            "call_id": i,
+            "name": "n",
+            "arguments": "{}",
+            "id": f"f{i}",
+        }
+        out = {
+            "type": "function_call_output",
+            "call_id": i,
+            "output": "{}",
+            "id": f"o{i}",
+        }
         msg_list.extend((call, out))
         batch.extend((call, out))
     repaired_full = repair_tool_call_pairing(
@@ -164,12 +218,25 @@ def test_function_call_output_pairing_passes_repair():
         keep_latest_unanswered=False,
     )
     assert any(m.get("type") == "function_call_output" for m in repaired_full)
-    assert len(repair_tool_call_pairing(batch, keep_latest_unanswered=False)) == len(batch)
+    assert len(
+        repair_tool_call_pairing(batch, keep_latest_unanswered=False)
+    ) == len(batch)
 
 
 def test_tool_pair_variants_accepted():
-    call = {"type": "tool_call", "call_id": "t1", "name": "n", "arguments": "{}", "id": "tc"}
-    out = {"type": "tool_call_output", "call_id": "t1", "output": "{}", "id": "to"}
+    call = {
+        "type": "tool_call",
+        "call_id": "t1",
+        "name": "n",
+        "arguments": "{}",
+        "id": "tc",
+    }
+    out = {
+        "type": "tool_call_output",
+        "call_id": "t1",
+        "output": "{}",
+        "id": "to",
+    }
     batch = build_preserved_batch(
         current_messages=[call, out],
         mode="function_call_output",

@@ -10,7 +10,16 @@ import json
 import threading
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Literal, Optional, Protocol, runtime_checkable
+from typing import (
+    Any,
+    Deque,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 
@@ -133,7 +142,9 @@ def _todo_args_summary(todos: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str:
 _TODO_ITEM_STATUSES = ("pending", "in_progress", "completed")
 
 
-def todo_items_from_arguments(arguments: Any) -> Optional[List[Dict[str, str]]]:
+def todo_items_from_arguments(
+    arguments: Any,
+) -> Optional[List[Dict[str, str]]]:
     """Пункты чек-листа из аргументов вызова session_todo — или ``None``.
 
     Понимает str-JSON и dict. Валидация ЗЕРКАЛИТ тул (``tools/session/todo.py``):
@@ -175,7 +186,12 @@ def _todo_item_from(item: Any) -> Optional[Dict[str, str]]:
     return {"content": content.strip(), "status": status}
 
 
-def brief_args_summary(arguments: Any, *, tool_name: Optional[str] = None, limit: int = _ARGS_SUMMARY_MAX) -> str:
+def brief_args_summary(
+    arguments: Any,
+    *,
+    tool_name: Optional[str] = None,
+    limit: int = _ARGS_SUMMARY_MAX,
+) -> str:
     """Compact one-line args preview for progress events (no TUI dependency)."""
     data: Any = arguments
     if isinstance(arguments, str):
@@ -191,7 +207,9 @@ def brief_args_summary(arguments: Any, *, tool_name: Optional[str] = None, limit
         # битые аргументы — генерик-превью, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
-    pairs = [_arg_pair_preview(key, value) for key, value in list(data.items())[:3]]
+    pairs = [
+        _arg_pair_preview(key, value) for key, value in list(data.items())[:3]
+    ]
     text = ", ".join(pairs)
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
@@ -216,7 +234,9 @@ def _truncate_error_brief(message: str) -> str:
     return text[:_ERROR_BRIEF_MAX].rstrip() + "…"
 
 
-def parse_tool_result_status(output: Any) -> tuple[Optional[bool], Optional[str]]:
+def parse_tool_result_status(
+    output: Any,
+) -> tuple[Optional[bool], Optional[str]]:
     """Extract (ok, error_brief) from a tool result payload string/dict."""
     data: Any = output
     if isinstance(output, str):

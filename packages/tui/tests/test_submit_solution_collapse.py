@@ -90,13 +90,19 @@ async def test_two_submit_attempts_first_collapsed(tmp_path):
         )
     )
 
-    (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "...", "messages_count": 4}),
+        json.dumps(
+            {"thread_id": tid, "updated_at": "...", "messages_count": 4}
+        ),
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -134,7 +140,11 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
                 "type": "message",
                 "seq": 1,
                 "ts_utc": "2026-05-22T12:00:00+00:00",
-                "payload": {"id": "u1", "role": "user", "content": "первый вопрос"},
+                "payload": {
+                    "id": "u1",
+                    "role": "user",
+                    "content": "первый вопрос",
+                },
             }
         )
     )
@@ -166,7 +176,11 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
                 "type": "message",
                 "seq": 3,
                 "ts_utc": "2026-05-22T12:00:02+00:00",
-                "payload": {"id": "u2", "role": "user", "content": "второй вопрос"},
+                "payload": {
+                    "id": "u2",
+                    "role": "user",
+                    "content": "второй вопрос",
+                },
             }
         )
     )
@@ -192,13 +206,23 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
         )
     )
 
-    (tmp_path / f"data_cli_{tid}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 4}),
+        json.dumps(
+            {
+                "thread_id": tid,
+                "updated_at": "2026-05-22T12:00:00+00:00",
+                "messages_count": 4,
+            }
+        ),
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
@@ -215,7 +239,9 @@ async def test_submit_solutions_in_different_turns_not_collapsed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block(tmp_path):
+async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block(
+    tmp_path,
+):
     """Submit_solution с multi-блочным task_report → retry-коллапс удаляет ВСЕ виджеты
     предыдущей попытки, ничего не оставляя взамен (молчаливый regenerate)."""
     pytest.importorskip("textual")
@@ -251,19 +277,40 @@ async def test_submit_solution_retry_removes_all_widgets_of_previous_multi_block
     }
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 2}
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-05-26T12:00:00+00:00",
+                "messages_count": 2,
+            }
         ),
         encoding="utf-8",
     )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
-        json.dumps({"type": "message", "seq": 1, "ts_utc": "...", "payload": first_payload})
+        json.dumps(
+            {
+                "type": "message",
+                "seq": 1,
+                "ts_utc": "...",
+                "payload": first_payload,
+            }
+        )
         + "\n"
-        + json.dumps({"type": "message", "seq": 2, "ts_utc": "...", "payload": second_payload})
+        + json.dumps(
+            {
+                "type": "message",
+                "seq": 2,
+                "ts_utc": "...",
+                "payload": second_payload,
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)

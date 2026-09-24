@@ -52,7 +52,9 @@ def parse_config_models(payload: dict) -> list:
                 id=str(m["model"]),
                 description=str(m.get("description") or ""),
                 tool_capable=tc if isinstance(tc, bool) else None,
-                context=ps.get("context_window_size") if isinstance(ps.get("context_window_size"), int) else None,
+                context=ps.get("context_window_size")
+                if isinstance(ps.get("context_window_size"), int)
+                else None,
             )
         )
     return out
@@ -76,7 +78,12 @@ def api_base(completions_url: str) -> str:
     ввода — тот же OpenAI-совместимый `/v1`) режутся так же, как chat: без них
     `fetch_models` стучался бы в `…/audio/transcriptions/models` — мёртвый путь."""
     u = (completions_url or "").rstrip("/")
-    for suffix in ("/chat/completions", "/completions", "/audio/transcriptions", "/audio/translations"):
+    for suffix in (
+        "/chat/completions",
+        "/completions",
+        "/audio/transcriptions",
+        "/audio/translations",
+    ):
         if u.endswith(suffix):
             return u[: -len(suffix)]
     return u
@@ -97,7 +104,12 @@ def _request(url: str, headers: dict, *, data=None, method=None):
     Дефолт идёт первым — заголовок вызывающего его перекрывает."""
     import urllib.request
 
-    return urllib.request.Request(url, data=data, method=method, headers={"User-Agent": _user_agent(), **headers})
+    return urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={"User-Agent": _user_agent(), **headers},
+    )
 
 
 def _headers(auth_header: Optional[str]) -> dict:
@@ -136,7 +148,7 @@ def _requests_get_ex(
         resp = NO_NETRC_SESSION.get(
             url,
             headers=headers,
-            verify=verify,  # NOSONAR: use_ssl:false из config.yml — осознанный opt-in, см. docs/code-quality.md
+            verify=verify,  # NOSONAR: use_ssl:false из config.yml — осознанный opt-in, см. CONTRIBUTING.md
             timeout=5,
             proxies=proxies,
         )
@@ -176,7 +188,7 @@ def _requests_post_ex(
             url,
             headers=headers,
             json=body,
-            verify=verify,  # NOSONAR: use_ssl:false из config.yml — осознанный opt-in, см. docs/code-quality.md
+            verify=verify,  # NOSONAR: use_ssl:false из config.yml — осознанный opt-in, см. CONTRIBUTING.md
             timeout=5,
             proxies=proxies,
         )
@@ -213,7 +225,11 @@ def _urllib_get_ex(url: str, headers: dict, verify: bool | str) -> HttpReply:
     except urllib.error.HTTPError as exc:
         return HttpReply(status=exc.code, payload=None)
     except OSError as exc:
-        return HttpReply(status=None, payload=None, network_error=str(exc) or exc.__class__.__name__)
+        return HttpReply(
+            status=None,
+            payload=None,
+            network_error=str(exc) or exc.__class__.__name__,
+        )
 
 
 def _parse_reply_models(reply: HttpReply, parser: Callable) -> list:
@@ -240,7 +256,9 @@ def probe_fetch(
     if http_get_ex is None:
 
         def get_ex(url, headers, verify):
-            return _requests_get_ex(url, headers, verify, config_proxy=config_proxy)
+            return _requests_get_ex(
+                url, headers, verify, config_proxy=config_proxy
+            )
     else:
         get_ex = http_get_ex
     base = api_base(completions_url)
@@ -250,11 +268,16 @@ def probe_fetch(
         return FetchOutcome(None, None, "пустой адрес", 0)
     statuses: list = []
     net_errors: list = []
-    for path, parser in (("/config", parse_config_models), ("/models", parse_models_list)):
+    for path, parser in (
+        ("/config", parse_config_models),
+        ("/models", parse_models_list),
+    ):
         reply = get_ex(base + path, headers, verify)
         parsed = _parse_reply_models(reply, parser)
         if parsed:
-            return FetchOutcome(parsed, reply.status, "", int((time.monotonic() - t0) * 1000))
+            return FetchOutcome(
+                parsed, reply.status, "", int((time.monotonic() - t0) * 1000)
+            )
         if reply.status is not None:
             statuses.append(reply.status)
         else:
@@ -264,7 +287,12 @@ def probe_fetch(
         return FetchOutcome(None, 401, "", latency)
     if statuses:
         return FetchOutcome(None, statuses[-1], "", latency)
-    return FetchOutcome(None, None, "; ".join(dict.fromkeys(net_errors)) or "нет соединения", latency)
+    return FetchOutcome(
+        None,
+        None,
+        "; ".join(dict.fromkeys(net_errors)) or "нет соединения",
+        latency,
+    )
 
 
 def probe_post(
@@ -287,14 +315,26 @@ def probe_post(
     if http_post_ex is None:
 
         def post_ex(url, headers, body, verify):
-            return _requests_post_ex(url, headers, body, verify, config_proxy=config_proxy)
+            return _requests_post_ex(
+                url, headers, body, verify, config_proxy=config_proxy
+            )
     else:
         post_ex = http_post_ex
     headers = _headers(auth_header)
-    body = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1, "stream": False}
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "stream": False,
+    }
     t0 = time.monotonic()
     reply = post_ex(completions_url, headers, body, verify)
-    return (reply.status, reply.network_error, int((time.monotonic() - t0) * 1000), reply.payload)
+    return (
+        reply.status,
+        reply.network_error,
+        int((time.monotonic() - t0) * 1000),
+        reply.payload,
+    )
 
 
 def fetch_models(
@@ -308,7 +348,9 @@ def fetch_models(
     if http_get is None:
 
         def get(url, headers, verify):
-            reply = _requests_get_ex(url, headers, verify, config_proxy=config_proxy)
+            reply = _requests_get_ex(
+                url, headers, verify, config_proxy=config_proxy
+            )
             if reply.status is None:
                 raise OSError(reply.network_error or "нет соединения")
             if reply.payload is None:

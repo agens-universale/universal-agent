@@ -8,7 +8,9 @@ def test_unknown_command_snapshot(snap_compare, tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
     )
 
     async def setup(pilot):

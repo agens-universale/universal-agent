@@ -34,7 +34,10 @@ def test_load_filters_old_command_entries(tmp_path):
         {"ts": "t", "text": "/status"},
         {"ts": "t", "text": "проанализируй проект"},
     ]
-    f.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines), encoding="utf-8")
+    f.write_text(
+        "\n".join(json.dumps(x, ensure_ascii=False) for x in lines),
+        encoding="utf-8",
+    )
     h = InputHistory(tmp_path)
     h.load()
     assert h.size == 2  # команды отсеяны при загрузке

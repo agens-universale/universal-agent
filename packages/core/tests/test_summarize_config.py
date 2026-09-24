@@ -2,7 +2,10 @@ import os
 import tempfile
 
 from gc_core.config import load_config
-from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
+from gc_core.summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_turn_end_trigger_chars,
+)
 
 
 def test_parse_turn_end_reads_normalized_value_only():
@@ -36,5 +39,10 @@ def test_turn_end_default_sixty_percent_via_load_config():
                 "backend:\n  api_mode: chat_completions\nsummary:\n  chat_completions_summary_trigger_chars: 200000\n"
             )
         cfg = load_config(cfg_path)
-        assert cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"] == 120000
+        assert (
+            cfg["summary_params"][
+                "chat_completions_summary_turn_end_trigger_chars"
+            ]
+            == 120000
+        )
         assert parse_summary_turn_end_trigger_chars(cfg) == 120000

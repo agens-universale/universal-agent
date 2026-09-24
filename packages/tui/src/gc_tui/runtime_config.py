@@ -21,7 +21,9 @@ RUNTIME_KEYS = ("launch_root", "console_trace")
 def apply_runtime_fields(config_dict: dict) -> None:
     """Проставить поля рантайма TUI — один раз, на старте."""
     config_dict["console_trace"] = False  # TUI владеет alt-screen выводом
-    config_dict["launch_root"] = str(Path.cwd().resolve())  # снапшот, не live cwd
+    config_dict["launch_root"] = str(
+        Path.cwd().resolve()
+    )  # снапшот, не live cwd
 
 
 def carry_over_runtime_fields(old: dict, new: dict) -> None:

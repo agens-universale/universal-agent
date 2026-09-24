@@ -73,7 +73,9 @@ from gc_core.utils.aio_compat import run_coro_blocking
 _CANCEL_DRAIN_BUDGET_SEC = 3.0
 
 
-def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
+def _spawn_detached_stdio_process(
+    server_cfg: Dict[str, Any],
+) -> subprocess.Popen:
     """
     Запуск stdio MCP-сервера как лидера собственной сессии/process group.
 
@@ -114,7 +116,9 @@ def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Pope
         popen_kwargs["start_new_session"] = True
     else:
         # На Windows — отдельный process group, чтобы CTRL_BREAK работал по всей группе.
-        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        popen_kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
     return subprocess.Popen(cmd, **popen_kwargs)
 
 
@@ -160,7 +164,9 @@ def _group_alive(pgid: int) -> bool:
         return True  # кто-то есть, но сигналить ему нам нельзя
 
 
-def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> bool:
+def _signal_tree(
+    proc: subprocess.Popen, pgid: Optional[int], *, kill: bool
+) -> bool:
     """Сигнал всему дереву сервера: группе, а без неё — хотя бы лидеру.
 
     ``False`` — бить некого: группы нет, лидер мёртв. Не бросает никогда:
@@ -188,7 +194,9 @@ def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> 
     return True
 
 
-async def _await_exit(proc: subprocess.Popen, timeout: float, pgid: Optional[int] = None) -> bool:
+async def _await_exit(
+    proc: subprocess.Popen, timeout: float, pgid: Optional[int] = None
+) -> bool:
     """Дождаться смерти процесса, а с ``pgid`` — и всей его группы.
 
     ``True`` — успел, ``False`` — таймаут. Замена ``proc.wait(timeout)``,
@@ -203,14 +211,20 @@ async def _await_exit(proc: subprocess.Popen, timeout: float, pgid: Optional[int
     """
     deadline = time.monotonic() + timeout
     while True:
-        if proc.poll() is not None and (pgid is None or not _group_alive(pgid)):
+        if proc.poll() is not None and (
+            pgid is None or not _group_alive(pgid)
+        ):
             return True
         if time.monotonic() >= deadline:
             return False
-        await asyncio.sleep(min(_POLL_STEP_SEC, max(0.0, deadline - time.monotonic())))
+        await asyncio.sleep(
+            min(_POLL_STEP_SEC, max(0.0, deadline - time.monotonic()))
+        )
 
 
-async def _aterminate_process_tree(proc: subprocess.Popen, graceful_timeout: float = 5.0) -> None:
+async def _aterminate_process_tree(
+    proc: subprocess.Popen, graceful_timeout: float = 5.0
+) -> None:
     """Убить процесс вместе со всей его группой (детьми), с эскалацией до KILL.
 
     ЕДИНСТВЕННАЯ форма терминации. Синхронный близнец снят: он отличался
@@ -300,7 +314,9 @@ class PersistentStdioSession:
             # поэтому свой, как у `close`; `run_coro_blocking` переживёт и
             # вызов с живого loop.
             try:
-                run_coro_blocking(_aterminate_process_tree(dead, graceful_timeout=5.0))
+                run_coro_blocking(
+                    _aterminate_process_tree(dead, graceful_timeout=5.0)
+                )
             except Exception:
                 pass
 
@@ -381,7 +397,9 @@ class PersistentStdioSession:
             # встраивающий зовёт `close_all` из своего `finally` — под живым
             # loop. Голый `asyncio.run` там бросал, общий `except` выше это
             # глушил, и отцепленный процесс оставался жить без хозяина.
-            run_coro_blocking(_aterminate_process_tree(proc, graceful_timeout=5.0))
+            run_coro_blocking(
+                _aterminate_process_tree(proc, graceful_timeout=5.0)
+            )
 
     async def aclose(self) -> None:
         """То же закрытие, но ожидание не занимает поток.
@@ -452,7 +470,9 @@ class PersistentStdioSession:
             return close_tool.strip()
         return None
 
-    def _write_close_tool(self, proc: "subprocess.Popen", close_tool: str) -> int:
+    def _write_close_tool(
+        self, proc: "subprocess.Popen", close_tool: str
+    ) -> int:
         req_id = self._next_id
         self._next_id += 1
         self._write_line_on(
@@ -502,7 +522,9 @@ class PersistentStdioSession:
         self._write_line_on(proc, payload)
 
     @staticmethod
-    def _write_line_on(proc: "subprocess.Popen", payload: Dict[str, Any]) -> None:
+    def _write_line_on(
+        proc: "subprocess.Popen", payload: Dict[str, Any]
+    ) -> None:
         """Написать в УЖЕ ИЗВЕСТНЫЙ процесс.
 
         Закрытие снимает процесс с сессии первым делом (``_detach``), поэтому
@@ -515,7 +537,9 @@ class PersistentStdioSession:
         proc.stdin.flush()
 
     @staticmethod
-    def _match_line(line: "str | None", req_id: Any) -> "tuple[bool, Dict[str, Any]]":
+    def _match_line(
+        line: "str | None", req_id: Any
+    ) -> "tuple[bool, Dict[str, Any]]":
         """``(готово, ответ)`` для одной прочитанной строки.
 
         Общий разбор для синхронного и асинхронного чтения: две копии этого
@@ -539,22 +563,30 @@ class PersistentStdioSession:
             return True, obj
         return False, {}
 
-    async def _aread_matching_on(self, proc: "subprocess.Popen", req_id: Any, timeout: float) -> Dict[str, Any]:
+    async def _aread_matching_on(
+        self, proc: "subprocess.Popen", req_id: Any, timeout: float
+    ) -> Dict[str, Any]:
         """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            done, obj = self._match_line(await _areadline_with_timeout(proc.stdout, timeout), req_id)
+            done, obj = self._match_line(
+                await _areadline_with_timeout(proc.stdout, timeout), req_id
+            )
             if done:
                 return obj
         return {}
 
-    def _read_matching_on(self, proc: "subprocess.Popen", req_id: Any, timeout: float) -> Dict[str, Any]:
+    def _read_matching_on(
+        self, proc: "subprocess.Popen", req_id: Any, timeout: float
+    ) -> Dict[str, Any]:
         """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            done, obj = self._match_line(_readline_with_timeout(proc.stdout, timeout), req_id)
+            done, obj = self._match_line(
+                _readline_with_timeout(proc.stdout, timeout), req_id
+            )
             if done:
                 return obj
         return {}
@@ -774,7 +806,9 @@ class PersistentStdioRegistry:
                     # Сняли нас: дочищаем остаток в пределах общего бюджета и
                     # отдаём отмену наружу. Что не успели — ждёт выхода
                     # процесса, хук на который теперь стоит всегда.
-                    await self._adrain_own_within_budget(_CANCEL_DRAIN_BUDGET_SEC)
+                    await self._adrain_own_within_budget(
+                        _CANCEL_DRAIN_BUDGET_SEC
+                    )
                     raise
                 cancelled = exc  # отменилась сессия: гасим остальные
             except Exception:

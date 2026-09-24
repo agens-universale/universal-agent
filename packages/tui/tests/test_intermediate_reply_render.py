@@ -10,7 +10,9 @@ async def test_intermediate_reply_renders_as_dot_prose(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(
@@ -24,7 +26,11 @@ async def test_intermediate_reply_renders_as_dot_prose(tmp_path):
         )
         screen._render_event(ev)
         await pilot.pause()
-        rows = [w for w in screen.query(TraceRow) if w.has_class("line-intermediate")]
+        rows = [
+            w
+            for w in screen.query(TraceRow)
+            if w.has_class("line-intermediate")
+        ]
         assert len(rows) == 1
 
 
@@ -34,7 +40,9 @@ async def test_error_msg_renders_red_bang(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(

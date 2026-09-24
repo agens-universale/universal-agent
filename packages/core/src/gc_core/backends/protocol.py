@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Optional, Sequence
 
 from gc_core.backends.capture import CapturedStream, captured_stream_from_text
-from gc_core.backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries
+from gc_core.backends.walk_util import (
+    WalkEntry,
+    iter_walk_entries_from_flat,
+    prune_flat_entries,
+)
 
 # Потолок captured-буфера на поток (decoded UTF-8 chars): L = head H + tail T,
 # H = floor(L / 2), T = L - H. По умолчанию 40k на поток = 20k + 20k.
@@ -50,7 +54,9 @@ class WalkOutputTooLargeError(OSError):
 class _Missing:
     """Отличает «не передали return_code» от осознанного ``None`` (timeout)."""
 
-    def __repr__(self) -> str:  # pragma: no cover - только для сообщений об ошибке
+    def __repr__(
+        self,
+    ) -> str:  # pragma: no cover - только для сообщений об ошибке
         return "<missing>"
 
 
@@ -82,17 +88,27 @@ class ExecResult:
         if isinstance(self.return_code, _Missing):
             # Молчаливый None превратил бы успешную команду в non_zero_exit
             # "exited with status None" — падаем на конструировании, как раньше.
-            raise TypeError("ExecResult: return_code обязателен (None означает timeout)")
+            raise TypeError(
+                "ExecResult: return_code обязателен (None означает timeout)"
+            )
         if self.stdout_stream is None:
-            self.stdout_stream = CapturedStream(head=self.stdout or "", total_chars=len(self.stdout or ""))
+            self.stdout_stream = CapturedStream(
+                head=self.stdout or "", total_chars=len(self.stdout or "")
+            )
         else:
             self.stdout = self.stdout_stream.text
         if self.stderr_stream is None:
-            self.stderr_stream = CapturedStream(head=self.stderr or "", total_chars=len(self.stderr or ""))
+            self.stderr_stream = CapturedStream(
+                head=self.stderr or "", total_chars=len(self.stderr or "")
+            )
         else:
             self.stderr = self.stderr_stream.text
-        self.stdout_hit_capture_cap = bool(self.stdout_hit_capture_cap) or self.stdout_stream.truncated
-        self.stderr_hit_capture_cap = bool(self.stderr_hit_capture_cap) or self.stderr_stream.truncated
+        self.stdout_hit_capture_cap = (
+            bool(self.stdout_hit_capture_cap) or self.stdout_stream.truncated
+        )
+        self.stderr_hit_capture_cap = (
+            bool(self.stderr_hit_capture_cap) or self.stderr_stream.truncated
+        )
 
 
 def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
@@ -101,7 +117,9 @@ def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
     return cs.text, cs.truncated
 
 
-def _rebound(stream: Optional[CapturedStream], text: str, max_chars: int) -> CapturedStream:
+def _rebound(
+    stream: Optional[CapturedStream], text: str, max_chars: int
+) -> CapturedStream:
     # Поток из accumulator с отброшенной серединой пересобирать нельзя: его
     # плоский текст — уже склейка краёв, total_chars восстановить неоткуда.
     if stream is not None and stream.truncated:
@@ -215,7 +233,13 @@ class FsBackend(ABC):
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None, env: Optional[dict] = None) -> dict:
+    async def aspawn_background(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[dict] = None,
+    ) -> dict:
         """Запустить команду фоном и НЕ ждать её: вернуть как минимум ``pid``.
 
         Вывод команды не сохраняется: у фонового процесса не должно быть ни
@@ -231,7 +255,9 @@ class FsBackend(ABC):
         он нужнее всего. Теперь поверхность порта одна, и сторож паритета
         обёртки ловит пропажу сразу.
         """
-        raise BackgroundNotSupportedError(f"{type(self).__name__} не умеет запускать команды фоном")
+        raise BackgroundNotSupportedError(
+            f"{type(self).__name__} не умеет запускать команды фоном"
+        )
 
     # Кэш ответов проб. Заполняет ЕДИНСТВЕННЫЙ писатель —
     # ``awarm_capabilities``; подклассы могут задать ответы заранее через
@@ -366,7 +392,9 @@ class FsBackend(ABC):
     @abstractmethod
     async def getsize(self, path: str) -> int: ...
     @abstractmethod
-    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict: ...
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict: ...
     @abstractmethod
     async def readable(self, path: str) -> bool: ...
     @abstractmethod
@@ -393,11 +421,15 @@ class FsBackend(ABC):
 
     # --- write ---
     @abstractmethod
-    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None: ...
     @abstractmethod
     async def write_bytes(self, path: str, data: bytes) -> None: ...
     @abstractmethod
-    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None: ...
     @abstractmethod
     async def copy(self, src: str, dst: str) -> None: ...
     @abstractmethod
@@ -438,8 +470,12 @@ class FsBackend(ABC):
         Default: from ``walk()`` — no sizes (tools fall back to ``getsize``) and
         host-side prune, so every backend yields the same tree for the same rules.
         """
-        entries = [WalkEntry(rel, is_dir) for rel, is_dir in await self.walk(path)]
-        return prune_flat_entries(entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)
+        entries = [
+            WalkEntry(rel, is_dir) for rel, is_dir in await self.walk(path)
+        ]
+        return prune_flat_entries(
+            entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+        )
 
     async def iter_walk_entries(
         self,
@@ -451,7 +487,9 @@ class FsBackend(ABC):
     ) -> AsyncIterator[WalkEntry]:
         """``iter_walk`` order over ``walk_entries`` (sizes preserved)."""
         for entry in iter_walk_entries_from_flat(
-            await self.walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs),
+            await self.walk_entries(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            ),
             should_descend=should_descend,
             join=self.join,
             root=path,

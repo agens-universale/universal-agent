@@ -12,7 +12,9 @@ from pathlib import Path
 
 import yaml
 from gc_core.config import _default_config_path, flatten_app_config
-from gc_core.config_modules.model_sections_validation import validate_model_sections
+from gc_core.config_modules.model_sections_validation import (
+    validate_model_sections,
+)
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_testkit.paths import REPO
@@ -314,7 +316,9 @@ def test_demo_config_carries_live_profile_and_level_pointers():
     assert raw.get("profile") == "", (
         'demo_config.yml потерял живой указатель `profile: ""` — §13 требует демонстрации заполнения указателей'
     )
-    assert raw.get("level") == "default", "demo_config.yml потерял живой указатель `level: default`"
+    assert raw.get("level") == "default", (
+        "demo_config.yml потерял живой указатель `level: default`"
+    )
 
 
 def _anchor_line(lines: list[str], anchor: str) -> int:
@@ -367,7 +371,9 @@ def test_demo_config_commented_example_is_valid_when_uncommented():
     (схема + ссылочная целостность на merged), а не только через `safe_load`."""
     text = DEMO_CONFIG_PATH.read_text(encoding="utf-8")
     example = yaml.safe_load(_uncomment_block(text, "# models:")) or {}
-    assert set(example) == {"models", "slots", "assign"}, f"из блока-примера вынулись не те секции: {sorted(example)}"
+    assert set(example) == {"models", "slots", "assign"}, (
+        f"из блока-примера вынулись не те секции: {sorted(example)}"
+    )
     merged = (yaml.safe_load(text) or {}) | example
     cfg = AppConfig.model_validate(merged)
     assert validate_model_sections(cfg) == []
@@ -392,7 +398,9 @@ def _template_covered(schema_paths: set, template_paths: set) -> set:
     """Пути схемы, покрытые шаблоном напрямую или как префикс (для пустых dict-листьев)."""
     covered: set = set()
     for sp in schema_paths:
-        if sp in template_paths or any(tp.startswith(sp + ".") for tp in template_paths):
+        if sp in template_paths or any(
+            tp.startswith(sp + ".") for tp in template_paths
+        ):
             covered.add(sp)
     return covered
 
@@ -461,6 +469,12 @@ def test_demo_config_covers_the_same_keys_as_the_template():
     demo_covered = _template_covered(schema_paths, _leaf_paths(demo_raw))
 
     missing = template_covered - demo_covered - DEMO_KNOWN_GAPS
-    assert not missing, f"{name} отстал от config.default.yml — добавь ключи:\n" + "\n".join(sorted(missing))
+    assert not missing, (
+        f"{name} отстал от config.default.yml — добавь ключи:\n"
+        + "\n".join(sorted(missing))
+    )
     closed = DEMO_KNOWN_GAPS & demo_covered
-    assert not closed, f"{name}: эти ключи уже добавлены — удали их из DEMO_KNOWN_GAPS:\n" + "\n".join(sorted(closed))
+    assert not closed, (
+        f"{name}: эти ключи уже добавлены — удали их из DEMO_KNOWN_GAPS:\n"
+        + "\n".join(sorted(closed))
+    )

@@ -238,7 +238,9 @@ def _extract_marked(stdout: str) -> Optional[Dict[str, Any]]:
 class OsBackendStatelessClient(McpClientPort):
     """`http` / `stream_http` / `stdio`, spoken from inside the backend."""
 
-    def __init__(self, server_name: str, server_cfg: Dict[str, Any], *, os_backend: Any) -> None:
+    def __init__(
+        self, server_name: str, server_cfg: Dict[str, Any], *, os_backend: Any
+    ) -> None:
         super().__init__(server_name, server_cfg)
         self.os_backend = os_backend
 
@@ -264,7 +266,9 @@ class OsBackendStatelessClient(McpClientPort):
             # Сырой канал: проба носителя — внутренний вызов, профиль образа ей
             # вреден (у develop так же).
             probe = await arun_backend_exec_raw(
-                self.os_backend, self._PROBE_COMMAND, timeout=self._probe_timeout(timeout)
+                self.os_backend,
+                self._PROBE_COMMAND,
+                timeout=self._probe_timeout(timeout),
             )
             cached = self._remember_probe(probe)
         if not cached:
@@ -293,18 +297,33 @@ class OsBackendStatelessClient(McpClientPort):
         body = await self._aoperation("tools/list", {}, timeout=timeout)
         return _tools_from_body(body)
 
-    async def acall_tool(self, tool_name: str, arguments: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
-        return await self._aoperation("tools/call", {"name": tool_name, "arguments": arguments}, timeout=timeout)
+    async def acall_tool(
+        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
+        return await self._aoperation(
+            "tools/call",
+            {"name": tool_name, "arguments": arguments},
+            timeout=timeout,
+        )
 
-    async def _aoperation(self, method: str, params: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
+    async def _aoperation(
+        self, method: str, params: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
         """Асинхронный двойник :meth:`_operation`: порядок шагов общий."""
         if str(self.server_cfg.get("transport") or "") == "stdio":
-            return await self._astdio_operation(method, params, timeout=timeout)
+            return await self._astdio_operation(
+                method, params, timeout=timeout
+            )
         per_request = max(1.0, float(timeout) / _REQUESTS_PER_OPERATION)
         await self._arequire_python3(timeout=per_request)
         session_id = await self._ahandshake(timeout=per_request)
         _headers, body = await self._arequest(
-            {"jsonrpc": "2.0", "id": f"gc-{method}", "method": method, "params": params},
+            {
+                "jsonrpc": "2.0",
+                "id": f"gc-{method}",
+                "method": method,
+                "params": params,
+            },
             session_id=session_id,
             timeout=per_request,
             close_session=True,
@@ -313,7 +332,12 @@ class OsBackendStatelessClient(McpClientPort):
 
     async def _ahandshake(self, *, timeout: float) -> Optional[str]:
         headers, _body = await self._arequest(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": MCP_INIT_PARAMS},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": MCP_INIT_PARAMS,
+            },
             session_id=None,
             timeout=timeout,
         )
@@ -363,8 +387,12 @@ class OsBackendStatelessClient(McpClientPort):
         }
         socket_timeout, deadline = _split_share(timeout)
         request["timeout"] = socket_timeout
-        payload_b64 = base64.b64encode(json.dumps(request).encode("utf-8")).decode("ascii")
-        code = _HTTP_CARRIER.format(payload_b64=payload_b64, marker=EXEC_RESULT_MARKER)
+        payload_b64 = base64.b64encode(
+            json.dumps(request).encode("utf-8")
+        ).decode("ascii")
+        code = _HTTP_CARRIER.format(
+            payload_b64=payload_b64, marker=EXEC_RESULT_MARKER
+        )
         return code, deadline
 
     def _carrier_argv(self) -> list:
@@ -399,7 +427,9 @@ class OsBackendStatelessClient(McpClientPort):
         )
         return self._interpret(result)
 
-    def _stdio_call_parts(self, method: str, params: Dict[str, Any]) -> Tuple[list, str, str]:
+    def _stdio_call_parts(
+        self, method: str, params: Dict[str, Any]
+    ) -> Tuple[list, str, str]:
         """``(argv, stdin, rpc_id)`` одного stdio-обмена. Общее для обеих форм.
 
         MCP stdio-серверы читают JSON-RPC построчно, поэтому все три сообщения
@@ -411,8 +441,13 @@ class OsBackendStatelessClient(McpClientPort):
             raise McpExecCarrierError(
                 f"MCP server '{self.server_name}': transport stdio needs a 'command' in the config"
             )
-        argv = [str(command)] + [str(a) for a in (self.server_cfg.get("args") or [])]
-        env = {str(k): str(v) for k, v in (self.server_cfg.get("env") or {}).items()}
+        argv = [str(command)] + [
+            str(a) for a in (self.server_cfg.get("args") or [])
+        ]
+        env = {
+            str(k): str(v)
+            for k, v in (self.server_cfg.get("env") or {}).items()
+        }
         if env:
             # `exec_argv` builds `printf … | <argv>` and backends prepend `env K=V`
             # to the whole string — in POSIX grammar the pipe splits the command
@@ -421,9 +456,19 @@ class OsBackendStatelessClient(McpClientPort):
             argv = ["env"] + [f"{k}={v}" for k, v in env.items()] + argv
         rpc_id = f"gc-{method}"
         messages = [
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": MCP_INIT_PARAMS},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": MCP_INIT_PARAMS,
+            },
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params},
+            {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": method,
+                "params": params,
+            },
         ]
         stdin = "".join(json.dumps(m) + "\n" for m in messages)
         return argv, stdin, rpc_id
@@ -452,7 +497,9 @@ class OsBackendStatelessClient(McpClientPort):
             f"stderr={stderr})"
         )
 
-    async def _astdio_operation(self, method: str, params: Dict[str, Any], *, timeout: float) -> Dict[str, Any]:
+    async def _astdio_operation(
+        self, method: str, params: Dict[str, Any], *, timeout: float
+    ) -> Dict[str, Any]:
         """Асинхронный двойник: сборка и разбор общие, отличается запуск."""
         argv, stdin, rpc_id = self._stdio_call_parts(method, params)
         result = await aexec_port(self.os_backend).aexec_argv(
@@ -470,7 +517,11 @@ class OsBackendStatelessClient(McpClientPort):
         it rides the backend's internal-channel ceiling (the one walk/listdir
         use), not the 60k shell cap — a product catalog must not fail the call.
         Backends without the attribute (local) get the protocol default."""
-        return int(getattr(self.os_backend, "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS))
+        return int(
+            getattr(
+                self.os_backend, "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS
+            )
+        )
 
     def _interpret(self, result: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         if getattr(result, "stdout_hit_capture_cap", False):
@@ -486,14 +537,19 @@ class OsBackendStatelessClient(McpClientPort):
                 f"(rc={getattr(result, 'return_code', None)}, stderr={stderr})"
             )
         if "error" in parsed and "status" not in parsed:
-            raise McpExecCarrierError(f"MCP server '{self.server_name}': carrier failed: {parsed['error']}")
+            raise McpExecCarrierError(
+                f"MCP server '{self.server_name}': carrier failed: {parsed['error']}"
+            )
         status = int(parsed.get("status") or 0)
         if status >= 400:
             raise McpCarrierHttpError(
                 f"MCP server '{self.server_name}': HTTP {status} from {self.server_cfg.get('url')}",
                 status=status,
             )
-        headers = {str(k).lower(): str(v) for k, v in (parsed.get("headers") or {}).items()}
+        headers = {
+            str(k).lower(): str(v)
+            for k, v in (parsed.get("headers") or {}).items()
+        }
         body = parsed.get("body")
         return headers, (body if isinstance(body, dict) else {})
 

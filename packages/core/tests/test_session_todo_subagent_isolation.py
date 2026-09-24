@@ -11,7 +11,9 @@ import json
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.states import SharedStateData, State
-from gc_core.summarize.working_memory_gateway import read_session_todo_from_state
+from gc_core.summarize.working_memory_gateway import (
+    read_session_todo_from_state,
+)
 from gc_core.tools.session.todo import SessionTodo
 from gc_testkit.helpers.tool_ctx import CallableTool
 
@@ -83,7 +85,9 @@ def test_tool_call_from_subagent_preserves_parent_checklist():
     CallableTool(SessionTodo(state=parent))(todos=list(PARENT_ITEMS))
     child = _child_of(parent)
 
-    out = json.loads(CallableTool(SessionTodo(state=child))(todos=list(CHILD_ITEMS)))
+    out = json.loads(
+        CallableTool(SessionTodo(state=child))(todos=list(CHILD_ITEMS))
+    )
 
     assert out["ok"] is True
     assert out["count"] == 2
@@ -100,7 +104,9 @@ def test_tool_error_from_subagent_reports_own_counts():
     out = json.loads(CallableTool(SessionTodo(state=child))(todos="не список"))
 
     assert out["ok"] is False
-    assert out["count"] == 2, "в ошибке отдаём текущий чек-лист субагента, не родителя"
+    assert out["count"] == 2, (
+        "в ошибке отдаём текущий чек-лист субагента, не родителя"
+    )
 
 
 # --- читатели чек-листа ------------------------------------------------------

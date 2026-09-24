@@ -15,17 +15,32 @@ import logging
 import re
 import shlex
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from gc_core.backends.async_protocol import aexec_port, arun_backend_exec_raw
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 from gc_core.utils.find_in_files_scan_mode import Needles
 from gc_core.utils.fs_search_walk import effective_exclude_dir_names
-from gc_core.utils.pattern_native_gate import NativeGrepPlan, is_safe_grep_include
+from gc_core.utils.pattern_native_gate import (
+    NativeGrepPlan,
+    is_safe_grep_include,
+)
 
 log = logging.getLogger(__name__)
 
-_GREP_LINE_RE = re.compile(r"^(?P<path>[^:]+):(?P<line>\d+):(?P<text>.*)$", re.ASCII)
+_GREP_LINE_RE = re.compile(
+    r"^(?P<path>[^:]+):(?P<line>\d+):(?P<text>.*)$", re.ASCII
+)
 # Tail of a ``--null`` record: the file name is already split off at NUL.
 _GREP_REST_RE = re.compile(r"^(?P<line>\d+):(?P<text>.*)$", re.ASCII)
 # One grep record, read straight from the buffer — no list of lines.
@@ -77,7 +92,9 @@ class _ParseFailure(Exception):
     """A record that is neither a match line nor a torn tail: the buffer is invalid."""
 
 
-def _record_fields(raw: str, *, torn_tail: bool) -> Optional[Tuple[str, int, str]]:
+def _record_fields(
+    raw: str, *, torn_tail: bool
+) -> Optional[Tuple[str, int, str]]:
     """``(path, line_no, text)``; None — torn last record to drop; raises on garbage."""
     rec = _split_grep_record(raw)
     if rec is not None:
@@ -89,7 +106,9 @@ def _record_fields(raw: str, *, torn_tail: bool) -> Optional[Tuple[str, int, str
     raise _ParseFailure()
 
 
-def _winner_entries(winners: Any, report_path: Callable[[str], str], torn_tail: bool) -> List[Dict[str, Any]]:
+def _winner_entries(
+    winners: Any, report_path: Callable[[str], str], torn_tail: bool
+) -> List[Dict[str, Any]]:
     matches: List[Dict[str, Any]] = []
     for _key, _i, abs_p, line_no, text, is_last in winners:
         entry: Dict[str, Any] = {
@@ -146,7 +165,11 @@ class _RecordScan:
             if rec is None:
                 return  # torn prefix: drop the tail, keep what parsed
             p, line_no, text = rec
-            abs_p = p if self._backend.isabs(p) else self._backend.join(self._root, p)
+            abs_p = (
+                p
+                if self._backend.isabs(p)
+                else self._backend.join(self._root, p)
+            )
             if self._allow_path is not None and not self._allow_path(abs_p):
                 continue
             self.total += 1
@@ -178,14 +201,28 @@ def _stream_top_k(
     full parse, same brain, no second parser to drift).
     """
     torn_tail = hit_cap and not stdout.endswith("\n")
-    scan = _RecordScan(stdout, hit_cap=hit_cap, root=root, backend=backend, allow_path=allow_path, rank_key=rank_key)
+    scan = _RecordScan(
+        stdout,
+        hit_cap=hit_cap,
+        root=root,
+        backend=backend,
+        allow_path=allow_path,
+        rank_key=rank_key,
+    )
     try:
         if rank_key is not None and top_k is not None:
-            winners = heapq.nsmallest(top_k, scan.records(), key=lambda r: (r[0], r[1]))
+            winners = heapq.nsmallest(
+                top_k, scan.records(), key=lambda r: (r[0], r[1])
+            )
         else:
             winners = list(scan.records())
     except _ParseFailure:
-        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure="native_error")
+        return NativeGrepResult(
+            matches=[],
+            truncated=False,
+            hit_capture_cap=hit_cap,
+            failure="native_error",
+        )
     return NativeGrepResult(
         matches=_winner_entries(winners, report_path, torn_tail),
         truncated=hit_cap,
@@ -246,7 +283,9 @@ def native_grep_refusal(
         return "no_grep"
 
     names = [n for n in (exclude_dir_names or []) if n]
-    need_prune = bool(names) or bool(exclude_nested_dot_dirs) or bool(call_exclude_dirs)
+    need_prune = (
+        bool(names) or bool(exclude_nested_dot_dirs) or bool(call_exclude_dirs)
+    )
     if need_prune and not _backend_flag(backend, "has_find"):
         return "no_find"
 
@@ -289,10 +328,16 @@ def find_prune_group(
     """
     # Имя экранируется так же, как путь ниже: домашний предикат сравнивает строго,
     # а `-name` без экранирования читает имя как шаблон — `my[1]` вырезал бы `my1`.
-    parts: List[List[str]] = [["-type", "d", "-name", _fnmatch_escape(n)] for n in exclude_dir_names if n]
+    parts: List[List[str]] = [
+        ["-type", "d", "-name", _fnmatch_escape(n)]
+        for n in exclude_dir_names
+        if n
+    ]
     if exclude_nested_dot_dirs:
         parts.append(["-type", "d", "-name", ".*"])
-    parts.extend(["-type", "d", "-path", _fnmatch_escape(p)] for p in exclude_paths if p)
+    parts.extend(
+        ["-type", "d", "-path", _fnmatch_escape(p)] for p in exclude_paths if p
+    )
     if not parts:
         return []
     group: List[str] = ["("]
@@ -390,7 +435,11 @@ def _inline_env(env: Optional[Dict[str, str]]) -> str:
     """
     if not env:
         return ""
-    return "env " + " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items()) + " "
+    return (
+        "env "
+        + " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
+        + " "
+    )
 
 
 def build_find_xargs_grep_command(
@@ -438,7 +487,9 @@ PREFILTER_TIMEOUT_SEC = 60
 _UTF16_BOM_PRINTF = ("\\377\\376", "\\376\\377")
 
 
-def prefilter_terms(needles: Needles, *, case_insensitive: bool) -> Optional[List[str]]:
+def prefilter_terms(
+    needles: Needles, *, case_insensitive: bool
+) -> Optional[List[str]]:
     """Fixed strings whose absence proves the pattern absent — or None.
 
     Sound only while grep sees the bytes Python would match: control characters
@@ -493,7 +544,9 @@ def build_prefilter_command(
         grep_argv.extend(["-e", term])
     find_s = " ".join(shlex.quote(a) for a in find_argv)
     grep_s = " ".join(shlex.quote(a) for a in grep_argv)
-    bom_s = " ".join(f"-e \"$(printf '{octal}')\"" for octal in _UTF16_BOM_PRINTF)
+    bom_s = " ".join(
+        f"-e \"$(printf '{octal}')\"" for octal in _UTF16_BOM_PRINTF
+    )
     return f"{find_s} | xargs -0 -r {_inline_env(dict(_PREFILTER_ENV))}{grep_s} {bom_s}"
 
 
@@ -511,7 +564,9 @@ async def anative_prefilter_candidates(
     """
     cmd = build_prefilter_command(path, **kwargs)
     try:
-        res = await arun_backend_exec_raw(backend, cmd, **_prefilter_run_kwargs(backend))
+        res = await arun_backend_exec_raw(
+            backend, cmd, **_prefilter_run_kwargs(backend)
+        )
     except Exception as exc:
         log.debug("native prefilter failed: %s", exc)
         return None, "failed"
@@ -528,7 +583,9 @@ def _prefilter_run_kwargs(backend: Any) -> Dict[str, Any]:
     }
 
 
-def _prefilter_result(res: Any, backend: Any, path: str) -> tuple[Optional[List[str]], Optional[str]]:
+def _prefilter_result(
+    res: Any, backend: Any, path: str
+) -> tuple[Optional[List[str]], Optional[str]]:
     """Разбор результата префильтра — общий для обеих форм."""
     if getattr(res, "timed_out", False):
         return None, "timeout"
@@ -609,7 +666,9 @@ def _grep_recipe(
         argv.extend(["--", plan.pattern, path])
         return _GrepRecipe(shell=False, target=argv, kwargs=common)
     # single file
-    return _GrepRecipe(shell=False, target=list(grep_argv) + [path], kwargs=common)
+    return _GrepRecipe(
+        shell=False, target=list(grep_argv) + [path], kwargs=common
+    )
 
 
 async def arun_native_grep(
@@ -636,8 +695,12 @@ async def arun_native_grep(
     запуска процесса нативная асинхронная форма есть.
     """
     names = [n for n in exclude_dir_names if n]
-    need_prune = is_dir_target and (bool(names) or exclude_nested_dot_dirs or bool(exclude_paths))
-    grep_argv: List[str] = build_grep_argv_flags(case_insensitive=plan.case_insensitive, fixed=plan.fixed)
+    need_prune = is_dir_target and (
+        bool(names) or exclude_nested_dot_dirs or bool(exclude_paths)
+    )
+    grep_argv: List[str] = build_grep_argv_flags(
+        case_insensitive=plan.case_insensitive, fixed=plan.fixed
+    )
     grep_argv.extend(["--", plan.pattern])
     env = _grep_env(plan)
 
@@ -657,13 +720,20 @@ async def arun_native_grep(
     port = aexec_port(backend)
     try:
         res = (
-            await arun_backend_exec_raw(backend, recipe.target, **recipe.kwargs)
+            await arun_backend_exec_raw(
+                backend, recipe.target, **recipe.kwargs
+            )
             if recipe.shell
             else await port.aexec_argv(recipe.target, **recipe.kwargs)
         )
     except Exception as exc:
         log.debug("native grep failed: %s", exc)
-        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=False, failure="native_error")
+        return NativeGrepResult(
+            matches=[],
+            truncated=False,
+            hit_capture_cap=False,
+            failure="native_error",
+        )
 
     return _grep_result(
         res,
@@ -677,17 +747,31 @@ async def arun_native_grep(
     )
 
 
-def _grep_exit_outcome(rc: Any, stdout: str, stderr: str, hit_cap: bool) -> Optional[NativeGrepResult]:
+def _grep_exit_outcome(
+    rc: Any, stdout: str, stderr: str, hit_cap: bool
+) -> Optional[NativeGrepResult]:
     """Итог по коду выхода grep без разбора вывода; None — вывод надо разбирать."""
 
     def _failed(kind: str) -> NativeGrepResult:
-        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind)
+        return NativeGrepResult(
+            matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind
+        )
 
-    empty = NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap)
-    if rc is not None and rc >= 2 and (rc != 123 or (stderr.strip() and "Binary" not in stderr)):
+    empty = NativeGrepResult(
+        matches=[], truncated=False, hit_capture_cap=hit_cap
+    )
+    if (
+        rc is not None
+        and rc >= 2
+        and (rc != 123 or (stderr.strip() and "Binary" not in stderr))
+    ):
         return _failed("native_error")
     if rc == 1:
-        return _failed("native_error") if (stderr.strip() or stdout.strip()) else empty
+        return (
+            _failed("native_error")
+            if (stderr.strip() or stdout.strip())
+            else empty
+        )
     if rc not in (0, 123, None):
         return _failed("native_error")
     if rc == 0 and not stdout.strip() and not hit_cap:
@@ -709,7 +793,9 @@ def _grep_result(
     """Разбор вывода grep — общий для синхронной и асинхронной форм."""
 
     def _failed(kind: str, *, hit_cap: bool = False) -> NativeGrepResult:
-        return NativeGrepResult(matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind)
+        return NativeGrepResult(
+            matches=[], truncated=False, hit_capture_cap=hit_cap, failure=kind
+        )
 
     if getattr(res, "timed_out", False):
         return _failed("native_timeout")
@@ -736,7 +822,11 @@ def _grep_result(
     )
     if result.failure:
         return result
-    if rank_key is None and max_matches is not None and len(result.matches) > max_matches:
+    if (
+        rank_key is None
+        and max_matches is not None
+        and len(result.matches) > max_matches
+    ):
         del result.matches[max_matches:]
         return NativeGrepResult(
             matches=result.matches,
@@ -748,6 +838,8 @@ def _grep_result(
     return result
 
 
-def hard_exclude_names_for_grep(extra: Optional[Sequence[str]] = None) -> List[str]:
+def hard_exclude_names_for_grep(
+    extra: Optional[Sequence[str]] = None,
+) -> List[str]:
     """Basenames for prune/--exclude-dir (hard floor ∪ config extras)."""
     return sorted(effective_exclude_dir_names(extra))

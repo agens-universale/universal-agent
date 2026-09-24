@@ -113,7 +113,9 @@ class AskHuman(AbstractSimpleTool):
     """
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_ask_human",
@@ -137,7 +139,9 @@ class AskHuman(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
         description = """Tool name: turn_ask_human
@@ -311,14 +315,19 @@ Do not implement until they confirm.
         print("-" * 60, file=sys.stderr)
         print(question, file=sys.stderr)
         print("-" * 60, file=sys.stderr)
-        print("Please enter your response (end with EOF or empty line):", file=sys.stderr)
+        print(
+            "Please enter your response (end with EOF or empty line):",
+            file=sys.stderr,
+        )
         self._run_logger().info(
             "ask_human_question",
             extra={"event": "ask_human_question", "question": question},
         )
         return question, via_name
 
-    def _ask_answered(self, question: str, via_name: Optional[str], response: str) -> str:
+    def _ask_answered(
+        self, question: str, via_name: Optional[str], response: str
+    ) -> str:
         from gc_core.tools.subagents.progress import emit_progress
 
         if response == "":
@@ -364,10 +373,15 @@ Do not implement until they confirm.
             ok=False,
             question=question,
             response="(user interrupted)",
-            error={"type": "interrupted", "message": "Interaction interrupted by user."},
+            error={
+                "type": "interrupted",
+                "message": "Interaction interrupted by user.",
+            },
         )
 
-    def _ask_failed(self, question: str, via_name: Optional[str], exc: Exception) -> str:
+    def _ask_failed(
+        self, question: str, via_name: Optional[str], exc: Exception
+    ) -> str:
         from gc_core.tools.subagents.progress import emit_progress
 
         error_msg = f"(error reading input: {exc!s})"

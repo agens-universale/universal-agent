@@ -1,13 +1,22 @@
 import json
 
-from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, ACTION_USER_ASK
+from gc_core.intent_log import (
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    ACTION_USER_ASK,
+)
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
     append_user_asks_from_messages,
     init_subagent_open_turn,
 )
-from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
-from gc_core.message_policy.user_message_policy import extract_real_user_message_text
+from gc_core.intent_scope.append import (
+    append_tool_aggregated_to_current,
+    append_tool_raw_to_current,
+)
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.states import State
 
@@ -26,7 +35,11 @@ def _make_state() -> State:
 
 
 def _user_ask_contents(records) -> list[str]:
-    return [str(record.content) for record in records if record.action == ACTION_USER_ASK]
+    return [
+        str(record.content)
+        for record in records
+        if record.action == ACTION_USER_ASK
+    ]
 
 
 def test_new_state_has_empty_user_intent_log():
@@ -87,7 +100,9 @@ def test_append_user_asks_preserves_initial_across_step_batches():
         },
     ]
     state.current_user_intent = append_user_asks_from_messages(
-        state.current_user_intent, step_batch, user_turn_seq=state.user_turn_seq
+        state.current_user_intent,
+        step_batch,
+        user_turn_seq=state.user_turn_seq,
     )
 
     assert _user_ask_contents(state.current_user_intent) == ["do the thing"]
@@ -105,10 +120,14 @@ def test_init_subagent_open_turn_without_policy_filter():
     assert state.finish_gate_rejection_count == 0
 
     state2 = _make_state()
-    text = extract_real_user_message_text({"role": "user", "content": assignment, "id": "m_sub"})
+    text = extract_real_user_message_text(
+        {"role": "user", "content": assignment, "id": "m_sub"}
+    )
     if text:
         state2.current_user_intent = append_user_ask_deduped(
-            state2.current_user_intent, text, user_turn_seq=state2.user_turn_seq
+            state2.current_user_intent,
+            text,
+            user_turn_seq=state2.user_turn_seq,
         )
     assert state2.current_user_intent == []
 
@@ -117,12 +136,21 @@ def test_seed_user_ask_appends_only_to_current():
     from gc_core.intent_log import append_user_ask
 
     state = _make_state()
-    state.user_intent_log = append_user_ask([], "old intent 1", user_turn_seq=0, ts="2026-05-30T11:35:08Z")
+    state.user_intent_log = append_user_ask(
+        [], "old intent 1", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
+    )
     state.flush_current_user_intent()
     state.current_user_intent = append_user_ask(
-        [], "active intent 1", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+        [],
+        "active intent 1",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
     )
-    new_user_message = {"role": "user", "content": "fresh request", "id": "m_new"}
+    new_user_message = {
+        "role": "user",
+        "content": "fresh request",
+        "id": "m_new",
+    }
 
     state.finish_gate_rejection_count = 0
     text = extract_real_user_message_text(new_user_message)
@@ -164,10 +192,15 @@ def test_flush_moves_current_to_log_without_dedup():
     from gc_core.intent_log import append_user_ask
 
     state = _make_state()
-    state.user_intent_log = append_user_ask([], "closed turn", user_turn_seq=0, ts="2026-05-30T11:35:08Z")
+    state.user_intent_log = append_user_ask(
+        [], "closed turn", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
+    )
     state.flush_current_user_intent()
     state.current_user_intent = append_user_ask(
-        [], "line a", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+        [],
+        "line a",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
     )
     state.current_user_intent = append_user_ask(
         state.current_user_intent,
@@ -247,7 +280,9 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache["https://example.com"] = {"content": "ok"}
 
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+        ToolCallOutputRecord,
+    )
 
     state.tool_call_outputs_store.put(
         ToolCallOutputRecord(
@@ -267,7 +302,9 @@ def test_state_to_dict_roundtrip_is_json_serializable_and_restores_shared_and_st
     assert restored.shared.working_memory["state"] == "entry"
     assert StateSerializer.serialize(restored)["state_schema_version"] == "v2"
     assert restored.shared.notes_md == "notes"
-    assert restored.shared.fetch_url_cache["https://example.com"] == {"content": "ok"}
+    assert restored.shared.fetch_url_cache["https://example.com"] == {
+        "content": "ok"
+    }
     rec = restored.tool_call_outputs_store.peek("out_1")
     assert rec is not None
     assert rec.text == "ok"
@@ -281,11 +318,29 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         verbose=True,
         model="CodeChat-Pro",
         tools_spec=[
-            {"type": "function", "function": {"name": "fs_read_file", "parameters": {"type": "object"}}},
-            {"type": "function", "function": {"name": "fs_write_file", "parameters": {"type": "object"}}},
+            {
+                "type": "function",
+                "function": {
+                    "name": "fs_read_file",
+                    "parameters": {"type": "object"},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fs_write_file",
+                    "parameters": {"type": "object"},
+                },
+            },
         ],
-        tools_descr=[{"name": "fs_read_file", "desc": "Read file"}, {"name": "fs_write_file", "desc": "Write file"}],
-        skills_list=[{"name": "skill_a", "version": 1}, {"name": "skill_b", "version": 2}],
+        tools_descr=[
+            {"name": "fs_read_file", "desc": "Read file"},
+            {"name": "fs_write_file", "desc": "Write file"},
+        ],
+        skills_list=[
+            {"name": "skill_a", "version": 1},
+            {"name": "skill_b", "version": 2},
+        ],
         max_steps=99,
         system_prompt_id="v2-monster",
         use_server_subagents=True,
@@ -303,14 +358,22 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
     state.last_backend_response_id = "resp_last"
     state.steps = 42
     state.stop_requested = True
-    state.user_intent_log = append_user_ask([], "msg one", user_turn_seq=0, ts="2026-05-30T11:35:08Z")
+    state.user_intent_log = append_user_ask(
+        [], "msg one", user_turn_seq=0, ts="2026-05-30T11:35:08Z"
+    )
     state.flush_current_user_intent()
     state.user_intent_log = append_user_ask(
-        state.user_intent_log, "msg two", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+        state.user_intent_log,
+        "msg two",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
     )
     state.flush_current_user_intent()
     state.current_user_intent = append_user_ask(
-        [], "active one", user_turn_seq=state.user_turn_seq, ts="2026-05-30T11:35:08Z"
+        [],
+        "active one",
+        user_turn_seq=state.user_turn_seq,
+        ts="2026-05-30T11:35:08Z",
     )
     state.current_user_intent = append_user_ask(
         state.current_user_intent,
@@ -324,14 +387,27 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         "meta": {"a": 1, "b": "x"},
     }
     state.messages = [
-        {"id": "u1", "role": "user", "content": "Сделай отчёт", "extra": {"source": "cli"}},
+        {
+            "id": "u1",
+            "role": "user",
+            "content": "Сделай отчёт",
+            "extra": {"source": "cli"},
+        },
         {
             "id": "a1",
             "role": "assistant",
-            "content": [{"type": "text", "text": "готово"}, {"type": "tool_call", "name": "fs_read_file"}],
+            "content": [
+                {"type": "text", "text": "готово"},
+                {"type": "tool_call", "name": "fs_read_file"},
+            ],
             "tokens": {"input": 120, "output": 55},
         },
-        {"id": "t1", "type": "function_call", "name": "memory_files", "arguments": '{"action":"list"}'},
+        {
+            "id": "t1",
+            "type": "function_call",
+            "name": "memory_files",
+            "arguments": '{"action":"list"}',
+        },
     ]
 
     state.shared.working_memory.update(
@@ -342,10 +418,18 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
         }
     )
     state.shared.notes_md = "# Notes\n- item1\n- item2"
-    state.shared.fetch_url_cache["https://example.com/a"] = {"content": "AAA", "ts": "2026-05-06T11:00:00Z"}
-    state.shared.fetch_url_cache["https://example.com/b"] = {"content": "BBB", "ts": "2026-05-06T11:01:00Z"}
+    state.shared.fetch_url_cache["https://example.com/a"] = {
+        "content": "AAA",
+        "ts": "2026-05-06T11:00:00Z",
+    }
+    state.shared.fetch_url_cache["https://example.com/b"] = {
+        "content": "BBB",
+        "ts": "2026-05-06T11:01:00Z",
+    }
 
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+        ToolCallOutputRecord,
+    )
 
     state.tool_call_outputs_store.set_max_entries(5)
     state.tool_call_outputs_store.put(
@@ -391,15 +475,31 @@ def test_state_roundtrip_with_monster_payload_preserves_core_runtime_fields():
 
     assert len(restored.messages) == 3
     assert restored.messages[1]["tokens"]["output"] == 55
-    assert _user_ask_contents(restored.user_intent_log) == ["msg one", "msg two"]
-    assert _user_ask_contents(restored.current_user_intent) == ["active one", "active two"]
+    assert _user_ask_contents(restored.user_intent_log) == [
+        "msg one",
+        "msg two",
+    ]
+    assert _user_ask_contents(restored.current_user_intent) == [
+        "active one",
+        "active two",
+    ]
     assert restored.user_turn_seq == 2
-    assert restored.call_metadata["extra"]["nested"][2]["flags"] == [True, False, None]
+    assert restored.call_metadata["extra"]["nested"][2]["flags"] == [
+        True,
+        False,
+        None,
+    ]
 
     assert restored.shared.working_memory["state"] == "line1\nline2"
-    assert restored.shared.working_memory["knowledge"] == "decision: keep explicit serializers"
+    assert (
+        restored.shared.working_memory["knowledge"]
+        == "decision: keep explicit serializers"
+    )
     assert restored.shared.notes_md == "# Notes\n- item1\n- item2"
-    assert restored.shared.fetch_url_cache["https://example.com/b"]["content"] == "BBB"
+    assert (
+        restored.shared.fetch_url_cache["https://example.com/b"]["content"]
+        == "BBB"
+    )
 
     assert restored.tool_call_outputs_store.max_entries == 5
     rec_alpha = restored.tool_call_outputs_store.peek("out_alpha")

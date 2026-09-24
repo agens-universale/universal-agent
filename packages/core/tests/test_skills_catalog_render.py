@@ -30,7 +30,11 @@ F_TR = {
     "pack_id": None,
     "is_pack_bootstrap": False,
 }
-B_NOSIZE = {"id": "gamma:using-gamma", "description": "Gamma entry.", "is_pack_bootstrap": True}
+B_NOSIZE = {
+    "id": "gamma:using-gamma",
+    "description": "Gamma entry.",
+    "is_pack_bootstrap": True,
+}
 
 HEADER = "For solving the task you can use skills."
 CORE = "Pick a skill by fit to the OVERALL task, not the first sub-step you decompose it into"
@@ -99,7 +103,9 @@ def test_empty_list_header_and_core_only():
 def test_entries_without_id_do_not_crash():
     # The old json.dumps tolerated arbitrary skill dicts; the renderer must
     # too (an existing State-roundtrip test feeds id-less skill dicts).
-    out = render_skills_catalog([{"name": "skill_a", "version": 1}, {"name": "skill_b", "version": 2}])
+    out = render_skills_catalog(
+        [{"name": "skill_a", "version": 1}, {"name": "skill_b", "version": 2}]
+    )
     assert HEADER in out
     assert CORE in out
     assert STAND_H in out
@@ -129,5 +135,7 @@ def test_only_id_and_description_surfaced():
     )
     assert "p:b" in out and "PackDesc." in out
     assert "flat" in out and "FlatDesc." in out
-    assert "ZZNAME" not in out and "ZZSOURCE" not in out and "ZZPACK" not in out
+    assert (
+        "ZZNAME" not in out and "ZZSOURCE" not in out and "ZZPACK" not in out
+    )
     assert "YYNAME" not in out and "YYSOURCE" not in out

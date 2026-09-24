@@ -45,7 +45,9 @@ def backend():
     return LocalFsBackend()
 
 
-async def test_large_stdin_with_flooding_child_does_not_hang(backend, tmp_path):
+async def test_large_stdin_with_flooding_child_does_not_hang(
+    backend, tmp_path
+):
     """Шаг обязан завершиться — сам или по таймауту, но не висеть."""
     script = tmp_path / "flood.py"
     script.write_text(_FLOOD_THEN_READ, encoding="utf-8")
@@ -81,7 +83,9 @@ async def test_child_actually_receives_the_whole_stdin(backend, tmp_path):
         encoding="utf-8",
     )
 
-    result = await backend.aexec_argv([sys.executable, str(script)], timeout=30, stdin="b" * _STDIN_BYTES)
+    result = await backend.aexec_argv(
+        [sys.executable, str(script)], timeout=30, stdin="b" * _STDIN_BYTES
+    )
 
     assert str(_STDIN_BYTES) in str(result.stdout), result
 

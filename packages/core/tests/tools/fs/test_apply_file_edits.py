@@ -12,8 +12,18 @@ def test_apply_batch_success(tmp_path):
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
-                {"search": "A", "replace": "X", "occurrence": "first", "expected_matches": 2},
-                {"search": "C", "replace": "Z", "occurrence": "all", "expected_matches": 2},
+                {
+                    "search": "A",
+                    "replace": "X",
+                    "occurrence": "first",
+                    "expected_matches": 2,
+                },
+                {
+                    "search": "C",
+                    "replace": "Z",
+                    "occurrence": "all",
+                    "expected_matches": 2,
+                },
             ],
         )
     )
@@ -33,7 +43,12 @@ def test_apply_batch_atomic_fail_keeps_file(tmp_path):
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
-                {"search": "one", "replace": "ONE", "occurrence": "all", "expected_matches": 2},
+                {
+                    "search": "one",
+                    "replace": "ONE",
+                    "occurrence": "all",
+                    "expected_matches": 2,
+                },
                 {"search": "missing", "replace": "x"},
             ],
         )
@@ -226,7 +241,9 @@ def test_apply_success_path_has_no_suggestions_field_needed(tmp_path):
     res = json.loads(
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
-            edits=[{"search": "alpha beta gamma", "replace": "ALPHA BETA GAMMA"}],
+            edits=[
+                {"search": "alpha beta gamma", "replace": "ALPHA BETA GAMMA"}
+            ],
         )
     )
     assert res["ok"] is True and res["applied"] is True

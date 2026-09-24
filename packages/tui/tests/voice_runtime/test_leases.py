@@ -20,7 +20,9 @@ _HAS_START_KEY = os.name == "nt" or Path("/proc").is_dir()
 
 
 def _patch_dir(monkeypatch, tmp_path):
-    monkeypatch.setattr("gc_tui.voice_runtime.leases.voice_leases_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.leases.voice_leases_dir", lambda: tmp_path
+    )
 
 
 def test_acquire_release_last_one_off(monkeypatch, tmp_path):
@@ -82,11 +84,15 @@ def test_reused_pid_does_not_keep_the_light_on(monkeypatch, tmp_path):
     _patch_dir(monkeypatch, tmp_path)
     monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-A")
     leases.acquire(100)  # lease нашего TUI
-    monkeypatch.setattr(leases, "process_start_key", lambda pid: "start-B")  # чужой процесс
+    monkeypatch.setattr(
+        leases, "process_start_key", lambda pid: "start-B"
+    )  # чужой процесс
 
     assert leases.live_leases(alive=lambda pid: True) == []
     assert not (tmp_path / "100.lease").exists()  # прибран как мёртвый
-    assert leases.release(999, alive=lambda pid: True) is True  # свет можно гасить
+    assert (
+        leases.release(999, alive=lambda pid: True) is True
+    )  # свет можно гасить
 
 
 def test_same_process_keeps_its_lease(monkeypatch, tmp_path):
@@ -110,7 +116,9 @@ def test_lease_without_a_start_key_is_trusted(monkeypatch, tmp_path):
 
 
 def _patch_pids(monkeypatch, tmp_path):
-    monkeypatch.setattr("gc_tui.voice_runtime.leases.voice_pids_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.leases.voice_pids_dir", lambda: tmp_path
+    )
 
 
 def test_no_marker_means_not_ours(monkeypatch, tmp_path):

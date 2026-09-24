@@ -12,9 +12,7 @@ from typing import Any
 
 # LLM-facing hints for semantically optional string fields (must match JSON required).
 OPTIONAL_OMIT_HINT = 'When unused, omit this field. Empty string "" is also accepted and treated as unused.'
-OPTIONAL_EMPTY_AS_OMIT_HINT = (
-    'When unused, pass empty string "" (field omit is unavailable under strict OpenAI tool schema).'
-)
+OPTIONAL_EMPTY_AS_OMIT_HINT = 'When unused, pass empty string "" (field omit is unavailable under strict OpenAI tool schema).'
 
 _OPTIONAL_HINTS = (OPTIONAL_OMIT_HINT, OPTIONAL_EMPTY_AS_OMIT_HINT)
 
@@ -40,7 +38,9 @@ def optional_property_description(base: str, *, openai_strict: bool) -> str:
 
 
 def _property_preserves_empty_string(prop_schema: Any) -> bool:
-    return isinstance(prop_schema, dict) and bool(prop_schema.get(X_PRESERVE_EMPTY_STRING))
+    return isinstance(prop_schema, dict) and bool(
+        prop_schema.get(X_PRESERVE_EMPTY_STRING)
+    )
 
 
 def resolve_optional_property_keys(params_schema: dict[str, Any]) -> list[str]:
@@ -62,7 +62,11 @@ def resolve_optional_property_keys(params_schema: dict[str, Any]) -> list[str]:
 
     explicit = params_schema.get("x-optional-keys")
     if isinstance(explicit, list):
-        return [k for k in explicit if isinstance(k, str) and k in props and _eligible(k)]
+        return [
+            k
+            for k in explicit
+            if isinstance(k, str) and k in props and _eligible(k)
+        ]
 
     required = params_schema.get("required")
     if not isinstance(required, list):
@@ -126,7 +130,12 @@ def seed_optional_keys(schema: dict[str, Any]) -> list[str]:
     required_before = schema.get("required")
     if not isinstance(required_before, list):
         required_before = []
-    seeded = [k for k in props if k not in required_before and not _property_preserves_empty_string(props[k])]
+    seeded = [
+        k
+        for k in props
+        if k not in required_before
+        and not _property_preserves_empty_string(props[k])
+    ]
     schema["x-optional-keys"] = seeded
     return seeded
 
@@ -173,8 +182,13 @@ def _rewrite_semantic_required(schema: Any) -> None:
     if not isinstance(schema, dict):
         return
 
-    is_object = schema.get("type") == "object" or isinstance(schema.get("properties"), dict)
-    if is_object and (isinstance(schema.get("x-optional-keys"), list) or schema.get("x-openai-strict")):
+    is_object = schema.get("type") == "object" or isinstance(
+        schema.get("properties"), dict
+    )
+    if is_object and (
+        isinstance(schema.get("x-optional-keys"), list)
+        or schema.get("x-openai-strict")
+    ):
         props = schema.get("properties")
         if isinstance(props, dict):
             optional = set(resolve_optional_property_keys(schema))
@@ -190,7 +204,9 @@ def _has_optional_markers(schema: Any) -> bool:
     """True if the schema (or any nested subschema) carries strict/optional markers."""
     if not isinstance(schema, dict):
         return False
-    if schema.get("x-openai-strict") or isinstance(schema.get("x-optional-keys"), list):
+    if schema.get("x-openai-strict") or isinstance(
+        schema.get("x-optional-keys"), list
+    ):
         return True
     return any(_has_optional_markers(sub) for sub in _nested_schemas(schema))
 
@@ -215,7 +231,9 @@ def _nested_schemas(schema: dict):
             yield from defs.values()
 
 
-def parameters_schema_for_local_validation(params: dict[str, Any]) -> dict[str, Any]:
+def parameters_schema_for_local_validation(
+    params: dict[str, Any],
+) -> dict[str, Any]:
     """
     Schema for local Draft7 validation under OpenAI strict tools mode.
 

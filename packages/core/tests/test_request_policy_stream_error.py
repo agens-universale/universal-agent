@@ -16,14 +16,32 @@ def test_policy_retries_stream_error_then_succeeds(monkeypatch):
     calls = {"n": 0}
 
     async def _fake_request(
-        payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600, config_proxy=None
+        payload,
+        headers,
+        url,
+        verify,
+        use_retry,
+        logger,
+        on_delta,
+        cert=None,
+        timeout=600,
+        config_proxy=None,
     ):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise BackendStreamError("Backend stream error: context length exceeded", status_code=400)
-        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+            raise BackendStreamError(
+                "Backend stream error: context length exceeded",
+                status_code=400,
+            )
+        return {
+            "choices": [
+                {"message": {"content": "ok"}, "finish_reason": "stop"}
+            ]
+        }
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", _fake_request)
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", _fake_request
+    )
 
     res, _payload = run_coro(
         policy.arequest_chat_completions_with_policy(
@@ -38,4 +56,6 @@ def test_policy_retries_stream_error_then_succeeds(monkeypatch):
     )
 
     assert res["choices"][0]["message"]["content"] == "ok"
-    assert calls["n"] == 2  # 1-й BackendStreamError(400) → адаптивный ретрай → успех
+    assert (
+        calls["n"] == 2
+    )  # 1-й BackendStreamError(400) → адаптивный ретрай → успех

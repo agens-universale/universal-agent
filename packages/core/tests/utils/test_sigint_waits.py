@@ -13,7 +13,9 @@ import threading
 import pytest
 from gc_core.utils.sigint_waits import intercept_sigint
 
-pytestmark = pytest.mark.skipif(not hasattr(signal, "raise_signal"), reason="платформа без raise_signal")
+pytestmark = pytest.mark.skipif(
+    not hasattr(signal, "raise_signal"), reason="платформа без raise_signal"
+)
 
 
 @pytest.fixture
@@ -38,7 +40,9 @@ def test_ctrl_c_goes_to_the_wait_still_open_after_an_earlier_one_left(base):
     try:
         first.__exit__(None, None, None)  # A вышел раньше B
         signal.raise_signal(signal.SIGINT)
-        assert (a_hits, b_hits, base) == ([], [1], []), f"сигнал ушёл не тому: A={a_hits} B={b_hits} до-всех={base}"
+        assert (a_hits, b_hits, base) == ([], [1], []), (
+            f"сигнал ушёл не тому: A={a_hits} B={b_hits} до-всех={base}"
+        )
     finally:
         second.__exit__(None, None, None)
 
@@ -64,7 +68,9 @@ def test_the_handler_from_before_the_first_wait_returns_after_the_last(base):
 
     assert signal.getsignal(signal.SIGINT) is handler, "обработчик не вернулся"
     signal.raise_signal(signal.SIGINT)
-    assert base == [1], "после последнего ожидания Ctrl+C до общего обработчика не дошёл"
+    assert base == [1], (
+        "после последнего ожидания Ctrl+C до общего обработчика не дошёл"
+    )
 
 
 def test_off_the_main_thread_nothing_is_intercepted(base):

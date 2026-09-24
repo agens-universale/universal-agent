@@ -26,9 +26,16 @@ class EndpointPreset(BaseModel):
 # иначе он копией впечатывается в конфиг каждому при первом запуске и следующий
 # добавленный провайдер до людей не доезжает.
 DEFAULT_ENDPOINT_PRESETS: tuple[EndpointPreset, ...] = (
-    EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions"),
-    EndpointPreset(name="Cloud.ru", url="https://foundation-models.api.cloud.ru/v1/chat/completions"),
-    EndpointPreset(name="RouterAI", url="https://routerai.ru/api/v1/chat/completions"),
+    EndpointPreset(
+        name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions"
+    ),
+    EndpointPreset(
+        name="Cloud.ru",
+        url="https://foundation-models.api.cloud.ru/v1/chat/completions",
+    ),
+    EndpointPreset(
+        name="RouterAI", url="https://routerai.ru/api/v1/chat/completions"
+    ),
 )
 
 

@@ -2,7 +2,10 @@ import logging
 import os as _os
 
 import pytest
-from gc_core.config_modules.env_interpolation import resolve_env_only, resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import (
+    resolve_env_only,
+    resolve_env_placeholders,
+)
 
 
 def test_replaces_marker(monkeypatch):
@@ -13,12 +16,17 @@ def test_replaces_marker(monkeypatch):
 def test_embedded_and_multiple(monkeypatch):
     monkeypatch.setenv("K", "abc")
     monkeypatch.setenv("V", "xyz")
-    assert resolve_env_placeholders("Bearer ${ENV:K}/${ENV:V}") == "Bearer abc/xyz"
+    assert (
+        resolve_env_placeholders("Bearer ${ENV:K}/${ENV:V}")
+        == "Bearer abc/xyz"
+    )
 
 
 def test_nested_structures(monkeypatch):
     monkeypatch.setenv("T", "tok")
-    out = resolve_env_placeholders({"a": ["${ENV:T}", 5], "b": {"c": "${ENV:T}"}, "n": True})
+    out = resolve_env_placeholders(
+        {"a": ["${ENV:T}", 5], "b": {"c": "${ENV:T}"}, "n": True}
+    )
     assert out == {"a": ["tok", 5], "b": {"c": "tok"}, "n": True}
 
 
@@ -39,7 +47,9 @@ def test_empty_env_var_honored_no_warning(monkeypatch, caplog):
 def test_missing_var_empty_and_warns(monkeypatch, caplog):
     monkeypatch.delenv("NOPE", raising=False)
     with caplog.at_level(logging.WARNING):
-        out = resolve_env_placeholders({"a": "${ENV:NOPE}", "b": "x ${ENV:NOPE} y"})
+        out = resolve_env_placeholders(
+            {"a": "${ENV:NOPE}", "b": "x ${ENV:NOPE} y"}
+        )
     assert out == {"a": "", "b": "x  y"}
     warns = [r for r in caplog.records if "NOPE" in r.message]
     assert len(warns) == 1  # deduped
@@ -69,14 +79,18 @@ def test_file_marker_composition(tmp_path):
 def test_file_marker_in_nested_structures(tmp_path):
     f = tmp_path / "tok"
     f.write_text("v")
-    out = resolve_env_placeholders({"a": [f"${{FILE:{f}}}", 5], "b": {"c": f"${{FILE:{f}}}"}})
+    out = resolve_env_placeholders(
+        {"a": [f"${{FILE:{f}}}", 5], "b": {"c": f"${{FILE:{f}}}"}}
+    )
     assert out == {"a": ["v", 5], "b": {"c": "v"}}
 
 
 def test_file_marker_missing_empty_and_warns_once(tmp_path, caplog):
     missing = tmp_path / "nope"
     with caplog.at_level(logging.WARNING):
-        out = resolve_env_placeholders({"a": f"${{FILE:{missing}}}", "b": f"x ${{FILE:{missing}}} y"})
+        out = resolve_env_placeholders(
+            {"a": f"${{FILE:{missing}}}", "b": f"x ${{FILE:{missing}}} y"}
+        )
     assert out == {"a": "", "b": "x  y"}
     warns = [r for r in caplog.records if str(missing) in r.getMessage()]
     assert len(warns) == 1  # dedup по пути
@@ -138,7 +152,10 @@ def test_file_marker_lax_permissions_warn(tmp_path, caplog):
     _os.chmod(f, 0o644)
     with caplog.at_level(logging.WARNING):
         assert resolve_env_placeholders(f"${{FILE:{f}}}") == "v"
-    assert any("accessible" in r.getMessage() and str(f) in r.getMessage() for r in caplog.records)
+    assert any(
+        "accessible" in r.getMessage() and str(f) in r.getMessage()
+        for r in caplog.records
+    )
 
 
 @pytest.mark.skipif(_os.name != "posix", reason="POSIX file modes only")
@@ -165,7 +182,9 @@ def test_file_marker_same_path_read_once(tmp_path, monkeypatch):
         return real_open(file, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", counting_open)
-    out = resolve_env_placeholders({"a": f"${{FILE:{f}}}", "b": f"${{FILE:{f}}}"})
+    out = resolve_env_placeholders(
+        {"a": f"${{FILE:{f}}}", "b": f"${{FILE:{f}}}"}
+    )
     assert out == {"a": "v", "b": "v"}
     assert len(opens) == 1
 
@@ -202,7 +221,11 @@ def test_env_only_never_touches_the_filesystem(tmp_path, monkeypatch):
     from gc_core.config_modules import env_interpolation as env_interp
 
     calls: list = []
-    monkeypatch.setattr(env_interp, "_read_secret_file", lambda *a, **k: (calls.append(a), "")[1])
+    monkeypatch.setattr(
+        env_interp,
+        "_read_secret_file",
+        lambda *a, **k: (calls.append(a), "")[1],
+    )
     f = tmp_path / "tok"
     f.write_text("v")
     resolve_env_only(f"${{FILE:{f}}}")
@@ -221,7 +244,9 @@ def test_env_only_missing_var_empty_and_silent(monkeypatch, caplog):
 
 def test_env_only_nested_structures(monkeypatch):
     monkeypatch.setenv("T3", "tok")
-    out = resolve_env_only({"a": ["${ENV:T3}", 5], "b": {"c": "${ENV:T3}"}, "n": True})
+    out = resolve_env_only(
+        {"a": ["${ENV:T3}", 5], "b": {"c": "${ENV:T3}"}, "n": True}
+    )
     assert out == {"a": ["tok", 5], "b": {"c": "tok"}, "n": True}
 
 

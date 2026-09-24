@@ -235,7 +235,9 @@ def test_t9_lru_evicts_oldest_and_index_entry(proj):
         p = proj / "src" / name
         p.write_text(f"{name}-base\n", encoding="utf-8")
         store.register_mutation(str(p))
-        p.write_text(f"{name}-dirty\n", encoding="utf-8")  # dirty → не clean-evict
+        p.write_text(
+            f"{name}-dirty\n", encoding="utf-8"
+        )  # dirty → не clean-evict
         # Развести mtime .orig (oldest-first).
         orig = _orig_path(store, f"src/{name}")
         os.utime(orig, (1_000_000 + i, 1_000_000 + i))
@@ -270,5 +272,7 @@ def test_t9_created_without_orig_not_treated_as_stale(proj):
     target = proj / "src" / "new.py"
     store.register_mutation(str(target))
     entries = store.list_entries(cleanup_stale=True)
-    assert any(e.key == "src/new.py" and e.status == "created" for e in entries)
+    assert any(
+        e.key == "src/new.py" and e.status == "created" for e in entries
+    )
     assert "src/new.py" in store.load_index()

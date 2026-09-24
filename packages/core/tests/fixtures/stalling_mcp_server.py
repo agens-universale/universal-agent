@@ -63,14 +63,23 @@ def main():
                     "result": {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "stalling-fake", "version": "1"},
+                        "serverInfo": {
+                            "name": "stalling-fake",
+                            "version": "1",
+                        },
                     },
                 }
             )
         elif method == "notifications/initialized":
             continue
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": msg.get("id"), "result": {"tools": []}})
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": msg.get("id"),
+                    "result": {"tools": []},
+                }
+            )
         elif msg.get("id") is not None:
             send({"jsonrpc": "2.0", "id": msg.get("id"), "result": {}})
 

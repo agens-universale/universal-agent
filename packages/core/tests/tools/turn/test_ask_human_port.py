@@ -20,7 +20,10 @@ async def test_sync_port_is_used():
         seen["question"] = question
         return "ответ приложения"
 
-    assert await _aread_human_response(_ctx(ask_human=port), "как дела?") == "ответ приложения"
+    assert (
+        await _aread_human_response(_ctx(ask_human=port), "как дела?")
+        == "ответ приложения"
+    )
     assert seen["question"] == "как дела?"
 
 
@@ -34,11 +37,18 @@ async def test_async_port_is_awaited():
 
 
 async def test_port_result_is_stripped():
-    assert await _aread_human_response(_ctx(ask_human=lambda q: "  с полями  "), "?") == "с полями"
+    assert (
+        await _aread_human_response(
+            _ctx(ask_human=lambda q: "  с полями  "), "?"
+        )
+        == "с полями"
+    )
 
 
 async def test_port_returning_none_gives_empty():
-    assert await _aread_human_response(_ctx(ask_human=lambda q: None), "?") == ""
+    assert (
+        await _aread_human_response(_ctx(ask_human=lambda q: None), "?") == ""
+    )
 
 
 async def test_without_port_reads_stdin_as_before(monkeypatch):
@@ -46,7 +56,10 @@ async def test_without_port_reads_stdin_as_before(monkeypatch):
     answers = iter(["первая", "вторая", ""])
     monkeypatch.setattr("builtins.input", lambda: next(answers))
 
-    assert await _aread_human_response(_ctx(ask_human=None), "?") == "первая\nвторая"
+    assert (
+        await _aread_human_response(_ctx(ask_human=None), "?")
+        == "первая\nвторая"
+    )
 
 
 async def test_without_port_handles_eof(monkeypatch):

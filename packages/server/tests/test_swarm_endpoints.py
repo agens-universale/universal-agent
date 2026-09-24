@@ -20,8 +20,12 @@ import pytest
 
 # Server-side зависимости (fastapi, starlette) ставятся через extra [server]
 # и могут отсутствовать в основном venv проекта. Если их нет — skip всех тестов.
-pytest.importorskip("fastapi", reason="server-side dep, install via extra [server]")
-pytest.importorskip("starlette", reason="server-side dep, install via extra [server]")
+pytest.importorskip(
+    "fastapi", reason="server-side dep, install via extra [server]"
+)
+pytest.importorskip(
+    "starlette", reason="server-side dep, install via extra [server]"
+)
 
 # Swarm runs the CLI inside a bubblewrap (bwrap) sandbox — Linux-only. Off Linux
 # (e.g. macOS dev) these endpoint tests can't exercise real swarm behavior, so skip.
@@ -67,7 +71,9 @@ def make_server(tmp_path):
         # тесты шли против настоящего config_server.yml хоста. Файл Linux-only,
         # так что на macOS промах не проявлялся.
         for mod in list(sys.modules):
-            if mod == "gc_server.server" or mod.startswith("gc_server.server."):
+            if mod == "gc_server.server" or mod.startswith(
+                "gc_server.server."
+            ):
                 sys.modules.pop(mod, None)
 
         threads_dir = tmp_path / "threads"
@@ -77,9 +83,13 @@ def make_server(tmp_path):
 
         # Патчим load_*_config до импорта server'а, чтобы не зависеть от config.yml хоста.
         with (
-            patch("gc_server.rest_api.server_config.load_server_config", return_value=_minimal_server_config()),
             patch(
-                "gc_server.rest_api.server_config.build_agent_config_for_server", return_value=_minimal_agent_config()
+                "gc_server.rest_api.server_config.load_server_config",
+                return_value=_minimal_server_config(),
+            ),
+            patch(
+                "gc_server.rest_api.server_config.build_agent_config_for_server",
+                return_value=_minimal_agent_config(),
             ),
         ):
             from gc_server import server as server_mod
@@ -255,7 +265,9 @@ def test_status_normalizes_system_lowercase(make_server, monkeypatch):
 def test_status_already_final_returns_as_is(make_server):
     """Финальный статус — никакой повторной финализации, возврат как есть."""
     server_mod, threads, sandbox = make_server(enabled=True)
-    _seed_meta(threads, _swarm_sid("g", "t4"), "completed", exit_code=0, pid=99999)
+    _seed_meta(
+        threads, _swarm_sid("g", "t4"), "completed", exit_code=0, pid=99999
+    )
 
     from starlette.testclient import TestClient
 
@@ -292,7 +304,9 @@ def test_status_unregisters_from_monitor_when_finalized(make_server):
     assert resp.status_code == 200
     assert resp.json()["status"] == "completed"
 
-    mock_monitor.unregister_active.assert_called_once_with(_swarm_sid("g", "t5"))
+    mock_monitor.unregister_active.assert_called_once_with(
+        _swarm_sid("g", "t5")
+    )
 
 
 # ===========================================================================
@@ -319,7 +333,9 @@ def stub_runner(monkeypatch):
         )
         return sid, 99999
 
-    monkeypatch.setattr("gc_server.swarm.runner.start_swarm_process", fake_start)
+    monkeypatch.setattr(
+        "gc_server.swarm.runner.start_swarm_process", fake_start
+    )
     return calls
 
 
@@ -370,7 +386,9 @@ def test_run_starts_new_sworm_returns_started(make_server, stub_runner):
     assert stub_runner[0][0] == _swarm_sid("generic", "build-42")
 
 
-def test_run_forwards_trace_id_and_strips_it_from_payload(make_server, stub_runner):
+def test_run_forwards_trace_id_and_strips_it_from_payload(
+    make_server, stub_runner
+):
     """trace_id уезжает отдельным аргументом, а НЕ в payload.
 
     payload доставляется агенту в песочнице через `-q`, т.е. становится текстом
@@ -381,7 +399,10 @@ def test_run_forwards_trace_id_and_strips_it_from_payload(make_server, stub_runn
 
     client = TestClient(server_mod.app)
 
-    resp = client.post("/swarm/run", json={"task_id": "t-tr", "trace_id": " wf-42 ", "q": "go"})
+    resp = client.post(
+        "/swarm/run",
+        json={"task_id": "t-tr", "trace_id": " wf-42 ", "q": "go"},
+    )
     assert resp.status_code == 200
     _sid, payload, trace_id = stub_runner[0]
     assert trace_id == "wf-42"  # нормализован (strip)
@@ -407,7 +428,9 @@ def test_run_400_on_invalid_trace_id(make_server, stub_runner):
 
     client = TestClient(server_mod.app)
 
-    resp = client.post("/swarm/run", json={"task_id": "t-bad", "trace_id": "wf\n42"})
+    resp = client.post(
+        "/swarm/run", json={"task_id": "t-bad", "trace_id": "wf\n42"}
+    )
     assert resp.status_code == 400
     assert "invalid trace_id" in resp.json()["detail"]["payload"]
     assert stub_runner == []  # процесс не стартовал
@@ -467,7 +490,9 @@ def test_run_501_when_reuse_strategy_continue(make_server, stub_runner):
 
     client = TestClient(server_mod.app)
 
-    resp = client.post("/swarm/run", json={"task_id": "x", "reuse_strategy": "continue"})
+    resp = client.post(
+        "/swarm/run", json={"task_id": "x", "reuse_strategy": "continue"}
+    )
     assert resp.status_code == 501
     body = resp.json()
     assert body["status"] == "not_implemented"
@@ -480,7 +505,9 @@ def test_run_501_when_reuse_strategy_fresh(make_server, stub_runner):
 
     client = TestClient(server_mod.app)
 
-    resp = client.post("/swarm/run", json={"task_id": "x", "reuse_strategy": "fresh"})
+    resp = client.post(
+        "/swarm/run", json={"task_id": "x", "reuse_strategy": "fresh"}
+    )
     assert resp.status_code == 501
 
 
@@ -568,7 +595,9 @@ def test_run_concurrent_posts_only_one_starts(make_server, stub_runner):
         runner_mod.start_swarm_process = runner_mod_orig
 
     # Первый — started (200), второй — 409.
-    assert started_count[0] == 1, f"start_swarm_process called {started_count[0]} times, expected 1"
+    assert started_count[0] == 1, (
+        f"start_swarm_process called {started_count[0]} times, expected 1"
+    )
     statuses = sorted(r[0] for r in results)
     assert statuses == [200, 409], statuses
 
@@ -612,7 +641,9 @@ def test_run_registers_with_monitor(make_server, stub_runner):
     client = TestClient(server_mod.app)
     resp = client.post("/swarm/run", json={"task_id": "x"})
     assert resp.status_code == 200
-    mock_monitor.register_active.assert_called_once_with(_swarm_sid("generic", "x"))
+    mock_monitor.register_active.assert_called_once_with(
+        _swarm_sid("generic", "x")
+    )
 
 
 # ===========================================================================

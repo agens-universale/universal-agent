@@ -74,15 +74,22 @@ def test_backup_goes_to_backups_subdir_and_caps(tmp_path):
     cfg = tmp_path / "config.yml"
     tmpl = Path(config_sync._default_config_path())
     for i in range(12):
-        cfg.write_text(tmpl.read_text(encoding="utf-8").replace("\n", f"\n# c{i}\n", 1), encoding="utf-8")
+        cfg.write_text(
+            tmpl.read_text(encoding="utf-8").replace("\n", f"\n# c{i}\n", 1),
+            encoding="utf-8",
+        )
         config_sync.sync_config(cfg, timestamp=f"20260714-0000{i:02d}")
     backups = sorted((tmp_path / "backups").glob("config.yml.bak-*"))
-    assert backups and all(b.parent.name == "backups" for b in backups)  # подпапка
+    assert backups and all(
+        b.parent.name == "backups" for b in backups
+    )  # подпапка
     assert len(backups) <= 10  # кап 10
 
 
 def test_sync_applies_renames(monkeypatch, tmp_path):
-    monkeypatch.setattr(compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"})
+    monkeypatch.setattr(
+        compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"}
+    )
     user = 'backend:\n  legacy_url: "http://old/v1"\n'
     cfg, report = _run_sync(tmp_path, user=user)
     out = cfg.read_text(encoding="utf-8")
@@ -122,9 +129,7 @@ def test_sync_renames_legacy_llm_when_template_has_auxiliary(tmp_path):
 
     import yaml
 
-    template = (
-        'backend:\n  completions_url: "http://sentinel"\nchat_completions:\n  auxiliary_llm:\n    max_tokens: 8192\n'
-    )
+    template = 'backend:\n  completions_url: "http://sentinel"\nchat_completions:\n  auxiliary_llm:\n    max_tokens: 8192\n'
     user = 'backend:\n  completions_url: "http://real/v1"\nchat_completions:\n  llm:\n    max_tokens: 1111\n'
     cfg, report = _run_sync(tmp_path, user=user, template=template)
     out = cfg.read_text(encoding="utf-8")
@@ -161,7 +166,9 @@ def test_sync_real_template_over_its_own_copy(tmp_path):
     real = P(_default_config_path()).read_text(encoding="utf-8")
     cfg = tmp_path / "config.yml"
     cfg.write_text(real, encoding="utf-8")
-    report = config_sync.sync_config(cfg, _default_config_path(), timestamp="t")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t"
+    )
     assert report.unknown == []
     assert report.reenter == []
 
@@ -181,7 +188,9 @@ def test_sync_valid_section_outside_template_transferred(tmp_path):
 
 def test_sync_invalid_section_outside_template_stays_unknown(tmp_path):
     """Настоящий мусор (my_unknown_key) по-прежнему в unknown."""
-    user = 'backend:\n  completions_url: "http://real/v1"\nmy_unknown_key: 42\n'
+    user = (
+        'backend:\n  completions_url: "http://real/v1"\nmy_unknown_key: 42\n'
+    )
     cfg, report = _run_sync(tmp_path, user=user)
     out = cfg.read_text(encoding="utf-8")
     assert "my_unknown_key" not in out
@@ -230,7 +239,9 @@ def test_sync_config_raises_value_error_on_broken_yaml(tmp_path):
         config_sync.sync_config(cfg, tpl)
 
 
-def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(tmp_path):
+def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(
+    tmp_path,
+):
     """Ключ юзера вне шаблона не утаскивает за собой всю секцию.
 
     Корп-сетап: у юзера в backend: заданы cert_path/key_path (mTLS — схема их знает,

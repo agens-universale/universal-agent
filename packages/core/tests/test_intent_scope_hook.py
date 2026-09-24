@@ -2,9 +2,19 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from gc_core.config_modules.intent_scope import IntentScopeConfig, IntentScopeToolConfig
-from gc_core.intent_log import ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_user_ask
-from gc_core.intent_scope.append import append_tool_aggregated_to_current, append_tool_raw_to_current
+from gc_core.config_modules.intent_scope import (
+    IntentScopeConfig,
+    IntentScopeToolConfig,
+)
+from gc_core.intent_log import (
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    append_user_ask,
+)
+from gc_core.intent_scope.append import (
+    append_tool_aggregated_to_current,
+    append_tool_raw_to_current,
+)
 from gc_core.intent_scope.hook import (
     amaybe_update_intent_scope_from_tool,
 )
@@ -41,13 +51,17 @@ def _ctx(
     )
 
 
-def _tool(name: str, *, record: str = "aggregated") -> dict[str, IntentScopeToolConfig]:
+def _tool(
+    name: str, *, record: str = "aggregated"
+) -> dict[str, IntentScopeToolConfig]:
     return {name: IntentScopeToolConfig(record=record)}
 
 
 def test_raw_store_flags_require_at_least_one_enabled():
     with pytest.raises(ValueError, match="requires at least one"):
-        IntentScopeToolConfig(record="raw", store_arguments=False, store_output=False)
+        IntentScopeToolConfig(
+            record="raw", store_arguments=False, store_output=False
+        )
 
 
 def test_hook_skipped_on_responses_backend():
@@ -106,7 +120,9 @@ def test_hook_appends_aggregated_record_after_llm_summary(monkeypatch):
             tool_name="turn_ask_human",
             tool_output_raw='{"response":"B"}',
             state=state,
-            ctx=_ctx(backend="chat_completions", tools=_tool("turn_ask_human")),
+            ctx=_ctx(
+                backend="chat_completions", tools=_tool("turn_ask_human")
+            ),
         )
     )
     assert len(state.current_user_intent) == 1
@@ -155,7 +171,10 @@ async def test_finish_gate_reject_submit_in_current_without_flush():
     )
     from gc_core.intent_guard.validation_result import ValidationResult
     from gc_core.tools.turn.submit_solution import SubmitSolution
-    from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
+    from gc_testkit.intent_fixtures import (
+        intent_user_ask_texts,
+        seed_state_intent,
+    )
 
     state = _make_state()
     seed_state_intent(state, log=["closed turn"], current="open question")
@@ -218,7 +237,9 @@ async def test_finish_gate_reject_submit_in_current_without_flush():
         finish_call_id="call_finish",
         decision=decision,
     )
-    final_output = get_function_call_output_text(state.messages, "call_finish") or ""
+    final_output = (
+        get_function_call_output_text(state.messages, "call_finish") or ""
+    )
     await amaybe_update_intent_scope_from_tool(
         tool_name="turn_finish",
         tool_output_raw=final_output,
@@ -234,16 +255,25 @@ async def test_finish_gate_reject_submit_in_current_without_flush():
     assert state.user_turn_seq == closed_seq
     assert len(state.user_intent_log) == closed_log_len
     assert intent_user_ask_texts(state.user_intent_log) == ["closed turn"]
-    assert intent_user_ask_texts(state.current_user_intent) == ["open question"]
+    assert intent_user_ask_texts(state.current_user_intent) == [
+        "open question"
+    ]
 
-    submit_records = [r for r in state.current_user_intent if getattr(r, "tool_name", None) == "turn_finish"]
+    submit_records = [
+        r
+        for r in state.current_user_intent
+        if getattr(r, "tool_name", None) == "turn_finish"
+    ]
     assert len(submit_records) == 1
     assert submit_records[0].action == ACTION_TOOL_RAW
     output = submit_records[0].content.get("output")
     assert isinstance(output, dict)
     assert output.get("ok") is False
     assert output.get("status") == "rejected_by_finish_gate"
-    assert output.get("finish_gate", {}).get("action") == "fix_report_and_continue"
+    assert (
+        output.get("finish_gate", {}).get("action")
+        == "fix_report_and_continue"
+    )
 
 
 def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
@@ -262,7 +292,10 @@ def test_hook_submit_solution_raw_skips_llm_and_stores_object(monkeypatch):
             tool_output_raw=reject_output,
             tool_arguments='{"task_report":"done"}',
             state=state,
-            ctx=_ctx(backend="chat_completions", tools=_tool("turn_finish", record="raw")),
+            ctx=_ctx(
+                backend="chat_completions",
+                tools=_tool("turn_finish", record="raw"),
+            ),
         )
     )
     assert len(state.current_user_intent) == 1
@@ -307,7 +340,9 @@ def test_hook_submit_solution_raw_can_store_only_output(monkeypatch):
     assert record.content["output"]["ok"] is True
 
 
-def test_hook_aggregated_fallback_stores_truncated_content_with_flag(monkeypatch):
+def test_hook_aggregated_fallback_stores_truncated_content_with_flag(
+    monkeypatch,
+):
     async def _empty_summary(**kwargs):
         return ""
 
@@ -385,4 +420,6 @@ def test_hook_turn_close_flush_increments_seq():
     assert state.user_intent_log[0].action == "user_ask"
     assert state.user_intent_log[1].action == ACTION_TOOL_AGGREGATED
     assert state.user_intent_log[2].action == ACTION_TOOL_RAW
-    assert json.loads(json.dumps(state.user_intent_log[2].content))["output"] == {"ok": True}
+    assert json.loads(json.dumps(state.user_intent_log[2].content))[
+        "output"
+    ] == {"ok": True}

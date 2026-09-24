@@ -25,7 +25,10 @@ def test_python_runs_false_for_bogus_path():
 
 def test_create_prefers_uv(tmp_path):
     root = tmp_path / "venv"
-    with patch("shutil.which", return_value="/usr/bin/uv"), patch("subprocess.run") as run:
+    with (
+        patch("shutil.which", return_value="/usr/bin/uv"),
+        patch("subprocess.run") as run,
+    ):
         venv_mod._create_mcp_venv(root)
     cmd = run.call_args.args[0]
     assert cmd[:3] == ["/usr/bin/uv", "venv", "--seed"]
@@ -35,7 +38,10 @@ def test_create_prefers_uv(tmp_path):
 
 def test_create_falls_back_to_stdlib_when_no_uv(tmp_path):
     root = tmp_path / "venv"
-    with patch("shutil.which", return_value=None), patch.object(venv_mod.venv, "EnvBuilder") as eb:
+    with (
+        patch("shutil.which", return_value=None),
+        patch.object(venv_mod.venv, "EnvBuilder") as eb,
+    ):
         venv_mod._create_mcp_venv(root)
     eb.return_value.create.assert_called_once_with(root)
 
@@ -44,7 +50,10 @@ def test_create_falls_back_when_uv_fails(tmp_path):
     root = tmp_path / "venv"
     with (
         patch("shutil.which", return_value="/usr/bin/uv"),
-        patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "uv")),
+        patch(
+            "subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "uv"),
+        ),
         patch.object(venv_mod.venv, "EnvBuilder") as eb,
     ):
         venv_mod._create_mcp_venv(root)
@@ -77,7 +86,9 @@ def test_ensure_recreates_broken_venv(tmp_path):
     with (
         patch.object(venv_mod, "mcp_python_executable", return_value=py),
         patch.object(venv_mod, "mcp_env_root", return_value=root),
-        patch.object(venv_mod, "_python_runs", side_effect=lambda p: next(runs)),
+        patch.object(
+            venv_mod, "_python_runs", side_effect=lambda p: next(runs)
+        ),
         patch.object(venv_mod, "_create_mcp_venv") as create,
         patch("shutil.rmtree") as rmtree,
     ):

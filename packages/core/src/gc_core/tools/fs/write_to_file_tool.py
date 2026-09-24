@@ -4,15 +4,25 @@ from typing import Any, Dict, Optional
 
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.file_text import resolve_encoding_arg, sha256_hex_of_bytes, try_encode_text_bytes
+from gc_core.utils.file_text import (
+    resolve_encoding_arg,
+    sha256_hex_of_bytes,
+    try_encode_text_bytes,
+)
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
-def _validate_write_args(path, content, mode, make_dirs, encoding, newline, backup) -> "tuple[str | None, dict | None]":
+def _validate_write_args(
+    path, content, mode, make_dirs, encoding, newline, backup
+) -> "tuple[str | None, dict | None]":
     """(encoding_used, None) либо (None, error) на первом невалидном аргументе."""
     if not isinstance(content, str):
         return None, {"type": "invalid_argument", "field": "content"}
-    if not isinstance(mode, str) or mode not in ("overwrite", "create_only", "fail_if_missing"):
+    if not isinstance(mode, str) or mode not in (
+        "overwrite",
+        "create_only",
+        "fail_if_missing",
+    ):
         return None, {"type": "invalid_argument", "field": "mode"}
     if not isinstance(make_dirs, bool):
         return None, {"type": "invalid_argument", "field": "make_dirs"}
@@ -21,7 +31,11 @@ def _validate_write_args(path, content, mode, make_dirs, encoding, newline, back
     encoding_used, enc_err = resolve_encoding_arg(encoding)
     if enc_err is not None:
         return None, enc_err
-    if not isinstance(newline, str) or newline not in ("preserve", "lf", "crlf"):
+    if not isinstance(newline, str) or newline not in (
+        "preserve",
+        "lf",
+        "crlf",
+    ):
         return None, {"type": "invalid_argument", "field": "newline"}
     if not isinstance(backup, bool):
         return None, {"type": "invalid_argument", "field": "backup"}
@@ -38,7 +52,11 @@ def _normalize_newlines(content: str, newline: str) -> str:
     if newline == "lf":
         return content.replace("\r\n", "\n").replace("\r", "\n")
     if newline == "crlf":
-        return content.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        return (
+            content.replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\n", "\r\n")
+        )
     return content
 
 
@@ -73,7 +91,11 @@ class WriteToFile(AbstractSimpleTool):
                     "mode": {
                         "type": "string",
                         "description": "Write mode: 'overwrite' (default), 'create_only' (fail if exists), or 'fail_if_missing' (fail if missing).",
-                        "enum": ["overwrite", "create_only", "fail_if_missing"],
+                        "enum": [
+                            "overwrite",
+                            "create_only",
+                            "fail_if_missing",
+                        ],
                     },
                     "make_dirs": {
                         "type": "boolean",
@@ -144,7 +166,9 @@ Usage:
                 "bytes_written": bytes_written,
                 "sha256": sha256,
                 "encoding_used": encoding_used,
-                "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
+                "backup_path": tool_report_abspath(
+                    backup_path, workspace=self._workspace
+                ),
                 "error": error,
             },
             ensure_ascii=False,
@@ -161,7 +185,9 @@ Usage:
     ) -> str:
         return self._result(ok=False, path=path, mode=mode, error=error)
 
-    async def _ensure_parent_dir(self, path: str, make_dirs: bool) -> "dict | None":
+    async def _ensure_parent_dir(
+        self, path: str, make_dirs: bool
+    ) -> "dict | None":
         parent = os.path.dirname(path) or "."
         if await self._backend.is_dir(parent):
             return None
@@ -192,19 +218,32 @@ Usage:
                 mode=mode,
                 error={"type": "invalid_argument", "field": "path"},
             )
-        encoding_used, arg_error = _validate_write_args(path, content, mode, make_dirs, encoding, newline, backup)
+        encoding_used, arg_error = _validate_write_args(
+            path, content, mode, make_dirs, encoding, newline, backup
+        )
         if arg_error is not None:
-            return self._result(ok=False, path=path, mode=mode, error=arg_error)
+            return self._result(
+                ok=False, path=path, mode=mode, error=arg_error
+            )
 
         exists = await self._backend.exists(path)
         if mode == "create_only" and exists:
-            return self._result(ok=False, path=path, mode=mode, error={"type": "already_exists"})
+            return self._result(
+                ok=False,
+                path=path,
+                mode=mode,
+                error={"type": "already_exists"},
+            )
         if mode == "fail_if_missing" and not exists:
-            return self._result(ok=False, path=path, mode=mode, error={"type": "not_found"})
+            return self._result(
+                ok=False, path=path, mode=mode, error={"type": "not_found"}
+            )
 
         parent_error = await self._ensure_parent_dir(path, make_dirs)
         if parent_error is not None:
-            return self._result(ok=False, path=path, mode=mode, error=parent_error)
+            return self._result(
+                ok=False, path=path, mode=mode, error=parent_error
+            )
 
         normalized = _normalize_newlines(content, newline)
 
@@ -222,7 +261,9 @@ Usage:
                 )
 
         try:
-            out_bytes, encode_err = try_encode_text_bytes(normalized, encoding_used)
+            out_bytes, encode_err = try_encode_text_bytes(
+                normalized, encoding_used
+            )
             if encode_err is not None:
                 return self._result(
                     ok=False,

@@ -50,11 +50,19 @@ def _flush(logger):
 
 
 def test_summary_started_and_precheck_events(tmp_path):
-    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_precheck, log_compaction_started
+    from gc_core.summarize.summary_logging import (
+        SummaryCompactionLog,
+        log_compaction_precheck,
+        log_compaction_started,
+    )
 
     logger, path = _make_logger(tmp_path)
-    ctx = SummaryCompactionLog(trigger_reason="turn_end", thread_id="t1", trigger_volume=10)
-    log_compaction_started(logger, ctx, serialized_chars=100, history_messages_count=3)
+    ctx = SummaryCompactionLog(
+        trigger_reason="turn_end", thread_id="t1", trigger_volume=10
+    )
+    log_compaction_started(
+        logger, ctx, serialized_chars=100, history_messages_count=3
+    )
     log_compaction_precheck(
         logger,
         trigger_reason="turn_end",
@@ -76,10 +84,16 @@ def test_summary_started_and_precheck_events(tmp_path):
 
 
 def test_summary_raw_text_and_message_body_events(tmp_path):
-    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_summary_message_body, log_summary_raw_text
+    from gc_core.summarize.summary_logging import (
+        SummaryCompactionLog,
+        log_summary_message_body,
+        log_summary_raw_text,
+    )
 
     logger, path = _make_logger(tmp_path)
-    ctx = SummaryCompactionLog(trigger_reason="pre_run", thread_id="t2", trigger_volume=1)
+    ctx = SummaryCompactionLog(
+        trigger_reason="pre_run", thread_id="t2", trigger_volume=1
+    )
     log_summary_raw_text(logger, ctx, "RAW TEXT")
     log_summary_message_body(logger, ctx, "BODY TEXT")
     _flush(logger)
@@ -93,10 +107,16 @@ def test_summary_raw_text_and_message_body_events(tmp_path):
 
 
 def test_summary_completed_and_failed_events(tmp_path):
-    from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_completed, log_compaction_failed
+    from gc_core.summarize.summary_logging import (
+        SummaryCompactionLog,
+        log_compaction_completed,
+        log_compaction_failed,
+    )
 
     logger, path = _make_logger(tmp_path)
-    ctx = SummaryCompactionLog(trigger_reason="pre_backend", thread_id="t3", trigger_volume=5)
+    ctx = SummaryCompactionLog(
+        trigger_reason="pre_backend", thread_id="t3", trigger_volume=5
+    )
     log_compaction_completed(
         logger,
         ctx,
@@ -124,12 +144,17 @@ def test_summary_completed_and_failed_events(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_backend_request_and_response_events_chat_completions(tmp_path, monkeypatch):
+def test_backend_request_and_response_events_chat_completions(
+    tmp_path, monkeypatch
+):
     from gc_core.utils import connect_backend
 
     logger, path = _make_logger(tmp_path, level="debug")
 
-    install_transport(monkeypatch, json_response({"choices": [{"message": {"content": "hi"}}]}))
+    install_transport(
+        monkeypatch,
+        json_response({"choices": [{"message": {"content": "hi"}}]}),
+    )
     run_coro(
         connect_backend.arequest_backend_chat_completions(
             {"model": "m", "messages": []},
@@ -146,7 +171,10 @@ def test_backend_request_and_response_events_chat_completions(tmp_path, monkeypa
     assert reqs and reqs[0]["api_mode"] == "chat_completions"
 
     resps = [r for r in recs if r["event"] == "backend_response"]
-    assert resps and resps[0]["response"]["choices"][0]["message"]["content"] == "hi"
+    assert (
+        resps
+        and resps[0]["response"]["choices"][0]["message"]["content"] == "hi"
+    )
 
 
 def test_backend_responses_json_error_event(tmp_path, monkeypatch):
@@ -156,7 +184,9 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
 
     # Ответ, который не разбирается как JSON: событие backend_responses_json_error
     # должно попасть в лог, а исключение — подняться.
-    install_transport(monkeypatch, stream_response("data: not-json-at-all\n\n"))
+    install_transport(
+        monkeypatch, stream_response("data: not-json-at-all\n\n")
+    )
 
     with pytest.raises(Exception):
         run_coro(
@@ -202,7 +232,9 @@ def test_agent_md_read_failed_event(tmp_path, monkeypatch):
     assert failed and failed[0]["path"] == str(missing_path)
 
 
-def test_agent_md_read_failed_event_not_emitted_when_not_verbose(tmp_path, monkeypatch):
+def test_agent_md_read_failed_event_not_emitted_when_not_verbose(
+    tmp_path, monkeypatch
+):
     """Same L0 read-failure + logger present, but verbose=False (the default)
     must suppress the event — matching the fork's ``if self.verbose:`` gate."""
     from gc_core.config_modules import env_vars
@@ -256,7 +288,9 @@ def test_state_threads_logger_into_agent_md_read_failed(tmp_path, monkeypatch):
     assert failed and failed[0]["path"] == str(missing_path)
 
 
-def test_state_does_not_emit_agent_md_read_failed_when_not_verbose(tmp_path, monkeypatch):
+def test_state_does_not_emit_agent_md_read_failed_when_not_verbose(
+    tmp_path, monkeypatch
+):
     """Same setup as above but verbose=False: State must not emit the event."""
     from gc_core.config_modules import env_vars
     from gc_core.states import State
@@ -318,7 +352,10 @@ def test_dialog_message_event_emitted_for_each_message(tmp_path):
 
     logger, path = _make_logger(tmp_path)
     console_trace = False
-    messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]
+    messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
 
     for m in messages:
         m_formatted = format_message_responses(m)

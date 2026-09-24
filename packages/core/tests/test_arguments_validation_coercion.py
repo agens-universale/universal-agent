@@ -2,7 +2,10 @@
 # ensure_real_tools_package перегружает tools.* между сбором и прогоном, поэтому
 # импорт исключения внутри теста дал бы ДРУГОЙ класс → pytest.raises не ловил бы
 # исключение, поднятое parse_and_validate (старый класс). Один импорт — одна личность.
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 
 _SPEC = {
     "parameters": {
@@ -34,7 +37,9 @@ def test_string_valid_as_is_not_touched():
     spec = {
         "parameters": {
             "type": "object",
-            "properties": {"x": {"anyOf": [{"type": "string"}, {"type": "object"}]}},
+            "properties": {
+                "x": {"anyOf": [{"type": "string"}, {"type": "object"}]}
+            },
             "required": [],
             "additionalProperties": False,
         }
@@ -45,7 +50,9 @@ def test_string_valid_as_is_not_touched():
         tool_spec=spec,
         allow_empty_for_empty_schema=False,
     )
-    assert out["x"] == "123"  # строка валидна по строковой ветке → НЕ коэрсим в 123
+    assert (
+        out["x"] == "123"
+    )  # строка валидна по строковой ветке → НЕ коэрсим в 123
 
 
 def test_unrecoverable_still_rejected():

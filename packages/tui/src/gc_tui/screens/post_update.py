@@ -64,7 +64,11 @@ class PostUpdateScreen(Screen):
     def on_mount(self) -> None:
         self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
         if self._wired:
-            self.run_worker(self._scan_mcp_updates, thread=True, name="post-update-mcp-scan")
+            self.run_worker(
+                self._scan_mcp_updates,
+                thread=True,
+                name="post-update-mcp-scan",
+            )
 
     def on_resize(self, event: events.Resize) -> None:
         # Потолок рамки зависит только от высоты окна и хрома (см. form_frame).
@@ -76,7 +80,9 @@ class PostUpdateScreen(Screen):
         try:
             manifest = self._mcp_cli.load_manifest_entries()
             for name in self._wired:
-                if self._mcp_cli.installed_state(name, manifest=manifest).get("update"):
+                if self._mcp_cli.installed_state(name, manifest=manifest).get(
+                    "update"
+                ):
                     outdated.append(name)
         except Exception:
             outdated = []  # версии не узнали — вслепую переустановку не навязываем
@@ -123,14 +129,20 @@ class PostUpdateScreen(Screen):
         with Vertical(id="root"):
             with VerticalScroll(id="pu-scroll"):
                 with Vertical(id="pu-frame"):  # карточка по контенту (§6)
-                    title_classes = "pu-title" if self._items else "pu-title solo"
-                    yield Static(self._title_text(), classes=title_classes, markup=False)
+                    title_classes = (
+                        "pu-title" if self._items else "pu-title solo"
+                    )
+                    yield Static(
+                        self._title_text(), classes=title_classes, markup=False
+                    )
                     # Блок «Осталось обновить» — только когда правда есть что обновлять
                     # (иначе экран сводится к факту обновления, а футер — к «продолжить»).
                     if self._items:
                         yield Static(_HINT, classes="post-update-hint pu-hint")
                     for i, key in enumerate(self._items):
-                        yield Static(self._row_text(key, i), classes="post-update-item")
+                        yield Static(
+                            self._row_text(key, i), classes="post-update-item"
+                        )
             yield Static(self._footer_text(), id="footer", markup=False)
 
     def _footer_text(self) -> str:
@@ -154,7 +166,9 @@ class PostUpdateScreen(Screen):
         t = Text()
         t.append("▸" if i == self._idx else " ", style=ACCENT)
         checked = key in self._marked
-        t.append("[●] " if checked else "[ ] ", style=INK if checked else DEEP_DIM)
+        t.append(
+            "[●] " if checked else "[ ] ", style=INK if checked else DEEP_DIM
+        )
         if key == "mcp":
             t.append("Обновить подключённые MCP")
             t.append("   ")
@@ -177,14 +191,20 @@ class PostUpdateScreen(Screen):
         """Список пунктов изменился (пришёл скан MCP) — перемонтировать блок и футер:
         подзаголовок и полный футер появляются вместе с первым пунктом."""
         frame = self.query_one("#pu-frame")
-        for w in list(self.query(".post-update-item")) + list(self.query(".pu-hint")):
+        for w in list(self.query(".post-update-item")) + list(
+            self.query(".pu-hint")
+        ):
             w.remove()
         title = self.query_one(".pu-title")
-        title.set_class(not self._items, "solo")  # появился пункт → вернуть линию-разделитель
+        title.set_class(
+            not self._items, "solo"
+        )  # появился пункт → вернуть линию-разделитель
         if self._items:
             frame.mount(Static(_HINT, classes="post-update-hint pu-hint"))
         for i, key in enumerate(self._items):
-            frame.mount(Static(self._row_text(key, i), classes="post-update-item"))
+            frame.mount(
+                Static(self._row_text(key, i), classes="post-update-item")
+            )
         self.query_one("#footer", Static).update(self._footer_text())
 
     # --- навигация/действия ---
@@ -212,7 +232,11 @@ class PostUpdateScreen(Screen):
         # print() с UnicodeEncodeError. Rich-рендер экрана (▸/[●]/✓) — отдельно.
         def _do() -> None:
             if "mcp" in self._marked and self._mcp_outdated:
-                print("\nОбновляю MCP: " + ", ".join(self._mcp_outdated) + " ...\n")
+                print(
+                    "\nОбновляю MCP: "
+                    + ", ".join(self._mcp_outdated)
+                    + " ...\n"
+                )
                 for name in self._mcp_outdated:
                     try:
                         rc = self._mcp_cli.install(name)
@@ -232,7 +256,9 @@ class PostUpdateScreen(Screen):
             if "config" in self._marked and self._needs_sync:
                 try:
                     report = self._config_sync.sync_config(self._config_path)
-                    print(f"\n[ok] config.yml обновлён, перенесено: {report.transferred}\n")
+                    print(
+                        f"\n[ok] config.yml обновлён, перенесено: {report.transferred}\n"
+                    )
                 except (ValueError, OSError) as exc:
                     print(f"\n[fail] config.yml не обновлён: {exc}\n")
 

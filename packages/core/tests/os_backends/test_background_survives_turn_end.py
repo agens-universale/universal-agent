@@ -46,8 +46,12 @@ def test_background_writer_survives_the_end_of_the_turn(tmp_path):
     asyncio.run(turn())  # конец хода: loop закрыт, его задачи отменены
     gc.collect()  # транспорты хода собраны
 
-    early = log.read_text(encoding="utf-8").count("tick") if log.exists() else 0
-    assert early < 20, f"потомок успел всё ({early}) внутри хода — тест холостой"
+    early = (
+        log.read_text(encoding="utf-8").count("tick") if log.exists() else 0
+    )
+    assert early < 20, (
+        f"потомок успел всё ({early}) внутри хода — тест холостой"
+    )
 
     deadline = time.monotonic() + 15
     text = ""
@@ -56,4 +60,6 @@ def test_background_writer_survives_the_end_of_the_turn(tmp_path):
         if text.count("tick") >= 20:
             break
         time.sleep(0.1)
-    assert text.count("tick") == 20, f"дописано {text.count('tick')} из 20: процесс не пережил конец хода"
+    assert text.count("tick") == 20, (
+        f"дописано {text.count('tick')} из 20: процесс не пережил конец хода"
+    )

@@ -24,21 +24,27 @@ _DEFAULT_BINARY_ALLOWED_EXTENSIONS = [
 def validate_command_moderation_mode(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "deny").strip().lower()
     if mode not in ALLOWED_COMMAND_MODES:
-        raise ValueError("command_moderation.mode должен быть 'allow', 'ask' или 'deny'")
+        raise ValueError(
+            "command_moderation.mode должен быть 'allow', 'ask' или 'deny'"
+        )
     return mode
 
 
 def validate_read_guard_mode(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "deny").strip().lower()
     if mode not in ALLOWED_COMMAND_MODES:
-        raise ValueError("read_guard.mode должен быть 'allow', 'ask' или 'deny'")
+        raise ValueError(
+            "read_guard.mode должен быть 'allow', 'ask' или 'deny'"
+        )
     return mode
 
 
 def validate_binary_read_policy(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "ask").strip().lower()
     if mode not in ALLOWED_BINARY_READ_MODES:
-        raise ValueError("read_guard.binary_read_policy должен быть 'allow', 'ask' или 'deny'")
+        raise ValueError(
+            "read_guard.binary_read_policy должен быть 'allow', 'ask' или 'deny'"
+        )
     return mode
 
 
@@ -62,7 +68,9 @@ class WriteGuardConfig(BaseModel):
     def validate_mode(cls, value: str) -> str:
         mode = str(value or "deny").strip().lower()
         if mode not in {"allow", "ask", "deny"}:
-            raise ValueError("security.write_guard.mode должен быть 'allow', 'ask' или 'deny'")
+            raise ValueError(
+                "security.write_guard.mode должен быть 'allow', 'ask' или 'deny'"
+            )
         return mode
 
 
@@ -79,7 +87,9 @@ class UrlPolicyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     mode: str = "ask"
-    allowed_schemes: list[str] = Field(default_factory=lambda: ["http", "https"])
+    allowed_schemes: list[str] = Field(
+        default_factory=lambda: ["http", "https"]
+    )
     url_blacklist: list[str] = Field(default_factory=list)
 
     @field_validator("mode")
@@ -87,7 +97,9 @@ class UrlPolicyConfig(BaseModel):
     def validate_mode(cls, value: str) -> str:
         mode = str(value or "deny").strip().lower()
         if mode not in {"allow", "ask", "deny"}:
-            raise ValueError("security.url_policy.mode должен быть 'allow', 'ask' или 'deny'")
+            raise ValueError(
+                "security.url_policy.mode должен быть 'allow', 'ask' или 'deny'"
+            )
         return mode
 
 
@@ -114,8 +126,12 @@ class ReadGuardConfig(BaseModel):
     # forward-compat: размер и бинарная политика (не enforce'ятся в v1).
     max_file_size_kb: int = 1024
     binary_read_policy: str = "ask"
-    binary_allowed_types: list[str] = Field(default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES))
-    binary_allowed_extensions: list[str] = Field(default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS))
+    binary_allowed_types: list[str] = Field(
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES)
+    )
+    binary_allowed_extensions: list[str] = Field(
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS)
+    )
 
     @field_validator("mode")
     @classmethod
@@ -123,7 +139,9 @@ class ReadGuardConfig(BaseModel):
         try:
             return validate_read_guard_mode(value)
         except ValueError as exc:
-            raise ValueError("security.read_guard.mode должен быть 'allow', 'ask' или 'deny'") from exc
+            raise ValueError(
+                "security.read_guard.mode должен быть 'allow', 'ask' или 'deny'"
+            ) from exc
 
     @field_validator("binary_read_policy")
     @classmethod
@@ -160,7 +178,9 @@ class CommandModerationConfig(BaseModel):
         try:
             return validate_command_moderation_mode(value)
         except ValueError as exc:
-            raise ValueError("security.command_moderation.mode должен быть 'allow', 'ask' или 'deny'") from exc
+            raise ValueError(
+                "security.command_moderation.mode должен быть 'allow', 'ask' или 'deny'"
+            ) from exc
 
 
 class ProtectedPathsConfig(BaseModel):
@@ -188,12 +208,16 @@ class SecurityConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    command_moderation: CommandModerationConfig = Field(default_factory=CommandModerationConfig)
+    command_moderation: CommandModerationConfig = Field(
+        default_factory=CommandModerationConfig
+    )
     write_guard: WriteGuardConfig = Field(default_factory=WriteGuardConfig)
     read_guard: ReadGuardConfig = Field(default_factory=ReadGuardConfig)
     url_policy: UrlPolicyConfig = Field(default_factory=UrlPolicyConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
-    protected_paths: ProtectedPathsConfig = Field(default_factory=ProtectedPathsConfig)
+    protected_paths: ProtectedPathsConfig = Field(
+        default_factory=ProtectedPathsConfig
+    )
 
 
 def apply_cli_command_moderation_overrides(
@@ -210,7 +234,9 @@ def apply_cli_command_moderation_overrides(
     """
     command_moderation = config_dict.setdefault("command_moderation", {})
     if command_moderation_mode is not None:
-        command_moderation["mode"] = validate_command_moderation_mode(command_moderation_mode)
+        command_moderation["mode"] = validate_command_moderation_mode(
+            command_moderation_mode
+        )
     elif "mode" not in command_moderation:
         command_moderation["mode"] = "ask"
     command_moderation.setdefault("enabled", True)

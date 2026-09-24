@@ -18,7 +18,10 @@ def _task(tid: str, updated_at: str) -> TaskSummary:
 
 def _tasks():
     # 5 сессий: t00 самая свежая (06-05) ... t04 самая старая (06-01)
-    return [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
+    return [
+        _task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00")
+        for i in range(5)
+    ]
 
 
 def test_keep_last_drops_oldest():
@@ -45,7 +48,10 @@ def test_older_than_days_cutoff():
 
 def test_older_than_unparsable_kept():
     now = datetime(2026, 6, 6, tzinfo=UTC)
-    tasks = [_task("good", "2026-01-01T00:00:00+00:00"), _task("bad", "не-дата")]
+    tasks = [
+        _task("good", "2026-01-01T00:00:00+00:00"),
+        _task("bad", "не-дата"),
+    ]
     ids = select_for_deletion(tasks, older_than_days=1, now=now)
     assert ids == ["good"]
 

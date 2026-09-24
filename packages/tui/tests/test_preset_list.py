@@ -14,9 +14,16 @@ from textual.widgets import Input, Static
 _HINT = "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
 
 _PRESETS = [
-    EndpointPreset(name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions"),
-    EndpointPreset(name="Cloud.ru", url="https://foundation-models.api.cloud.ru/v1/chat/completions"),
-    EndpointPreset(name="RouterAI", url="https://routerai.ru/api/v1/chat/completions"),
+    EndpointPreset(
+        name="OpenRouter", url="https://openrouter.ai/api/v1/chat/completions"
+    ),
+    EndpointPreset(
+        name="Cloud.ru",
+        url="https://foundation-models.api.cloud.ru/v1/chat/completions",
+    ),
+    EndpointPreset(
+        name="RouterAI", url="https://routerai.ru/api/v1/chat/completions"
+    ),
 ]
 
 
@@ -59,7 +66,9 @@ async def test_open_mounts_status_and_rows_with_cursor_on_first():
         rows = list(host.query(".test-preset-row"))
         assert len(rows) == 3
         assert str(rows[0].render()).startswith("▸ OpenRouter")
-        assert "https://openrouter.ai/api/v1/chat/completions" in str(rows[0].render())
+        assert "https://openrouter.ai/api/v1/chat/completions" in str(
+            rows[0].render()
+        )
         assert str(rows[1].render()).startswith("  Cloud.ru")
         status = str(host.query_one(".host-url-preset-hint").render())
         assert status == _HINT
@@ -91,13 +100,18 @@ async def test_pick_returns_selected_url_and_closes_list():
         await pilot.pause()
         # pick() отдаёт сам пресет — хост решает, подставлять ли .url
         # (пункт-наследование с .inherit подставлять нельзя)
-        assert picked.url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        assert (
+            picked.url
+            == "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        )
         assert host.ctrl.is_open is False
         assert not list(host.query(".test-preset-row"))
         # Подсказка переживает подстановку: строка под полем постоянна, меняется только
         # текст (канон 2026-08-17). Раньше pick() уносил её вместе со строками, и форма
         # дёргалась на строку вверх ровно в момент выбора.
-        hint = [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        hint = [
+            w for w in host.query(".host-url-preset-hint") if not w._pruning
+        ]
         assert hint and "показать список" in str(hint[-1].render())
 
 
@@ -132,7 +146,10 @@ async def test_hint_stops_promising_a_pick_when_the_filter_matches_nothing():
         assert str(host.query_one(".host-url-preset-hint").render()) == _HINT
         host.ctrl.apply_filter("https://my-own-host.internal/v1")
         await pilot.pause()
-        assert str(host.query_one(".host-url-preset-hint").render()) == PRESET_HINT_NO_MATCH
+        assert (
+            str(host.query_one(".host-url-preset-hint").render())
+            == PRESET_HINT_NO_MATCH
+        )
         # Вернулись к совпадениям — вернулась и подсказка хоста (она у каждого своя).
         host.ctrl.apply_filter("cloud")
         await pilot.pause()
@@ -177,7 +194,9 @@ async def test_close_removes_rows_but_keeps_the_hint():
         host.ctrl.close()
         await pilot.pause()
         assert not list(host.query(".test-preset-row"))
-        hint = [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        hint = [
+            w for w in host.query(".host-url-preset-hint") if not w._pruning
+        ]
         assert hint and "показать список" in str(hint[-1].render())
         host.ctrl.open()
         await pilot.pause()
@@ -213,7 +232,9 @@ async def test_open_with_preset_url_in_field_highlights_that_preset():
     app = _harness(host)
     async with app.run_test() as pilot:
         await pilot.pause()
-        cloud_url = "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        cloud_url = (
+            "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        )
         host.query_one("#host-url", Input).value = cloud_url
         host.ctrl.reload()
         await pilot.pause()
@@ -274,7 +295,9 @@ async def test_initial_index_matches_the_preset_with_that_url():
     app = _harness(host)
     async with app.run_test() as pilot:
         await pilot.pause()
-        cloud_url = "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        cloud_url = (
+            "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        )
         host.query_one("#host-url", Input).value = cloud_url
         host.ctrl.reload()
         await pilot.pause()
@@ -311,7 +334,9 @@ async def test_open_with_custom_address_in_field_does_not_open():
         assert not list(host.query(".test-preset-row"))
         # Отказ раскрытия — тоже состояние, и строка обязана назвать способ вызвать
         # список вручную: без неё о пресетах не узнать вовсе (канон 2026-08-17).
-        hint = [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        hint = [
+            w for w in host.query(".host-url-preset-hint") if not w._pruning
+        ]
         assert hint and "показать список" in str(hint[-1].render())
         # ↑/↓ формы (move() контроллера — no-op при закрытом списке, форма ведёт себя как без пресетов)
         host.ctrl.move(1)
@@ -332,7 +357,12 @@ async def test_can_open_only_on_empty_value():
         await pilot.pause()
         can_open = host.ctrl._can_open
         assert can_open("") is True
-        assert can_open("https://foundation-models.api.cloud.ru/v1/chat/completions") is False
+        assert (
+            can_open(
+                "https://foundation-models.api.cloud.ru/v1/chat/completions"
+            )
+            is False
+        )
         assert can_open("https://own-host/v1/chat/completions") is False
 
 
@@ -345,7 +375,13 @@ async def test_can_open_guards_an_empty_catalog():
     host = _Host()
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
-        ctrl = preset_list_controller(host, presets=[], row_class="test-preset-row", input_id="host-url", hint=_HINT)
+        ctrl = preset_list_controller(
+            host,
+            presets=[],
+            row_class="test-preset-row",
+            input_id="host-url",
+            hint=_HINT,
+        )
         assert ctrl._can_open("") is False
 
 
@@ -363,9 +399,15 @@ async def test_empty_catalog_promises_nothing_under_the_field():
     async with _harness(host).run_test() as pilot:
         await pilot.pause()
         host.ctrl = preset_list_controller(
-            host, presets=[], row_class="test-preset-row", input_id="host-url", hint=_HINT
+            host,
+            presets=[],
+            row_class="test-preset-row",
+            input_id="host-url",
+            hint=_HINT,
         )
         host.ctrl.open()  # отказ по пустому каталогу
         await pilot.pause()
         assert host.ctrl.is_open is False
-        assert not [w for w in host.query(".host-url-preset-hint") if not w._pruning]
+        assert not [
+            w for w in host.query(".host-url-preset-hint") if not w._pruning
+        ]

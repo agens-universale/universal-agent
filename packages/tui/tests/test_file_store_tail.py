@@ -7,16 +7,28 @@ from gc_tui.services.stores.file_store import FileTaskStore
 
 
 def _append_record(data_path: Path, seq: int, role: str, text: str) -> None:
-    rec = {"type": "message", "seq": seq, "payload": {"id": f"m{seq}", "role": role, "content": text}}
+    rec = {
+        "type": "message",
+        "seq": seq,
+        "payload": {"id": f"m{seq}", "role": role, "content": text},
+    }
     line = json.dumps(rec) + "\n"
     with open(data_path, "a", encoding="utf-8") as f:
         f.write(line)
 
 
 def _write_meta(
-    meta_path: Path, *, epoch_suffix: str | None = None, msgs: int = 0, updated: str = "2026-05-20T10:00:00+00:00"
+    meta_path: Path,
+    *,
+    epoch_suffix: str | None = None,
+    msgs: int = 0,
+    updated: str = "2026-05-20T10:00:00+00:00",
 ) -> None:
-    obj = {"thread_id": meta_path.stem.split("_", 2)[-1], "updated_at": updated, "messages_count": msgs}
+    obj = {
+        "thread_id": meta_path.stem.split("_", 2)[-1],
+        "updated_at": updated,
+        "messages_count": msgs,
+    }
     if epoch_suffix is not None:
         obj["last_summary_archive_suffix"] = epoch_suffix
     meta_path.write_text(json.dumps(obj))
@@ -83,7 +95,11 @@ def test_tail_events_stream_reset_on_file_truncation(tmp_path):
     _, cur = store.read_all_events("t1")
 
     # Перезапись файла более коротким содержимым (size < position_token).
-    short = {"type": "message", "seq": 1, "payload": {"id": "m1", "role": "user", "content": "x"}}
+    short = {
+        "type": "message",
+        "seq": 1,
+        "payload": {"id": "m1", "role": "user", "content": "x"},
+    }
     data.write_text(json.dumps(short) + "\n", encoding="utf-8")
     assert data.stat().st_size < cur.position_token
 

@@ -36,19 +36,33 @@ def _pairs() -> set:
         if "vendor" in p.parts:
             continue
         tree = ast.parse(p.read_text(encoding="utf-8"))
-        for scope in [tree] + [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        for scope in [tree] + [
+            n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)
+        ]:
             body = getattr(scope, "body", [])
-            names = {m.name for m in body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            names = {
+                m.name
+                for m in body
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
             asy = {m.name for m in body if isinstance(m, ast.AsyncFunctionDef)}
             for n in asy:
                 b = _base_of(n)
                 if b and b in names and b not in asy:
-                    rel = p.as_posix().split("/src/")[-1]  # str(p) на Windows — с «\», разреза не было бы
-                    rows.add(f"{rel}::{getattr(scope, 'name', '<модуль>')}.{b}")
+                    rel = p.as_posix().split("/src/")[
+                        -1
+                    ]  # str(p) на Windows — с «\», разреза не было бы
+                    rows.add(
+                        f"{rel}::{getattr(scope, 'name', '<модуль>')}.{b}"
+                    )
     return rows
 
 
 def test_only_the_named_pairs_remain():
     found = _pairs()
-    assert found - EXPECTED == set(), f"новая пара sync/async: {sorted(found - EXPECTED)}"
-    assert EXPECTED - found == set(), f"пара снята — уберите её из EXPECTED и из описания: {sorted(EXPECTED - found)}"
+    assert found - EXPECTED == set(), (
+        f"новая пара sync/async: {sorted(found - EXPECTED)}"
+    )
+    assert EXPECTED - found == set(), (
+        f"пара снята — уберите её из EXPECTED и из описания: {sorted(EXPECTED - found)}"
+    )

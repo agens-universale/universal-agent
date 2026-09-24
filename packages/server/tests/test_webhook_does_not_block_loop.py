@@ -80,7 +80,9 @@ async def test_context_build_leaves_the_loop_free(blocking_ctx):
         stop.set()
         await beat
 
-    assert elapsed >= _BUILD_SEC, "подмена не сработала — тест ничего не меряет"
+    assert elapsed >= _BUILD_SEC, (
+        "подмена не сработала — тест ничего не меряет"
+    )
     assert gaps, "хартбит не тикал вовсе"
     assert max(gaps) < _MAX_STALL_SEC, (
         f"loop залипал на {max(gaps):.3f}с при сборке контекста — похоже, дискавери зовётся прямо на loop"
@@ -98,4 +100,6 @@ def test_webhook_awaits_the_async_builder():
     from gc_server import server
 
     src = inspect.getsource(server.events_webhook)
-    assert "await acreate_run_context(" in src, "вебхук снова собирает контекст синхронно"
+    assert "await acreate_run_context(" in src, (
+        "вебхук снова собирает контекст синхронно"
+    )

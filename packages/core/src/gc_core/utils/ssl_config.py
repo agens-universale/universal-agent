@@ -66,7 +66,9 @@ def get_client_cert(server_cfg: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     return None
 
 
-def get_backend_client_cert(config_dict: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+def get_backend_client_cert(
+    config_dict: Dict[str, Any],
+) -> Optional[Tuple[str, str]]:
     """Клиентский сертификат модели-бэкенда из config_dict (cert_path/key_path).
 
     Оба заданы → (cert, key) с раскрытыми путями; только один → warning + None;

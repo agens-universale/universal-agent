@@ -48,7 +48,9 @@ async def _run(tmp_path, log_format, **run_kwargs):
         state.messages += list(messages)
         return "ok"
 
-    with patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent):
+    with patch.object(
+        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
+    ):
         executor = agent_executor_module.AgentExecutor(ctx)
         result = await executor.arun(["привет"], verbose=False, **run_kwargs)
 
@@ -80,13 +82,17 @@ class TestJsonl:
         # run_id ставит RunContextFilter на каждую запись — дублировать его в
         # extra= не нужно, и именно он связывает событие с именем файла.
         text = await _run(tmp_path, "jsonl", thread_id="thr-1", system="cli")
-        bound = [e for e in _events(text) if e.get("event") == "thread_bound"][0]
+        bound = [e for e in _events(text) if e.get("event") == "thread_bound"][
+            0
+        ]
         assert bound["run_id"]
 
     async def test_no_event_without_thread(self, tmp_path):
         # gc-cli без -t: треда нет вовсе, связывать не с чем — и это не падение.
         text = await _run(tmp_path, "jsonl")
-        assert not [e for e in _events(text) if e.get("event") == "thread_bound"]
+        assert not [
+            e for e in _events(text) if e.get("event") == "thread_bound"
+        ]
 
 
 class TestText:
@@ -123,6 +129,11 @@ async def test_no_crash_when_logger_is_absent(tmp_path):
         state.messages += list(messages)
         return "ok"
 
-    with patch.object(agent_executor_module, "arun_agent", side_effect=_fake_run_agent):
+    with patch.object(
+        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
+    ):
         executor = agent_executor_module.AgentExecutor(ctx)
-        assert await executor.arun(["привет"], thread_id="thr-1", system="cli") == "ok"
+        assert (
+            await executor.arun(["привет"], thread_id="thr-1", system="cli")
+            == "ok"
+        )

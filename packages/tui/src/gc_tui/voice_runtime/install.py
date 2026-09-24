@@ -18,7 +18,11 @@ from gc_tui.voice_runtime.state import (
     VoiceState,
     save_state,
 )
-from gc_tui.voice_runtime.wire import managed_language, user_voice_conflict, wire_voice
+from gc_tui.voice_runtime.wire import (
+    managed_language,
+    user_voice_conflict,
+    wire_voice,
+)
 
 
 class VoiceInstallError(RuntimeError):
@@ -90,7 +94,17 @@ def _clone_mismatch(runner, git: str, root) -> Optional[str]:
         # Послабление точечное: только этот вызов, только чтение HEAD, и каталог наш —
         # мы его сами и клонировали.
         result = runner(
-            [git, "-c", f"safe.directory={root}", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True
+            [
+                git,
+                "-c",
+                f"safe.directory={root}",
+                "-C",
+                str(root),
+                "rev-parse",
+                "HEAD",
+            ],
+            capture_output=True,
+            text=True,
         )
     except OSError as exc:
         return f"версию клона не прочитать ({exc})"
@@ -112,10 +126,14 @@ def install(
 ) -> VoiceState:
     git = shutil.which("git")
     if git is None:
-        raise VoiceInstallError("git не найден в PATH — установите git и повторите.")
+        raise VoiceInstallError(
+            "git не найден в PATH — установите git и повторите."
+        )
     uv = shutil.which("uv")
     if uv is None:
-        raise VoiceInstallError("uv не найден в PATH — установите uv (агент им ставится).")
+        raise VoiceInstallError(
+            "uv не найден в PATH — установите uv (агент им ставится)."
+        )
 
     root = speaches_root()
     if root.is_dir():
@@ -131,27 +149,50 @@ def install(
         echo(f"[voice] клонирую speaches {SPEACHES_PIN} → {root}")
         root.parent.mkdir(parents=True, exist_ok=True)
         _run(
-            runner, [git, "clone", "--depth", "1", "--branch", SPEACHES_PIN, SPEACHES_REPO, str(root)], step="git clone"
+            runner,
+            [
+                git,
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                SPEACHES_PIN,
+                SPEACHES_REPO,
+                str(root),
+            ],
+            step="git clone",
         )
     else:
         echo(f"[voice] клон уже на {SPEACHES_PIN}: {root}")
 
     echo("[voice] uv sync (окружение speaches; uv сам поставит Python 3.12)")
-    _run(runner, [uv, "sync", "--project", str(root), "--no-dev"], step="uv sync")
+    _run(
+        runner,
+        [uv, "sync", "--project", str(root), "--no-dev"],
+        step="uv sync",
+    )
 
     # CPU-only: их deps тянут kokoro-onnx[gpu] → onnxruntime-gpu; заменяем на CPU.
     py = str(speaches_python())
     echo("[voice] нейтрализую GPU-зависимости (onnxruntime-gpu → onnxruntime)")
     runner(
-        [uv, "pip", "uninstall", "--python", py, "onnxruntime-gpu"], capture_output=True, text=True
+        [uv, "pip", "uninstall", "--python", py, "onnxruntime-gpu"],
+        capture_output=True,
+        text=True,
     )  # может отсутствовать — не ошибка
-    _run(runner, [uv, "pip", "install", "--python", py, "onnxruntime"], step="установка CPU onnxruntime")
+    _run(
+        runner,
+        [uv, "pip", "install", "--python", py, "onnxruntime"],
+        step="установка CPU onnxruntime",
+    )
 
     echo(f"[voice] проверяю модель {model} (карточка HF)")
     try:
         reason = validate_model_card(model)
     except Exception as exc:  # оффлайн/зеркало — не блокируем
-        echo(f"[voice] не удалось проверить карточку модели ({exc}) — продолжаю")
+        echo(
+            f"[voice] не удалось проверить карточку модели ({exc}) — продолжаю"
+        )
         reason = None
     if reason is not None:
         raise VoiceInstallError(
@@ -162,11 +203,17 @@ def install(
     try:
         _download_model(model)
     except Exception as exc:
-        raise VoiceInstallError(f"скачивание модели завершилось с ошибкой: {exc}") from exc
+        raise VoiceInstallError(
+            f"скачивание модели завершилось с ошибкой: {exc}"
+        ) from exc
 
     conflict = user_voice_conflict(base_raw or {}, port)
-    wire_voice(port, model, managed_language())  # переустановка не сбрасывает язык
-    state = VoiceState(version=SPEACHES_PIN, root=str(root), port=port, model=model)
+    wire_voice(
+        port, model, managed_language()
+    )  # переустановка не сбрасывает язык
+    state = VoiceState(
+        version=SPEACHES_PIN, root=str(root), port=port, model=model
+    )
     save_state(state)
 
     if conflict:
@@ -175,5 +222,7 @@ def install(
             "локальный сервис перекроет его (config.local.yml главнее). "
             "Вернуть как было: gc-voice remove."
         )
-    echo(f"[voice] готово: порт {port}, модель {model}. Запустите gc-ua — сервис поднимется сам.")
+    echo(
+        f"[voice] готово: порт {port}, модель {model}. Запустите gc-ua — сервис поднимется сам."
+    )
     return state

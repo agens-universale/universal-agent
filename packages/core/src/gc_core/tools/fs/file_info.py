@@ -18,15 +18,23 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 DEFAULT_MAX_HASH_BYTES = 100 * 1024 * 1024
 
 
-def _info_arg_error(include_hash, hash_algorithm, include_line_count, follow_symlinks) -> "tuple[str, str] | None":
+def _info_arg_error(
+    include_hash, hash_algorithm, include_line_count, follow_symlinks
+) -> "tuple[str, str] | None":
     if not isinstance(include_hash, bool):
         return "include_hash", "Argument 'include_hash' must be a boolean."
     if hash_algorithm != "sha256":
         return "hash_algorithm", "Only hash_algorithm='sha256' is supported."
     if not isinstance(include_line_count, bool):
-        return "include_line_count", "Argument 'include_line_count' must be a boolean."
+        return (
+            "include_line_count",
+            "Argument 'include_line_count' must be a boolean.",
+        )
     if not isinstance(follow_symlinks, bool):
-        return "follow_symlinks", "Argument 'follow_symlinks' must be a boolean."
+        return (
+            "follow_symlinks",
+            "Argument 'follow_symlinks' must be a boolean.",
+        )
     return None
 
 
@@ -59,7 +67,9 @@ class FileInfo(AbstractSimpleTool):
     max_hash_bytes = DEFAULT_MAX_HASH_BYTES
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_file_info",
@@ -83,7 +93,9 @@ class FileInfo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return (
             "Tool name: fs_file_info\n"
             "Cheap read-only metadata before editing a file.\n"
@@ -93,7 +105,11 @@ class FileInfo(AbstractSimpleTool):
 
     @staticmethod
     def _result(**fields: Any) -> str:
-        payload = {"tool": FileInfo.registered_tool_name(), "error": None, **fields}
+        payload = {
+            "tool": FileInfo.registered_tool_name(),
+            "error": None,
+            **fields,
+        }
         return json.dumps(payload, ensure_ascii=False)
 
     def _error(self, path: str, error: Dict[str, Any], message: str) -> str:
@@ -118,7 +134,11 @@ class FileInfo(AbstractSimpleTool):
                 + ("x" if mode & (bits >> 2) else "-")
             )
 
-        return triplet(stat_module.S_IRUSR) + triplet(stat_module.S_IRGRP) + triplet(stat_module.S_IROTH)
+        return (
+            triplet(stat_module.S_IRUSR)
+            + triplet(stat_module.S_IRGRP)
+            + triplet(stat_module.S_IROTH)
+        )
 
     def _read_guard_blocked_result(
         self,
@@ -133,11 +153,16 @@ class FileInfo(AbstractSimpleTool):
         return self._error(
             path=path,
             error=error,
-            message=str(error.get("message") or "Read operation is outside allowed read_guard perimeter."),
+            message=str(
+                error.get("message")
+                or "Read operation is outside allowed read_guard perimeter."
+            ),
         )
 
     async def _classify(self, probe: "_FileProbe", stat_path: str) -> None:
-        sample = await self._backend.read_head_bytes(stat_path, BINARY_SAMPLE_BYTES)
+        sample = await self._backend.read_head_bytes(
+            stat_path, BINARY_SAMPLE_BYTES
+        )
         classification = classify_content_from_sample(stat_path, sample)
         probe.is_binary = classification.is_binary
         probe.binary_detection_reason = classification.binary_detection_reason
@@ -148,9 +173,13 @@ class FileInfo(AbstractSimpleTool):
             probe.encoding_guess = classification.encoding_guess
             probe.encoding_confidence = 1.0
         else:
-            probe.encoding_guess, probe.encoding_confidence = guess_encoding(sample)
+            probe.encoding_guess, probe.encoding_confidence = guess_encoding(
+                sample
+            )
 
-    async def _hash(self, probe: "_FileProbe", stat_path: str, size_bytes) -> "tuple[str, str] | None":
+    async def _hash(
+        self, probe: "_FileProbe", stat_path: str, size_bytes
+    ) -> "tuple[str, str] | None":
         if size_bytes > self.max_hash_bytes:
             probe.hash_skipped_reason = "file_too_large"
             return None
@@ -162,7 +191,12 @@ class FileInfo(AbstractSimpleTool):
         return None
 
     async def _probe_file(
-        self, probe: "_FileProbe", stat_path: str, size_bytes, include_line_count: bool, include_hash: bool
+        self,
+        probe: "_FileProbe",
+        stat_path: str,
+        size_bytes,
+        include_line_count: bool,
+        include_hash: bool,
     ) -> "tuple[str, str] | None":
         """Бинарность/кодировка, счётчик строк и хеш; (str(e), message) при ошибке чтения."""
         await self._classify(probe, stat_path)
@@ -198,7 +232,9 @@ class FileInfo(AbstractSimpleTool):
                 error={"type": "invalid_argument", "field": "path"},
                 message="Argument 'path' must be a non-empty string.",
             )
-        arg_error = _info_arg_error(include_hash, hash_algorithm, include_line_count, follow_symlinks)
+        arg_error = _info_arg_error(
+            include_hash, hash_algorithm, include_line_count, follow_symlinks
+        )
         if arg_error is not None:
             return self._error(
                 path=path,
@@ -233,9 +269,15 @@ class FileInfo(AbstractSimpleTool):
             )
 
         is_symlink = await self._backend.is_symlink(path)
-        stat_path = await self._backend.realpath(path) if follow_symlinks and is_symlink else path
+        stat_path = (
+            await self._backend.realpath(path)
+            if follow_symlinks and is_symlink
+            else path
+        )
         try:
-            info = await self._backend.stat_info(stat_path, follow_symlinks=follow_symlinks)
+            info = await self._backend.stat_info(
+                stat_path, follow_symlinks=follow_symlinks
+            )
         except OSError as e:
             return self._error(
                 path=path,
@@ -245,21 +287,31 @@ class FileInfo(AbstractSimpleTool):
 
         is_dir = info["is_dir"]
         is_file = info["is_file"]
-        entry_type = _entry_type(is_symlink and not follow_symlinks, is_dir, is_file)
+        entry_type = _entry_type(
+            is_symlink and not follow_symlinks, is_dir, is_file
+        )
 
         readable = await self._backend.readable(stat_path)
         writable = await self._backend.writable(stat_path)
         size_bytes = info["size"]
-        permissions = self._format_permissions(info["mode"]) if info["mode"] is not None else None
+        permissions = (
+            self._format_permissions(info["mode"])
+            if info["mode"] is not None
+            else None
+        )
         modified_time = (
-            datetime.fromtimestamp(info["mtime"], tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            datetime.fromtimestamp(info["mtime"], tz=UTC).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
             if info["mtime"] is not None
             else None
         )
 
         probe = _FileProbe()
         if is_file and readable:
-            read_error = await self._probe_file(probe, stat_path, size_bytes, include_line_count, include_hash)
+            read_error = await self._probe_file(
+                probe, stat_path, size_bytes, include_line_count, include_hash
+            )
             if read_error is not None:
                 return self._error(
                     path=path,

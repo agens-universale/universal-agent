@@ -22,7 +22,13 @@ def _write_thread(
     meta = threads_dir / f"meta_{system}_{tid}.json"
     data.write_text(
         "\n".join(
-            json.dumps({"type": "message", "seq": i, "payload": {"id": f"m{i}", "role": "user", "content": "x"}})
+            json.dumps(
+                {
+                    "type": "message",
+                    "seq": i,
+                    "payload": {"id": f"m{i}", "role": "user", "content": "x"},
+                }
+            )
             for i in range(msgs)
         )
     )
@@ -40,8 +46,22 @@ def _write_thread(
 
 
 def test_list_tasks_scans_meta_and_returns_summary(tmp_path):
-    _write_thread(tmp_path, "cli", "t1", msgs=3, updated="2026-05-20T10:00:00+00:00", skill="swe-task-solver")
-    _write_thread(tmp_path, "cli", "t2", msgs=1, updated="2026-05-20T09:00:00+00:00", error="ENOENT")
+    _write_thread(
+        tmp_path,
+        "cli",
+        "t1",
+        msgs=3,
+        updated="2026-05-20T10:00:00+00:00",
+        skill="swe-task-solver",
+    )
+    _write_thread(
+        tmp_path,
+        "cli",
+        "t2",
+        msgs=1,
+        updated="2026-05-20T09:00:00+00:00",
+        error="ENOENT",
+    )
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     tasks = store.list_tasks()
@@ -56,8 +76,12 @@ def test_list_tasks_scans_meta_and_returns_summary(tmp_path):
 
 
 def test_list_tasks_sorted_by_updated_desc(tmp_path):
-    _write_thread(tmp_path, "cli", "older", msgs=1, updated="2026-05-19T10:00:00+00:00")
-    _write_thread(tmp_path, "cli", "newer", msgs=1, updated="2026-05-20T10:00:00+00:00")
+    _write_thread(
+        tmp_path, "cli", "older", msgs=1, updated="2026-05-19T10:00:00+00:00"
+    )
+    _write_thread(
+        tmp_path, "cli", "newer", msgs=1, updated="2026-05-20T10:00:00+00:00"
+    )
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     tasks = store.list_tasks()
@@ -65,7 +89,9 @@ def test_list_tasks_sorted_by_updated_desc(tmp_path):
 
 
 def test_get_task_meta_returns_full_dict(tmp_path):
-    _write_thread(tmp_path, "cli", "t1", msgs=2, updated="2026-05-20T10:00:00+00:00")
+    _write_thread(
+        tmp_path, "cli", "t1", msgs=2, updated="2026-05-20T10:00:00+00:00"
+    )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     meta = store.get_task_meta("t1")
     assert meta["thread_id"] == "t1"
@@ -74,7 +100,13 @@ def test_get_task_meta_returns_full_dict(tmp_path):
 
 def test_list_tasks_offset_limit(tmp_path):
     for i in range(5):
-        _write_thread(tmp_path, "cli", f"t{i}", msgs=1, updated=f"2026-05-2{i}T10:00:00+00:00")
+        _write_thread(
+            tmp_path,
+            "cli",
+            f"t{i}",
+            msgs=1,
+            updated=f"2026-05-2{i}T10:00:00+00:00",
+        )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     tasks = store.list_tasks(limit=2, offset=1)
     assert len(tasks) == 2
@@ -110,8 +142,18 @@ def test_list_tasks_skips_pre_summary_snapshots(tmp_path):
     threads.mkdir()
     # 1 live + 2 snapshot-а одного и того же треда.
     _write_meta(threads, "thread1", updated_at="2026-05-29T10:00:00+00:00")
-    _write_meta(threads, "thread1", suffix="__pre_summary__20260529_090000", updated_at="2026-05-29T09:00:00+00:00")
-    _write_meta(threads, "thread1", suffix="__pre_summary__20260529_080000", updated_at="2026-05-29T08:00:00+00:00")
+    _write_meta(
+        threads,
+        "thread1",
+        suffix="__pre_summary__20260529_090000",
+        updated_at="2026-05-29T09:00:00+00:00",
+    )
+    _write_meta(
+        threads,
+        "thread1",
+        suffix="__pre_summary__20260529_080000",
+        updated_at="2026-05-29T08:00:00+00:00",
+    )
     # И ещё один независимый тред.
     _write_meta(threads, "thread2", updated_at="2026-05-29T09:30:00+00:00")
     store = FileTaskStore(threads_dir=str(threads), system="cli")

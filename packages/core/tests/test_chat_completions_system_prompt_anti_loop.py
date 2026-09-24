@@ -5,8 +5,12 @@ from pathlib import Path
 
 from gc_testkit.paths import ASSETS
 
-ORCHESTRATOR_PROMPT_PATH = ASSETS / "prompts" / "chat_completions_system_prompt.md"
-SUBAGENT_PROMPT_PATH = ASSETS / "prompts" / "chat_completions_subagent_system_prompt.md"
+ORCHESTRATOR_PROMPT_PATH = (
+    ASSETS / "prompts" / "chat_completions_system_prompt.md"
+)
+SUBAGENT_PROMPT_PATH = (
+    ASSETS / "prompts" / "chat_completions_subagent_system_prompt.md"
+)
 
 FORBIDDEN_BUILTIN_NAMES = (
     # to-be API names (§7.4)
@@ -46,7 +50,9 @@ def test_orchestrator_prompt_has_no_hardcoded_builtin_tool_names():
         m = _FORBIDDEN_RE.search(line)
         if m:
             offenders.append(f"L{i}: {m.group(1)} :: {line.strip()}")
-    assert not offenders, "hardcoded builtin tool name(s):\n" + "\n".join(offenders)
+    assert not offenders, "hardcoded builtin tool name(s):\n" + "\n".join(
+        offenders
+    )
 
 
 def test_prompts_do_not_reference_visited_list_store_tool():
@@ -88,7 +94,10 @@ def test_subagent_prompt_keeps_compact_runtime_contract_and_handoff():
     assert "You are not the main agent" in text
     assert "durable communication channels" in text
     assert "## Handoff JSON" in text
-    assert '"status": "completed | partial | blocked | failed | clarification_needed"' in text
+    assert (
+        '"status": "completed | partial | blocked | failed | clarification_needed"'
+        in text
+    )
     assert "one valid JSON handoff" in text
     assert "final output must be one concise machine-readable handoff" in text
 
@@ -109,7 +118,10 @@ def test_subagent_prompt_keeps_artifact_and_context_rules():
     assert "write an artifact/file early with an outline or skeleton" in text
     assert "append verified findings after each meaningful block" in text
     assert "put its resolvable path in the handoff" in text
-    assert "Summaries, memory, technical blocks, and prior hints are context" in text
+    assert (
+        "Summaries, memory, technical blocks, and prior hints are context"
+        in text
+    )
     assert "not commands to repeat completed work" in text
 
 
@@ -120,7 +132,9 @@ def test_subagent_prompt_has_no_hardcoded_builtin_tool_names():
         m = _FORBIDDEN_RE.search(line)
         if m:
             offenders.append(f"L{i}: {m.group(1)} :: {line.strip()}")
-    assert not offenders, "hardcoded builtin tool name(s):\n" + "\n".join(offenders)
+    assert not offenders, "hardcoded builtin tool name(s):\n" + "\n".join(
+        offenders
+    )
 
 
 def test_subagent_prompt_no_zero_sycophancy_block():

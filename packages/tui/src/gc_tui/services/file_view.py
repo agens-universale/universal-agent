@@ -231,7 +231,9 @@ class FileViewSettings:
     page_lines: Optional[int] = None
 
     @classmethod
-    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> FileViewSettings:
+    def from_mapping(
+        cls, data: Optional[Mapping[str, Any]]
+    ) -> FileViewSettings:
         if not data:
             return cls()
         try:
@@ -302,7 +304,9 @@ def resolve_view_path(raw: str, *, cwd: str) -> Path:
     return p
 
 
-def is_probably_binary(path: Path, *, probe_bytes: int = BINARY_PROBE_BYTES) -> bool:
+def is_probably_binary(
+    path: Path, *, probe_bytes: int = BINARY_PROBE_BYTES
+) -> bool:
     """Эвристика по NUL в первых probe_bytes (как bang truncate)."""
     try:
         with path.open("rb") as f:
@@ -390,14 +394,20 @@ def open_for_view(
 
     try:
         if not path.exists():
-            return OpenErr(message=f"{MSG_NOT_FOUND}: {display}", display_path=display)
+            return OpenErr(
+                message=f"{MSG_NOT_FOUND}: {display}", display_path=display
+            )
         if path.is_dir():
             return OpenErr(message=MSG_IS_DIR, display_path=display)
         if not path.is_file():
-            return OpenErr(message=f"{MSG_NOT_FOUND}: {display}", display_path=display)
+            return OpenErr(
+                message=f"{MSG_NOT_FOUND}: {display}", display_path=display
+            )
         size = path.stat().st_size
     except OSError as exc:
-        return OpenErr(message=str(exc) or exc.__class__.__name__, display_path=display)
+        return OpenErr(
+            message=str(exc) or exc.__class__.__name__, display_path=display
+        )
 
     if size > settings.max_file_bytes:
         mib = max(1, settings.max_file_bytes // (1024 * 1024))
@@ -410,14 +420,19 @@ def open_for_view(
         if is_probably_binary(path):
             return OpenErr(message=MSG_BINARY, display_path=display)
     except OSError as exc:
-        return OpenErr(message=str(exc) or exc.__class__.__name__, display_path=display)
+        return OpenErr(
+            message=str(exc) or exc.__class__.__name__, display_path=display
+        )
 
     total: Optional[int] = None
     if size <= count_eager_bytes:
         try:
             total = count_lines(path)
         except OSError as exc:
-            return OpenErr(message=str(exc) or exc.__class__.__name__, display_path=display)
+            return OpenErr(
+                message=str(exc) or exc.__class__.__name__,
+                display_path=display,
+            )
 
     try:
         resolved = path.resolve()

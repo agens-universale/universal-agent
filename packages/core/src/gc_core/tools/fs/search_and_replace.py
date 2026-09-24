@@ -41,38 +41,71 @@ def _replace_arg_error(
     return (
         _text_arg_error(path, search, replace, dry_run)
         or _occurrence_arg_error(expected_matches, occurrence)
-        or diff_arg_error(backup, return_diff, diff_context_lines, max_diff_chars, expected_file_sha256)
+        or diff_arg_error(
+            backup,
+            return_diff,
+            diff_context_lines,
+            max_diff_chars,
+            expected_file_sha256,
+        )
     )
 
 
-def _text_arg_error(path, search, replace, dry_run) -> "tuple[str, Dict[str, Any]] | None":
+def _text_arg_error(
+    path, search, replace, dry_run
+) -> "tuple[str, Dict[str, Any]] | None":
     if not isinstance(path, str):
-        return "Argument 'path' must be a string.", {"type": "invalid_argument", "field": "path"}
+        return "Argument 'path' must be a string.", {
+            "type": "invalid_argument",
+            "field": "path",
+        }
     if not isinstance(search, str):
-        return "Argument 'search' must be a string.", {"type": "invalid_argument", "field": "search"}
+        return "Argument 'search' must be a string.", {
+            "type": "invalid_argument",
+            "field": "search",
+        }
     if not isinstance(replace, str):
-        return "Argument 'replace' must be a string.", {"type": "invalid_argument", "field": "replace"}
+        return "Argument 'replace' must be a string.", {
+            "type": "invalid_argument",
+            "field": "replace",
+        }
     if not isinstance(dry_run, bool):
-        return "Argument 'dry_run' must be a boolean.", {"type": "invalid_argument", "field": "dry_run"}
+        return "Argument 'dry_run' must be a boolean.", {
+            "type": "invalid_argument",
+            "field": "dry_run",
+        }
     return None
 
 
-def _occurrence_arg_error(expected_matches, occurrence) -> "tuple[str, Dict[str, Any]] | None":
-    if expected_matches is not None and (not isinstance(expected_matches, int) or expected_matches < 0):
+def _occurrence_arg_error(
+    expected_matches, occurrence
+) -> "tuple[str, Dict[str, Any]] | None":
+    if expected_matches is not None and (
+        not isinstance(expected_matches, int) or expected_matches < 0
+    ):
         return "Argument 'expected_matches' must be a non-negative integer.", {
             "type": "invalid_argument",
             "field": "expected_matches",
         }
-    if not (occurrence in ("first", "last", "all") or (isinstance(occurrence, int) and occurrence >= 1)):
-        return "Argument 'occurrence' must be 'first', 'last', 'all', or a 1-based integer.", {
-            "type": "invalid_argument",
-            "field": "occurrence",
-        }
+    if not (
+        occurrence in ("first", "last", "all")
+        or (isinstance(occurrence, int) and occurrence >= 1)
+    ):
+        return (
+            "Argument 'occurrence' must be 'first', 'last', 'all', or a 1-based integer.",
+            {
+                "type": "invalid_argument",
+                "field": "occurrence",
+            },
+        )
     if occurrence == "all" and expected_matches is None:
-        return "Argument 'expected_matches' is required when occurrence='all'.", {
-            "type": "invalid_argument",
-            "field": "expected_matches",
-        }
+        return (
+            "Argument 'expected_matches' is required when occurrence='all'.",
+            {
+                "type": "invalid_argument",
+                "field": "expected_matches",
+            },
+        )
     return None
 
 
@@ -95,17 +128,25 @@ def _miss_payload(original_search: str, content: str) -> Dict[str, Any]:
 
 
 def _match_error_payload(
-    match_entries: list, original_search: str, content: str, expected_total_matches
+    match_entries: list,
+    original_search: str,
+    content: str,
+    expected_total_matches,
 ) -> "Dict[str, Any] | None":
     """Payload ошибки поиска (нет вхождений / не то число), либо None."""
     if not match_entries:
         return _miss_payload(original_search, content)
-    if expected_total_matches is not None and len(match_entries) != expected_total_matches:
+    if (
+        expected_total_matches is not None
+        and len(match_entries) != expected_total_matches
+    ):
         return _mismatch_payload(match_entries, expected_total_matches)
     return None
 
 
-def _mismatch_payload(match_entries: list, expected_total_matches: int) -> Dict[str, Any]:
+def _mismatch_payload(
+    match_entries: list, expected_total_matches: int
+) -> Dict[str, Any]:
     match_count = len(match_entries)
     return dict(
         ok=False,
@@ -113,8 +154,13 @@ def _mismatch_payload(match_entries: list, expected_total_matches: int) -> Dict[
         replaced=0,
         match_count=match_count,
         line_numbers=sorted({entry[1] for entry in match_entries}),
-        match_ranges=[{"start_line": entry[1], "end_line": entry[2]} for entry in match_entries],
-        message=(f"Match count mismatch: expected {expected_total_matches}, found {match_count}. No changes made."),
+        match_ranges=[
+            {"start_line": entry[1], "end_line": entry[2]}
+            for entry in match_entries
+        ],
+        message=(
+            f"Match count mismatch: expected {expected_total_matches}, found {match_count}. No changes made."
+        ),
         suggestions=[],
         suggestions_total=0,
         error={"type": "match_count_mismatch"},
@@ -123,8 +169,14 @@ def _mismatch_payload(match_entries: list, expected_total_matches: int) -> Dict[
 
 def _unchanged_payload(eol_adapted: bool) -> Dict[str, Any]:
     if eol_adapted:
-        return dict(message=line_ending_change_refused_message(), error=line_ending_change_refused_error())
-    return dict(message="No change needed (content identical after replacement).", error=None)
+        return dict(
+            message=line_ending_change_refused_message(),
+            error=line_ending_change_refused_error(),
+        )
+    return dict(
+        message="No change needed (content identical after replacement).",
+        error=None,
+    )
 
 
 def _select_entries(match_entries: list, occurrence) -> tuple:
@@ -138,7 +190,10 @@ def _select_entries(match_entries: list, occurrence) -> tuple:
         return [match_entries[-1]], None
     target_idx = occurrence - 1
     if target_idx < 0 or target_idx >= match_count:
-        return None, f"Occurrence {occurrence} is out of range for {match_count} matches. No changes made."
+        return (
+            None,
+            f"Occurrence {occurrence} is out of range for {match_count} matches. No changes made.",
+        )
     return [match_entries[target_idx]], None
 
 
@@ -153,7 +208,9 @@ class SearchAndReplace(AbstractSimpleTool):
     default_max_diff_chars = 12000
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_search_and_replace",
@@ -198,7 +255,10 @@ class SearchAndReplace(AbstractSimpleTool):
                             "When 'all', you must also pass expected_matches equal to the total match count."
                         ),
                         "anyOf": [
-                            {"type": "string", "enum": ["first", "last", "all"]},
+                            {
+                                "type": "string",
+                                "enum": ["first", "last", "all"],
+                            },
                             {"type": "integer", "minimum": 1},
                         ],
                     },
@@ -206,7 +266,10 @@ class SearchAndReplace(AbstractSimpleTool):
                         "type": "boolean",
                         "description": "If true and file is modified, creates '<path>.bak' before writing.",
                     },
-                    "return_diff": {"type": "boolean", "description": "If true, include a unified diff in the result."},
+                    "return_diff": {
+                        "type": "boolean",
+                        "description": "If true, include a unified diff in the result.",
+                    },
                     "diff_context_lines": {
                         "type": "integer",
                         "minimum": 0,
@@ -241,7 +304,9 @@ class SearchAndReplace(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         description = """Tool name: fs_search_and_replace
 Tool description: Replaces exact text in a file using literal matching; supports dry-run, occurrence selection, expected match count, backup, and optional diff output.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to modify."}, "search": {"type": "string", "description": "The exact content to find and replace.  May be multiline."}, "replace": {"type": "string", "description": "The new content to replace the found content with.  May be multiline."}, "dry_run": {"type": "boolean"}, "expected_matches": {"type": "integer", "minimum": 0}, "occurrence": {"anyOf": [{"type": "string", "enum": ["first", "last", "all"]}, {"type": "integer", "minimum": 1}]}, "backup": {"type": "boolean"}, "return_diff": {"type": "boolean"}, "diff_context_lines": {"type": "integer", "minimum": 0}, "max_diff_chars": {"type": "integer", "minimum": 1}}, "required": ["path", "search", "replace"], "additionalProperties": false}
@@ -309,7 +374,7 @@ Update version string:
 """
         return description
 
-    def _result(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+    def _result(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         *,
         path: str,
@@ -341,7 +406,9 @@ Update version string:
                 "line_numbers": line_numbers or [],
                 "match_ranges": match_ranges or [],
                 "path": tool_report_abspath(path, workspace=self._workspace),
-                "backup_path": tool_report_abspath(backup_path, workspace=self._workspace),
+                "backup_path": tool_report_abspath(
+                    backup_path, workspace=self._workspace
+                ),
                 "diff": diff,
                 "diff_truncated": diff_truncated,
                 "suggestions": suggestions or [],
@@ -376,12 +443,24 @@ Update version string:
             error=error,
         )
 
-    def _diff_if_requested(self, return_diff: bool, path, old: str, new: str, context_lines: int, max_chars: int):
+    def _diff_if_requested(
+        self,
+        return_diff: bool,
+        path,
+        old: str,
+        new: str,
+        context_lines: int,
+        max_chars: int,
+    ):
         if not return_diff:
             return None, False
-        return build_unified_diff(path, old, new, context_lines=context_lines, max_chars=max_chars)
+        return build_unified_diff(
+            path, old, new, context_lines=context_lines, max_chars=max_chars
+        )
 
-    async def _maybe_backup(self, path: str, backup: bool) -> "tuple[str | None, dict | None]":
+    async def _maybe_backup(
+        self, path: str, backup: bool
+    ) -> "tuple[str | None, dict | None]":
         if not backup:
             return None, None
         backup_path = f"{path}.bak"
@@ -448,7 +527,9 @@ Update version string:
         if not await self._backend.exists(path):
             return fail(message="File not found.", error={"type": "not_found"})
         if not await self._backend.is_file(path):
-            return fail(message="Path is not a file.", error={"type": "not_a_file"})
+            return fail(
+                message="Path is not a file.", error={"type": "not_a_file"}
+            )
         if search == "":
             return fail(
                 message="Argument 'search' cannot be an empty string.",
@@ -469,13 +550,19 @@ Update version string:
         search = resolved.search
         replace = resolved.replace
 
-        match_entries = collect_literal_matches(content, search, resolved.first_index)
+        match_entries = collect_literal_matches(
+            content, search, resolved.first_index
+        )
         match_count = len(match_entries)
-        match_error = _match_error_payload(match_entries, original_search, content, expected_total_matches)
+        match_error = _match_error_payload(
+            match_entries, original_search, content, expected_total_matches
+        )
         if match_error is not None:
             return _result(**match_error)
 
-        selected_entries, select_error = _select_entries(match_entries, occurrence)
+        selected_entries, select_error = _select_entries(
+            match_entries, occurrence
+        )
         if select_error is not None:
             return _result(
                 ok=False,
@@ -490,12 +577,22 @@ Update version string:
             )
 
         line_numbers = sorted({entry[1] for entry in selected_entries})
-        match_ranges = [{"start_line": entry[1], "end_line": entry[2]} for entry in selected_entries]
+        match_ranges = [
+            {"start_line": entry[1], "end_line": entry[2]}
+            for entry in selected_entries
+        ]
         replaced_count = len(selected_entries)
 
-        new_content = splice_replacements(content, selected_entries, search, replace)
+        new_content = splice_replacements(
+            content, selected_entries, search, replace
+        )
         diff_text, diff_truncated = self._diff_if_requested(
-            return_diff, path, content, new_content, diff_context_lines, max_diff_chars
+            return_diff,
+            path,
+            content,
+            new_content,
+            diff_context_lines,
+            max_diff_chars,
         )
 
         if new_content == content:
@@ -543,7 +640,9 @@ Update version string:
                 error=backup_error,
             )
 
-        out_bytes, write_error = await encode_and_write(self, path, new_content, encoding_used)
+        out_bytes, write_error = await encode_and_write(
+            self, path, new_content, encoding_used
+        )
         if write_error is not None:
             return _result(
                 ok=False,

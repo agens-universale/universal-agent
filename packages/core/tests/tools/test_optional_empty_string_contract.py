@@ -59,34 +59,56 @@ def _call(fabric, tool_name: str, args: dict, *, strict: bool) -> dict:
 
 # Поля с enum: пустая строка под-схему не проходит.
 _ENUM_CASES = [
-    (WriteToFile, "fs_write_file", {"path": "/tmp/x.txt", "content": "hi"}, "newline"),
-    (WriteToFile, "fs_write_file", {"path": "/tmp/x.txt", "content": "hi"}, "mode"),
+    (
+        WriteToFile,
+        "fs_write_file",
+        {"path": "/tmp/x.txt", "content": "hi"},
+        "newline",
+    ),
+    (
+        WriteToFile,
+        "fs_write_file",
+        {"path": "/tmp/x.txt", "content": "hi"},
+        "mode",
+    ),
     (FileInfo, "fs_file_info", {"path": "/tmp/x.txt"}, "hash_algorithm"),
 ]
 
 
 @pytest.mark.parametrize("strict", [True, False], ids=["strict", "non-strict"])
 @pytest.mark.parametrize("fabric, tool_name, base, field", _ENUM_CASES)
-def test_empty_string_in_enum_field_is_treated_as_unset(fabric, tool_name, base, field, strict):
+def test_empty_string_in_enum_field_is_treated_as_unset(
+    fabric, tool_name, base, field, strict
+):
     out = _call(fabric, tool_name, {**base, field: ""}, strict=strict)
-    assert field not in out, f"{field}='' должен сниматься, а не доезжать до инструмента"
+    assert field not in out, (
+        f"{field}='' должен сниматься, а не доезжать до инструмента"
+    )
     for key, value in base.items():
         assert out[key] == value
 
 
 @pytest.mark.parametrize("strict", [True, False], ids=["strict", "non-strict"])
 @pytest.mark.parametrize("fabric, tool_name, base, field", _ENUM_CASES)
-def test_enum_field_without_empty_string_promise(fabric, tool_name, base, field, strict):
+def test_enum_field_without_empty_string_promise(
+    fabric, tool_name, base, field, strict
+):
     """Подсказку не вешаем туда, где она ложна — иначе модель идёт в гарантированный отказ."""
     props = _spec(fabric, strict=strict)["parameters"]["properties"]
-    assert _EMPTY_STRING_PROMISE not in (props[field].get("description") or "").lower()
+    assert (
+        _EMPTY_STRING_PROMISE
+        not in (props[field].get("description") or "").lower()
+    )
 
 
 @pytest.mark.parametrize("strict", [True, False], ids=["strict", "non-strict"])
 def test_free_form_string_keeps_the_promise(strict):
     """У обычного строкового поля подсказка остаётся: там "" действительно принимается."""
     props = _spec(WriteToFile, strict=strict)["parameters"]["properties"]
-    assert _EMPTY_STRING_PROMISE in (props["encoding"].get("description") or "").lower()
+    assert (
+        _EMPTY_STRING_PROMISE
+        in (props["encoding"].get("description") or "").lower()
+    )
     out = _call(
         WriteToFile,
         "fs_write_file",
@@ -122,7 +144,9 @@ def test_garbage_enum_value_still_rejected(strict):
 def test_preserve_empty_string_field_is_untouched():
     """Для separator у fs_append_file пустая строка — значимое значение, не «не задано»."""
     spec = _spec(AppendToFile, strict=True)
-    assert "separator" not in resolve_optional_property_keys(spec["parameters"])
+    assert "separator" not in resolve_optional_property_keys(
+        spec["parameters"]
+    )
     out = _call(
         AppendToFile,
         "fs_append_file",

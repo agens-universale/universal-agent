@@ -56,11 +56,15 @@ TICK = 0.02
 
 
 def _cmd(config_dict=None):
-    return ExecuteCommand(ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS))
+    return ExecuteCommand(
+        ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
+    )
 
 
 def _py(config_dict=None):
-    return RunPythonCode(ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS))
+    return RunPythonCode(
+        ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
+    )
 
 
 async def _worst_gap(coro_factory):
@@ -104,7 +108,11 @@ async def test_command_acall_runs_and_returns_output():
 
 async def test_command_does_not_hold_the_loop():
     """Пока команда идёт, loop продолжает тикать."""
-    _, gap = await _worst_gap(lambda: _cmd().acall(command=f"python3 -c 'import time; time.sleep({NAP})'"))
+    _, gap = await _worst_gap(
+        lambda: _cmd().acall(
+            command=f"python3 -c 'import time; time.sleep({NAP})'"
+        )
+    )
 
     assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — запуск не асинхронный"
 
@@ -123,11 +131,18 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
     """
     hog_sec = 1.2
     cmd_sec = 1.0
-    hogs = [asyncio.create_task(asyncio.to_thread(time.sleep, hog_sec)) for _ in range(24)]
+    hogs = [
+        asyncio.create_task(asyncio.to_thread(time.sleep, hog_sec))
+        for _ in range(24)
+    ]
     await asyncio.sleep(0.05)
 
     started = time.perf_counter()
-    out = json.loads(await _cmd().acall(command=f"python3 -c 'import time; time.sleep({cmd_sec})'"))
+    out = json.loads(
+        await _cmd().acall(
+            command=f"python3 -c 'import time; time.sleep({cmd_sec})'"
+        )
+    )
     spent = time.perf_counter() - started
 
     for h in hogs:
@@ -156,7 +171,11 @@ async def test_command_validation_rejects_bad_arguments():
 
 async def test_command_reports_a_timeout_the_same_way():
     """Таймаут — общий путь разбора результата, а не отдельная ветка."""
-    out = json.loads(await _cmd().acall(command="python3 -c 'import time; time.sleep(5)'", timeout=1))
+    out = json.loads(
+        await _cmd().acall(
+            command="python3 -c 'import time; time.sleep(5)'", timeout=1
+        )
+    )
 
     assert out["ok"] is False, out
     assert out["timed_out"] is True, out
@@ -169,7 +188,9 @@ async def test_command_has_no_sync_entry():
     Он был вторым способом позвать то же самое и держался ради `apply_tool`,
     которого тоже не стало: звать через него было некого.
     """
-    assert not callable(_cmd()), "у exec_command снова появился синхронный вход"
+    assert not callable(_cmd()), (
+        "у exec_command снова появился синхронный вход"
+    )
 
 
 # --- exec_python -----------------------------------------------------------
@@ -183,7 +204,9 @@ async def test_python_acall_runs_and_returns_output():
 
 
 async def test_python_does_not_hold_the_loop():
-    _, gap = await _worst_gap(lambda: _py().acall(code=f"import time; time.sleep({NAP})"))
+    _, gap = await _worst_gap(
+        lambda: _py().acall(code=f"import time; time.sleep({NAP})")
+    )
 
     assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — запуск не асинхронный"
 
@@ -221,4 +244,6 @@ async def test_a_blocking_body_still_runs_off_the_loop():
     wrapped = dual_wrap(target, _flow, body_may_block=True)
 
     assert await wrapped() == "ok"
-    assert seen["thread"] != threading.get_ident(), "тело с body_may_block исполнилось на loop — флаг перестал работать"
+    assert seen["thread"] != threading.get_ident(), (
+        "тело с body_may_block исполнилось на loop — флаг перестал работать"
+    )

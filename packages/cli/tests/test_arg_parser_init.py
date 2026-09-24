@@ -51,7 +51,9 @@ def test_trace_id_both_spellings_are_the_same_flag(monkeypatch):
     """--trace-id и --trace_id — один параметр, оба идут в dest trace_id."""
     dash = _parse(["gc-cli", "-q", "x", "--trace-id", "wf-42"], monkeypatch)
     assert dash.trace_id == "wf-42"
-    underscore = _parse(["gc-cli", "-q", "x", "--trace_id", "wf-42"], monkeypatch)
+    underscore = _parse(
+        ["gc-cli", "-q", "x", "--trace_id", "wf-42"], monkeypatch
+    )
     assert underscore.trace_id == "wf-42"
 
 
@@ -60,7 +62,9 @@ def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
 
     Иначе значение прошло бы через yaml.safe_load: `00123` → 83, `on` → True.
     """
-    monkeypatch.setattr(sys, "argv", ["gc-cli", "-q", "x", "--trace_id", "00123"])
+    monkeypatch.setattr(
+        sys, "argv", ["gc-cli", "-q", "x", "--trace_id", "00123"]
+    )
     import importlib
 
     from gc_cli import arg_parser as ap_mod

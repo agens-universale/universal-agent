@@ -4,7 +4,10 @@ from typing import Any
 
 from gc_core.message_format import dialog_history as dialog_history
 from gc_core.summarize.llm import arequest_summary_text
-from gc_core.summarize.summary_spec import render_output_shape_for_prompt, render_tag_roles_for_prompt
+from gc_core.summarize.summary_spec import (
+    render_output_shape_for_prompt,
+    render_tag_roles_for_prompt,
+)
 
 
 async def acompress_summary_text(
@@ -74,7 +77,9 @@ async def arepair_summary_text(
     )
     missing_line = ""
     if missing_tags:
-        missing_line = f"Missing child tags (must add): {', '.join(missing_tags)}.\n"
+        missing_line = (
+            f"Missing child tags (must add): {', '.join(missing_tags)}.\n"
+        )
     previous_block = ""
     if (previous_summary or "").strip():
         previous_block = f"<previous_summary>\n{previous_summary.strip()}\n</previous_summary>\n\n"

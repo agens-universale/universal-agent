@@ -51,7 +51,9 @@ def _validate_text_answer(label: str, tool_name, content) -> tuple:
     return content.strip(), None
 
 
-def _validate_action_payload(action: str, tool_name, content, fallback) -> tuple:
+def _validate_action_payload(
+    action: str, tool_name, content, fallback
+) -> tuple:
     """Проверка content/tool_name по типу действия → (content, fallback)."""
     if action == ACTION_USER_ASK:
         return _validate_text_answer("user_ask", tool_name, content)
@@ -79,7 +81,9 @@ def validate_record(record: IntentRecord | Mapping[str, Any]) -> IntentRecord:
     elif isinstance(record, Mapping):
         data = dict(record)
     else:
-        raise TypeError(f"Expected IntentRecord or mapping, got {type(record)!r}")
+        raise TypeError(
+            f"Expected IntentRecord or mapping, got {type(record)!r}"
+        )
 
     action = str(data.get("action", "")).strip()
     if action not in ALLOWED_ACTIONS:
@@ -94,12 +98,16 @@ def validate_record(record: IntentRecord | Mapping[str, Any]) -> IntentRecord:
         raise ValueError("Intent record ts must be non-empty ISO UTC string")
 
     tool_name_raw = data.get("tool_name")
-    tool_name = None if tool_name_raw is None else str(tool_name_raw).strip() or None
+    tool_name = (
+        None if tool_name_raw is None else str(tool_name_raw).strip() or None
+    )
     content = data.get("content")
     fallback_raw = data.get("fallback")
     fallback = None if fallback_raw is None else bool(fallback_raw)
 
-    content, fallback = _validate_action_payload(action, tool_name, content, fallback)
+    content, fallback = _validate_action_payload(
+        action, tool_name, content, fallback
+    )
 
     return IntentRecord(
         turn=turn,

@@ -9,7 +9,9 @@ from gc_core.config_modules.env_vars import EnvVars
 from pydantic import ValidationError
 
 
-def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monkeypatch):
+def test_project_local_config_path_returns_path_when_file_exists(
+    tmp_path, monkeypatch
+):
     from gc_core.config_modules.env_vars import project_local_config_path
 
     gc_dir = tmp_path / ".gc"
@@ -23,7 +25,9 @@ def test_project_local_config_path_returns_path_when_file_exists(tmp_path, monke
     assert os.path.abspath(result) == str(project_cfg.resolve())
 
 
-def test_project_local_config_path_returns_none_when_missing(tmp_path, monkeypatch):
+def test_project_local_config_path_returns_none_when_missing(
+    tmp_path, monkeypatch
+):
     from gc_core.config_modules.env_vars import project_local_config_path
 
     monkeypatch.chdir(tmp_path)
@@ -31,7 +35,9 @@ def test_project_local_config_path_returns_none_when_missing(tmp_path, monkeypat
     assert project_local_config_path() is None
 
 
-def test_project_local_config_path_returns_none_when_gc_dir_is_file(tmp_path, monkeypatch):
+def test_project_local_config_path_returns_none_when_gc_dir_is_file(
+    tmp_path, monkeypatch
+):
     from gc_core.config_modules.env_vars import project_local_config_path
 
     # Краевой случай: <cwd>/.gc — это файл, а не директория. Нет config.yml внутри.
@@ -126,7 +132,9 @@ def test_project_extends_list_with_dedup(global_config_file, isolated_cwd):
     assert cfg["stop_tools"] == ["bash_run", "fs_write", "browse_url"]
 
 
-def test_project_extends_dict_mcp_servers(global_config_file, isolated_cwd, tmp_path):
+def test_project_extends_dict_mcp_servers(
+    global_config_file, isolated_cwd, tmp_path
+):
     """Project добавляет новый MCP-сервер, не трогая существующие из global."""
     from gc_core.config import load_config
 
@@ -165,7 +173,9 @@ mcp:
     assert cfg["mcp-servers"]["fileserver"]["url"] == "http://localhost:8080"
 
 
-def test_project_overrides_nested_scalar(global_config_file, isolated_cwd, tmp_path):
+def test_project_overrides_nested_scalar(
+    global_config_file, isolated_cwd, tmp_path
+):
     """Project переопределяет конкретное scalar-поле внутри dict в global."""
     from gc_core.config import load_config
 
@@ -202,7 +212,9 @@ mcp:
     assert cfg["mcp-servers"]["fileserver"]["transport"] == "http"
 
 
-def test_explicit_config_pointing_to_project_local_no_recursion(isolated_cwd, monkeypatch):
+def test_explicit_config_pointing_to_project_local_no_recursion(
+    isolated_cwd, monkeypatch
+):
     """
     Если CLI запущен как `gc-cli --config <cwd>/.gc/config.yml`, layered loading
     не применяется (защита от рекурсии: иначе deep_merge мерджил бы файл сам с собой).
@@ -258,7 +270,9 @@ agent:
     assert cfg["max_steps"] == 77
 
 
-def test_cli_extra_overrides_win_over_layered(global_config_file, isolated_cwd):
+def test_cli_extra_overrides_win_over_layered(
+    global_config_file, isolated_cwd
+):
     """CLI args (через apply_cli_overrides extra_overrides) побеждают layered config."""
     from gc_core.config import apply_cli_overrides, load_config
 
@@ -291,7 +305,9 @@ def test_invalid_yaml_in_project_loud_error(global_config_file, isolated_cwd):
         load_config(str(global_config_file))
 
 
-def test_invalid_schema_in_project_loud_error(global_config_file, isolated_cwd):
+def test_invalid_schema_in_project_loud_error(
+    global_config_file, isolated_cwd
+):
     """
     Невалидная схема в project config → ValidationError от Pydantic, не silent fallback.
 
@@ -360,7 +376,9 @@ def test_unreadable_base_config_loud_error(tmp_path):
     assert str(missing) in str(exc_info.value)
 
 
-def test_empty_project_config_falls_back_to_global(global_config_file, isolated_cwd):
+def test_empty_project_config_falls_back_to_global(
+    global_config_file, isolated_cwd
+):
     """Пустой project config = пустой dict; deep_merge с global = global. Это нормальное поведение."""
     from gc_core.config import load_config
 
@@ -388,7 +406,9 @@ def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     assert cfg["agentsmd_override"] is False
 
 
-def test_hiding_the_project_layer_works_from_its_home_module(global_config_file, isolated_cwd, monkeypatch):
+def test_hiding_the_project_layer_works_from_its_home_module(
+    global_config_file, isolated_cwd, monkeypatch
+):
     """Проектный слой глушится подменой у ВЛАДЕЛЬЦА пути — и подмена обязана
     действовать на весь загрузчик.
 
@@ -418,7 +438,9 @@ def test_pointing_the_managed_overlay_works_from_its_home_module(
 
     managed = tmp_path / "managed.yml"
     managed.write_text("agent:\n  max_steps: 777\n", encoding="utf-8")
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
+    )
 
     cfg = config_mod.load_config(str(global_config_file))
 

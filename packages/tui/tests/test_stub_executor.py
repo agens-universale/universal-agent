@@ -19,4 +19,8 @@ def test_stub_executor_writes_full_dialog(tmp_path):
     assert lines[0]["payload"]["role"] == "user"
     assert lines[0]["payload"]["content"] == "расскажи об этом проекте"
     # function_call read_file присутствует
-    assert any(l["payload"].get("type") == "function_call" and l["payload"].get("name") == "read_file" for l in lines)
+    assert any(
+        l["payload"].get("type") == "function_call"
+        and l["payload"].get("name") == "read_file"
+        for l in lines
+    )

@@ -14,7 +14,11 @@ def _build(gc_cli_config):
     # Reorder sys.path so the real site-packages entry comes first, then evict
     # cached shadow modules — mirrors the same fix in test_harbor_adapter_bundled_paths.py.
     _harbor_sp = next(
-        (p for p in sys.path if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+        (
+            p
+            for p in sys.path
+            if (Path(p) / "harbor" / "agents" / "base.py").exists()
+        ),
         None,
     )
     if _harbor_sp:
@@ -34,8 +38,13 @@ def _build(gc_cli_config):
     from gc_core.summarize.config import parse_summary_trigger_chars
 
     # completions_url: the adapter has no hardcoded default (fail-fast) — supply one.
-    cfg = {"completions_url": "http://test/v1/chat/completions", **gc_cli_config}
-    a = mod.GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg)
+    cfg = {
+        "completions_url": "http://test/v1/chat/completions",
+        **gc_cli_config,
+    }
+    a = mod.GcCliExternal(
+        logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg
+    )
     c = a._build_config()
     return c, parse_summary_trigger_chars(c)
 

@@ -31,12 +31,16 @@ def _tool_classes() -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     for path in sorted(_TOOLS_DIR.rglob("*.py")):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = ast.parse(
+                path.read_text(encoding="utf-8"), filename=str(path)
+            )
         except SyntaxError:  # pragma: no cover — синтаксис ловит другой гейт
             continue
         for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
             has_acall = any(
-                isinstance(m, (ast.AsyncFunctionDef, ast.FunctionDef)) and m.name == "acall" for m in cls.body
+                isinstance(m, (ast.AsyncFunctionDef, ast.FunctionDef))
+                and m.name == "acall"
+                for m in cls.body
             )
             if has_acall:
                 found.append((str(path.relative_to(_TOOLS_DIR)), cls.name))
@@ -47,9 +51,16 @@ def test_no_core_tool_declares_a_sync_entry():
     offenders = []
     for rel, cls_name in _tool_classes():
         tree = ast.parse((_TOOLS_DIR / rel).read_text(encoding="utf-8"))
-        cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == cls_name)
+        cls = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == cls_name
+        )
         for m in cls.body:
-            if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == "__call__":
+            if (
+                isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and m.name == "__call__"
+            ):
                 offenders.append(f"{rel}:{m.lineno}: {cls_name}.__call__")
 
     assert offenders == [], (

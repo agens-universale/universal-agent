@@ -3,7 +3,9 @@
 import pytest
 from gc_tui.palette import TOOL_NAME
 
-_TOOL_NAME_HEX = TOOL_NAME[1:].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
+_TOOL_NAME_HEX = TOOL_NAME[
+    1:
+].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
 
 
 @pytest.mark.asyncio
@@ -14,7 +16,11 @@ async def test_tool_call_row_initial_state():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='src/x.py'")
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="read_file",
+                args_summary="path='src/x.py'",
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -34,7 +40,11 @@ async def test_tool_call_row_mutate_to_ok():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='src/x.py'")
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="read_file",
+                args_summary="path='src/x.py'",
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -55,7 +65,11 @@ async def test_tool_call_row_mutate_to_error():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c2", tool_name="read_file", args_summary="path='src/missing.py'")
+            yield ToolCallRow(
+                call_id="c2",
+                tool_name="read_file",
+                args_summary="path='src/missing.py'",
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -77,7 +91,9 @@ async def test_tool_call_row_error_text_is_dim():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c2", tool_name="exec", args_summary="cmd='rm'")
+            yield ToolCallRow(
+                call_id="c2", tool_name="exec", args_summary="cmd='rm'"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -86,8 +102,16 @@ async def test_tool_call_row_error_text_is_dim():
         rendered = row._render_content()
         # Сегмент с текстом ошибки покрашен DIM, не ERR.
         plain = rendered.plain
-        dim_segs = [plain[s.start : s.end] for s in rendered.spans if str(s.style).lower() == DIM.lower()]
-        err_segs = [plain[s.start : s.end] for s in rendered.spans if str(s.style).lower() == ERR.lower()]
+        dim_segs = [
+            plain[s.start : s.end]
+            for s in rendered.spans
+            if str(s.style).lower() == DIM.lower()
+        ]
+        err_segs = [
+            plain[s.start : s.end]
+            for s in rendered.spans
+            if str(s.style).lower() == ERR.lower()
+        ]
         assert any("permission denied" in seg for seg in dim_segs)
         assert not any("permission denied" in seg for seg in err_segs)
 
@@ -131,7 +155,11 @@ async def test_tool_call_row_ok_with_empty_summary_omits_arrow():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="skills_load", args_summary="skill_id='x'")
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="skills_load",
+                args_summary="skill_id='x'",
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -154,7 +182,9 @@ async def test_tool_call_row_ok_state_uses_styled_text():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='x.py'")
+            yield ToolCallRow(
+                call_id="c1", tool_name="read_file", args_summary="path='x.py'"
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -163,7 +193,11 @@ async def test_tool_call_row_ok_state_uses_styled_text():
         prefix = row._render_prefix()
         assert isinstance(prefix, Text)
         ok_color = "#5FAE7F"
-        green = [prefix.plain[s.start : s.end] for s in prefix.spans if str(s.style).lower() == ok_color.lower()]
+        green = [
+            prefix.plain[s.start : s.end]
+            for s in prefix.spans
+            if str(s.style).lower() == ok_color.lower()
+        ]
         assert any("✓" in seg for seg in green), f"spans={prefix.spans}"
 
 
@@ -178,7 +212,11 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='src/thread_store.py'")
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="read_file",
+                args_summary="path='src/thread_store.py'",
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -187,7 +225,9 @@ async def test_tool_call_row_tool_name_uses_tool_name_color():
         rendered = row._render_content()
         assert isinstance(rendered, Text)
         tool_name_spans = [
-            rendered.plain[s.start : s.end] for s in rendered.spans if _TOOL_NAME_HEX in str(s.style).lower()
+            rendered.plain[s.start : s.end]
+            for s in rendered.spans
+            if _TOOL_NAME_HEX in str(s.style).lower()
         ]
         assert "read_file" in tool_name_spans, (
             f"No TOOL_NAME-colored span equal to 'read_file'; spans="
@@ -203,7 +243,11 @@ async def test_tool_call_row_set_result_twice_overwrites():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='src/x.py'")
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="read_file",
+                args_summary="path='src/x.py'",
+            )
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -231,7 +275,12 @@ async def test_ctrl_click_posts_open_tool_call_detail_request():
 
     class _App(App):
         def compose(self):
-            yield ToolCallRow(call_id="c42", tool_name="read_file", args_summary="", event_no=1)
+            yield ToolCallRow(
+                call_id="c42",
+                tool_name="read_file",
+                args_summary="",
+                event_no=1,
+            )
 
         def on_open_tool_call_detail_request(self, message):
             captured.append(message.call_id)
@@ -271,7 +320,12 @@ async def test_focus_does_not_render_event_number_prefix():
         AUTO_FOCUS = None
 
         def compose(self) -> ComposeResult:
-            yield ToolCallRow(call_id="c1", tool_name="read_file", args_summary="path='x'", event_no=42)
+            yield ToolCallRow(
+                call_id="c1",
+                tool_name="read_file",
+                args_summary="path='x'",
+                event_no=42,
+            )
             yield Static("decoy", id="decoy")
 
     async with _App().run_test() as pilot:
@@ -306,7 +360,12 @@ async def test_focus_handler_has_focus_after_super():
 
     class _App(App):
         def compose(self) -> ComposeResult:
-            yield _ProbeRow(call_id="c1", tool_name="read_file", args_summary="path='x'", event_no=1)
+            yield _ProbeRow(
+                call_id="c1",
+                tool_name="read_file",
+                args_summary="path='x'",
+                event_no=1,
+            )
 
     async with _App().run_test() as pilot:
         pilot.app.query_one(_ProbeRow).focus()
@@ -320,7 +379,9 @@ def test_running_row_shows_elapsed_seconds():
 
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c1", tool_name="subagent_planner", args_summary="task=x")
+    row = ToolCallRow(
+        call_id="c1", tool_name="subagent_planner", args_summary="task=x"
+    )
     row._start_monotonic = time.monotonic() - 47.0
     r = str(row._render_content())
     assert "· 47с" in r
@@ -332,7 +393,9 @@ def test_running_row_elapsed_same_for_any_tool():
 
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c2", tool_name="read_file", args_summary="path=a")
+    row = ToolCallRow(
+        call_id="c2", tool_name="read_file", args_summary="path=a"
+    )
     row._start_monotonic = time.monotonic() - 3.0
     assert "· 3с" in str(row._render_content())
 
@@ -354,7 +417,9 @@ def test_elapsed_excludes_paused_interval(monkeypatch):
 
     clock = {"t": 100.0}
     monkeypatch.setattr(tcr.time, "monotonic", lambda: clock["t"])
-    row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")  # _start=100
+    row = ToolCallRow(
+        call_id="c1", tool_name="t", args_summary=""
+    )  # _start=100
     clock["t"] = 105.0
     assert row._elapsed_s() == 5
     row.pause()  # заморозка на 105
@@ -362,7 +427,9 @@ def test_elapsed_excludes_paused_interval(monkeypatch):
     assert row._elapsed_s() == 5, "во время паузы elapsed заморожен"
     row.resume()
     clock["t"] = 132.0
-    assert row._elapsed_s() == 7, "25с ожидания исключены (105..132 минус 25 = 7)"
+    assert row._elapsed_s() == 7, (
+        "25с ожидания исключены (105..132 минус 25 = 7)"
+    )
 
 
 def test_pause_resume_idempotent(monkeypatch):
@@ -405,7 +472,9 @@ def test_pulse_cycle_length_is_ten():
     def glyph_color(frame: int) -> str:
         row._pulse_frame = frame
         p = row._render_prefix()
-        return next(str(s.style) for s in p.spans if "▸" in p.plain[s.start : s.end])
+        return next(
+            str(s.style) for s in p.spans if "▸" in p.plain[s.start : s.end]
+        )
 
     c0 = glyph_color(0)
     assert glyph_color(10) == c0  # цикл = 10 → frame10 == frame0
@@ -446,7 +515,9 @@ def test_refresh_running_elapsed_does_not_advance_pulse():
 def test_completed_ok_row_has_no_elapsed():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c3", tool_name="subagent_planner", args_summary="x")
+    row = ToolCallRow(
+        call_id="c3", tool_name="subagent_planner", args_summary="x"
+    )
     row.set_result(summary="ok", error=False)
     assert "✓" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
@@ -455,7 +526,9 @@ def test_completed_ok_row_has_no_elapsed():
 def test_completed_error_row_has_no_elapsed():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c4", tool_name="subagent_planner", args_summary="x")
+    row = ToolCallRow(
+        call_id="c4", tool_name="subagent_planner", args_summary="x"
+    )
     row.set_result(summary="boom", error=True)
     assert "✗" in str(row._render_prefix())
     assert "running" not in str(row._render_content())
@@ -464,7 +537,9 @@ def test_completed_error_row_has_no_elapsed():
 def test_refresh_running_elapsed_noop_after_completion():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c5", tool_name="subagent_planner", args_summary="x")
+    row = ToolCallRow(
+        call_id="c5", tool_name="subagent_planner", args_summary="x"
+    )
     row.set_result(summary="ok", error=False)
     row.refresh_running_elapsed()  # не возвращает в running
     assert "✓" in str(row._render_prefix())
@@ -487,7 +562,9 @@ async def test_poll_active_ticks_running_rows():
     app.active_runner = _LiveRunner()
     async with app.run_test() as pilot:
         scr = pilot.app.screen  # TraceScreen (дефолтный экран)
-        row = ToolCallRow(call_id="c1", tool_name="subagent_planner", args_summary="task=x")
+        row = ToolCallRow(
+            call_id="c1", tool_name="subagent_planner", args_summary="task=x"
+        )
         scr.query_one("#trace", VerticalScroll).mount(row)
         await pilot.pause()  # compose → _content_static готов (running · 0с)
         scr._active_calls["c1"] = row
@@ -503,7 +580,9 @@ async def test_poll_active_ticks_running_rows():
 def test_mark_interrupted_renders_dim_terminal_state():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c6", tool_name="subagent_critic", args_summary="t")
+    row = ToolCallRow(
+        call_id="c6", tool_name="subagent_critic", args_summary="t"
+    )
     row.mark_interrupted()
     assert "·" in str(row._render_prefix())
     content = str(row._render_content())

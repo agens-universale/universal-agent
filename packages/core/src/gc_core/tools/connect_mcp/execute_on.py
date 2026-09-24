@@ -7,7 +7,10 @@ of the other, and no transport helper is aware of the locus.
 import logging
 from typing import Any, Dict, Optional
 
-from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
+from gc_core.tools.connect_mcp.client_port import (
+    AgentRuntimeClient,
+    McpClientPort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +99,9 @@ def resolve_mcp_client(
             f"execute_on: agent."
         )
 
-    from gc_core.tools.connect_mcp.os_backend_client import OsBackendStatelessClient
+    from gc_core.tools.connect_mcp.os_backend_client import (
+        OsBackendStatelessClient,
+    )
 
     return OsBackendStatelessClient(server_name, cfg, os_backend=os_backend)
 

@@ -41,7 +41,9 @@ def format_money(value: float, currency: str) -> str:
     return f"{fine} {currency}".strip()
 
 
-def format_parts(parts: list[CostPart], unpriced: bool = False, mark_tariff: bool = False) -> str:
+def format_parts(
+    parts: list[CostPart], unpriced: bool = False, mark_tariff: bool = False
+) -> str:
     """Ячейка стоимости: части через «+», «?» при неполноте.
 
     Знаки те же, что в футере TUI: «+» соединяет слагаемые суммы, «?» — есть
@@ -57,24 +59,37 @@ def format_parts(parts: list[CostPart], unpriced: bool = False, mark_tariff: boo
     chunks = []
     for part in parts:
         money = format_money(part.amount, part.currency)
-        chunks.append(f"~{money}" if mark_tariff and part.source == "tariff" else money)
+        chunks.append(
+            f"~{money}" if mark_tariff and part.source == "tariff" else money
+        )
     text = "+".join(chunks)
     return f"{text}?" if unpriced else text
 
 
-def render_cost_report(report: CostReport, *, model_name: str | None = None, title: str = "Run usage") -> str:
+def render_cost_report(
+    report: CostReport,
+    *,
+    model_name: str | None = None,
+    title: str = "Run usage",
+) -> str:
     lines: list[str] = [_report_header(title, model_name)]
     show_cost = report.has_cost
     lines.append(_columns_header(show_cost))
 
     # Тильда осмысленна только когда в отчёте есть ОБЕ стороны — факт и тариф;
     # чисто тарифный (или чисто фактический) отчёт её не ставит нигде.
-    has_provider_part = any(p.source == "provider" for c in report.categories for p in c.parts)
-    has_tariff_part = any(p.source == "tariff" for c in report.categories for p in c.parts)
+    has_provider_part = any(
+        p.source == "provider" for c in report.categories for p in c.parts
+    )
+    has_tariff_part = any(
+        p.source == "tariff" for c in report.categories for p in c.parts
+    )
     mark_tariff = has_provider_part and has_tariff_part
 
     for c in report.categories:
-        lines.append(_category_row(c, show_cost=show_cost, mark_tariff=mark_tariff))
+        lines.append(
+            _category_row(c, show_cost=show_cost, mark_tariff=mark_tariff)
+        )
 
     lines.append("─" * (62 if show_cost else 40))
     total_row = f"{'total':<20}{format_tokens(report.total_input):>10}{format_tokens(report.total_output):>10}"
@@ -121,10 +136,18 @@ def _category_row(c: Any, *, show_cost: bool, mark_tariff: bool) -> str:
 def _usage_caveat_lines(report: CostReport) -> list[str]:
     lines: list[str] = []
     if report.total_cached > 0:
-        share = report.total_cached / report.total_input * 100 if report.total_input else 0
-        lines.append(f"из них cached input: {format_tokens(report.total_cached)} ({share:.0f}% — по cache-ставке)")
+        share = (
+            report.total_cached / report.total_input * 100
+            if report.total_input
+            else 0
+        )
+        lines.append(
+            f"из них cached input: {format_tokens(report.total_cached)} ({share:.0f}% — по cache-ставке)"
+        )
     if report.total_missing_usage_calls > 0:
-        lines.append(f"⚠ {report.total_missing_usage_calls} вызов(ов) без usage не учтены (итог — нижняя граница)")
+        lines.append(
+            f"⚠ {report.total_missing_usage_calls} вызов(ов) без usage не учтены (итог — нижняя граница)"
+        )
     return lines
 
 
@@ -170,7 +193,9 @@ def build_run_usage_report(
     if not isinstance(run_usage, UsageAccount) or run_usage.is_empty():
         return None
     cost_report = compute_cost(run_usage, pricing, model_name, endpoint_url)
-    return render_cost_report(cost_report, model_name=model_name, title="Run usage")
+    return render_cost_report(
+        cost_report, model_name=model_name, title="Run usage"
+    )
 
 
 def build_run_usage_dict(
@@ -190,9 +215,14 @@ def build_run_usage_dict(
 
     categories: dict[str, dict[str, Any]] = {}
     for c in report.categories:
-        categories[c.category] = _category_usage_entry(c, has_cost=report.has_cost)
+        categories[c.category] = _category_usage_entry(
+            c, has_cost=report.has_cost
+        )
 
-    total: dict[str, Any] = {"input": report.total_input, "output": report.total_output}
+    total: dict[str, Any] = {
+        "input": report.total_input,
+        "output": report.total_output,
+    }
     if report.total_cached:
         total["cached"] = report.total_cached
     if report.total_missing_usage_calls:
@@ -216,7 +246,10 @@ def _category_usage_entry(c: Any, *, has_cost: bool) -> dict[str, Any]:
         entry["missing_usage_calls"] = c.missing_usage_calls
     if has_cost:
         entry["cost_source"] = c.cost_source
-        entry["cost_parts"] = [{"amount": p.amount, "currency": p.currency, "source": p.source} for p in c.parts]
+        entry["cost_parts"] = [
+            {"amount": p.amount, "currency": p.currency, "source": p.source}
+            for p in c.parts
+        ]
         entry["unpriced"] = c.unpriced
         if len(c.parts) == 1:
             entry["cost"] = c.parts[0].amount

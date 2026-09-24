@@ -30,7 +30,11 @@ from gc_tui.voice_runtime.state import (
     clear_state,
     load_state,
 )
-from gc_tui.voice_runtime.wire import base_config_raw, managed_voice, unwire_voice
+from gc_tui.voice_runtime.wire import (
+    base_config_raw,
+    managed_voice,
+    unwire_voice,
+)
 
 SERVICE_NAME = "speaches"
 
@@ -60,14 +64,21 @@ def _cmd_status() -> int:
         # Устаревание называем прямо здесь: раньше status печатал версию, но ни с чем её не
         # сравнивал — узнать, что движок отстал, было неоткуда, кроме экрана после апгрейда.
         upd = available_update(state)
-        print(f"[voice] установлен: speaches {state.version} → {state.root}" + (f"  · доступно {upd}" if upd else ""))
+        print(
+            f"[voice] установлен: speaches {state.version} → {state.root}"
+            + (f"  · доступно {upd}" if upd else "")
+        )
         if upd:
-            print("[voice] обновить: /settings → Голосовой ввод → Ctrl+U (или gc-voice install)")
+            print(
+                "[voice] обновить: /settings → Голосовой ввод → Ctrl+U (или gc-voice install)"
+            )
         print(f"[voice] порт {state.port}, модель {state.model}")
         pid = read_pid(SERVICE_NAME, voice_pids_dir())
         running = pid is not None and is_pid_alive(pid)
         if running:
-            print(f"[voice] сервис: жив (pid {pid}){', порт отвечает' if port_alive(state) else ''}")
+            print(
+                f"[voice] сервис: жив (pid {pid}){', порт отвечает' if port_alive(state) else ''}"
+            )
         elif port_alive(state):
             # pid-файла нет, а порт занят: сервис подняли снаружи (gc-voice serve в другом
             # окне) либо его pid-файл потерян. Сказать «не запущен» — соврать в глаза.
@@ -80,7 +91,9 @@ def _cmd_status() -> int:
         clients = live_leases()
         print(f"[voice] клиенты (lease): {clients if clients else 'нет'}")
         wired = managed_voice()
-        print(f"[voice] конфиг (managed): {wired['url'] if wired else 'не прописан'}")
+        print(
+            f"[voice] конфиг (managed): {wired['url'] if wired else 'не прописан'}"
+        )
     return 0
 
 
@@ -90,7 +103,9 @@ def _stop_service() -> bool:
         return False
     terminate_pid(pid)
     remove_pid(SERVICE_NAME, voice_pids_dir())
-    clear_agent_owned(SERVICE_NAME)  # погашен — пометке владельца не о чем лежать
+    clear_agent_owned(
+        SERVICE_NAME
+    )  # погашен — пометке владельца не о чем лежать
     return True
 
 
@@ -114,7 +129,10 @@ def _cmd_stop() -> int:
 def _cmd_serve() -> int:
     state = load_state()
     if state is None:
-        print("[voice] не установлен. Установка: gc-voice install", file=sys.stderr)
+        print(
+            "[voice] не установлен. Установка: gc-voice install",
+            file=sys.stderr,
+        )
         return 1
     spec = build_run_spec(state)
     argv = build_command_argv(spec)
@@ -185,9 +203,13 @@ def _cmd_remove() -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     _tolerant_console()
-    parser = argparse.ArgumentParser(prog="gc-voice", description="Локальный STT-сервис (батарейка)")
+    parser = argparse.ArgumentParser(
+        prog="gc-voice", description="Локальный STT-сервис (батарейка)"
+    )
     sub = parser.add_subparsers(dest="command")
-    p_inst = sub.add_parser("install", help="поставить speaches + модель + конфиг")
+    p_inst = sub.add_parser(
+        "install", help="поставить speaches + модель + конфиг"
+    )
     p_inst.add_argument("--model", default=DEFAULT_MODEL)
     p_inst.add_argument("--port", type=int, default=DEFAULT_PORT)
     sub.add_parser("status", help="состояние установки/сервиса/клиентов")

@@ -72,7 +72,9 @@ def stdio_registry(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio
 
     reg = persistent_stdio.PersistentStdioRegistry()
-    monkeypatch.setattr(persistent_stdio, "PersistentStdioSession", lambda cfg: _FakeSession())
+    monkeypatch.setattr(
+        persistent_stdio, "PersistentStdioSession", lambda cfg: _FakeSession()
+    )
     return reg
 
 
@@ -131,7 +133,9 @@ class _FakeCm:
 
 @pytest.mark.asyncio
 async def test_stream_sessions_are_per_owner():
-    from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
+    from gc_core.tools.connect_mcp.stream_client import (
+        _PersistentSessionManager,
+    )
 
     mgr = _PersistentSessionManager()
     with use_owner("agent-1"):
@@ -148,7 +152,9 @@ async def test_stream_sessions_are_per_owner():
 @pytest.mark.asyncio
 async def test_stream_aclose_all_spares_other_owners():
     """Тот самый случай, что валил три агента с CancelledError."""
-    from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
+    from gc_core.tools.connect_mcp.stream_client import (
+        _PersistentSessionManager,
+    )
 
     mgr = _PersistentSessionManager()
     closed: list = []
@@ -178,7 +184,9 @@ async def test_stream_teardown_spares_a_foreign_owner():
     владелец в этот момент может быть внутри вызова тула, и закрытие из нашей
     задачи отменило бы его anyio-scope.
     """
-    from gc_core.tools.connect_mcp.stream_client import _PersistentSessionManager
+    from gc_core.tools.connect_mcp.stream_client import (
+        _PersistentSessionManager,
+    )
 
     mgr = _PersistentSessionManager()
     with use_owner("agent-1"):

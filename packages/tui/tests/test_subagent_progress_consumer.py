@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
-from gc_tui.services.subagent_progress import SubagentProgressConsumer, plan_progress_actions
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+)
+from gc_tui.services.subagent_progress import (
+    SubagentProgressConsumer,
+    plan_progress_actions,
+)
 
 
 def _ev(**kwargs) -> SubagentProgressEvent:
@@ -23,8 +29,19 @@ class TestPlanProgressActions:
     def test_tool_start_then_end(self):
         actions = plan_progress_actions(
             [
-                _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1", args_summary="path='a.py'"),
-                _ev(kind="tool_end", tool_name="fs_read_file", tool_call_id="tc1", ok=True, elapsed_ms=12),
+                _ev(
+                    kind="tool_start",
+                    tool_name="fs_read_file",
+                    tool_call_id="tc1",
+                    args_summary="path='a.py'",
+                ),
+                _ev(
+                    kind="tool_end",
+                    tool_name="fs_read_file",
+                    tool_call_id="tc1",
+                    ok=True,
+                    elapsed_ms=12,
+                ),
             ]
         )
         kinds = [a.kind for a in actions]
@@ -40,14 +57,22 @@ class TestPlanProgressActions:
 
     def test_intermediate_reply(self):
         actions = plan_progress_actions(
-            [_ev(kind="intermediate_reply", prose="Сейчас проверю", tool_name="turn_intermediate_reply")]
+            [
+                _ev(
+                    kind="intermediate_reply",
+                    prose="Сейчас проверю",
+                    tool_name="turn_intermediate_reply",
+                )
+            ]
         )
         assert actions[0].kind == "mount_nested_prose"
         assert actions[0].prose == "Сейчас проверю"
         assert any(a.kind == "parent_heartbeat" for a in actions)
 
     def test_user_message(self):
-        actions = plan_progress_actions([_ev(kind="user_message", prose="смотри auth")])
+        actions = plan_progress_actions(
+            [_ev(kind="user_message", prose="смотри auth")]
+        )
         assert actions[0].kind == "mount_nested_user"
         assert actions[0].prose == "смотри auth"
         assert any(a.kind == "parent_heartbeat" for a in actions)
@@ -70,7 +95,11 @@ class TestPlanProgressActions:
     def test_finished_keeps_nested_no_collapse(self):
         actions = plan_progress_actions(
             [
-                _ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1"),
+                _ev(
+                    kind="tool_start",
+                    tool_name="fs_read_file",
+                    tool_call_id="tc1",
+                ),
                 _ev(kind="finished", step=5),
             ]
         )
@@ -83,8 +112,22 @@ class TestPlanProgressActions:
 class TestConsumerApply:
     def test_apply_mounts_and_finishes_via_hooks(self):
         sink = QueueSubagentProgressSink()
-        sink.emit(_ev(kind="tool_start", tool_name="fs_read_file", tool_call_id="tc1", args_summary="p"))
-        sink.emit(_ev(kind="tool_end", tool_name="fs_read_file", tool_call_id="tc1", ok=True))
+        sink.emit(
+            _ev(
+                kind="tool_start",
+                tool_name="fs_read_file",
+                tool_call_id="tc1",
+                args_summary="p",
+            )
+        )
+        sink.emit(
+            _ev(
+                kind="tool_end",
+                tool_name="fs_read_file",
+                tool_call_id="tc1",
+                ok=True,
+            )
+        )
 
         mounted: list[dict] = []
         finished: list[dict] = []

@@ -5,7 +5,11 @@ import unittest
 from unittest.mock import patch
 
 from gc_core.summarize.compaction import arun_summary_compaction
-from gc_core.summarize.summary_spec import agent_summary_slice_mode, hint_section_tags, slice_summary
+from gc_core.summarize.summary_spec import (
+    agent_summary_slice_mode,
+    hint_section_tags,
+    slice_summary,
+)
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
@@ -13,9 +17,18 @@ from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 class CompactionSummarySliceTest(unittest.TestCase):
     def test_agent_summary_slice_mode(self) -> None:
-        self.assertEqual(agent_summary_slice_mode(num_batches=1, patch_executed=True), "short")
-        self.assertEqual(agent_summary_slice_mode(num_batches=1, patch_executed=False), "full")
-        self.assertEqual(agent_summary_slice_mode(num_batches=2, patch_executed=False), "full")
+        self.assertEqual(
+            agent_summary_slice_mode(num_batches=1, patch_executed=True),
+            "short",
+        )
+        self.assertEqual(
+            agent_summary_slice_mode(num_batches=1, patch_executed=False),
+            "full",
+        )
+        self.assertEqual(
+            agent_summary_slice_mode(num_batches=2, patch_executed=False),
+            "full",
+        )
 
     @patch("gc_core.summarize.compaction.log_compaction_completed")
     @patch("gc_core.summarize.compaction.log_summary_message_body")
@@ -64,7 +77,9 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
+        ctx = types.SimpleNamespace(
+            config_dict={"summary_params": {}}, logger=None
+        )
 
         with (
             patch(
@@ -146,7 +161,9 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
+        ctx = types.SimpleNamespace(
+            config_dict={"summary_params": {}}, logger=None
+        )
 
         with (
             patch(
@@ -173,5 +190,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
             self.assertIn(f"<{tag}>", seen["raw_summary"])
         self.assertEqual(trace["final_output"]["agent_summary_slice"], "full")
         self.assertEqual(trace["final_output"]["raw_summary"], full_xml)
-        self.assertEqual(trace["final_output"]["agent_summary_text"], full_slice)
+        self.assertEqual(
+            trace["final_output"]["agent_summary_text"], full_slice
+        )
         self.assertFalse(trace["memory_patch"]["executed"])

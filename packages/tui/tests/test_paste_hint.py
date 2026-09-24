@@ -30,7 +30,9 @@ async def test_paste_hint_lasts_5_seconds():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         with patch.object(scr, "set_timer", wraps=scr.set_timer) as spy:
-            scr.query_one("#cmdinput", CommandTextArea)._handle_paste("a\n" * 4 + "a")
+            scr.query_one("#cmdinput", CommandTextArea)._handle_paste(
+                "a\n" * 4 + "a"
+            )
             await pilot.pause()
         delays = [c.args[0] for c in spy.call_args_list]
         assert 5.0 in delays
@@ -102,7 +104,9 @@ async def test_footer_refusal_survives_the_deferred_input_clear():
         scr._show_footer_refusal("✗ не сохранено: причина")
         await pilot.pause()
         left = scr.query_one("#footer-left", Static)
-        assert "не сохранено" in str(left.render())  # пережил отложенный Changed
+        assert "не сохранено" in str(
+            left.render()
+        )  # пережил отложенный Changed
         await pilot.press("q")
         assert "не сохранено" not in str(left.render())
 

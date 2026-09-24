@@ -64,7 +64,10 @@ class AppendToFile(AbstractSimpleTool):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "The absolute path of the existing file to append to."},
+                    "path": {
+                        "type": "string",
+                        "description": "The absolute path of the existing file to append to.",
+                    },
                     "content": {
                         "type": "string",
                         "description": (
@@ -157,9 +160,13 @@ Usage:
         *args,
         **kwargs,
     ) -> str:
-        return self._result(ok=False, path=path, separator=separator, error=error)
+        return self._result(
+            ok=False, path=path, separator=separator, error=error
+        )
 
-    async def _missing_target_error(self, path: str, create_if_missing: bool, make_dirs: bool) -> "dict | None":
+    async def _missing_target_error(
+        self, path: str, create_if_missing: bool, make_dirs: bool
+    ) -> "dict | None":
         """Файла нет: можно ли создать (и родителя) — иначе готовая ошибка."""
         if not create_if_missing:
             return {"type": "not_found"}
@@ -180,9 +187,13 @@ Usage:
         except OSError as e:
             return 0, {"type": "stat_failed", "message": str(e)}
 
-    async def _append_existing(self, path: str, chunk: str, encoding_used: str, size: int) -> "dict | None":
+    async def _append_existing(
+        self, path: str, chunk: str, encoding_used: str, size: int
+    ) -> "dict | None":
         """Дописать в существующий непустой файл; ошибка проверки кодировки головы — как dict."""
-        head = await self._backend.read_head_bytes(path, APPEND_HEAD_SAMPLE_BYTES)
+        head = await self._backend.read_head_bytes(
+            path, APPEND_HEAD_SAMPLE_BYTES
+        )
         head_err = check_encoding_on_file_head(
             head,
             encoding_used,
@@ -194,7 +205,11 @@ Usage:
         # CRLF (\r\n), normalize lone \n in the appended chunk to \r\n
         # so we don't mix line endings. LF files are written as-is.
         if b"\r\n" in head:
-            chunk = chunk.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+            chunk = (
+                chunk.replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .replace("\n", "\r\n")
+            )
         await self._backend.append(path, chunk, encoding=encoding_used)
         return None
 
@@ -222,34 +237,59 @@ Usage:
         )
         if arg_error is not None:
             sep_out = separator if isinstance(separator, str) else ""
-            return self._result(ok=False, path=path, separator=sep_out, error=arg_error)
+            return self._result(
+                ok=False, path=path, separator=sep_out, error=arg_error
+            )
 
         exists = await self._backend.exists(path)
-        target_error = None if exists else await self._missing_target_error(path, create_if_missing, make_dirs)
+        target_error = (
+            None
+            if exists
+            else await self._missing_target_error(
+                path, create_if_missing, make_dirs
+            )
+        )
         if target_error is not None:
-            return self._result(ok=False, path=path, separator=separator, error=target_error)
+            return self._result(
+                ok=False, path=path, separator=separator, error=target_error
+            )
 
         chunk = separator + content
         # Encode once according to whether we create or append.
         # Create-path (incl. size==0 existing file): leading BOM needed for utf-16/sig.
         # Append-path: pure payload without BOM (mid-file BOM corrupts utf-16/sig).
-        size, size_error = await self._existing_size(path) if exists else (0, None)
+        size, size_error = (
+            await self._existing_size(path) if exists else (0, None)
+        )
         if size_error is not None:
-            return self._result(ok=False, path=path, separator=separator, error=size_error)
+            return self._result(
+                ok=False, path=path, separator=separator, error=size_error
+            )
         # Empty existing file behaves like create: needs a leading BOM.
         is_create = not exists or size == 0
-        payload_bytes, encode_err = _encode_chunk(chunk, encoding_used, is_create)
+        payload_bytes, encode_err = _encode_chunk(
+            chunk, encoding_used, is_create
+        )
         if encode_err is not None:
-            return self._result(ok=False, path=path, separator=separator, error=encode_err)
+            return self._result(
+                ok=False, path=path, separator=separator, error=encode_err
+            )
         assert payload_bytes is not None
 
         try:
             if is_create:
                 await self._backend.write_bytes(path, payload_bytes)
             else:
-                head_err = await self._append_existing(path, chunk, encoding_used, size)
+                head_err = await self._append_existing(
+                    path, chunk, encoding_used, size
+                )
                 if head_err is not None:
-                    return self._result(ok=False, path=path, separator=separator, error=head_err)
+                    return self._result(
+                        ok=False,
+                        path=path,
+                        separator=separator,
+                        error=head_err,
+                    )
             content_sha256 = await self._backend.sha256_bytes(path)
         except Exception as e:
             return self._result(

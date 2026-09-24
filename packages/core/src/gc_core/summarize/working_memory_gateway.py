@@ -37,11 +37,15 @@ class SessionMemoryRegister:
 SESSION_MEMORY_REGISTERS: tuple[SessionMemoryRegister, ...] = (
     SessionMemoryRegister(
         name=REGISTER_GOAL,
-        replace_rule=("current objective and definition of done (no artifact catalogs, no sha256 lists)"),
+        replace_rule=(
+            "current objective and definition of done (no artifact catalogs, no sha256 lists)"
+        ),
     ),
     SessionMemoryRegister(
         name=REGISTER_CONSTRAINTS,
-        replace_rule=("hard requirements and preferences still binding (no TODO lists, no repeated goal prose)"),
+        replace_rule=(
+            "hard requirements and preferences still binding (no TODO lists, no repeated goal prose)"
+        ),
     ),
     SessionMemoryRegister(
         name=REGISTER_STATE,
@@ -61,7 +65,9 @@ SESSION_MEMORY_REGISTERS: tuple[SessionMemoryRegister, ...] = (
     ),
 )
 
-REGISTER_ORDER: tuple[str, ...] = tuple(r.name for r in SESSION_MEMORY_REGISTERS)
+REGISTER_ORDER: tuple[str, ...] = tuple(
+    r.name for r in SESSION_MEMORY_REGISTERS
+)
 
 # Parsed/applied LLM memory patches: every register is a full replace (not append).
 # The ``session_memory`` tool trace path does not use this map.
@@ -69,7 +75,9 @@ REGISTER_MERGE_MODES: Dict[str, str] = dict.fromkeys(REGISTER_ORDER, "replace")
 
 SUMMARY_PATCH_REPLACE_REGISTERS: frozenset[str] = frozenset(REGISTER_ORDER)
 
-REGISTER_PATCH_RULES: Dict[str, str] = {r.name: r.replace_rule for r in SESSION_MEMORY_REGISTERS}
+REGISTER_PATCH_RULES: Dict[str, str] = {
+    r.name: r.replace_rule for r in SESSION_MEMORY_REGISTERS
+}
 
 
 def render_session_memory_register_names_for_prompt() -> str:
@@ -79,7 +87,10 @@ def render_session_memory_register_names_for_prompt() -> str:
 def render_memory_patch_registers_for_prompt() -> str:
     n = len(REGISTER_ORDER)
     shape = "\n".join(f"<{name}>...</{name}>" for name in REGISTER_ORDER)
-    rules = "\n".join(f"- **{reg.name}:** {reg.replace_rule}" for reg in SESSION_MEMORY_REGISTERS)
+    rules = "\n".join(
+        f"- **{reg.name}:** {reg.replace_rule}"
+        for reg in SESSION_MEMORY_REGISTERS
+    )
     return (
         f"Return **full snapshots** for **all {n}** registers on every run "
         "(replace semantics downstream):\n\n"
@@ -96,8 +107,12 @@ def render_memory_patch_registers_for_prompt() -> str:
     )
 
 
-def render_memory_deltas_format_repair_system_prompt(*, full_replace: bool = False) -> str:
-    register_tags = ", ".join(f"<{name}>...</{name}>" for name in REGISTER_ORDER)
+def render_memory_deltas_format_repair_system_prompt(
+    *, full_replace: bool = False
+) -> str:
+    register_tags = ", ".join(
+        f"<{name}>...</{name}>" for name in REGISTER_ORDER
+    )
     n = len(REGISTER_ORDER)
     replace_hint = (
         f"Use all {n} register tags when the source covers a full memory rebuild; "
@@ -132,7 +147,9 @@ class _RegisterBagMixin:  # noqa: PLW1641  # сравнение по соста�
 
     def __init__(self, **kwargs: Any) -> None:
         for name in REGISTER_ORDER:
-            object.__setattr__(self, name, _normalize_register_text(kwargs.get(name)))
+            object.__setattr__(
+                self, name, _normalize_register_text(kwargs.get(name))
+            )
 
     def to_dict(self) -> Dict[str, str]:
         return {name: getattr(self, name) for name in REGISTER_ORDER}
@@ -140,10 +157,16 @@ class _RegisterBagMixin:  # noqa: PLW1641  # сравнение по соста�
     def __eq__(self, other: object) -> bool:
         if type(other) is not type(self):
             return False
-        return all(getattr(self, n) == getattr(other, n) for n in REGISTER_ORDER)
+        return all(
+            getattr(self, n) == getattr(other, n) for n in REGISTER_ORDER
+        )
 
     def __repr__(self) -> str:
-        parts = [f"{name}={getattr(self, name)!r}" for name in REGISTER_ORDER if getattr(self, name)]
+        parts = [
+            f"{name}={getattr(self, name)!r}"
+            for name in REGISTER_ORDER
+            if getattr(self, name)
+        ]
         return f"{type(self).__name__}({', '.join(parts)})"
 
 
@@ -170,14 +193,26 @@ def _normalize_register_text(value: Any) -> str:
     return ""
 
 
-def _snapshot_from_mapping(raw: Mapping[str, Any] | None) -> WorkingMemorySnapshot:
+def _snapshot_from_mapping(
+    raw: Mapping[str, Any] | None,
+) -> WorkingMemorySnapshot:
     data = raw if isinstance(raw, Mapping) else {}
-    return WorkingMemorySnapshot(**{name: _normalize_register_text(data.get(name)) for name in REGISTER_ORDER})
+    return WorkingMemorySnapshot(
+        **{
+            name: _normalize_register_text(data.get(name))
+            for name in REGISTER_ORDER
+        }
+    )
 
 
 def _deltas_from_mapping(raw: Mapping[str, Any] | None) -> WorkingMemoryDeltas:
     data = raw if isinstance(raw, Mapping) else {}
-    return WorkingMemoryDeltas(**{name: _normalize_register_text(data.get(name)) for name in REGISTER_ORDER})
+    return WorkingMemoryDeltas(
+        **{
+            name: _normalize_register_text(data.get(name))
+            for name in REGISTER_ORDER
+        }
+    )
 
 
 def coerce_working_memory_deltas(
@@ -196,7 +231,9 @@ def read_snapshot_from_state(state: Any) -> WorkingMemorySnapshot:
     return _snapshot_from_mapping(getattr(shared, "working_memory", None))
 
 
-MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL = "working_memory_deltas_format_repair"
+MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL = (
+    "working_memory_deltas_format_repair"
+)
 
 
 def render_persistent_state_for_prompt(
@@ -204,7 +241,9 @@ def render_persistent_state_for_prompt(
     session_todo: Any = None,
 ) -> str:
     # nested: message_policy → tool_usage_notice → states → tools → summarize
-    from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+    from gc_core.message_policy.todo_context import (
+        render_todo_for_persistent_state,
+    )
 
     data = snapshot.to_dict()
     parts = ["<persistent_state>", "<session_memory>"]
@@ -243,7 +282,9 @@ def build_memory_deltas_format_repair_messages(
     *,
     full_replace: bool = False,
 ) -> List[Dict[str, str]]:
-    system_prompt = render_memory_deltas_format_repair_system_prompt(full_replace=full_replace)
+    system_prompt = render_memory_deltas_format_repair_system_prompt(
+        full_replace=full_replace
+    )
     user_prompt = f"<raw_memory_step_output>\n{raw_output or ''!s}\n</raw_memory_step_output>\n"
     return [
         {"role": "system", "content": system_prompt},
@@ -251,9 +292,13 @@ def build_memory_deltas_format_repair_messages(
     ]
 
 
-def _register_uses_replace_semantics(name: str, *, full_replace: bool = False) -> bool:
+def _register_uses_replace_semantics(
+    name: str, *, full_replace: bool = False
+) -> bool:
     del full_replace  # all gateway registers use replace semantics
-    return name in REGISTER_ORDER and REGISTER_MERGE_MODES.get(name) == "replace"
+    return (
+        name in REGISTER_ORDER and REGISTER_MERGE_MODES.get(name) == "replace"
+    )
 
 
 def _build_register_body_patterns() -> dict[str, re.Pattern[str]]:
@@ -322,7 +367,9 @@ def should_attempt_memory_deltas_repair(
         return False
     if not deltas.is_empty():
         return False
-    return len(str(raw_output or "").strip()) >= max(1, int(min_chars_for_repair))
+    return len(str(raw_output or "").strip()) >= max(
+        1, int(min_chars_for_repair)
+    )
 
 
 def parse_memory_deltas_with_repair(
@@ -332,7 +379,9 @@ def parse_memory_deltas_with_repair(
     min_chars_for_repair: int = 100,
     full_replace: bool = False,
 ) -> tuple[WorkingMemoryDeltas, frozenset[str], bool, str]:
-    first_pass, first_present = parse_memory_deltas(raw_output, full_replace=full_replace)
+    first_pass, first_present = parse_memory_deltas(
+        raw_output, full_replace=full_replace
+    )
     if not should_attempt_memory_deltas_repair(
         raw_output,
         first_pass,
@@ -342,7 +391,9 @@ def parse_memory_deltas_with_repair(
     if repair_fn is None:
         return first_pass, first_present, False, str(raw_output or "")
     repaired_output = str(repair_fn(str(raw_output or "")) or "")
-    repaired_pass, repaired_present = parse_memory_deltas(repaired_output, full_replace=full_replace)
+    repaired_pass, repaired_present = parse_memory_deltas(
+        repaired_output, full_replace=full_replace
+    )
     return repaired_pass, repaired_present, True, repaired_output
 
 
@@ -352,7 +403,9 @@ def apply_append_deltas(
     *,
     touched: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
-    delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(skip_empty=False)
+    delta_map: Mapping[str, str] = coerce_working_memory_deltas(
+        deltas
+    ).to_dict(skip_empty=False)
     merged: Dict[str, str] = snapshot.to_dict()
     for name in REGISTER_ORDER:
         if REGISTER_MERGE_MODES.get(name) != "append":
@@ -363,7 +416,9 @@ def apply_append_deltas(
         if not delta_text:
             continue
         base_text = _normalize_register_text(merged.get(name))
-        merged[name] = f"{base_text}\n\n{delta_text}" if base_text else delta_text
+        merged[name] = (
+            f"{base_text}\n\n{delta_text}" if base_text else delta_text
+        )
     return _snapshot_from_mapping(merged)
 
 
@@ -374,15 +429,23 @@ def apply_replace_deltas(
     touched: frozenset[str] | None = None,
     registers: frozenset[str] | None = None,
 ) -> WorkingMemorySnapshot:
-    delta_map: Mapping[str, str] = coerce_working_memory_deltas(deltas).to_dict(skip_empty=False)
+    delta_map: Mapping[str, str] = coerce_working_memory_deltas(
+        deltas
+    ).to_dict(skip_empty=False)
     merged: Dict[str, str] = snapshot.to_dict()
     replace_names = (
         registers
         if registers is not None
-        else frozenset(name for name in REGISTER_ORDER if REGISTER_MERGE_MODES.get(name) == "replace")
+        else frozenset(
+            name
+            for name in REGISTER_ORDER
+            if REGISTER_MERGE_MODES.get(name) == "replace"
+        )
     )
     for name in REGISTER_ORDER:
-        if name not in replace_names or not _replace_applies(name, deltas, delta_map, touched):
+        if name not in replace_names or not _replace_applies(
+            name, deltas, delta_map, touched
+        ):
             continue
         merged[name] = _normalize_register_text(delta_map.get(name, ""))
     return _snapshot_from_mapping(merged)
@@ -417,12 +480,16 @@ def apply_memory_patch(
     touched: set[str] = set()
     if append_touched:
         touched.update(append_touched)
-        append_all = coerce_working_memory_deltas(append_deltas).to_dict(skip_empty=False)
+        append_all = coerce_working_memory_deltas(append_deltas).to_dict(
+            skip_empty=False
+        )
         for name in append_touched:
             combined[name] = append_all.get(name, "")
     if replace_touched:
         touched.update(replace_touched)
-        replace_all = coerce_working_memory_deltas(replace_deltas).to_dict(skip_empty=False)
+        replace_all = coerce_working_memory_deltas(replace_deltas).to_dict(
+            skip_empty=False
+        )
         for name in replace_touched:
             combined[name] = replace_all.get(name, "")
     return apply_replace_deltas(
@@ -450,7 +517,9 @@ def apply_summary_memory_patch(
     )
 
 
-def render_session_memory_for_summary_message(snapshot: WorkingMemorySnapshot) -> str:
+def render_session_memory_for_summary_message(
+    snapshot: WorkingMemorySnapshot,
+) -> str:
     parts = ["<session_memory>"]
     for name in REGISTER_ORDER:
         value = _normalize_register_text(snapshot.to_dict().get(name))

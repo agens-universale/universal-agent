@@ -50,8 +50,12 @@ def test_every_init_source_declares_the_same():
     """
     from gc_core.tools.connect_mcp.client import MCP_INIT_PARAMS
 
-    assert _INIT_PAYLOAD["params"] == MCP_INIT_PARAMS, "параметры initialize разъехались между локусами"
-    offenders = sorted(set(MCP_INIT_PARAMS["capabilities"]) & set(_UNIMPLEMENTED))
+    assert _INIT_PAYLOAD["params"] == MCP_INIT_PARAMS, (
+        "параметры initialize разъехались между локусами"
+    )
+    offenders = sorted(
+        set(MCP_INIT_PARAMS["capabilities"]) & set(_UNIMPLEMENTED)
+    )
     assert offenders == [], f"легаси-путь объявляет {offenders}"
 
 
@@ -73,7 +77,9 @@ def test_client_has_no_incoming_request_handler():
     # всё остальное — то есть входящий запрос сервера просто теряется.
     import inspect
 
-    body = inspect.getsource(persistent_stdio.PersistentStdioSession._read_matching)
+    body = inspect.getsource(
+        persistent_stdio.PersistentStdioSession._read_matching
+    )
     assert 'if "id" not in obj' in body and "continue" in body, (
         "_read_matching изменился — проверить, не появилась ли обработка "
         "серверных запросов (тогда capabilities можно расширять)"

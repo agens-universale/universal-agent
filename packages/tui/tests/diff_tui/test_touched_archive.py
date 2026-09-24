@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from gc_core.thread_store import ThreadSession, delete_thread, touched_journal_path
+from gc_core.thread_store import (
+    ThreadSession,
+    delete_thread,
+    touched_journal_path,
+)
 from gc_tui.diff_tui.touched import TouchedJournal
 
 
@@ -89,7 +93,9 @@ def test_legacy_gc_touched_json_ignored(tmp_path, monkeypatch):
     threads.mkdir()
     gc = root / ".gc" / "diffs"
     gc.mkdir(parents=True)
-    (gc / "touched.json").write_text(json.dumps({"paths": {"ghost.py": {"ts": 1}}}), encoding="utf-8")
+    (gc / "touched.json").write_text(
+        json.dumps({"paths": {"ghost.py": {"ts": 1}}}), encoding="utf-8"
+    )
     (root / "ghost.py").write_text("x\n", encoding="utf-8")
     svc = DiffService(
         str(root),

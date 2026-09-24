@@ -32,9 +32,24 @@ def _fixed_rel(iso_utc, **_):
     return f"{dt.day} мая"
 
 
-def _write_task(tmp_path, tid, *, status, hours_ago, msgs_count, skills=None, branch=None, first_prompt=""):
+def _write_task(
+    tmp_path,
+    tid,
+    *,
+    status,
+    hours_ago,
+    msgs_count,
+    skills=None,
+    branch=None,
+    first_prompt="",
+):
     updated = (_FIXED_NOW - timedelta(hours=hours_ago)).isoformat()
-    meta = {"thread_id": tid, "status": status, "updated_at": updated, "messages_count": msgs_count}
+    meta = {
+        "thread_id": tid,
+        "status": status,
+        "updated_at": updated,
+        "messages_count": msgs_count,
+    }
     tui = {}
     if skills:
         tui["skills"] = skills
@@ -42,14 +57,20 @@ def _write_task(tmp_path, tid, *, status, hours_ago, msgs_count, skills=None, br
         tui["branch"] = branch
     if tui:
         meta["tui"] = tui
-    (tmp_path / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text(
         json.dumps(
             {
                 "type": "message",
                 "seq": 1,
                 "ts": updated,
-                "payload": {"id": "u1", "role": "user", "content": first_prompt},
+                "payload": {
+                    "id": "u1",
+                    "role": "user",
+                    "content": first_prompt,
+                },
             }
         )
         + "\n",
@@ -65,9 +86,15 @@ def test_sessions_picker_full_snapshot(snap_compare, tmp_path, monkeypatch):
     # Детерминируем относительное время (иначе зависит от часов/локали машины).
     monkeypatch.setattr(sessions_mod, "format_relative_local", _fixed_rel)
     # Текущая ветка фиксирована (иначе зависит от git-состояния машины).
-    monkeypatch.setattr(sessions_mod, "current_branch", lambda cwd: "feat/tui-mvp-impl-v2")
+    monkeypatch.setattr(
+        sessions_mod, "current_branch", lambda cwd: "feat/tui-mvp-impl-v2"
+    )
     # Путь проекта фиксирован (иначе зависит от cwd машины и ОС-разделителей).
-    monkeypatch.setattr(sessions_mod.SessionsScreen, "_project_path", lambda self: "D:\\dev\\sber\\background-agent")
+    monkeypatch.setattr(
+        sessions_mod.SessionsScreen,
+        "_project_path",
+        lambda self: "D:\\dev\\sber\\background-agent",
+    )
 
     # 8 фикстурных задач разных типов (вкл. очень длинный промпт — проверка клиппинга)
     _write_task(
@@ -142,11 +169,15 @@ def test_sessions_picker_full_snapshot(snap_compare, tmp_path, monkeypatch):
         first_prompt="разобраться с авто-суммаризацией chat_completions",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
 
     async def setup(pilot):
         await pilot.pause()
-        await pilot.app.push_screen(SessionsScreen(threads_dir=str(tmp_path), system="cli"))
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
         await pilot.pause(0.3)
 
     assert snap_compare(app, terminal_size=(120, 32), run_before=setup)

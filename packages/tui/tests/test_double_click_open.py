@@ -10,7 +10,12 @@ import pytest
 def _write(tmp_path, tid):
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-22T12:00:00+00:00", "messages_count": 2}
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-05-22T12:00:00+00:00",
+                "messages_count": 2,
+            }
         ),
         encoding="utf-8",
     )
@@ -19,13 +24,22 @@ def _write(tmp_path, tid):
             "type": "message",
             "seq": 1,
             "ts_utc": "2026-05-22T12:00:00+00:00",
-            "payload": {"id": "u1", "role": "user", "content": "прочитай файл"},
+            "payload": {
+                "id": "u1",
+                "role": "user",
+                "content": "прочитай файл",
+            },
         },
         {
             "type": "message",
             "seq": 2,
             "ts_utc": "2026-05-22T12:00:01+00:00",
-            "payload": {"type": "function_call", "name": "read_file", "arguments": {"path": "x.py"}, "call_id": "c1"},
+            "payload": {
+                "type": "function_call",
+                "name": "read_file",
+                "arguments": {"path": "x.py"},
+                "call_id": "c1",
+            },
         },
     ]
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
@@ -44,7 +58,9 @@ async def test_ctrl_click_tool_row_opens_detail_screen(tmp_path):
     tid = "t1"
     _write(tmp_path, tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.2)
@@ -78,7 +94,9 @@ async def test_enter_on_focused_row_opens_detail_screen(tmp_path):
     tid = "t3"
     _write(tmp_path, tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.2)
@@ -109,7 +127,12 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
     # агентской реплики и проверить что Viewer открыл её payload (не tool_call).
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 3}
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-05-26T12:00:00+00:00",
+                "messages_count": 3,
+            }
         ),
         encoding="utf-8",
     )
@@ -124,27 +147,40 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
             "type": "message",
             "seq": 2,
             "ts_utc": "2026-05-26T12:00:01+00:00",
-            "payload": {"type": "function_call", "name": "read_file", "arguments": {"path": "x.py"}, "call_id": "c1"},
+            "payload": {
+                "type": "function_call",
+                "name": "read_file",
+                "arguments": {"path": "x.py"},
+                "call_id": "c1",
+            },
         },
         {
             "type": "message",
             "seq": 3,
             "ts_utc": "2026-05-26T12:00:02+00:00",
-            "payload": {"id": "a1", "role": "assistant", "content": "Готово:\n```python\nx = 1\n```\nКонец."},
+            "payload": {
+                "id": "a1",
+                "role": "assistant",
+                "content": "Готово:\n```python\nx = 1\n```\nКонец.",
+            },
         },
     ]
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
         "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)
 
         scr = pilot.app.screen
         # Prose-блоки — TraceRow с event_no; code-block panel — BlockPanel.
-        prose_rows = [r for r in scr.query(TraceRow) if r.has_class("line-agent")]
+        prose_rows = [
+            r for r in scr.query(TraceRow) if r.has_class("line-agent")
+        ]
         code_panels = list(scr.query(BlockPanel))
         # Минимум: 2 prose-блока ("Готово:" и "Конец.") + 1 code-panel.
         assert len(prose_rows) >= 2
@@ -192,7 +228,12 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
     tid = "agent_click_panel"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
         json.dumps(
-            {"thread_id": tid, "status": "stopped", "updated_at": "2026-05-26T12:00:00+00:00", "messages_count": 3}
+            {
+                "thread_id": tid,
+                "status": "stopped",
+                "updated_at": "2026-05-26T12:00:00+00:00",
+                "messages_count": 3,
+            }
         ),
         encoding="utf-8",
     )
@@ -207,20 +248,31 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
             "type": "message",
             "seq": 2,
             "ts_utc": "2026-05-26T12:00:01+00:00",
-            "payload": {"type": "function_call", "name": "read_file", "arguments": {"path": "x.py"}, "call_id": "c1"},
+            "payload": {
+                "type": "function_call",
+                "name": "read_file",
+                "arguments": {"path": "x.py"},
+                "call_id": "c1",
+            },
         },
         {
             "type": "message",
             "seq": 3,
             "ts_utc": "2026-05-26T12:00:02+00:00",
-            "payload": {"id": "a1", "role": "assistant", "content": "Готово:\n```python\nx = 1\n```\nКонец."},
+            "payload": {
+                "id": "a1",
+                "role": "assistant",
+                "content": "Готово:\n```python\nx = 1\n```\nКонец.",
+            },
         },
     ]
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text(
         "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)
@@ -264,7 +316,9 @@ async def test_single_click_does_not_open_viewer(tmp_path):
     tid = "t2"
     _write(tmp_path, tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.2)

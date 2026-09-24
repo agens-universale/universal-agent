@@ -2,7 +2,10 @@ import json
 import re
 from typing import Any, Dict, List
 
-from gc_core.constants.tool_names import FS_APPEND_FILE_NAME, FS_WRITE_FILE_NAME
+from gc_core.constants.tool_names import (
+    FS_APPEND_FILE_NAME,
+    FS_WRITE_FILE_NAME,
+)
 
 TECHNICAL_TYPE_TECHNICAL = "technical"
 TECHNICAL_TYPE_ERROR_MESSAGE = "error_message"
@@ -43,7 +46,9 @@ def is_technical_user_message_text(text: str) -> bool:
     return any(marker in normalized for marker in _TECHNICAL_USER_MARKERS)
 
 
-def wrap_technical_user_content(content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL) -> str:
+def wrap_technical_user_content(
+    content: str, *, technical_type: str = TECHNICAL_TYPE_TECHNICAL
+) -> str:
     raw = str(content or "").strip()
     if technical_type not in _TECHNICAL_TYPES:
         raise ValueError(f"Unsupported technical_type: {technical_type!r}")
@@ -60,7 +65,12 @@ def wrap_skill_resolution_technical_instruction(skill_name: str) -> str:
     Technical-сообщение для CLI: решать запрос через skill с данным именем;
     при отсутствии — похожее имя (опечатка), если описание подходит; иначе fail.
     """
-    safe = str(skill_name).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = (
+        str(skill_name)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     body = (
         f'For resolving user ask use skill "{safe}". '
         "If such skill is not available, use a skill with a similar name "
@@ -77,7 +87,10 @@ def is_dialog_summary_user_message_text(text: str) -> bool:
         return False
     if '<technical type="dialog_summary">' in normalized:
         return True
-    return "summarized context from previous dialogue." in normalized or "<dialog_summary>" in normalized
+    return (
+        "summarized context from previous dialogue." in normalized
+        or "<dialog_summary>" in normalized
+    )
 
 
 def user_content_to_text(content: Any) -> str:
@@ -149,7 +162,9 @@ def resolve_technical_user_content_type(content: str) -> str:
     return TECHNICAL_TYPE_TECHNICAL
 
 
-def append_user_log_entries(existing: List[str], step_messages: List[Dict[str, Any]]) -> List[str]:
+def append_user_log_entries(
+    existing: List[str], step_messages: List[Dict[str, Any]]
+) -> List[str]:
     out = list(existing) if isinstance(existing, list) else []
     seen = set(out)
     for message in step_messages:
@@ -168,7 +183,9 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
     args_text = str(raw_args) if raw_args is not None else "(missing)"
     try:
         json.loads(args_text)
-        error_text = "tool arguments were marked invalid by pre-send validation"
+        error_text = (
+            "tool arguments were marked invalid by pre-send validation"
+        )
     except Exception as exc:
         error_text = f"invalid JSON in tool arguments: {exc}"
 
@@ -193,5 +210,7 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
     )
     return {
         "role": "user",
-        "content": wrap_technical_user_content(feedback, technical_type=TECHNICAL_TYPE_ERROR_MESSAGE),
+        "content": wrap_technical_user_content(
+            feedback, technical_type=TECHNICAL_TYPE_ERROR_MESSAGE
+        ),
     }

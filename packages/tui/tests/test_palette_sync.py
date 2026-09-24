@@ -32,7 +32,9 @@ def test_tcss_vars_provided_by_palette():
     used = _tcss_used_vars()
     provided = set(palette.css_variables())
     missing = sorted(v for v in used if v not in provided)
-    assert not missing, f"$var используются в styles.tcss, но нет в palette.css_variables(): {missing}"
+    assert not missing, (
+        f"$var используются в styles.tcss, но нет в palette.css_variables(): {missing}"
+    )
 
 
 def test_css_variables_match_palette_constants():
@@ -43,17 +45,24 @@ def test_css_variables_match_palette_constants():
     for tcss_name, css_value in palette.css_variables().items():
         py_name = _tcss_to_py_name(tcss_name)
         if not hasattr(palette, py_name):
-            mismatches.append(f"css_variables['{tcss_name}'] → нет palette.{py_name}")
+            mismatches.append(
+                f"css_variables['{tcss_name}'] → нет palette.{py_name}"
+            )
             continue
         if getattr(palette, py_name) != css_value:
-            mismatches.append(f"${tcss_name}={css_value} ≠ palette.{py_name}={getattr(palette, py_name)}")
+            mismatches.append(
+                f"${tcss_name}={css_value} ≠ palette.{py_name}={getattr(palette, py_name)}"
+            )
     assert not mismatches, "\n  ".join(mismatches)
 
 
 def _luminance(hex_color: str) -> float:
     value = hex_color.lstrip("#")
     channels = [int(value[i : i + 2], 16) / 255 for i in (0, 2, 4)]
-    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    linear = [
+        c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        for c in channels
+    ]
     return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 
 
@@ -74,7 +83,9 @@ def test_selection_distinguishable_from_focus():
     Раньше они отличались на 21 — визуально неразличимо, когда выделение лежит
     поверх фокуса. Порог 40 держит нынешнюю разницу; уронить его правкой цвета
     молча теперь нельзя."""
-    assert _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.FOCUS_BG) >= 40
+    assert (
+        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.FOCUS_BG) >= 40
+    )
 
 
 def test_comments_readable_inside_selection():

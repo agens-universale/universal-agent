@@ -19,8 +19,15 @@ from pydantic import ValidationError
 
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.config_modules.model_registry import RESERVED_WORDS, validate_registry_pairs
-from gc_core.config_modules.root import PROFILE_SCHEMA_ERROR_PREFIX, AppConfig, schema_error_details
+from gc_core.config_modules.model_registry import (
+    RESERVED_WORDS,
+    validate_registry_pairs,
+)
+from gc_core.config_modules.root import (
+    PROFILE_SCHEMA_ERROR_PREFIX,
+    AppConfig,
+    schema_error_details,
+)
 from gc_core.utils.user_text import unreadable_reason
 
 # Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
@@ -85,18 +92,24 @@ def _profile_files(root: Path) -> list[Path]:
     return [path for path in sorted(root.glob("*.yml")) if path.is_file()]
 
 
-def _register_profile(result: dict, path: Path, root_kind, notices: Optional[list[str]]) -> None:
+def _register_profile(
+    result: dict, path: Path, root_kind, notices: Optional[list[str]]
+) -> None:
     name = path.stem
     if name in RESERVED_WORDS:
         if notices is not None:
-            notices.append(f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован')
+            notices.append(
+                f'{path}: имя профиля "{name}" зарезервировано — файл проигнорирован'
+            )
         return
     if name in result:
         return  # тёзка из менее приоритетного корня — проектный уже выиграл
     result[name] = ProfileRef(name=name, path=path, root_kind=root_kind)
 
 
-def discover_profiles(roots: list[Path], *, notices: Optional[list[str]] = None) -> dict[str, ProfileRef]:
+def discover_profiles(
+    roots: list[Path], *, notices: Optional[list[str]] = None
+) -> dict[str, ProfileRef]:
     """Дискавери профилей по корням (в порядке приоритета — первый найденный побеждает).
 
     Зарезервированные имена (`RESERVED_WORDS`) пропускаются + warning в `notices`,
@@ -104,7 +117,9 @@ def discover_profiles(roots: list[Path], *, notices: Optional[list[str]] = None)
     """
     result: dict[str, ProfileRef] = {}
     for idx, root in enumerate(roots):
-        root_kind: Literal["project", "base"] = "project" if idx == 0 else "base"
+        root_kind: Literal["project", "base"] = (
+            "project" if idx == 0 else "base"
+        )
         root = Path(root)
         if not root.is_dir():
             continue
@@ -114,8 +129,12 @@ def discover_profiles(roots: list[Path], *, notices: Optional[list[str]] = None)
 
 
 def _format_available(discovered: dict[str, ProfileRef]) -> str:
-    base_names = sorted(n for n, ref in discovered.items() if ref.root_kind == "base")
-    project_names = sorted(n for n, ref in discovered.items() if ref.root_kind == "project")
+    base_names = sorted(
+        n for n, ref in discovered.items() if ref.root_kind == "base"
+    )
+    project_names = sorted(
+        n for n, ref in discovered.items() if ref.root_kind == "project"
+    )
     segments = []
     if base_names:
         segments.append(f"{', '.join(base_names)} (глобальные)")
@@ -124,7 +143,9 @@ def _format_available(discovered: dict[str, ProfileRef]) -> str:
     return ", ".join(segments) if segments else "нет"
 
 
-def resolve_profile(name: str, roots: list[Path], *, notices: Optional[list[str]] = None) -> ProfileRef:
+def resolve_profile(
+    name: str, roots: list[Path], *, notices: Optional[list[str]] = None
+) -> ProfileRef:
     """Найти профиль `name` в `roots`. Не найден / имя зарезервировано → `ValueError`
     (спека §3.1, §3.2) — тот же класс, каким `load_config` уже падает на невалидном
     (ссылочно) конфиге, см. `model_sections_validation.validate_model_sections`.
@@ -133,12 +154,16 @@ def resolve_profile(name: str, roots: list[Path], *, notices: Optional[list[str]
     имя файла, обнаруженное дискавери попутно с резолвом указателя, не долетал бы до
     вызывающего кода (спека §3.2)."""
     if name in RESERVED_WORDS:
-        raise ValueError(f'profile: имя "{name}" зарезервировано ({", ".join(RESERVED_WORDS)})')
+        raise ValueError(
+            f'profile: имя "{name}" зарезервировано ({", ".join(RESERVED_WORDS)})'
+        )
     discovered = discover_profiles(roots, notices=notices)
     if name in discovered:
         return discovered[name]
     candidates = ", ".join(str(Path(root) / f"{name}.yml") for root in roots)
-    raise ValueError(f'профиль "{name}" не найден; искал: {candidates}; есть: {_format_available(discovered)}')
+    raise ValueError(
+        f'профиль "{name}" не найден; искал: {candidates}; есть: {_format_available(discovered)}'
+    )
 
 
 def _read_yaml_document(path: Path) -> dict:
@@ -167,7 +192,9 @@ def _read_yaml_document(path: Path) -> dict:
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(unreadable_reason(path, exc)) from exc
     if not isinstance(raw, dict):
-        raise ValueError(f"{path}: профиль должен быть YAML-документом (словарём)")
+        raise ValueError(
+            f"{path}: профиль должен быть YAML-документом (словарём)"
+        )
     return raw
 
 
@@ -187,7 +214,9 @@ def find_literal_tokens(raw: dict) -> list[str]:
     return aliases
 
 
-def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> None:
+def _validate_profile_document(
+    raw: dict, *, source: Optional[str] = None
+) -> None:
     """Общая фаза-1 валидация документа профиля: схема `AppConfig` (резерв-имена
     алиасов моделей проверяет её field_validator) + запрет ключа `profile`
     (анти-рекурсия, спека §3.2). Переиспользуется `load_profile_document`
@@ -201,9 +230,13 @@ def _validate_profile_document(raw: dict, *, source: Optional[str] = None) -> No
         # Не сырой `str(exc)`: pydantic-дамп несёт `input_value=<repr записи>` —
         # токен НЕАКТИВНОГО профиля уезжал в нотис секции «Модели» этим, вторым
         # путём (первый — `layers._app_config_from_raw`; ревью MR #80, L28).
-        raise ValueError(f"{prefix}{PROFILE_SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
+        raise ValueError(
+            f"{prefix}{PROFILE_SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
+        ) from exc
     if "profile" in raw:
-        raise ValueError(f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены')
+        raise ValueError(
+            f'{prefix}ключ "profile" внутри профиля запрещён — цепочки профилей запрещены'
+        )
 
 
 def load_profile_document(
@@ -282,7 +315,9 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list[ProfileRef]]:
     молча (витрина — не место для повторного warning'а дискавери загрузчика)."""
     result: dict[str, list[ProfileRef]] = {}
     for idx, root in enumerate(roots):
-        root_kind: Literal["project", "base"] = "project" if idx == 0 else "base"
+        root_kind: Literal["project", "base"] = (
+            "project" if idx == 0 else "base"
+        )
         root = Path(root)
         if not root.is_dir():
             continue
@@ -290,11 +325,15 @@ def discover_all_refs(roots: list[Path]) -> dict[str, list[ProfileRef]]:
             name = path.stem
             if name in RESERVED_WORDS:
                 continue
-            result.setdefault(name, []).append(ProfileRef(name=name, path=path, root_kind=root_kind))
+            result.setdefault(name, []).append(
+                ProfileRef(name=name, path=path, root_kind=root_kind)
+            )
     return result
 
 
-def find_active_ref(name: Optional[str], project_dir: Path, base_config_path: Path) -> Optional[ProfileRef]:
+def find_active_ref(
+    name: Optional[str], project_dir: Path, base_config_path: Path
+) -> Optional[ProfileRef]:
     """`ProfileRef` действующего имени профиля или `None` (нет имени / указатель
     не резолвится — санация уже случилась выше по стеку, здесь просто нечего
     показать). Общий источник для витрин `/config`, `/status`, Settings —
@@ -328,7 +367,9 @@ def profile_display_summary(path: Path) -> ProfileDisplaySummary:
     try:
         raw = _read_yaml_document(path)
     except (OSError, ValueError, yaml.YAMLError) as exc:
-        return ProfileDisplaySummary(slots={}, overlay_sections=[], error=str(exc))
+        return ProfileDisplaySummary(
+            slots={}, overlay_sections=[], error=str(exc)
+        )
     slots = raw.get("slots")
     overlay = sorted(k for k in raw if k not in _MODEL_SECTION_KEYS)
     return ProfileDisplaySummary(

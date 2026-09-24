@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from gc_core.tools.connect_mcp.stream_client import _is_loopback_url, _make_stream_http_client, _trust_env_for_url
+from gc_core.tools.connect_mcp.stream_client import (
+    _is_loopback_url,
+    _make_stream_http_client,
+    _trust_env_for_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -22,7 +26,9 @@ def test_is_loopback_url(url: str, expected: bool) -> None:
     assert _trust_env_for_url(url) is (not expected)
 
 
-def test_loopback_client_ignores_socks_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_loopback_client_ignores_socks_proxy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Локальный MCP не должен требовать socksio при socks5h:// в HTTP_PROXY."""
     monkeypatch.setenv("http_proxy", "socks5h://127.0.0.1:1080")
     monkeypatch.setenv("HTTP_PROXY", "socks5h://127.0.0.1:1080")
@@ -68,11 +74,17 @@ def test_lookalike_host_is_not_loopback():
         "https://localhost.evil.com/mcp",
     ):
         assert not _is_loopback_url(evil), evil
-        assert _trust_env_for_url(evil), f"{evil}: прокси снят, токен уйдёт мимо него"
+        assert _trust_env_for_url(evil), (
+            f"{evil}: прокси снят, токен уйдёт мимо него"
+        )
 
     # Положительный контроль: настоящая петля по-прежнему обходит прокси, иначе
     # тест прошёл бы и на реализации «всё считать внешним».
-    for local in ("http://127.0.0.1:8765/mcp", "http://localhost:8765/mcp", "http://[::1]:8765/mcp"):
+    for local in (
+        "http://127.0.0.1:8765/mcp",
+        "http://localhost:8765/mcp",
+        "http://[::1]:8765/mcp",
+    ):
         assert _is_loopback_url(local), local
         assert not _trust_env_for_url(local), local
 
@@ -93,7 +105,9 @@ def test_persistent_and_oneshot_agree_on_netrc():
     from gc_core.tools.connect_mcp import stream_client as sc
 
     client = sc._make_httpx_factory(True, url="https://mcp.example/mcp")()
-    assert client.trust_env is False, "персистентный клиент снова читает ~/.netrc — Bearer будет перетёрт"
+    assert client.trust_env is False, (
+        "персистентный клиент снова читает ~/.netrc — Bearer будет перетёрт"
+    )
 
     direct = sc._make_stream_http_client(
         token=None,

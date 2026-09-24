@@ -10,7 +10,14 @@ import pytest
 
 def _rec(payload, ts="2026-06-01T12:00:00Z"):
     """Envelope-запись вокруг payload."""
-    return {"type": "message", "thread_id": "t", "system": "cli", "seq": 1, "ts": ts, "payload": payload}
+    return {
+        "type": "message",
+        "thread_id": "t",
+        "system": "cli",
+        "seq": 1,
+        "ts": ts,
+        "payload": payload,
+    }
 
 
 @pytest.mark.asyncio
@@ -41,15 +48,21 @@ async def test_skill_plus_prompt_shows_marker_and_reply():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_thread_readonly(self.query_one("#t", VerticalScroll), records)
+            render_thread_readonly(
+                self.query_one("#t", VerticalScroll), records
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         # Реплика пользователя смонтирована
         assert len(scr.query(UserReplyContainer)) == 1
         # Ровно один [skill]-маркер
-        markers = [w for w in scr.query(TraceRow) if w.has_class("skill-marker")]
-        assert len(markers) == 1, f"Ожидался 1 skill-маркер, найдено {len(markers)}"
+        markers = [
+            w for w in scr.query(TraceRow) if w.has_class("skill-marker")
+        ]
+        assert len(markers) == 1, (
+            f"Ожидался 1 skill-маркер, найдено {len(markers)}"
+        )
         # Содержимое маркера: «`qa-x` загружен»
         assert "`qa-x` загружен" in markers[0]._content
 
@@ -82,15 +95,21 @@ async def test_mid_run_delivery_shows_only_marker():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_thread_readonly(self.query_one("#t", VerticalScroll), records)
+            render_thread_readonly(
+                self.query_one("#t", VerticalScroll), records
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         # UserReplyContainer НЕ монтируется (display_content пустой)
         assert len(scr.query(UserReplyContainer)) == 0
         # Ровно один [skill]-маркер
-        markers = [w for w in scr.query(TraceRow) if w.has_class("skill-marker")]
-        assert len(markers) == 1, f"Ожидался 1 skill-маркер, найдено {len(markers)}"
+        markers = [
+            w for w in scr.query(TraceRow) if w.has_class("skill-marker")
+        ]
+        assert len(markers) == 1, (
+            f"Ожидался 1 skill-маркер, найдено {len(markers)}"
+        )
         assert "`qa-x` загружен" in markers[0]._content
 
 
@@ -119,12 +138,18 @@ async def test_normal_user_record_no_marker():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_thread_readonly(self.query_one("#t", VerticalScroll), records)
+            render_thread_readonly(
+                self.query_one("#t", VerticalScroll), records
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         # Реплика смонтирована
         assert len(scr.query(UserReplyContainer)) == 1
         # Маркера нет
-        markers = [w for w in scr.query(TraceRow) if w.has_class("skill-marker")]
-        assert len(markers) == 0, f"Маркеров быть не должно, найдено {len(markers)}"
+        markers = [
+            w for w in scr.query(TraceRow) if w.has_class("skill-marker")
+        ]
+        assert len(markers) == 0, (
+            f"Маркеров быть не должно, найдено {len(markers)}"
+        )

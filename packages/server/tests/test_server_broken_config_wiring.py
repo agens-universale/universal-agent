@@ -12,8 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-pytest.importorskip("fastapi", reason="server-side dep, install via server_requirements.txt")
-pytest.importorskip("starlette", reason="server-side dep, install via server_requirements.txt")
+pytest.importorskip(
+    "fastapi", reason="server-side dep, install via server_requirements.txt"
+)
+pytest.importorskip(
+    "starlette", reason="server-side dep, install via server_requirements.txt"
+)
 
 
 def _reset_server_module():
@@ -64,7 +68,9 @@ def test_import_server_exits_cleanly_when_agent_config_broken():
             ),
             patch(
                 "gc_server.rest_api.server_config.build_agent_config_for_server",
-                side_effect=ValueError("C:\\gc\\config.yml: невалидный YAML: boom"),
+                side_effect=ValueError(
+                    "C:\\gc\\config.yml: невалидный YAML: boom"
+                ),
             ),
         ):
             with pytest.raises(SystemExit) as exc_info:

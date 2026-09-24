@@ -108,7 +108,9 @@ def _win_write_clipboard(text: str) -> bool:
             if not u32.SetClipboardData(_CF_UNICODETEXT, h):
                 k32.GlobalFree(h)
                 return False
-            return True  # на успехе владение h переходит буферу — не освобождаем
+            return (
+                True  # на успехе владение h переходит буферу — не освобождаем
+            )
         finally:
             u32.CloseClipboard()
     except Exception:

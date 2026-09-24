@@ -9,7 +9,10 @@ class _FakeMcp:
         return []
 
     def descriptions(self):
-        return {"duckduckgo_search": "веб-поиск в интернете", "office": "чтение/запись Word · Excel · PDF"}
+        return {
+            "duckduckgo_search": "веб-поиск в интернете",
+            "office": "чтение/запись Word · Excel · PDF",
+        }
 
     def install(self, name=None):
         return 0

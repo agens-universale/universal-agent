@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 
 from gc_core.intent_guard.guard import FinishGateDecision
-from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state
+from gc_core.intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_core.thread_store import make_message_key
@@ -43,7 +45,9 @@ def _finish_output() -> str:
 
 def test_apply_finish_gate_skipped_sets_runtime_outcome():
     base = _finish_output()
-    patched = SubmitSolution.apply_finish_gate_decision(base, FinishGateDecision(outcome="skipped"))
+    patched = SubmitSolution.apply_finish_gate_decision(
+        base, FinishGateDecision(outcome="skipped")
+    )
     payload = json.loads(patched)
     assert payload["finish_gate"]["runtime_outcome"] == "skipped"
 
@@ -90,7 +94,9 @@ def test_finish_gate_persisted_once_after_apply_not_before():
             "output": _finish_output(),
         },
     ]
-    assert persisted == [], "finish output не должен попасть в jsonl до apply gate"
+    assert persisted == [], (
+        "finish output не должен попасть в jsonl до apply gate"
+    )
 
     validation = ValidationResult(
         ok=True,
@@ -108,7 +114,9 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         apply_finish_gate_to_turn_finish_output_in_state(
             state=state,
             finish_call_id=call_id,
-            decision=FinishGateDecision(outcome="accept", validation=validation),
+            decision=FinishGateDecision(
+                outcome="accept", validation=validation
+            ),
             logger=None,
             persist_messages_callback=persist,
         )

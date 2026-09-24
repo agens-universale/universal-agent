@@ -67,7 +67,9 @@ def test_s1_journal_path_in_list(git_proj):
     root, threads = git_proj
     (root / "tracked.txt").write_text("dirty\n", encoding="utf-8")
     TouchedJournal(str(threads), "tui", "A").add("tracked.txt")
-    keys = {e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)}
+    keys = {
+        e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)
+    }
     assert keys == {"tracked.txt"}
 
 
@@ -84,8 +86,12 @@ def test_s3_sessions_different_files(git_proj):
     (root / "other.py").write_text("x\n", encoding="utf-8")
     TouchedJournal(str(threads), "tui", "A").add("tracked.txt")
     TouchedJournal(str(threads), "tui", "B").add("other.py")
-    assert {e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)} == {"tracked.txt"}
-    assert {e.key for e in _svc(root, threads, "B").list_entries(pending_only=True)} == {"other.py"}
+    assert {
+        e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)
+    } == {"tracked.txt"}
+    assert {
+        e.key for e in _svc(root, threads, "B").list_entries(pending_only=True)
+    } == {"other.py"}
 
 
 def test_s4_shared_file_both_see_same_visual(git_proj):
@@ -95,8 +101,12 @@ def test_s4_shared_file_both_see_same_visual(git_proj):
     TouchedJournal(str(threads), "tui", "B").add("tracked.txt")
     a = _svc(root, threads, "A")
     b = _svc(root, threads, "B")
-    assert {e.key for e in a.list_entries(pending_only=True)} == {"tracked.txt"}
-    assert {e.key for e in b.list_entries(pending_only=True)} == {"tracked.txt"}
+    assert {e.key for e in a.list_entries(pending_only=True)} == {
+        "tracked.txt"
+    }
+    assert {e.key for e in b.list_entries(pending_only=True)} == {
+        "tracked.txt"
+    }
     assert a.visual_diff("tracked.txt") == b.visual_diff("tracked.txt")
 
 
@@ -106,7 +116,9 @@ def test_s5_approve_a_only_discards_journal_a(git_proj):
     TouchedJournal(str(threads), "tui", "A").add("tracked.txt")
     TouchedJournal(str(threads), "tui", "B").add("tracked.txt")
     assert _svc(root, threads, "A").approve("tracked.txt").ok
-    assert "tracked.txt" not in TouchedJournal(str(threads), "tui", "A").paths()
+    assert (
+        "tracked.txt" not in TouchedJournal(str(threads), "tui", "A").paths()
+    )
     assert "tracked.txt" in TouchedJournal(str(threads), "tui", "B").paths()
 
 
@@ -116,11 +128,15 @@ def test_s6_s7_undo_a_lazy_discard_b(git_proj):
     TouchedJournal(str(threads), "tui", "A").add("tracked.txt")
     TouchedJournal(str(threads), "tui", "B").add("tracked.txt")
     assert _svc(root, threads, "A").undo("tracked.txt").ok
-    assert "tracked.txt" not in TouchedJournal(str(threads), "tui", "A").paths()
+    assert (
+        "tracked.txt" not in TouchedJournal(str(threads), "tui", "A").paths()
+    )
     assert "tracked.txt" in TouchedJournal(str(threads), "tui", "B").paths()
     # list B: no delta → hide + lazy discard B
     assert _svc(root, threads, "B").list_entries(pending_only=True) == []
-    assert "tracked.txt" not in TouchedJournal(str(threads), "tui", "B").paths()
+    assert (
+        "tracked.txt" not in TouchedJournal(str(threads), "tui", "B").paths()
+    )
 
 
 def test_s8_undo_all_does_not_touch_only_b(git_proj):
@@ -150,7 +166,9 @@ def test_s9_cache_mode_intersect_touched(tmp_path, monkeypatch):
     # без journal — скрыто
     assert _svc(root, threads, "A").list_entries(pending_only=True) == []
     TouchedJournal(str(threads), "tui", "A").add("src/foo.py")
-    keys = {e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)}
+    keys = {
+        e.key for e in _svc(root, threads, "A").list_entries(pending_only=True)
+    }
     assert keys == {"src/foo.py"}
 
 
@@ -161,7 +179,10 @@ def test_s10_hybrid_ignored_with_journal(git_proj):
     DiffStore(str(root)).register_mutation(str(target))
     target.write_text("v2\n", encoding="utf-8")
     TouchedJournal(str(threads), "tui", "A").add("local.md")
-    entries = {e.key: e for e in _svc(root, threads, "A").list_entries(pending_only=True)}
+    entries = {
+        e.key: e
+        for e in _svc(root, threads, "A").list_entries(pending_only=True)
+    }
     assert entries["local.md"].backend == "cache"
 
 
@@ -177,4 +198,6 @@ def test_lazy_discard_stale_journal_keys(git_proj):
     TouchedJournal(str(threads), "tui", "A").add("tracked.txt")
     # clean worktree — no delta
     assert _svc(root, threads, "A").list_entries(pending_only=True) == []
-    assert "tracked.txt" not in TouchedJournal(str(threads), "tui", "A").paths()
+    assert (
+        "tracked.txt" not in TouchedJournal(str(threads), "tui", "A").paths()
+    )

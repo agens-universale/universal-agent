@@ -21,7 +21,8 @@ def _config_module():
     """Модуль сборки конфига. Он намеренно свободен от импортов harbor."""
     sys.path.insert(0, str(HARBOR))
     spec = importlib.util.spec_from_file_location(
-        "adapters_gc_cli_config_for_tests", HARBOR / "adapters" / "gc_cli_config.py"
+        "adapters_gc_cli_config_for_tests",
+        HARBOR / "adapters" / "gc_cli_config.py",
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -46,11 +47,15 @@ def test_env_marker_in_a_header_is_resolved(tmp_path, monkeypatch):
     config = _build(
         tmp_path,
         {
-            "chat_completion_headers": {"X-Api-Key": "${ENV:GC_TEST_STAND_KEY}"},
+            "chat_completion_headers": {
+                "X-Api-Key": "${ENV:GC_TEST_STAND_KEY}"
+            },
         },
     )
 
-    assert config["chat_completion_headers"]["X-Api-Key"] == "секрет-из-окружения"
+    assert (
+        config["chat_completion_headers"]["X-Api-Key"] == "секрет-из-окружения"
+    )
 
 
 def test_marker_never_leaks_as_a_literal(tmp_path, monkeypatch):
@@ -60,7 +65,9 @@ def test_marker_never_leaks_as_a_literal(tmp_path, monkeypatch):
     config = _build(
         tmp_path,
         {
-            "chat_completion_headers": {"X-Api-Key": "${ENV:GC_TEST_STAND_KEY}"},
+            "chat_completion_headers": {
+                "X-Api-Key": "${ENV:GC_TEST_STAND_KEY}"
+            },
             "proxy": "${ENV:GC_TEST_STAND_KEY}",
         },
     )

@@ -68,7 +68,11 @@ async def _new_drain_threads_gone(before: set, timeout: float = 10.0) -> bool:
     """Потоки дренажа, появившиеся после снимка `before`, дошли до EOF и вышли."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not [t for t in threading.enumerate() if t.name == "exec-pipe-drain" and t.ident not in before]:
+        if not [
+            t
+            for t in threading.enumerate()
+            if t.name == "exec-pipe-drain" and t.ident not in before
+        ]:
             return True
         await asyncio.sleep(0.05)
     return False
@@ -84,7 +88,9 @@ async def test_a_grandchild_keeps_writing_after_the_tool_returned(tmp_path):
     elapsed = time.monotonic() - started
 
     assert res.return_code == 0, res
-    assert elapsed < _WAKE_AFTER_SEC, f"тул ждал внука {elapsed:.1f} с — он не должен ждать вовсе"
+    assert elapsed < _WAKE_AFTER_SEC, (
+        f"тул ждал внука {elapsed:.1f} с — он не должен ждать вовсе"
+    )
     assert await _status_when_written(marker) == "ok", (
         "внук получил ошибку на записи: трубы закрыли под ним, и сервис, "
         "поднятый чужим скриптом, начал сыпаться через пару секунд"

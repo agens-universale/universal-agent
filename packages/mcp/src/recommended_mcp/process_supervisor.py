@@ -71,7 +71,9 @@ def is_pid_alive(pid: int) -> bool:
     import ctypes
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    handle = ctypes.windll.kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+    )
     if handle:
         ctypes.windll.kernel32.CloseHandle(handle)
         return True
@@ -95,7 +97,9 @@ def _popen_kwargs(env: dict[str, str] | None, cwd: Path | None) -> dict:
     if os.name == "posix":
         kwargs["start_new_session"] = True
     else:
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
     return kwargs
 
 
@@ -144,7 +148,9 @@ def terminate_pid(pid: int, *, graceful_timeout: float = 5.0) -> None:
             pass
 
 
-def terminate_process(proc: subprocess.Popen, *, graceful_timeout: float = 5.0) -> None:
+def terminate_process(
+    proc: subprocess.Popen, *, graceful_timeout: float = 5.0
+) -> None:
     if proc.poll() is not None:
         return
     terminate_pid(proc.pid, graceful_timeout=graceful_timeout)
@@ -190,7 +196,9 @@ class RunSupervisor:
         try:
             proc = subprocess.Popen(cmd, **_popen_kwargs(env, cwd or run.cwd))
         except OSError as exc:
-            raise SupervisorError(f"mcp {name!r}: failed to start {cmd!r}: {exc}") from exc
+            raise SupervisorError(
+                f"mcp {name!r}: failed to start {cmd!r}: {exc}"
+            ) from exc
 
         write_pid(name, proc.pid, self.pids_dir)
         self._managed.append((name, proc))
@@ -205,7 +213,9 @@ class RunSupervisor:
 
     def wait_until_signal(self) -> None:
         if threading.current_thread() is not threading.main_thread():
-            raise SupervisorError("wait_until_signal must run on the main thread")
+            raise SupervisorError(
+                "wait_until_signal must run on the main thread"
+            )
 
         stop = threading.Event()
 
@@ -213,7 +223,11 @@ class RunSupervisor:
             stop.set()
 
         previous_int = signal.getsignal(signal.SIGINT)
-        previous_term = signal.getsignal(signal.SIGTERM) if hasattr(signal, "SIGTERM") else None
+        previous_term = (
+            signal.getsignal(signal.SIGTERM)
+            if hasattr(signal, "SIGTERM")
+            else None
+        )
         signal.signal(signal.SIGINT, _handler)
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, _handler)
@@ -223,8 +237,12 @@ class RunSupervisor:
                     if proc.poll() is not None:
                         code = proc.returncode
                         remove_pid(name, self.pids_dir)
-                        self._managed = [(n, p) for n, p in self._managed if n != name]
-                        raise SupervisorError(f"mcp {name!r} exited unexpectedly (code {code})")
+                        self._managed = [
+                            (n, p) for n, p in self._managed if n != name
+                        ]
+                        raise SupervisorError(
+                            f"mcp {name!r} exited unexpectedly (code {code})"
+                        )
                 stop.wait(timeout=0.5)
         finally:
             signal.signal(signal.SIGINT, previous_int)
@@ -232,7 +250,9 @@ class RunSupervisor:
                 signal.signal(signal.SIGTERM, previous_term)
 
 
-def stop_command_daemons(names: list[str], pids_dir: Path | None = None) -> int:
+def stop_command_daemons(
+    names: list[str], pids_dir: Path | None = None
+) -> int:
     """Остановить daemon'ы по PID-файлам. Возвращает число остановленных."""
     root = pids_dir or default_pids_dir()
     stopped = 0

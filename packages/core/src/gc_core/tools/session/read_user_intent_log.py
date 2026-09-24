@@ -1,7 +1,10 @@
 import json
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.intent_scope import DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT, intent_scope_from_config_dict
+from gc_core.config_modules.intent_scope import (
+    DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+    intent_scope_from_config_dict,
+)
 from gc_core.intent_log import deserialize_list, read_info, read_page
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -15,7 +18,10 @@ class ReadUserIntentLog(AbstractSimpleTool):
 
     def _default_limit(self) -> int:
         cfg = intent_scope_from_config_dict(self._config_dict or {})
-        return int(cfg.read_page_record_limit or DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT)
+        return int(
+            cfg.read_page_record_limit
+            or DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+        )
 
     def _closed_log(self) -> list:
         if self._state is None:
@@ -24,7 +30,9 @@ class ReadUserIntentLog(AbstractSimpleTool):
         return deserialize_list(raw)
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         default_records = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return {
             "type": "function",
@@ -48,12 +56,16 @@ class ReadUserIntentLog(AbstractSimpleTool):
                     },
                     "offset": {
                         "type": "integer",
-                        "description": ("For action=read only. 0-based **record** index (not char/line). Default: 0."),
+                        "description": (
+                            "For action=read only. 0-based **record** index (not char/line). Default: 0."
+                        ),
                         "default": 0,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": (f"For action=read only. Max records per page (default {default_records})."),
+                        "description": (
+                            f"For action=read only. Max records per page (default {default_records})."
+                        ),
                         "default": default_records,
                     },
                 },
@@ -64,7 +76,9 @@ class ReadUserIntentLog(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         page_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return f"""Tool name: session_read_user_intent_log
 Tool description: Read-only paginated access to closed user_intent_log (completed turns).
@@ -120,7 +134,9 @@ Behavior:
 
         if action == "info":
             info = read_info(records, default_limit=default_limit)
-            return self._payload(ok=True, action="info", body={**info, "error": None})
+            return self._payload(
+                ok=True, action="info", body={**info, "error": None}
+            )
 
         if action != "read":
             return self._error(
@@ -162,7 +178,9 @@ Behavior:
             req_limit,
             default_limit=default_limit,
         )
-        return self._payload(ok=True, action="read", body={**page, "error": None})
+        return self._payload(
+            ok=True, action="read", body={**page, "error": None}
+        )
 
 
 __all__ = ["ReadUserIntentLog"]

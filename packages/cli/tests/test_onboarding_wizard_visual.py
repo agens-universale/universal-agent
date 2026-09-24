@@ -40,7 +40,11 @@ def test_run_prints_rule_header_and_final_check(tmp_path, monkeypatch):
     io, lines = _capture()
     # уже сконфигурен → collect_fields ничего не спросит (не review_all, pending пуст)
     wz.run(
-        {"completions_url": "https://x/v1", "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"},
+        {
+            "completions_url": "https://x/v1",
+            "chat_completion_headers": {"Authorization": "Bearer sk"},
+            "model": "m",
+        },
         cfg,
         review_all=False,
         io=io,
@@ -48,7 +52,9 @@ def test_run_prints_rule_header_and_final_check(tmp_path, monkeypatch):
     blob = "\n".join(lines)
     assert lines[0] == ""  # пустая строка перед хедером
     assert "─── Настройка GigaCode Universal Agent" in blob  # rule-хедер
-    idx = next(i for i, l in enumerate(lines) if l.strip().startswith("✓ Готово"))
+    idx = next(
+        i for i, l in enumerate(lines) if l.strip().startswith("✓ Готово")
+    )
     assert lines[idx - 1] == ""  # пустая строка перед финалом
     assert lines[-1] == ""  # и после (воздух перед промптом)
     # После «✓ Готово» идут 3 строки сводки (три уровня) + пустая строка
@@ -75,7 +81,9 @@ def test_endpoint_rendered_as_section(tmp_path, monkeypatch):
     )
     printed = []
     it = iter(["https://real/v1/chat/completions"])  # ввод endpoint
-    io = wz.WizardIO(reader=lambda p, s: next(it, ""), printer=lambda m: printed.append(m))
+    io = wz.WizardIO(
+        reader=lambda p, s: next(it, ""), printer=lambda m: printed.append(m)
+    )
     wz.run(
         {
             "completions_url": "http://your-backend:PORT/v1/chat/completions",
@@ -110,10 +118,16 @@ def test_blank_line_separates_blocks(tmp_path, monkeypatch):
     # Список моделей не участвует в проверке — без подмены шаг «Модель» реально
     # стучится на «https://x/v1» (зелёный тест сейчас — только потому, что DNS
     # не резолвит этот хост).
-    monkeypatch.setattr("gc_core.model_picker.fetch_models", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "gc_core.model_picker.fetch_models", lambda *a, **k: None
+    )
     io, lines = _capture()
     wz.run(
-        {"completions_url": "https://x/v1", "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m"},
+        {
+            "completions_url": "https://x/v1",
+            "chat_completion_headers": {"Authorization": "Bearer sk"},
+            "model": "m",
+        },
         cfg,
         review_all=True,
         io=io,

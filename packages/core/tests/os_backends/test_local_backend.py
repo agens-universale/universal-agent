@@ -97,7 +97,11 @@ async def test_traverse_and_paths(be, tmp_path):
     (tmp_path / "top.md").write_text("y", encoding="utf-8")
     root = str(tmp_path)
     assert await be.listdir(root) == [("sub", True), ("top.md", False)]
-    assert sorted(await be.walk(root)) == [("sub", True), ("sub/f.txt", False), ("top.md", False)]
+    assert sorted(await be.walk(root)) == [
+        ("sub", True),
+        ("sub/f.txt", False),
+        ("top.md", False),
+    ]
     assert be.normpath(root + "/") == os.path.normpath(root + "/")
     assert be.join(root, "x") == os.path.join(root, "x")
 
@@ -105,7 +109,11 @@ async def test_traverse_and_paths(be, tmp_path):
 async def test_exec_ok_and_timeout(be, tmp_path):
     res = await be.aexec("echo hi", cwd=str(tmp_path), timeout=10)
     assert isinstance(res, ExecResult)
-    assert res.return_code == 0 and res.stdout.strip() == "hi" and not res.timed_out
+    assert (
+        res.return_code == 0
+        and res.stdout.strip() == "hi"
+        and not res.timed_out
+    )
     res = await be.aexec("sleep 5", timeout=1)
     assert res.timed_out and res.return_code is None
     env_res = await be.aexec("echo $GC_T", timeout=10, env={"GC_T": "42"})
@@ -180,9 +188,13 @@ async def test_write_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
     assert (tmp_path / "target.txt").read_text(encoding="utf-8") == "keep"
 
 
-async def test_write_bytes_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
+async def test_write_bytes_replace_failure_cleans_tmp(
+    be, tmp_path, monkeypatch
+):
     p = str(tmp_path / "bin.dat")
-    monkeypatch.setattr(os, "replace", lambda _s, _d: (_ for _ in ()).throw(OSError("nope")))
+    monkeypatch.setattr(
+        os, "replace", lambda _s, _d: (_ for _ in ()).throw(OSError("nope"))
+    )
     with pytest.raises(OSError):
         await be.write_bytes(p, b"\xff\xfe")
     assert not os.path.exists(p + ".tmp")
@@ -225,7 +237,9 @@ async def test_exec_spawns_no_helper_threads(be):
     assert threading.active_count() == before
 
 
-async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
+async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(
+    be,
+):
     """Захват ограничен, но процесс дочитывается и завершается сам.
 
     Раньше это проверялось на приватном _drain_pipe; теперь — на поведении
@@ -235,7 +249,9 @@ async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be)
     # sys.executable, а не голое `python`: имени `python` в PATH может не быть
     # (в окружениях uv/pyenv ставится только `python3`), и тест падал бы на
     # `command not found` — не на том свойстве, которое проверяет.
-    res = await be.aexec(f"{sys.executable} -c \"print('z' * 20000)\"", timeout=15)
+    res = await be.aexec(
+        f"{sys.executable} -c \"print('z' * 20000)\"", timeout=15
+    )
 
     assert len(res.stdout) <= 40
     assert res.stdout_hit_capture_cap is True
@@ -245,7 +261,9 @@ async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be)
 
 async def test_exec_per_call_capture_max_overrides_default(be):
     be.exec_output_capture_max_chars = 50
-    res = await be.aexec("yes A | head -c 5000", timeout=15, capture_max_chars=400)
+    res = await be.aexec(
+        "yes A | head -c 5000", timeout=15, capture_max_chars=400
+    )
     assert res.return_code == 0
     assert len(res.stdout) <= 400
     assert len(res.stdout) > 50
@@ -315,7 +333,9 @@ async def test_run_python_bounded_output(be):
 
 async def test_run_python_per_call_capture_max_overrides_default(be):
     be.exec_output_capture_max_chars = 50
-    res = await be.arun_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
+    res = await be.arun_python(
+        "print('A' * 5000)", timeout=15, capture_max_chars=400
+    )
     assert res.return_code == 0
     assert len(res.stdout) <= 400
     assert len(res.stdout) > 50
@@ -340,7 +360,9 @@ async def test_run_python_bounded_stderr(be):
 
 
 async def test_run_python_timeout(be, tmp_path):
-    res = await be.arun_python("import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1)
+    res = await be.arun_python(
+        "import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1
+    )
     assert res.timed_out is True
     assert res.return_code is None
     assert "go" in res.stdout
@@ -369,7 +391,9 @@ async def test_drain_keeps_reading_after_head_is_full():
     await _adrain_stream(_Stream([b"A" * 50, b"B" * 50, b"END"]), sink)
     cs = sink.stream
 
-    assert cs.total_chars == 103, "счётчик считает только голову — чтение обрывается"
+    assert cs.total_chars == 103, (
+        "счётчик считает только голову — чтение обрывается"
+    )
     assert cs.truncated is True
     assert cs.head == "A" * 20
     assert cs.tail.endswith("END"), f"хвост не настоящий: {cs.tail!r}"

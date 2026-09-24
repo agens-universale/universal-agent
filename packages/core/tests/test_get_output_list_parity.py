@@ -7,7 +7,13 @@ def test_stream_assembly_and_direct_json_give_same_output():
     direct = {
         "id": "r1",
         "model": "m",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "привет"}, "finish_reason": "stop"}],
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "привет"},
+                "finish_reason": "stop",
+            }
+        ],
     }
     # тот же ответ, собранный из SSE-дельт
     assembled = assemble_streamed_completion(
@@ -19,5 +25,11 @@ def test_stream_assembly_and_direct_json_give_same_output():
     out_direct = get_output_list(direct)
     out_assembled = get_output_list(assembled)
     # оба дают одинаковый message-output (единый путь валидации)
-    assert [o["type"] for o in out_direct] == [o["type"] for o in out_assembled]
-    assert out_direct[0]["content"][0]["text"] == out_assembled[0]["content"][0]["text"] == "привет"
+    assert [o["type"] for o in out_direct] == [
+        o["type"] for o in out_assembled
+    ]
+    assert (
+        out_direct[0]["content"][0]["text"]
+        == out_assembled[0]["content"][0]["text"]
+        == "привет"
+    )

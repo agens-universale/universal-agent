@@ -8,7 +8,11 @@
 import logging
 
 import pytest
-from gc_core.tools.subagents.selection import subagents_allowlist, subagents_allowlist_ordered, subagents_enabled
+from gc_core.tools.subagents.selection import (
+    subagents_allowlist,
+    subagents_allowlist_ordered,
+    subagents_enabled,
+)
 
 BUILTIN = {
     "subagent_worker",
@@ -111,30 +115,40 @@ class TestIntegration:
         return names & BUILTIN, sorted(names - BUILTIN)
 
     async def test_true_gives_all(self, tmp_path):
-        builtin, custom = await self._split(self._cfg(tmp_path, self._agents(tmp_path), True))
+        builtin, custom = await self._split(
+            self._cfg(tmp_path, self._agents(tmp_path), True)
+        )
         assert builtin == BUILTIN
         assert custom == ["subagent_alpha"]
 
     async def test_false_gives_none(self, tmp_path):
-        builtin, custom = await self._split(self._cfg(tmp_path, self._agents(tmp_path), False))
+        builtin, custom = await self._split(
+            self._cfg(tmp_path, self._agents(tmp_path), False)
+        )
         assert builtin == set()
         assert custom == []
 
     async def test_empty_list_keeps_builtins_only(self, tmp_path):
         # Ключевое отличие от false: встроенные остаются.
-        builtin, custom = await self._split(self._cfg(tmp_path, self._agents(tmp_path), []))
+        builtin, custom = await self._split(
+            self._cfg(tmp_path, self._agents(tmp_path), [])
+        )
         assert builtin == BUILTIN
         assert custom == []
 
     async def test_list_narrows_only_custom(self, tmp_path):
         agents = self._agents(tmp_path, ("alpha", "beta"))
-        builtin, custom = await self._split(self._cfg(tmp_path, agents, ["alpha"]))
+        builtin, custom = await self._split(
+            self._cfg(tmp_path, agents, ["alpha"])
+        )
         assert builtin == BUILTIN
         assert custom == ["subagent_alpha"]
 
     async def test_builtin_name_in_list_is_harmless(self, tmp_path):
         agents = self._agents(tmp_path, ("alpha", "beta"))
-        builtin, custom = await self._split(self._cfg(tmp_path, agents, ["alpha", "worker"]))
+        builtin, custom = await self._split(
+            self._cfg(tmp_path, agents, ["alpha", "worker"])
+        )
         assert builtin == BUILTIN
         assert custom == ["subagent_alpha"]
 
@@ -143,7 +157,10 @@ class TestIntegration:
         with caplog.at_level(logging.WARNING):
             await self._split(self._cfg(tmp_path, agents, ["typo_name"]))
         msgs = [r.getMessage() for r in caplog.records]
-        assert any("use_local_subagents_unknown" in m and "subagent_typo_name" in m for m in msgs)
+        assert any(
+            "use_local_subagents_unknown" in m and "subagent_typo_name" in m
+            for m in msgs
+        )
 
     async def test_builtin_name_in_list_is_not_warned(self, tmp_path, caplog):
         agents = self._agents(tmp_path)
@@ -190,7 +207,10 @@ class TestLimitFollowsListOrder:
         ]
 
     async def test_without_list_falls_back_to_filename_order(self, tmp_path):
-        assert await self._custom(tmp_path, True, 2) == ["subagent_alpha", "subagent_beta"]
+        assert await self._custom(tmp_path, True, 2) == [
+            "subagent_alpha",
+            "subagent_beta",
+        ]
 
     async def test_builtins_are_not_counted_against_limit(self, tmp_path):
         from gc_core.tools import abuild_tools_data
@@ -213,4 +233,7 @@ class TestLimitFollowsListOrder:
         with caplog.at_level(logging.WARNING):
             await self._custom(tmp_path, ["gamma", "alpha", "beta"], 2)
         msgs = [r.getMessage() for r in caplog.records]
-        assert any("subagents_max_count_exceeded" in m and "subagent_beta" in m for m in msgs)
+        assert any(
+            "subagents_max_count_exceeded" in m and "subagent_beta" in m
+            for m in msgs
+        )

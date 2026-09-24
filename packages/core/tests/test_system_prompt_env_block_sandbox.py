@@ -22,7 +22,13 @@ async def test_env_block_describes_container_not_runner(tmp_path, monkeypatch):
         max_steps=10,
         system_prompt_id="sp",
         use_server_subagents=False,
-        workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True),
+        workspace=ExecutionWorkspace(
+            root="/testbed",
+            backend=backend,
+            shell="sh",
+            os_name="Linux",
+            root_writable=True,
+        ),
     )
 
     prompt = render_system_prompt(

@@ -44,11 +44,17 @@ class PaletteRowsMixin:
         строки — его `_rebuild` докручивает в видимую область."""
         rows = self._visible_rows()
         if not rows:
-            return [Static(_NO_MATCH, classes="palette-hint", markup=False)], None
+            return [
+                Static(_NO_MATCH, classes="palette-hint", markup=False)
+            ], None
         widgets: list[Static] = []
         selected_widget: Optional[Static] = None
         for i, row in enumerate(rows):
-            classes = "palette-row selected" if i == self._selected else "palette-row"
+            classes = (
+                "palette-row selected"
+                if i == self._selected
+                else "palette-row"
+            )
             w = Static(self._format_row(row), classes=classes, markup=False)
             if i == self._selected:
                 selected_widget = w
@@ -84,4 +90,6 @@ class PaletteRowsMixin:
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+            self.call_after_refresh(
+                selected_widget.scroll_visible, animate=False
+            )

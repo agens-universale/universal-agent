@@ -12,14 +12,20 @@ def _ok_get(payload):
 
 def _err_get(status=None, network="timeout"):
     def get_ex(url, headers, verify):
-        return mp.HttpReply(status=status, payload=None, network_error="" if status else network)
+        return mp.HttpReply(
+            status=status,
+            payload=None,
+            network_error="" if status else network,
+        )
 
     return get_ex
 
 
 def test_probe_fetch_success_returns_models_and_latency():
     payload = {"data": [{"id": "m1"}]}
-    out = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=_ok_get(payload))
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", None, http_get_ex=_ok_get(payload)
+    )
     assert out.models and out.models[0].id == "m1"
     assert out.status == 200
     assert out.latency_ms >= 0
@@ -34,19 +40,27 @@ def test_probe_fetch_401_wins_over_404():
             return mp.HttpReply(status=401, payload=None, network_error="")
         return mp.HttpReply(status=404, payload=None, network_error="")
 
-    out = mp.probe_fetch("http://x/v1/chat/completions", "Bearer t", http_get_ex=get_ex)
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", "Bearer t", http_get_ex=get_ex
+    )
     assert out.models is None
     assert out.status == 401  # 401 приоритетнее прочих кодов
 
 
 def test_probe_fetch_pure_network_error():
-    out = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=_err_get(status=None, network="timeout"))
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions",
+        None,
+        http_get_ex=_err_get(status=None, network="timeout"),
+    )
     assert out.models is None and out.status is None
     assert "timeout" in out.network_error
 
 
 def test_probe_fetch_404_on_both_reports_status():
-    out = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=_err_get(status=404))
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", None, http_get_ex=_err_get(status=404)
+    )
     assert out.models is None and out.status == 404
 
 
@@ -57,7 +71,9 @@ def test_probe_post_status_and_body():
         seen["url"], seen["body"] = url, body
         return mp.HttpReply(status=200, payload={"ok": True}, network_error="")
 
-    status, err, lat, payload = mp.probe_post("http://x/v1/chat/completions", "Bearer t", "m1", http_post_ex=post_ex)
+    status, err, lat, payload = mp.probe_post(
+        "http://x/v1/chat/completions", "Bearer t", "m1", http_post_ex=post_ex
+    )
     assert status == 200 and err == "" and lat >= 0
     # Отдаём само тело, а не флаг «оно было JSON»: по нему проба отличает ответ на
     # наш токен от ответа на заведомо мусорный, когда статус у обоих одинаковый.
@@ -73,15 +89,21 @@ def test_probe_post_non_json_body_flagged():
     def post_ex(url, headers, body, verify):
         return mp.HttpReply(status=404, payload=None, network_error="")
 
-    status, err, _, payload = mp.probe_post("http://x/v1/chat/completions", None, "m1", http_post_ex=post_ex)
+    status, err, _, payload = mp.probe_post(
+        "http://x/v1/chat/completions", None, "m1", http_post_ex=post_ex
+    )
     assert status == 404 and payload is None
 
 
 def test_probe_post_network_error():
     def post_ex(url, headers, body, verify):
-        return mp.HttpReply(status=None, payload=None, network_error="connection refused")
+        return mp.HttpReply(
+            status=None, payload=None, network_error="connection refused"
+        )
 
-    status, err, _, payload = mp.probe_post("http://x/v1/chat/completions", None, "m1", http_post_ex=post_ex)
+    status, err, _, payload = mp.probe_post(
+        "http://x/v1/chat/completions", None, "m1", http_post_ex=post_ex
+    )
     assert status is None and "connection" in err and payload is None
 
 
@@ -120,7 +142,9 @@ def test_probe_fetch_status_kept_when_body_broken():
         # Оба пути возвращают 200 со статусом, но payload=None (битое тело)
         return mp.HttpReply(status=200, payload=None, network_error="")
 
-    out = mp.probe_fetch("http://x/v1/chat/completions", None, http_get_ex=get_ex_broken)
+    out = mp.probe_fetch(
+        "http://x/v1/chat/completions", None, http_get_ex=get_ex_broken
+    )
     assert out.models is None
     assert out.status == 200  # статус сохранён, не None
     assert out.network_error == ""

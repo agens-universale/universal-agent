@@ -183,7 +183,9 @@ def load_swarm_messages(
     return result
 
 
-def load_swarm_stdout_stderr(threads_dir: str, swarm_id: str) -> Tuple[List[str], List[str]]:
+def load_swarm_stdout_stderr(
+    threads_dir: str, swarm_id: str
+) -> Tuple[List[str], List[str]]:
     """
     Прочитать stdout.log и stderr.log, если они есть.
     """

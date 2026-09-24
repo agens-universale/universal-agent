@@ -67,7 +67,9 @@ class ChipStore:
         return {cid: chip_label(cid, t) for cid, t in self._chips.items()}
 
 
-def token_spans(text: str, store: ChipStore) -> list[tuple[int, int, int, int]]:
+def token_spans(
+    text: str, store: ChipStore
+) -> list[tuple[int, int, int, int]]:
     """Границы плашек в тексте: список (chip_id, row, col_start, col_end).
     Подпись однострочна → спан в пределах одной строки."""
     spans: list[tuple[int, int, int, int]] = []

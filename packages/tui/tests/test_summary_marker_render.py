@@ -10,7 +10,9 @@ async def test_summary_marker_renders(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(
@@ -24,8 +26,12 @@ async def test_summary_marker_renders(tmp_path):
         )
         screen._render_event(ev)
         await pilot.pause()
-        markers = [w for w in screen.query(TraceRow) if w.has_class("summary-marker")]
-        bodies = [w for w in screen.query(TraceRow) if w.has_class("summary-body")]
+        markers = [
+            w for w in screen.query(TraceRow) if w.has_class("summary-marker")
+        ]
+        bodies = [
+            w for w in screen.query(TraceRow) if w.has_class("summary-body")
+        ]
         assert len(markers) == 1
         assert len(bodies) == 1
         # Блок свёрнут по умолчанию — реально скрыт (display:none), не только класс.
@@ -40,7 +46,9 @@ async def test_summary_body_toggles_on_request(tmp_path):
     from gc_tui.messages import SummaryToggleRequest
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(
@@ -54,7 +62,9 @@ async def test_summary_body_toggles_on_request(tmp_path):
         )
         screen._render_event(ev)
         await pilot.pause()
-        body = next(w for w in screen.query(TraceRow) if w.has_class("summary-body"))
+        body = next(
+            w for w in screen.query(TraceRow) if w.has_class("summary-body")
+        )
         assert body.display is False  # свёрнут
         # Клик по маркеру (или телу) → раскрытие.
         screen.on_summary_toggle_request(SummaryToggleRequest(7))
@@ -74,7 +84,9 @@ async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
     from gc_tui.messages import SummaryToggleRequest
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(
@@ -88,7 +100,9 @@ async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
         )
         screen._render_event(ev)
         await pilot.pause()
-        marker = next(w for w in screen.query(TraceRow) if w.has_class("summary-marker"))
+        marker = next(
+            w for w in screen.query(TraceRow) if w.has_class("summary-marker")
+        )
         prefix = lambda: str(marker.query_one(".trace-prefix").render())
         assert "▸" in prefix() and "▾" not in prefix()  # свёрнут → вправо
         screen.on_summary_toggle_request(SummaryToggleRequest(3))
@@ -107,7 +121,9 @@ async def test_open_summary_event_shows_synthesis_not_empty(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.viewer import ViewerScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(
@@ -124,7 +140,9 @@ async def test_open_summary_event_shows_synthesis_not_empty(tmp_path):
         await pilot.pause()
         vs = pilot.app.screen
         assert isinstance(vs, ViewerScreen)
-        assert "User did X" in str(vs._content), f"summary viewer пуст: {vs._content!r}"
+        assert "User did X" in str(vs._content), (
+            f"summary viewer пуст: {vs._content!r}"
+        )
 
 
 @pytest.mark.asyncio
@@ -135,7 +153,9 @@ async def test_summary_expand_scrolls_body_into_view(tmp_path):
     from gc_tui.messages import SummaryToggleRequest
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         ev = TraceEvent(
@@ -149,7 +169,9 @@ async def test_summary_expand_scrolls_body_into_view(tmp_path):
         )
         screen._render_event(ev)
         await pilot.pause()
-        body = next(w for w in screen.query(TraceRow) if w.has_class("summary-body"))
+        body = next(
+            w for w in screen.query(TraceRow) if w.has_class("summary-body")
+        )
         calls = []
         body.scroll_visible = lambda *a, **k: calls.append(True)
         screen.on_summary_toggle_request(SummaryToggleRequest(5))  # раскрыть

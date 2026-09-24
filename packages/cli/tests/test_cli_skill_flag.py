@@ -20,7 +20,9 @@ class _FakeReg:
 
 def _cat():
     return SkillCatalog(
-        canonical_ids=frozenset({"supercoder:using-supercoder", "supercoder:brainstorming"}),
+        canonical_ids=frozenset(
+            {"supercoder:using-supercoder", "supercoder:brainstorming"}
+        ),
         bare_to_canonical={
             "using-supercoder": ("supercoder:using-supercoder",),
             "brainstorming": ("supercoder:brainstorming",),
@@ -46,7 +48,9 @@ async def test_empty_does_not_build_registry(monkeypatch):
     def _boom(config_dict=None):
         raise AssertionError("registry must not be built when -s is empty")
 
-    monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", _boom)
+    monkeypatch.setattr(
+        "gc_core.tools.skills.registry.get_skills_registry", _boom
+    )
     assert await cli._resolve_forced_skill("", {}) is None
     assert await cli._resolve_forced_skill("   ", {}) is None
 
@@ -77,7 +81,9 @@ async def test_not_found_soft_fallback_warns(_patch_reg, capsys):
     assert "not_found" in err
 
 
-async def test_ambiguous_soft_fallback_warns_with_suggestions(monkeypatch, capsys):
+async def test_ambiguous_soft_fallback_warns_with_suggestions(
+    monkeypatch, capsys
+):
     cat = SkillCatalog(
         canonical_ids=frozenset({"a:dup", "b:dup"}),
         bare_to_canonical={"dup": ("a:dup", "b:dup")},
@@ -117,7 +123,9 @@ async def test_catalog_build_failure_soft_fallback_warns(monkeypatch, capsys):
     def _boom(config_dict=None):
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr("gc_core.tools.skills.registry.get_skills_registry", _boom)
+    monkeypatch.setattr(
+        "gc_core.tools.skills.registry.get_skills_registry", _boom
+    )
     out = await cli._resolve_forced_skill("supercoder", {})
     assert out == "supercoder"
     err = capsys.readouterr().err

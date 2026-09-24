@@ -9,11 +9,20 @@ from gc_testkit import run_coro
 
 
 def test_summarize_empty_returns_empty():
-    assert run_coro(asummarize_final_answer_line(ctx=object(), state=object(), assistant_text="  ")) == ""
+    assert (
+        run_coro(
+            asummarize_final_answer_line(
+                ctx=object(), state=object(), assistant_text="  "
+            )
+        )
+        == ""
+    )
 
 
 def test_final_answer_prompt_file_exists_and_nonempty():
-    from gc_core.intent_scope.summarizer import _resolve_final_answer_prompt_path
+    from gc_core.intent_scope.summarizer import (
+        _resolve_final_answer_prompt_path,
+    )
 
     class _Ctx:
         intent_scope = None
@@ -49,7 +58,13 @@ class _FakeCtx:
 
 def test_short_prose_recorded_raw_as_is():
     state = _FakeState()
-    run_coro(amaybe_record_final_answer_intent(assistant_text="short answer", state=state, ctx=_FakeCtx(_FakeScope())))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="short answer",
+            state=state,
+            ctx=_FakeCtx(_FakeScope()),
+        )
+    )
     assert len(state.current_user_intent) == 1
     rec = state.current_user_intent[0]
     assert rec.action == "final_answer"
@@ -64,7 +79,11 @@ def test_long_prose_recorded_as_summary(monkeypatch):
     state = _FakeState()
     long_text = "x" * 50
     run_coro(
-        amaybe_record_final_answer_intent(assistant_text=long_text, state=state, ctx=_FakeCtx(_FakeScope(threshold=10)))
+        amaybe_record_final_answer_intent(
+            assistant_text=long_text,
+            state=state,
+            ctx=_FakeCtx(_FakeScope(threshold=10)),
+        )
     )
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].content == "SUMMARY LINE"
@@ -108,7 +127,9 @@ def test_responses_backend_skips():
     state = _FakeState()
     run_coro(
         amaybe_record_final_answer_intent(
-            assistant_text="answer", state=state, ctx=_FakeCtx(_FakeScope(), backend="responses")
+            assistant_text="answer",
+            state=state,
+            ctx=_FakeCtx(_FakeScope(), backend="responses"),
         )
     )
     assert state.current_user_intent == []
@@ -116,15 +137,27 @@ def test_responses_backend_skips():
 
 def test_empty_text_skips():
     state = _FakeState()
-    run_coro(amaybe_record_final_answer_intent(assistant_text="   ", state=state, ctx=_FakeCtx(_FakeScope())))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="   ", state=state, ctx=_FakeCtx(_FakeScope())
+        )
+    )
     assert state.current_user_intent == []
 
 
 def test_dedup_same_short_prose_once():
     state = _FakeState()
     ctx = _FakeCtx(_FakeScope())
-    run_coro(amaybe_record_final_answer_intent(assistant_text="same", state=state, ctx=ctx))
-    run_coro(amaybe_record_final_answer_intent(assistant_text="same", state=state, ctx=ctx))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="same", state=state, ctx=ctx
+        )
+    )
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="same", state=state, ctx=ctx
+        )
+    )
     assert len(state.current_user_intent) == 1
 
 
@@ -134,7 +167,13 @@ def test_threshold_zero_routes_to_summary(monkeypatch):
 
     monkeypatch.setattr(fa, "asummarize_final_answer_line", _fake_summary)
     state = _FakeState()
-    run_coro(amaybe_record_final_answer_intent(assistant_text="hi", state=state, ctx=_FakeCtx(_FakeScope(threshold=0))))
+    run_coro(
+        amaybe_record_final_answer_intent(
+            assistant_text="hi",
+            state=state,
+            ctx=_FakeCtx(_FakeScope(threshold=0)),
+        )
+    )
     assert len(state.current_user_intent) == 1
     assert state.current_user_intent[0].content == "S"
 

@@ -10,7 +10,9 @@ from uuid import uuid4
 import httpx
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
-from gc_core.message_policy.chat_completions import prepare_chat_completion_messages_for_api
+from gc_core.message_policy.chat_completions import (
+    prepare_chat_completion_messages_for_api,
+)
 from gc_core.model_router import ResolvedModel
 from gc_core.trace_id import (
     model_trace_header_enabled,
@@ -27,7 +29,9 @@ from gc_core.utils.backend_errors import (
     is_empty_completion,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError, OnDelta
-from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
+from gc_core.utils.format_messages import (
+    format_message_chat_completions_to_send_backend,
+)
 from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
@@ -41,7 +45,9 @@ logger = logging.getLogger(__name__)
 NO_BACKEND_OVERRIDE = object()
 
 
-def backend_override_value(resolved: Optional[ResolvedModel], backend_key: str):
+def backend_override_value(
+    resolved: Optional[ResolvedModel], backend_key: str
+):
     """Значение поля BackendConfig из ``resolved.backend_overrides``, если задано.
 
     ``backend_key`` — имя поля BackendConfig (не обязательно совпадает с плоским
@@ -59,7 +65,9 @@ def backend_override_value(resolved: Optional[ResolvedModel], backend_key: str):
     return NO_BACKEND_OVERRIDE
 
 
-def effective_cert_config(config_dict: Dict, resolved: Optional[ResolvedModel]) -> Dict:
+def effective_cert_config(
+    config_dict: Dict, resolved: Optional[ResolvedModel]
+) -> Dict:
     """``config_dict`` с наложенными ``cert_path``/``key_path`` из backend_overrides.
 
     Отдельная функция, а не ``backend_override_value`` по ключу: ``get_backend_client_cert``
@@ -67,7 +75,9 @@ def effective_cert_config(config_dict: Dict, resolved: Optional[ResolvedModel]) 
     if resolved is None:
         return config_dict
     overrides = resolved.backend_overrides or {}
-    cert_overrides = {k: overrides[k] for k in ("cert_path", "key_path") if k in overrides}
+    cert_overrides = {
+        k: overrides[k] for k in ("cert_path", "key_path") if k in overrides
+    }
     if not cert_overrides:
         return config_dict
     merged = dict(config_dict)
@@ -89,10 +99,20 @@ def resolve_network_params(
     как до появления ResolvedModel.
     """
     verify_override = backend_override_value(resolved, "use_ssl")
-    verify = config_dict.get("use_ssl", True) if verify_override is NO_BACKEND_OVERRIDE else verify_override
-    cert = get_backend_client_cert(effective_cert_config(config_dict, resolved))
+    verify = (
+        config_dict.get("use_ssl", True)
+        if verify_override is NO_BACKEND_OVERRIDE
+        else verify_override
+    )
+    cert = get_backend_client_cert(
+        effective_cert_config(config_dict, resolved)
+    )
     use_retry_override = backend_override_value(resolved, "use_retry")
-    use_retry = config_dict.get("use_retry", False) if use_retry_override is NO_BACKEND_OVERRIDE else use_retry_override
+    use_retry = (
+        config_dict.get("use_retry", False)
+        if use_retry_override is NO_BACKEND_OVERRIDE
+        else use_retry_override
+    )
     timeout_override = backend_override_value(resolved, "request_timeout_sec")
     timeout_sec = (
         float(config_dict["backend_request_timeout_sec"])
@@ -100,12 +120,18 @@ def resolve_network_params(
         else float(timeout_override)
     )
     proxy_override = backend_override_value(resolved, "proxy")
-    proxy = config_dict.get("proxy") if proxy_override is NO_BACKEND_OVERRIDE else proxy_override
+    proxy = (
+        config_dict.get("proxy")
+        if proxy_override is NO_BACKEND_OVERRIDE
+        else proxy_override
+    )
     # Ретрай ошибки, зашитой прокси в HTTP-200, — параметр той же политики повторов,
     # что и use_retry, и тюнится он под КОНКРЕТНЫЙ прокси. Поэтому живёт здесь, а не
     # читается плоско в каждой воронке: иначе `models.<alias>.backend` принимал бы
     # ключ (BackendConfig целиком), а рантайм молча брал глобальный.
-    retry_embedded_override = backend_override_value(resolved, "retry_embedded_choice_errors")
+    retry_embedded_override = backend_override_value(
+        resolved, "retry_embedded_choice_errors"
+    )
     retry_embedded = (
         config_dict.get("retry_embedded_choice_errors", True)
         if retry_embedded_override is NO_BACKEND_OVERRIDE
@@ -121,7 +147,9 @@ def _function_body_of_flat_tool(tool: Dict) -> Dict:
     if "description" in tool:
         fn["description"] = tool.get("description")
     if "parameters" in tool:
-        fn["parameters"] = schema_without_internal_markers(tool.get("parameters"))
+        fn["parameters"] = schema_without_internal_markers(
+            tool.get("parameters")
+        )
     if "strict" in tool:
         fn["strict"] = tool.get("strict")
     return fn
@@ -148,7 +176,12 @@ def normalize_chat_completions_tools(
             continue
 
         if tool.get("type") == "function" and "function" not in tool:
-            normalized.append({"type": "function", "function": _function_body_of_flat_tool(tool)})
+            normalized.append(
+                {
+                    "type": "function",
+                    "function": _function_body_of_flat_tool(tool),
+                }
+            )
         else:
             normalized.append(schema_without_internal_markers(tool))
 
@@ -176,7 +209,9 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     return isinstance(exc, (json.JSONDecodeError, ValueError))
 
 
-def _log_backend_request(logger, api_mode: str, url: str, payload: Dict) -> None:
+def _log_backend_request(
+    logger, api_mode: str, url: str, payload: Dict
+) -> None:
     """Лог исходящего запроса. Один на оба транспорта: расхождение в логах
     между sync и async путями искало бы себя часами."""
     if logger is None:
@@ -193,7 +228,12 @@ def _log_backend_request(logger, api_mode: str, url: str, payload: Dict) -> None
         logger.debug("Send request to backend %s url=%s", api_mode, url)
     logger.debug(
         "backend_request",
-        extra={"event": "backend_request", "api_mode": api_mode, "url": url, "payload": payload},
+        extra={
+            "event": "backend_request",
+            "api_mode": api_mode,
+            "url": url,
+            "payload": payload,
+        },
     )
 
 
@@ -202,26 +242,37 @@ def _log_backend_response(logger, api_mode: str, response: Any) -> None:
         return
     logger.debug(
         "backend_response",
-        extra={"event": "backend_response", "api_mode": api_mode, "response": response},
+        extra={
+            "event": "backend_response",
+            "api_mode": api_mode,
+            "response": response,
+        },
     )
 
 
 def _messages_summary(data: Dict) -> Optional[List[Dict]]:
     """Скелет отправленных сообщений — по нему видно причину 422 без тела запроса."""
     try:
-        payload_messages = data.get("messages") if isinstance(data, dict) else None
+        payload_messages = (
+            data.get("messages") if isinstance(data, dict) else None
+        )
         if not isinstance(payload_messages, list):
             return None
         return [
             {
                 "role": m.get("role") if isinstance(m, dict) else None,
                 "has_content": isinstance(m, dict) and "content" in m,
-                "content_type": type(m.get("content")).__name__ if isinstance(m, dict) and "content" in m else None,
-                "has_tool_calls": isinstance(m, dict) and isinstance(m.get("tool_calls"), list),
-                "tool_calls_len": len(m.get("tool_calls"))
-                if isinstance(m, dict) and isinstance(m.get("tool_calls"), list)
+                "content_type": type(m.get("content")).__name__
+                if isinstance(m, dict) and "content" in m
                 else None,
-                "has_tool_call_id": isinstance(m, dict) and "tool_call_id" in m,
+                "has_tool_calls": isinstance(m, dict)
+                and isinstance(m.get("tool_calls"), list),
+                "tool_calls_len": len(m.get("tool_calls"))
+                if isinstance(m, dict)
+                and isinstance(m.get("tool_calls"), list)
+                else None,
+                "has_tool_call_id": isinstance(m, dict)
+                and "tool_call_id" in m,
             }
             for m in payload_messages[:20]
         ]
@@ -245,9 +296,14 @@ def _report_chat_http_error(*, status, err_text, url, data, logger) -> None:
             err_text,
         )
         if messages_summary is not None:
-            logger.error("Backend chat/completions request messages summary=%s", messages_summary)
+            logger.error(
+                "Backend chat/completions request messages summary=%s",
+                messages_summary,
+            )
     try:
-        err_text_short = err_text[:4000] if isinstance(err_text, str) else str(err_text)
+        err_text_short = (
+            err_text[:4000] if isinstance(err_text, str) else str(err_text)
+        )
     except Exception:
         err_text_short = str(err_text)
     print(
@@ -321,11 +377,18 @@ async def arequest_backend_responses(
     if logger is not None:
         logger.debug(
             "backend_request",
-            extra={"event": "backend_request", "api_mode": "responses", "url": url, "payload": data},
+            extra={
+                "event": "backend_request",
+                "api_mode": "responses",
+                "url": url,
+                "payload": data,
+            },
         )
 
     chunks: List[str] = []
-    async with client.stream("POST", url, json=data, headers=headers, timeout=timeout) as r:
+    async with client.stream(
+        "POST", url, json=data, headers=headers, timeout=timeout
+    ) as r:
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError:
@@ -360,7 +423,10 @@ async def arequest_backend_responses(
         if logger is not None:
             logger.error(
                 "backend_responses_json_error",
-                extra={"event": "backend_responses_json_error", "last_chunk": last_chunk},
+                extra={
+                    "event": "backend_responses_json_error",
+                    "last_chunk": last_chunk,
+                },
             )
         raise e
 
@@ -375,7 +441,14 @@ async def arequest_backend_responses(
 
 
 async def _astream_chat_completions(
-    client, url: str, data: Dict, headers: Dict, *, timeout: float, logger, on_delta: OnDelta
+    client,
+    url: str,
+    data: Dict,
+    headers: Dict,
+    *,
+    timeout: float,
+    logger,
+    on_delta: OnDelta,
 ):
     stream_data = dict(data)
     stream_data["stream"] = True
@@ -385,7 +458,9 @@ async def _astream_chat_completions(
     stream_data["stream_options"] = {"include_usage": True}
     _log_backend_request(logger, "chat_completions", url, stream_data)
 
-    async with client.stream("POST", url, json=stream_data, headers=headers, timeout=timeout) as r:
+    async with client.stream(
+        "POST", url, json=stream_data, headers=headers, timeout=timeout
+    ) as r:
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError:
@@ -464,7 +539,13 @@ async def arequest_backend_chat_completions(
 
     if on_delta is not None:
         return await _astream_chat_completions(
-            client, url, data, headers, timeout=timeout, logger=logger, on_delta=on_delta
+            client,
+            url,
+            data,
+            headers,
+            timeout=timeout,
+            logger=logger,
+            on_delta=on_delta,
         )
 
     _log_backend_request(logger, "chat_completions", url, data)
@@ -517,12 +598,18 @@ async def aresolve_auth_token(auth_connector, *, force: bool = False) -> str:
     # без аргумента. Чужие коннекторы (и тестовые двойники) объявляют
     # `get_token()` без параметров, и лишний позиционный аргумент их ломает.
     def _get() -> str:
-        return auth_connector.get_token(force=True) if force else auth_connector.get_token()
+        return (
+            auth_connector.get_token(force=True)
+            if force
+            else auth_connector.get_token()
+        )
 
     return await asyncio.to_thread(_get)
 
 
-async def acreate_call_headers(state, ctx, resolved: Optional[ResolvedModel] = None) -> Dict[str, str]:
+async def acreate_call_headers(
+    state, ctx, resolved: Optional[ResolvedModel] = None
+) -> Dict[str, str]:
     """Заголовки вызова backend. ЕДИНСТВЕННАЯ форма этой операции.
 
     Отличие от чистой сборки ровно одно и несущее: токен берётся не на loop.
@@ -542,7 +629,9 @@ async def acreate_call_headers(state, ctx, resolved: Optional[ResolvedModel] = N
     return build_call_headers(state, ctx, resolved, token=token)
 
 
-def _authorization_header(authorization_override, auth_connector, token: Optional[str]) -> Optional[str]:
+def _authorization_header(
+    authorization_override, auth_connector, token: Optional[str]
+) -> Optional[str]:
     # authorization: None=наследовать эффективный заголовок, ""=явно без Authorization,
     # значение=использовать как есть (уже Bearer-нормализовано).
     if authorization_override == "":
@@ -567,10 +656,15 @@ def _authorization_header(authorization_override, auth_connector, token: Optiona
 
 
 def _apply_chat_completion_headers(
-    call_headers: Dict[str, str], config_dict: Dict, resolved_for_headers, authorization_override
+    call_headers: Dict[str, str],
+    config_dict: Dict,
+    resolved_for_headers,
+    authorization_override,
 ) -> None:
     """Оверлей backend.chat_completion_headers (per-model приоритетнее глобальных)."""
-    extra_headers = backend_override_value(resolved_for_headers, "chat_completion_headers")
+    extra_headers = backend_override_value(
+        resolved_for_headers, "chat_completion_headers"
+    )
     headers_from_model = extra_headers is not NO_BACKEND_OVERRIDE
     if not headers_from_model:
         extra_headers = config_dict.get("chat_completion_headers")
@@ -590,7 +684,11 @@ def _apply_chat_completion_headers(
         # конкретное: он уточняет token и проходит дальше. Сравнение
         # регистронезависимое: иначе `authorization:` строчными не перебивал
         # бы, а ДОБАВЛЯЛСЯ вторым заголовком к нашему.
-        if not headers_from_model and authorization_override is not None and k.lower() == "authorization":
+        if (
+            not headers_from_model
+            and authorization_override is not None
+            and k.lower() == "authorization"
+        ):
             continue
         if raw_val is None:
             continue
@@ -620,8 +718,12 @@ def build_call_headers(
     """
     config_dict = getattr(ctx, "config_dict", {}) or {}
     auth_connector = getattr(ctx, "auth_connector", None)
-    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-    resolved_for_headers = resolved if backend_mode == "chat_completions" else None
+    backend_mode = (
+        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    )
+    resolved_for_headers = (
+        resolved if backend_mode == "chat_completions" else None
+    )
 
     call_headers: Dict[str, str] = {
         "x_cl_id": str(config_dict.get("x_cl_id")),
@@ -633,15 +735,26 @@ def build_call_headers(
 
     # authorization: None=наследовать эффективный заголовок (путь ниже, как раньше),
     # ""=явно без Authorization, значение=использовать как есть (уже Bearer-нормализовано).
-    authorization_override = resolved_for_headers.authorization if resolved_for_headers is not None else None
-    authorization = _authorization_header(authorization_override, auth_connector, token)
+    authorization_override = (
+        resolved_for_headers.authorization
+        if resolved_for_headers is not None
+        else None
+    )
+    authorization = _authorization_header(
+        authorization_override, auth_connector, token
+    )
     if authorization is not None:
         call_headers["Authorization"] = authorization
 
     # Дополнительные заголовки для chat/completions передаются
     # универсально через backend.chat_completion_headers.
     if backend_mode == "chat_completions":
-        _apply_chat_completion_headers(call_headers, config_dict, resolved_for_headers, authorization_override)
+        _apply_chat_completion_headers(
+            call_headers,
+            config_dict,
+            resolved_for_headers,
+            authorization_override,
+        )
 
     # Внешний trace_id — строго opt-in через agent.trace_header_enabled: без
     # флага заголовок не уходит, даже если трейс у рана есть (в лог-файл и в
@@ -663,7 +776,11 @@ def _responses_input_without_message_call_id(messages):
     function_call_output call_id обязателен — сохраняем. Не мутируем исходники."""
     cleaned = []
     for m in messages:
-        if isinstance(m, dict) and "call_id" in m and m.get("type") not in ("function_call", "function_call_output"):
+        if (
+            isinstance(m, dict)
+            and "call_id" in m
+            and m.get("type") not in ("function_call", "function_call_output")
+        ):
             m = {k: v for k, v in m.items() if k != "call_id"}
         cleaned.append(m)
     return cleaned
@@ -679,11 +796,15 @@ def create_call_data_responses(
     # Responses-режим: из ResolvedModel действует только провайдерский id модели —
     # url/token/backend-квирки per-model в этом API-режиме не применяются (спека §4).
     call_data = dict()
-    call_data["model"] = resolved.model if resolved is not None else state.default_model
+    call_data["model"] = (
+        resolved.model if resolved is not None else state.default_model
+    )
     call_data["input"] = _responses_input_without_message_call_id(messages)
     call_data["tools"] = tools if tools else state.tools
     call_data["metadata"] = state.call_metadata
-    call_data["previous_response_id"] = state.previous_response_id if set_previous_response_id else None
+    call_data["previous_response_id"] = (
+        state.previous_response_id if set_previous_response_id else None
+    )
     return call_data
 
 
@@ -718,7 +839,9 @@ def _merge_state_messages(state_messages: Any, messages) -> List[Dict]:
     return to_send_messages
 
 
-def _config_value(resolved: Optional[ResolvedModel], cfg: Dict, key: str, default: Any = None) -> Any:
+def _config_value(
+    resolved: Optional[ResolvedModel], cfg: Dict, key: str, default: Any = None
+) -> Any:
     """Per-model override из ResolvedModel, иначе значение из config_dict."""
     value = backend_override_value(resolved, key)
     if value is NO_BACKEND_OVERRIDE:
@@ -726,7 +849,9 @@ def _config_value(resolved: Optional[ResolvedModel], cfg: Dict, key: str, defaul
     return value
 
 
-def _apply_chat_completion_kwargs(data: Dict, extra: Any, *, prompt_cache_on: bool) -> None:
+def _apply_chat_completion_kwargs(
+    data: Dict, extra: Any, *, prompt_cache_on: bool
+) -> None:
     if not (isinstance(extra, dict) and extra):
         return
     protected = {
@@ -784,8 +909,12 @@ def create_call_data_completions(
 
     cfg = config_dict if isinstance(config_dict, dict) else {}
 
-    configured_max_tokens = _safe_positive_int(_config_value(resolved, cfg, "chat_completions_max_tokens"))
-    effective_max_tokens = _safe_positive_int(max_tokens) or configured_max_tokens or 8096
+    configured_max_tokens = _safe_positive_int(
+        _config_value(resolved, cfg, "chat_completions_max_tokens")
+    )
+    effective_max_tokens = (
+        _safe_positive_int(max_tokens) or configured_max_tokens or 8096
+    )
 
     data = {
         "model": effective_model,
@@ -793,7 +922,9 @@ def create_call_data_completions(
         "tools": to_send_tools,
         "tool_choice": "auto",
     }
-    _use_max_tokens_param = _config_value(resolved, cfg, "use_max_tokens_param", False)
+    _use_max_tokens_param = _config_value(
+        resolved, cfg, "use_max_tokens_param", False
+    )
     # Key selection is provider-driven; explicit max_tokens only sets the VALUE.
     if bool(_use_max_tokens_param):
         data["max_tokens"] = effective_max_tokens
@@ -811,7 +942,9 @@ def create_call_data_completions(
     prompt_cache_on = prompt_cache_enabled(_prompt_cache, effective_model)
 
     _apply_chat_completion_kwargs(
-        data, _config_value(resolved, cfg, "chat_completion_kwargs"), prompt_cache_on=prompt_cache_on
+        data,
+        _config_value(resolved, cfg, "chat_completion_kwargs"),
+        prompt_cache_on=prompt_cache_on,
     )
 
     if prompt_cache_on:

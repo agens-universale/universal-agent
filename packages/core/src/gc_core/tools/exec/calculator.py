@@ -51,22 +51,34 @@ def _validate_node(node: ast.AST) -> None:
     """First pass: enforce the whitelist over the whole tree without computing."""
     # C5: numeric constants only — reject str/bool/None inside Constant.
     if isinstance(node, ast.Constant):
-        if isinstance(node.value, bool) or node.value is None or isinstance(node.value, str):
-            raise _DisallowedSyntax(f"Constant of type {type(node.value).__name__!r} is not allowed")
+        if (
+            isinstance(node.value, bool)
+            or node.value is None
+            or isinstance(node.value, str)
+        ):
+            raise _DisallowedSyntax(
+                f"Constant of type {type(node.value).__name__!r} is not allowed"
+            )
         if isinstance(node.value, (int, float)):
             return
-        raise _DisallowedSyntax(f"Constant of type {type(node.value).__name__!r} is not allowed")
+        raise _DisallowedSyntax(
+            f"Constant of type {type(node.value).__name__!r} is not allowed"
+        )
 
     if isinstance(node, ast.BinOp):
         if type(node.op) not in _BIN_OPS:
-            raise _DisallowedSyntax(f"BinOp operator {type(node.op).__name__} is not allowed")
+            raise _DisallowedSyntax(
+                f"BinOp operator {type(node.op).__name__} is not allowed"
+            )
         _validate_node(node.left)
         _validate_node(node.right)
         return
 
     if isinstance(node, ast.UnaryOp):
         if type(node.op) not in _UNARY_OPS:
-            raise _DisallowedSyntax(f"UnaryOp operator {type(node.op).__name__} is not allowed")
+            raise _DisallowedSyntax(
+                f"UnaryOp operator {type(node.op).__name__} is not allowed"
+            )
         _validate_node(node.operand)
         return
 
@@ -85,7 +97,9 @@ def _eval_node(node: ast.AST) -> Any:
         return node.value
 
     if isinstance(node, ast.BinOp):
-        return _BIN_OPS[type(node.op)](_eval_node(node.left), _eval_node(node.right))
+        return _BIN_OPS[type(node.op)](
+            _eval_node(node.left), _eval_node(node.right)
+        )
 
     if isinstance(node, ast.UnaryOp):
         return _UNARY_OPS[type(node.op)](_eval_node(node.operand))
@@ -240,4 +254,10 @@ Return format (JSON string):
                 error={"type": "eval_failed", "message": str(e)},
             )
 
-        return self._result(ok=True, expression=expression, value=result, value_type=result_type, error=None)
+        return self._result(
+            ok=True,
+            expression=expression,
+            value=result,
+            value_type=result_type,
+            error=None,
+        )

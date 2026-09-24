@@ -1,7 +1,9 @@
 import logging
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.stored_outputs import get_tool_output_inline_max_chars
+from gc_core.config_modules.stored_outputs import (
+    get_tool_output_inline_max_chars,
+)
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.session.stored_outputs.envelope import (
     PAGINATION_EOF_MARKER_DOC,
@@ -28,7 +30,9 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         return _fallback_logger
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": _TOOL_NAME,
@@ -47,7 +51,9 @@ class ReadStoredToolOutput(AbstractSimpleTool):
                     },
                     "offset": {
                         "type": "integer",
-                        "description": ("Character offset (Unicode code points) into the stored body. Default: 0."),
+                        "description": (
+                            "Character offset (Unicode code points) into the stored body. Default: 0."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
@@ -64,7 +70,9 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: session_read_stored_tool_output
 Tool description: Read paginated chunks from stored large tool output using output_ref.
 
@@ -149,7 +157,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "offset", "message": "offset must be an integer >= 0."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "offset",
+                    "message": "offset must be an integer >= 0.",
+                },
                 hint="Invalid offset argument.",
             )
 
@@ -166,7 +178,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "limit", "message": "limit must be an integer >= 1."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "limit",
+                    "message": "limit must be an integer >= 1.",
+                },
                 hint="Invalid limit argument.",
             )
 
@@ -183,7 +199,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "offset", "message": "offset must be >= 0."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "offset",
+                    "message": "offset must be >= 0.",
+                },
                 hint="Invalid offset argument.",
             )
 
@@ -200,7 +220,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "limit", "message": "limit must be >= 1."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "limit",
+                    "message": "limit must be >= 1.",
+                },
                 hint="Invalid limit argument.",
             )
 

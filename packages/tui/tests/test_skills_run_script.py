@@ -31,7 +31,9 @@ def reg_with_scripts(tmp_path):
     )
 
 
-def test_skills_run_script_sets_script_ok_false_on_nonzero_exit(reg_with_scripts, tmp_path):
+def test_skills_run_script_sets_script_ok_false_on_nonzero_exit(
+    reg_with_scripts, tmp_path
+):
     _write_skill_with_script(
         tmp_path / "system",
         "exit-one",
@@ -44,7 +46,9 @@ def test_skills_run_script_sets_script_ok_false_on_nonzero_exit(reg_with_scripts
     assert payload["result"]["exit_code"] == 1
 
 
-def test_skills_run_script_sets_script_ok_true_on_zero_exit(reg_with_scripts, tmp_path):
+def test_skills_run_script_sets_script_ok_true_on_zero_exit(
+    reg_with_scripts, tmp_path
+):
     _write_skill_with_script(
         tmp_path / "system",
         "exit-zero",
@@ -60,11 +64,15 @@ def test_skills_run_script_sets_script_ok_true_on_zero_exit(reg_with_scripts, tm
     assert "preview" not in payload["result"]
 
 
-def test_skills_run_script_passes_args_as_stdin_json(reg_with_scripts, tmp_path):
+def test_skills_run_script_passes_args_as_stdin_json(
+    reg_with_scripts, tmp_path
+):
     _write_skill_with_script(
         tmp_path / "system",
         "stdin-echo",
-        ("import json, sys\npayload = json.load(sys.stdin)\nprint(payload.get('skill_path', ''))\n"),
+        (
+            "import json, sys\npayload = json.load(sys.stdin)\nprint(payload.get('skill_path', ''))\n"
+        ),
     )
     tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
     payload = json.loads(
@@ -86,22 +94,40 @@ def test_skills_run_script_passes_argv(reg_with_scripts, tmp_path):
         "import sys\nprint('|'.join(sys.argv[1:]))\n",
     )
     tool = CallableTool(RunSkillScriptTool(reg_with_scripts, ctx=local_ctx()))
-    payload = json.loads(tool(skill_id="argv-echo", script_name="main.py", argv='--format json "two words"'))
+    payload = json.loads(
+        tool(
+            skill_id="argv-echo",
+            script_name="main.py",
+            argv='--format json "two words"',
+        )
+    )
     assert payload["ok"] is True
     assert payload["script_ok"] is True
-    assert payload["result"]["stdout"]["content"].strip() == "--format|json|two words"
+    assert (
+        payload["result"]["stdout"]["content"].strip()
+        == "--format|json|two words"
+    )
 
 
-async def test_skills_run_script_long_stdout_is_head_tail_with_preview(reg_with_scripts, tmp_path):
+async def test_skills_run_script_long_stdout_is_head_tail_with_preview(
+    reg_with_scripts, tmp_path
+):
     """Форма вызова — `acall`: синхронного входа у тула нет (async-only ядро)."""
     _write_skill_with_script(
         tmp_path / "system",
         "long-out",
         "import sys; sys.stdout.write('A' * 500)\n",
     )
-    cfg = {"exec_output_capture_max_chars": 100, "exec_output_preview_edge_chars": 10}
-    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx(cfg), config_dict=cfg)
-    payload = json.loads(await tool.acall(skill_id="long-out", script_name="main.py"))
+    cfg = {
+        "exec_output_capture_max_chars": 100,
+        "exec_output_preview_edge_chars": 10,
+    }
+    tool = RunSkillScriptTool(
+        reg_with_scripts, ctx=local_ctx(cfg), config_dict=cfg
+    )
+    payload = json.loads(
+        await tool.acall(skill_id="long-out", script_name="main.py")
+    )
     result = payload["result"]
     out = result["stdout"]
 
@@ -120,7 +146,9 @@ async def test_skills_run_script_long_stdout_is_head_tail_with_preview(reg_with_
     assert raw.index('"preview"') < raw.index('"stdout"')
 
 
-async def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_path):
+async def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(
+    tmp_path,
+):
     """Tokens that break shell quoting (Windows paths, quotes) pass verbatim.
 
     This is the cross-platform guarantee: an argv list goes through
@@ -132,14 +160,18 @@ async def test_local_exec_argv_is_shell_less_and_preserves_hostile_tokens(tmp_pa
         encoding="utf-8",
     )
     hostile = [r"C:\temp\it's report.pdf", '{"a": "b c"}', "--flag='x'"]
-    res = await LocalFsBackend().aexec_argv([sys.executable, str(script), *hostile], stdin="42")
+    res = await LocalFsBackend().aexec_argv(
+        [sys.executable, str(script), *hostile], stdin="42"
+    )
     assert res.return_code == 0
     lines = res.stdout.splitlines()
     assert lines[0] == "|".join(hostile)
     assert lines[1] == "42"
 
 
-async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_path):
+async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(
+    tmp_path,
+):
     """TrackingFsBackend (TUI wrapper) must expose exec_argv and delegate
     to the inner LocalFsBackend without a POSIX shell string.
 
@@ -162,7 +194,9 @@ async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(tmp_pat
     inner = LocalFsBackend()
     ctx = local_ctx()
     wrapped = TrackingFsBackend(inner, ctx)
-    res = await wrapped.aexec_argv([sys.executable, str(script), *hostile], stdin="42")
+    res = await wrapped.aexec_argv(
+        [sys.executable, str(script), *hostile], stdin="42"
+    )
     assert res.return_code == 0
     lines = res.stdout.splitlines()
     assert lines[0] == "|".join(hostile)
@@ -180,5 +214,11 @@ def test_default_exec_argv_builds_posix_pipe_for_sandbox_backends():
             return ExecResult(stdout="", stderr="", return_code=0)
 
     rec = _Recorder()
-    FsBackend.exec_argv(rec, ["python3", "/harbor/skills/s/scripts/x.py", "a b"], stdin='{"k": 1}')
-    assert rec.command == ("printf '%s' '{\"k\": 1}' | python3 /harbor/skills/s/scripts/x.py 'a b'")
+    FsBackend.exec_argv(
+        rec,
+        ["python3", "/harbor/skills/s/scripts/x.py", "a b"],
+        stdin='{"k": 1}',
+    )
+    assert rec.command == (
+        "printf '%s' '{\"k\": 1}' | python3 /harbor/skills/s/scripts/x.py 'a b'"
+    )

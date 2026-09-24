@@ -82,7 +82,9 @@ async def test_cancellation_reports_the_unconfirmed_count(caplog):
             await task
 
     texts = [r.getMessage() for r in caplog.records]
-    assert any("subagent_trace_writes_unconfirmed" in t for t in texts), f"отмена прошла молча: {texts}"
+    assert any("subagent_trace_writes_unconfirmed" in t for t in texts), (
+        f"отмена прошла молча: {texts}"
+    )
     assert any("left=3" in t for t in texts), f"неверный остаток: {texts}"
 
 

@@ -9,7 +9,10 @@ import json
 from typing import Any, Dict, List, Optional
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
+from gc_core.loop_detector.constants import (
+    GENERIC_PROFILE,
+    loop_warn_on_repeat,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
@@ -40,7 +43,9 @@ class SessionTodo(AbstractSimpleTool):
     tool_name = SESSION_TODO_TOOL_NAME
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_TODO_TOOL_NAME,
@@ -94,7 +99,9 @@ class SessionTodo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: session_todo
 Tool description: Structured checklist of the CURRENT task (plan + progress). Each call fully replaces the list; empty list clears it. Statuses: pending | in_progress | completed.
 
@@ -112,7 +119,12 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
 """
 
     def _result(
-        self, *, ok: bool, items: List[Dict[str, str]], message: str, error: Optional[Dict[str, Any]] = None
+        self,
+        *,
+        ok: bool,
+        items: List[Dict[str, str]],
+        message: str,
+        error: Optional[Dict[str, Any]] = None,
     ) -> str:
         payload: Dict[str, Any] = {
             "tool": SESSION_TODO_TOOL_NAME,
@@ -139,7 +151,9 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
     def _validate_item(self, index: int, item: Any) -> tuple:
         """``(ответ_с_ошибкой, None)`` либо ``(None, нормализованный_пункт)``."""
         if not isinstance(item, dict):
-            return self._error("invalid_item", f"todos[{index}] must be an object."), None
+            return self._error(
+                "invalid_item", f"todos[{index}] must be an object."
+            ), None
         extra = set(item) - {"content", "status"}
         if extra:
             return self._error(
@@ -166,7 +180,10 @@ Input schema: {"type":"object","properties":{"todos":{"type":"array","items":{"t
                 {
                     "tool": SESSION_TODO_TOOL_NAME,
                     "ok": False,
-                    "error": {"type": "no_state", "message": "state is missing."},
+                    "error": {
+                        "type": "no_state",
+                        "message": "state is missing.",
+                    },
                     "message": "Checklist NOT changed.",
                 },
                 ensure_ascii=False,

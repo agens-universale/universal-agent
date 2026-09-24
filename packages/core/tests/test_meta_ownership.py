@@ -11,7 +11,10 @@ from gc_core.persistence.meta_ownership import (
 def test_resolve_runtime_flag_name():
     assert resolve_runtime_flag_name("summarizing") == "summarizing"
     assert resolve_runtime_flag_name("finalizing") == "finalizing"
-    assert resolve_runtime_flag_name("finish_gate_checking") == "finish_gate_checking"
+    assert (
+        resolve_runtime_flag_name("finish_gate_checking")
+        == "finish_gate_checking"
+    )
 
 
 def test_resolve_runtime_flag_rejects_unknown():
@@ -30,6 +33,11 @@ def test_merge_runtime_into_meta():
 
 
 def test_runtime_section():
-    assert runtime_section({"runtime": {"summarizing": True}}) == {"summarizing": True}
+    assert runtime_section({"runtime": {"summarizing": True}}) == {
+        "summarizing": True
+    }
     assert runtime_section({}) == {}
-    assert frozenset({"summarizing", "finalizing", "finish_gate_checking"}) == RUNTIME_FLAG_NAMES
+    assert (
+        frozenset({"summarizing", "finalizing", "finish_gate_checking"})
+        == RUNTIME_FLAG_NAMES
+    )

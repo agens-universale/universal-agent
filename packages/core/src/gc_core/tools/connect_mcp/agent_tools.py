@@ -75,7 +75,9 @@ def _collect_schema_refs(node: Any) -> set[str]:
     return refs
 
 
-def _inline_defs_ref(node: dict, defs: dict[str, Any], depth: int, resolving: frozenset[str]) -> "dict | None":
+def _inline_defs_ref(
+    node: dict, defs: dict[str, Any], depth: int, resolving: frozenset[str]
+) -> "dict | None":
     """Узел с ``$ref`` на известный ``$defs`` → раскрытая схема; иначе None."""
     ref = node.get("$ref")
     if not (isinstance(ref, str) and ref.startswith("#/$defs/")):
@@ -86,7 +88,9 @@ def _inline_defs_ref(node: dict, defs: dict[str, Any], depth: int, resolving: fr
         return None
     if name in resolving:
         return {"$ref": ref}
-    resolved = _resolve_schema_refs(target, defs, depth + 1, resolving | {name})
+    resolved = _resolve_schema_refs(
+        target, defs, depth + 1, resolving | {name}
+    )
     merged = dict(resolved) if isinstance(resolved, dict) else {}
     for key, value in node.items():
         if key != "$ref" and key not in merged:
@@ -116,11 +120,16 @@ def _resolve_schema_refs(
             out[key] = _resolve_schema_refs(value, defs, depth + 1, resolving)
         return out
     if isinstance(node, list):
-        return [_resolve_schema_refs(item, defs, depth + 1, resolving) for item in node]
+        return [
+            _resolve_schema_refs(item, defs, depth + 1, resolving)
+            for item in node
+        ]
     return node
 
 
-def _preserve_referenced_defs(parameters: Dict[str, Any], source_defs: dict[str, Any]) -> None:
+def _preserve_referenced_defs(
+    parameters: Dict[str, Any], source_defs: dict[str, Any]
+) -> None:
     """Keep ``$defs`` entries still pointed at by ``$ref`` after partial inlining."""
     needed = _collect_schema_refs(parameters)
     while needed:
@@ -134,7 +143,9 @@ def _preserve_referenced_defs(parameters: Dict[str, Any], source_defs: dict[str,
         needed = expanded
     if needed:
         parameters[_DEFS_KEY] = {
-            name: copy.deepcopy(source_defs[name]) for name in sorted(needed) if name in source_defs
+            name: copy.deepcopy(source_defs[name])
+            for name in sorted(needed)
+            if name in source_defs
         }
     elif _DEFS_KEY in parameters:
         del parameters[_DEFS_KEY]
@@ -158,7 +169,11 @@ def _ensure_param_description(schema: Dict[str, Any], param_name: str) -> None:
     Гарантировать наличие description у параметра.
     При отсутствии используем title или генерируем простое описание.
     """
-    if "description" in schema and isinstance(schema["description"], str) and schema["description"].strip():
+    if (
+        "description" in schema
+        and isinstance(schema["description"], str)
+        and schema["description"].strip()
+    ):
         return
 
     title = schema.get("title")
@@ -175,12 +190,16 @@ def _bare_schema_ref(schema: dict[str, Any]) -> dict[str, str] | None:
     return None
 
 
-def _normalize_combinator_branches(schema: dict, param_name: str, *, openai_strict: bool) -> None:
+def _normalize_combinator_branches(
+    schema: dict, param_name: str, *, openai_strict: bool
+) -> None:
     for comb_key in ("anyOf", "oneOf", "allOf"):
         branches = schema.get(comb_key)
         if isinstance(branches, list):
             schema[comb_key] = [
-                _normalize_schema_recursive(branch, param_name=param_name, openai_strict=openai_strict)
+                _normalize_schema_recursive(
+                    branch, param_name=param_name, openai_strict=openai_strict
+                )
                 if isinstance(branch, dict)
                 else branch
                 for branch in branches
@@ -206,8 +225,12 @@ def _infer_missing_type(schema: dict) -> None:
         schema["type"] = "string"
 
 
-def _normalize_property(name: str, subschema: Any, *, openai_strict: bool) -> dict:
-    normalized = _normalize_schema_recursive(subschema, param_name=name, openai_strict=openai_strict)
+def _normalize_property(
+    name: str, subschema: Any, *, openai_strict: bool
+) -> dict:
+    normalized = _normalize_schema_recursive(
+        subschema, param_name=name, openai_strict=openai_strict
+    )
     if not isinstance(normalized, dict):
         normalized = {
             "type": "string",
@@ -229,7 +252,9 @@ def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
         schema["required"] = required
 
     for name, subschema in list(props.items()):
-        props[name] = _normalize_property(name, subschema, openai_strict=openai_strict)
+        props[name] = _normalize_property(
+            name, subschema, openai_strict=openai_strict
+        )
 
     if schema.get("additionalProperties") is not False:
         schema["additionalProperties"] = False
@@ -238,7 +263,9 @@ def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
         apply_openai_strict_object(schema)
 
 
-def _normalize_schema_recursive(schema: Any, param_name: str = "", *, openai_strict: bool = False) -> Any:
+def _normalize_schema_recursive(
+    schema: Any, param_name: str = "", *, openai_strict: bool = False
+) -> Any:
     """
     Рекурсивная нормализация фрагмента JSON Schema.
     Поддерживает объекты, массивы и простые типы.
@@ -258,7 +285,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "", *, openai_str
     if bare_ref is not None:
         return bare_ref
 
-    _normalize_combinator_branches(schema, param_name, openai_strict=openai_strict)
+    _normalize_combinator_branches(
+        schema, param_name, openai_strict=openai_strict
+    )
     _infer_missing_type(schema)
 
     schema_type = schema.get("type")
@@ -270,7 +299,9 @@ def _normalize_schema_recursive(schema: Any, param_name: str = "", *, openai_str
         items = schema.get("items")
         if items is not None:
             schema["items"] = _normalize_schema_recursive(
-                items, param_name=f"{param_name}_item", openai_strict=openai_strict
+                items,
+                param_name=f"{param_name}_item",
+                openai_strict=openai_strict,
             )
 
     else:
@@ -294,7 +325,9 @@ def _agent_tool_description(raw: Any) -> str:
     )
 
 
-def _object_parameters(parameters: Any, *, openai_strict: bool) -> Dict[str, Any]:
+def _object_parameters(
+    parameters: Any, *, openai_strict: bool
+) -> Dict[str, Any]:
     """parameters как object-схема: отсутствующие → пустой объект, не-object → обёртка {value}."""
     if not isinstance(parameters, dict):
         return {
@@ -309,7 +342,9 @@ def _object_parameters(parameters: Any, *, openai_strict: bool) -> Dict[str, Any
         return {
             "type": "object",
             "properties": {
-                "value": _normalize_schema_recursive(parameters, param_name="value", openai_strict=openai_strict),
+                "value": _normalize_schema_recursive(
+                    parameters, param_name="value", openai_strict=openai_strict
+                ),
             },
             "required": ["value"],
             "additionalProperties": False,
@@ -317,7 +352,9 @@ def _object_parameters(parameters: Any, *, openai_strict: bool) -> Dict[str, Any
     return parameters
 
 
-def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any], *, openai_strict: bool = False) -> Dict[str, Any]:
+def normalize_tool_spec_for_agent(
+    tool_spec: Dict[str, Any], *, openai_strict: bool = False
+) -> Dict[str, Any]:
     """
     Привести произвольную сигнатуру MCP-инструмента к стандарту агента.
     Гарантируются:
@@ -333,7 +370,9 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any], *, openai_strict: b
 
     spec["description"] = _agent_tool_description(spec.get("description"))
 
-    parameters = _object_parameters(spec.get("parameters"), openai_strict=openai_strict)
+    parameters = _object_parameters(
+        spec.get("parameters"), openai_strict=openai_strict
+    )
     _inline_parameter_schema_refs(parameters)
 
     props = parameters.get("properties")
@@ -347,7 +386,9 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any], *, openai_strict: b
         parameters["required"] = required
 
     for name, param_schema in list(props.items()):
-        props[name] = _normalize_property(name, param_schema, openai_strict=openai_strict)
+        props[name] = _normalize_property(
+            name, param_schema, openai_strict=openai_strict
+        )
 
     if "additionalProperties" not in parameters:
         parameters["additionalProperties"] = False
@@ -360,7 +401,9 @@ def normalize_tool_spec_for_agent(tool_spec: Dict[str, Any], *, openai_strict: b
         for def_name, def_schema in list(defs.items()):
             if isinstance(def_schema, dict):
                 defs[def_name] = _normalize_schema_recursive(
-                    def_schema, param_name=def_name, openai_strict=openai_strict
+                    def_schema,
+                    param_name=def_name,
+                    openai_strict=openai_strict,
                 )
 
     spec["parameters"] = parameters
@@ -438,14 +481,19 @@ def _servers_cfg_with_trace(
     header_name = trace_header_name(config_dict, "trace_id")
     out: Dict[str, Any] = {}
     for name, srv in servers_cfg.items():
-        if not isinstance(srv, dict) or not srv.get("trace_header_enabled", False):
+        if not isinstance(srv, dict) or not srv.get(
+            "trace_header_enabled", False
+        ):
             out[name] = srv
             continue
         transport = str(srv.get("transport") or "").strip()
         if transport in _TRACE_HEADER_TRANSPORTS:
             out[name] = {
                 **srv,
-                "headers": {**(srv.get("headers") or {}), header_name: trace_id},
+                "headers": {
+                    **(srv.get("headers") or {}),
+                    header_name: trace_id,
+                },
             }
         elif transport in _TRACE_ENV_TRANSPORTS:
             out[name] = {
@@ -510,7 +558,9 @@ def _prepare_mcp_tools_data(
     return tools_cache, servers_cfg
 
 
-def _warn_if_cache_misses_the_sandbox(tools_cache: ToolsCache, servers_cfg: Dict[str, Any], os_backend: Any) -> None:
+def _warn_if_cache_misses_the_sandbox(
+    tools_cache: ToolsCache, servers_cfg: Dict[str, Any], os_backend: Any
+) -> None:
     """Сказать вслух, что дискавери уйдёт мимо песочницы.
 
     Бэкенд кэш получает только при создании: `rebind` перепривязывает конфиг,
@@ -533,7 +583,8 @@ def _warn_if_cache_misses_the_sandbox(tools_cache: ToolsCache, servers_cfg: Dict
     orphaned = sorted(
         name
         for name, server_cfg in (servers_cfg or {}).items()
-        if isinstance(server_cfg, dict) and str(server_cfg.get("execute_on") or "agent") == "os_backend"
+        if isinstance(server_cfg, dict)
+        and str(server_cfg.get("execute_on") or "agent") == "os_backend"
     )
     if not orphaned:
         return
@@ -591,12 +642,20 @@ def _assemble_mcp_tools_data(
         if not isinstance(tool_entry, dict):
             continue
 
-        normalized_spec = normalize_tool_spec_for_agent(tool_entry, openai_strict=openai_strict)
-        server_key = metadata.get("mcp_server_key") if isinstance(metadata, dict) else None
+        normalized_spec = normalize_tool_spec_for_agent(
+            tool_entry, openai_strict=openai_strict
+        )
+        server_key = (
+            metadata.get("mcp_server_key")
+            if isinstance(metadata, dict)
+            else None
+        )
         server_cfg = servers_cfg.get(server_key) if server_key else None
         loop_warn = _loop_warn_for_mcp_tool(
             server_cfg if isinstance(server_cfg, dict) else None,
-            _mcp_base_tool_name(full_name, entry if isinstance(entry, dict) else {}),
+            _mcp_base_tool_name(
+                full_name, entry if isinstance(entry, dict) else {}
+            ),
         )
 
         tool_data: Dict[str, Any] = {
@@ -622,7 +681,9 @@ async def aget_mcp_tools_data_for_config(
     Форма одна. Синхронного имени нет: единственный вызывающий — сборка
     набора тулов, и она корутинная.
     """
-    prepared = _prepare_mcp_tools_data(config_dict, tools_cache=tools_cache, os_backend=os_backend)
+    prepared = _prepare_mcp_tools_data(
+        config_dict, tools_cache=tools_cache, os_backend=os_backend
+    )
     if prepared is None:
         return {}, {}
     cache, servers_cfg = prepared
@@ -632,7 +693,13 @@ async def aget_mcp_tools_data_for_config(
     except Exception:
         logger.error("Failed to load MCP tools", exc_info=True)
         return {}, {}
-    return _assemble_mcp_tools_data(mcp_registry, status_map, config_dict, servers_cfg, os_backend=os_backend)
+    return _assemble_mcp_tools_data(
+        mcp_registry,
+        status_map,
+        config_dict,
+        servers_cfg,
+        os_backend=os_backend,
+    )
 
 
 __all__ = [

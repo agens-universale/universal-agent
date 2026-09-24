@@ -24,7 +24,9 @@ async def test_cmd_init_busy_guard(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     rec = _RecRunner(running=True)
     app.active_runner = rec
     async with app.run_test() as pilot:
@@ -42,7 +44,9 @@ async def test_cmd_init_starts_run_with_init_prompt(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     rec = _RecRunner(running=False)
     # get_runner() должен вернуть наш стаб
     app.active_runner = rec

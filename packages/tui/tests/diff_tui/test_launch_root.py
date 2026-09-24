@@ -23,10 +23,14 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
             self._config_path = None
             self._config_project_local = None
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *args, **kwargs):  # заглушка §3.5-нотиса
+        def _maybe_notice_profile_activation(
+            self, *args, **kwargs
+        ):  # заглушка §3.5-нотиса
             return None
 
         def run(self):
@@ -44,14 +48,24 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
             ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
-    monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda _cfg: None)
-    monkeypatch.setattr("gc_core.onboarding.is_unconfigured", lambda _cfg: False)
+    monkeypatch.setattr(
+        "gc_core.config.apply_cli_overrides", lambda _cfg: None
+    )
+    monkeypatch.setattr(
+        "gc_core.onboarding.is_unconfigured", lambda _cfg: False
+    )
     monkeypatch.setattr(
         "gc_core.thread_store.resolve_threads_dir",
         lambda _cfg: str(tmp_path / "threads"),
     )
-    monkeypatch.setattr("gc_core.config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
+    monkeypatch.setattr(
+        "gc_core.config.resolve_config_path",
+        lambda _p: str(tmp_path / "c.yml"),
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.project_local_config_path",
+        lambda: None,
+    )
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,
@@ -73,7 +87,9 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     monkeypatch.setattr(
         tui_pkg.importlib,
         "import_module",
-        lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock(),
+        lambda name, package=None: (
+            fake_mod if name == "gc_tui.app" else MagicMock()
+        ),
     )
 
     rc = tui_pkg.main([])
@@ -101,10 +117,14 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
             self._config_path = None
             self._config_project_local = None
 
-        def set_config_path(self, path):  # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
-        def _maybe_notice_profile_activation(self, *args, **kwargs):  # заглушка §3.5-нотиса
+        def _maybe_notice_profile_activation(
+            self, *args, **kwargs
+        ):  # заглушка §3.5-нотиса
             return None
 
         def run(self):
@@ -122,14 +142,24 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
             ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
-    monkeypatch.setattr("gc_core.config.apply_cli_overrides", lambda _cfg: None)
-    monkeypatch.setattr("gc_core.onboarding.is_unconfigured", lambda _cfg: False)
+    monkeypatch.setattr(
+        "gc_core.config.apply_cli_overrides", lambda _cfg: None
+    )
+    monkeypatch.setattr(
+        "gc_core.onboarding.is_unconfigured", lambda _cfg: False
+    )
     monkeypatch.setattr(
         "gc_core.thread_store.resolve_threads_dir",
         lambda _cfg: str(tmp_path / "threads"),
     )
-    monkeypatch.setattr("gc_core.config.resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
-    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
+    monkeypatch.setattr(
+        "gc_core.config.resolve_config_path",
+        lambda _p: str(tmp_path / "c.yml"),
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.project_local_config_path",
+        lambda: None,
+    )
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.ensure_project_gc_dir",
         lambda: None,
@@ -151,7 +181,9 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     monkeypatch.setattr(
         tui_pkg.importlib,
         "import_module",
-        lambda name, package=None: fake_mod if name == "gc_tui.app" else MagicMock(),
+        lambda name, package=None: (
+            fake_mod if name == "gc_tui.app" else MagicMock()
+        ),
     )
 
     assert tui_pkg.main([]) == 0

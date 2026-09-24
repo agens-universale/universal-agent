@@ -189,7 +189,9 @@ def test_a_prefixed_names_are_rejected_with_a_hint():
 
     with pytest.raises(ThreadStoreContractError) as err:
         assert_conforms(ANamed)
-    assert "AsyncThreadStore" in str(err.value), "отказ не подсказал асинхронный контракт"
+    assert "AsyncThreadStore" in str(err.value), (
+        "отказ не подсказал асинхронный контракт"
+    )
 
 
 # --- типы контракта --------------------------------------------------------
@@ -243,7 +245,11 @@ async def test_store_reaches_the_context_and_session(tmp_path):
 
     store = MemoryThreadStore()
     ctx = await acreate_run_context(
-        {"stop_tools": [], "backend_api_mode": "chat_completions", "save_logs": False},
+        {
+            "stop_tools": [],
+            "backend_api_mode": "chat_completions",
+            "save_logs": False,
+        },
         thread_store=store,
     )
     assert ctx.thread_store is store, "контекст не донёс хранилище"
@@ -275,12 +281,16 @@ async def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
         thread_id=TID,
         store=store,
     )
-    await session.apersist_batch([_msg("m1", "раз")], previous_response_id=None)
+    await session.apersist_batch(
+        [_msg("m1", "раз")], previous_response_id=None
+    )
 
     assert store.calls.get("append_messages"), "запись прошла мимо хранилища"
     assert store.load_messages(SYS, TID), "сообщение не сохранилось"
     created = [p for p in tmp_path.rglob("*") if p.is_file()]
-    assert created == [], f"сессия создала файлы вопреки in-memory хранилищу: {created}"
+    assert created == [], (
+        f"сессия создала файлы вопреки in-memory хранилищу: {created}"
+    )
 
 
 def test_memory_store_touches_no_disk(tmp_path, monkeypatch):
@@ -346,14 +356,24 @@ def test_no_direct_file_calls_left_in_core():
     }
     core = REPO / "packages" / "core" / "src" / "gc_core"
     # Сам слой и его реализации зовут модульные функции законно — это их работа.
-    own_files = {"thread_store.py", "thread_store_file.py", "thread_store_types.py"}
+    own_files = {
+        "thread_store.py",
+        "thread_store_file.py",
+        "thread_store_types.py",
+    }
     offenders = []
     for path in core.rglob("*.py"):
         if path.name in own_files:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in module_fns:
-                offenders.append(f"{path.relative_to(core)}:{node.lineno} {node.func.id}")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in module_fns
+            ):
+                offenders.append(
+                    f"{path.relative_to(core)}:{node.lineno} {node.func.id}"
+                )
 
     assert offenders == [], (
         "прямые вызовы файлового слоя мимо хранилища:\n  "

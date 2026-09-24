@@ -6,7 +6,10 @@ import tempfile
 import pytest
 import yaml
 from gc_core.config import load_config
-from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC, BackendConfig
+from gc_core.config_modules.backend import (
+    DEFAULT_REQUEST_TIMEOUT_SEC,
+    BackendConfig,
+)
 from gc_core.utils import connect_backend
 from gc_testkit import run_coro
 
@@ -50,7 +53,9 @@ def test_load_config_timeout_default_when_omitted():
         with open(cfg_path, "w", encoding="utf-8") as fd:
             fd.write("backend:\n  api_mode: chat_completions\n")
         cfg = load_config(cfg_path)
-        assert cfg["backend_request_timeout_sec"] == DEFAULT_REQUEST_TIMEOUT_SEC
+        assert (
+            cfg["backend_request_timeout_sec"] == DEFAULT_REQUEST_TIMEOUT_SEC
+        )
 
 
 def _install_capturing_transport(monkeypatch, seen):
@@ -68,7 +73,9 @@ def _install_capturing_transport(monkeypatch, seen):
             return await super().post(*args, **kwargs)
 
     def handler(request):
-        return httpx.Response(200, json={"id": "x", "choices": [{"message": {"content": "ok"}}]})
+        return httpx.Response(
+            200, json={"id": "x", "choices": [{"message": {"content": "ok"}}]}
+        )
 
     monkeypatch.setattr(
         connect_backend,

@@ -29,7 +29,9 @@ def test_write_clipboard_windows_uses_winapi(monkeypatch):
     # Win32 — через ctypes (_win_write_clipboard), без subprocess.
     monkeypatch.setattr(os_ops.sys, "platform", "win32")
     seen: dict = {}
-    monkeypatch.setattr(os_ops, "_win_write_clipboard", lambda t: seen.update(text=t) or True)
+    monkeypatch.setattr(
+        os_ops, "_win_write_clipboard", lambda t: seen.update(text=t) or True
+    )
     assert os_ops.write_clipboard("тест") is True
     assert seen["text"] == "тест"
 

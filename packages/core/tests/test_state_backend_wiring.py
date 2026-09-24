@@ -27,9 +27,17 @@ async def test_state_without_backend_uses_local_cwd(tmp_path, monkeypatch):
 
 
 async def test_state_with_workspace_uses_container_root():
-    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True)
+    backend = FakeSandboxBackend(
+        cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True
+    )
     state = await _state(
-        workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True)
+        workspace=ExecutionWorkspace(
+            root="/testbed",
+            backend=backend,
+            shell="sh",
+            os_name="Linux",
+            root_writable=True,
+        )
     )
     assert state.initial_project_data["projectDir"] == "/testbed"
     assert state.initial_project_data["isGitProject"] == "true"
@@ -41,7 +49,9 @@ async def test_state_with_workspace_uses_container_root():
 
 
 async def test_state_os_backend_compat_builds_workspace():
-    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True)
+    backend = FakeSandboxBackend(
+        cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True
+    )
     state = await _state(os_backend=backend)
     assert state.workspace is not None
     assert state.workspace.root == "/testbed"
@@ -55,9 +65,17 @@ async def test_state_with_workspace_is_json_serializable():
 
     from gc_core.persistence.state_repository import StateRepository
 
-    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": []}, git=False)
+    backend = FakeSandboxBackend(
+        cwd="/testbed", tree={"/testbed": []}, git=False
+    )
     state = await _state(
-        workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True)
+        workspace=ExecutionWorkspace(
+            root="/testbed",
+            backend=backend,
+            shell="sh",
+            os_name="Linux",
+            root_writable=True,
+        )
     )
 
     payload = StateRepository.serialize_storage({state.state_id: state})

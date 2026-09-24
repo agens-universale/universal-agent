@@ -19,9 +19,15 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
 from gc_core.backends.walk_util import WalkEntry
-from gc_core.config_modules.fs_tools import FsFindInFilesConfig, parse_find_in_files_config
+from gc_core.config_modules.fs_tools import (
+    FsFindInFilesConfig,
+    parse_find_in_files_config,
+)
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.security.path_policy import _extract_config_dict, resolve_tool_context
+from gc_core.security.path_policy import (
+    _extract_config_dict,
+    resolve_tool_context,
+)
 from gc_core.security.read_guard import (
     ReadGuardViolation,
     _resolve_skills_root,
@@ -56,9 +62,13 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 
 # Python-path fallbacks where an in-sandbox needle prefilter is worth a try: the
 # recipe exists (grep+find), only the pattern/glob could not be expressed natively.
-_PREFILTER_FALLBACK_REASONS = frozenset({"pattern_not_native", "file_pattern_not_native"})
+_PREFILTER_FALLBACK_REASONS = frozenset(
+    {"pattern_not_native", "file_pattern_not_native"}
+)
 # Ответы, несущие candidate_count / candidate_limit / breakdown (карту по папкам).
-_REFUSE_STOP_REASONS = frozenset({"too_many_candidate_files", "unfiltered_host_reads", "output_capped"})
+_REFUSE_STOP_REASONS = frozenset(
+    {"too_many_candidate_files", "unfiltered_host_reads", "output_capped"}
+)
 
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
@@ -85,7 +95,9 @@ class _ScanShared:
     shortlist_len: int = 0
 
 
-def _memoized_path_predicate(pred: Callable[[str], bool]) -> Callable[[str], bool]:
+def _memoized_path_predicate(
+    pred: Callable[[str], bool],
+) -> Callable[[str], bool]:
     """Cache ``pred`` per path: grep reports the same file once per hit."""
     cache: Dict[str, bool] = {}
 
@@ -126,10 +138,14 @@ class FindInFiles(AbstractSimpleTool):
     QUERY_MODE_RE_DOTALL = "python-re-dotall"
     # Backward-compatible alias (deprecated name).
     QUERY_MODE_REGEXP = QUERY_MODE_RE
-    _QUERY_MODES = frozenset({QUERY_MODE_TEXT, QUERY_MODE_RE, QUERY_MODE_RE_DOTALL})
+    _QUERY_MODES = frozenset(
+        {QUERY_MODE_TEXT, QUERY_MODE_RE, QUERY_MODE_RE_DOTALL}
+    )
 
     @classmethod
-    def _param_schema(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _param_schema(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         cfg = parse_find_in_files_config(config_dict)
         dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return {
@@ -167,7 +183,9 @@ class FindInFiles(AbstractSimpleTool):
                     "type": "integer",
                     "minimum": 1,
                     "maximum": mtot,
-                    "description": (f"Maximum matches to return. Default {dlim}, maximum {mtot}."),
+                    "description": (
+                        f"Maximum matches to return. Default {dlim}, maximum {mtot}."
+                    ),
                 },
                 "case_insensitive": {
                     "type": "boolean",
@@ -211,7 +229,9 @@ class FindInFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
         cfg = parse_find_in_files_config(config_dict)
         dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
@@ -246,7 +266,9 @@ class FindInFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         skip = hard_exclude_dir_names_for_prompt()
         cfg = parse_find_in_files_config(config_dict)
         dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
@@ -307,16 +329,22 @@ class FindInFiles(AbstractSimpleTool):
             show_excluded_dirs,
         )
 
-    def _resolve_config(self) -> Tuple[Any, FsFindInFilesConfig, Dict[str, Any]]:
+    def _resolve_config(
+        self,
+    ) -> Tuple[Any, FsFindInFilesConfig, Dict[str, Any]]:
         rg_context = resolve_tool_context(self)
-        cfg_dict = _extract_config_dict(self, getattr(rg_context, "ctx", None), {})
+        cfg_dict = _extract_config_dict(
+            self, getattr(rg_context, "ctx", None), {}
+        )
         cfg_dict = cfg_dict if isinstance(cfg_dict, dict) else {}
         return rg_context, parse_find_in_files_config(cfg_dict), cfg_dict
 
     def _resolve_max_bytes(self, cfg_dict: Dict[str, Any]) -> int:
         return fs_find_in_files_max_bytes(cfg_dict)
 
-    def _candidate_limit_for_mode(self, mode: PatternMode, config: FsFindInFilesConfig) -> int:
+    def _candidate_limit_for_mode(
+        self, mode: PatternMode, config: FsFindInFilesConfig
+    ) -> int:
         attr = _MODE_CANDIDATE_LIMIT_ATTR[mode]
         return int(getattr(config, attr))
 
@@ -335,12 +363,19 @@ class FindInFiles(AbstractSimpleTool):
         if not isinstance(path, str):
             return self._error("invalid_argument", "path")
         if not self._backend.isabs(path):
-            return self._error("invalid_argument", "path", "path must be absolute")
+            return self._error(
+                "invalid_argument", "path", "path must be absolute"
+            )
         if not isinstance(pattern, str):
             return self._error("invalid_argument", "pattern")
         if pattern == "":
-            return self._error("invalid_argument", "pattern", "pattern must be non-empty")
-        if query_mode is not None and (not isinstance(query_mode, str) or query_mode not in self._QUERY_MODES):
+            return self._error(
+                "invalid_argument", "pattern", "pattern must be non-empty"
+            )
+        if query_mode is not None and (
+            not isinstance(query_mode, str)
+            or query_mode not in self._QUERY_MODES
+        ):
             return self._error(
                 "invalid_argument",
                 "query_mode",
@@ -365,7 +400,9 @@ class FindInFiles(AbstractSimpleTool):
         if not isinstance(limit, int) or isinstance(limit, bool):
             return self._error("invalid_argument", "limit")
         if limit < 1:
-            return self._error("invalid_argument", "limit", "limit must be >= 1")
+            return self._error(
+                "invalid_argument", "limit", "limit must be >= 1"
+            )
         return None
 
     def _compile_query(
@@ -381,15 +418,37 @@ class FindInFiles(AbstractSimpleTool):
             try:
                 compiled = re.compile(re.escape(pattern), flags)
             except re.error as e:
-                return self._error("invalid_argument", "pattern", f"Invalid pattern: {e}"), None, False, None, None
+                return (
+                    self._error(
+                        "invalid_argument", "pattern", f"Invalid pattern: {e}"
+                    ),
+                    None,
+                    False,
+                    None,
+                    None,
+                )
             effective_ci = bool(case_insensitive)
-            needles = Needles(required_literal=pattern, or_group=None, effective_ci=effective_ci)
+            needles = Needles(
+                required_literal=pattern,
+                or_group=None,
+                effective_ci=effective_ci,
+            )
             return None, compiled, effective_ci, needles, PatternMode.LIKE
         try:
             compiled = re.compile(pattern, flags)
-            scan = classify_scan_pattern(pattern, case_insensitive=case_insensitive)
+            scan = classify_scan_pattern(
+                pattern, case_insensitive=case_insensitive
+            )
         except re.error as e:
-            return self._error("invalid_argument", "pattern", f"Invalid regex: {e}"), None, False, None, None
+            return (
+                self._error(
+                    "invalid_argument", "pattern", f"Invalid regex: {e}"
+                ),
+                None,
+                False,
+                None,
+                None,
+            )
         return None, compiled, scan.effective_ci, scan.needles, scan.mode
 
     async def _dispatch(
@@ -404,7 +463,14 @@ class FindInFiles(AbstractSimpleTool):
         show_excluded_dirs: bool = False,
     ) -> str:
         arg_error = self._dispatch_arg_error(
-            path, pattern, query_mode, limit, case_insensitive, file_pattern, exclude_dirs, show_excluded_dirs
+            path,
+            pattern,
+            query_mode,
+            limit,
+            case_insensitive,
+            file_pattern,
+            exclude_dirs,
+            show_excluded_dirs,
         )
         if arg_error is not None:
             return arg_error
@@ -413,8 +479,8 @@ class FindInFiles(AbstractSimpleTool):
             query_mode = self.QUERY_MODE_RE
 
         # text / python-re: line-oriented '.' ; python-re-dotall: '.' spans newlines.
-        query_error, compiled, effective_ci, needles, pattern_mode = self._compile_query(
-            pattern, query_mode, case_insensitive
+        query_error, compiled, effective_ci, needles, pattern_mode = (
+            self._compile_query(pattern, query_mode, case_insensitive)
         )
         if query_error is not None:
             return query_error
@@ -509,7 +575,9 @@ class FindInFiles(AbstractSimpleTool):
         return starts
 
     @staticmethod
-    def _offset_to_line(line_starts: List[int], offset: int, text_len: int) -> int:
+    def _offset_to_line(
+        line_starts: List[int], offset: int, text_len: int
+    ) -> int:
         if not line_starts:
             return 1
         if offset <= 0:
@@ -544,7 +612,10 @@ class FindInFiles(AbstractSimpleTool):
 
         # Prefer a plain head prefix when the whole match is already visible.
         if me <= max_chars:
-            return content[:max_chars] + f"...[line_truncated: showing first {max_chars} of {total} chars]"
+            return (
+                content[:max_chars]
+                + f"...[line_truncated: showing first {max_chars} of {total} chars]"
+            )
 
         match_len = me - ms
         if match_len >= max_chars:
@@ -614,7 +685,9 @@ class FindInFiles(AbstractSimpleTool):
         for raw in chunks:
             line = self._clip_context_line(raw)
             if used + len(line) > self.max_context_chars:
-                out.append(f"...[context_truncated: budget {self.max_context_chars} chars]...\n")
+                out.append(
+                    f"...[context_truncated: budget {self.max_context_chars} chars]...\n"
+                )
                 break
             out.append(line)
             used += len(line)
@@ -645,7 +718,11 @@ class FindInFiles(AbstractSimpleTool):
             f"...[context_truncated: match spans lines {start_line}-{end_line}; "
             f"omitted {omitted} lines between context windows]...\n"
         )
-        return self._join_context(list(lines[head_lo:head_hi]) + [marker] + list(lines[tail_lo:tail_hi]))
+        return self._join_context(
+            list(lines[head_lo:head_hi])
+            + [marker]
+            + list(lines[tail_lo:tail_hi])
+        )
 
     @staticmethod
     def _native_context_line_range(
@@ -659,7 +736,9 @@ class FindInFiles(AbstractSimpleTool):
         return max(1, start_line - context_num), end_line + context_num
 
     @staticmethod
-    def _extract_needed_lines(text: str, needed: Iterable[int]) -> Dict[int, str]:
+    def _extract_needed_lines(
+        text: str, needed: Iterable[int]
+    ) -> Dict[int, str]:
         """1-based lineno → keepends slice; scan stops after the last needed line."""
         want = {int(n) for n in needed if int(n) >= 1}
         if not want:
@@ -689,7 +768,9 @@ class FindInFiles(AbstractSimpleTool):
         end_line: int,
         context_num: int = 5,
     ) -> Optional[str]:
-        lo, hi = self._native_context_line_range(start_line, end_line, context_num)
+        lo, hi = self._native_context_line_range(
+            start_line, end_line, context_num
+        )
         chunks = [line_map[i] for i in range(lo, hi + 1) if i in line_map]
         if not chunks:
             return None
@@ -725,7 +806,9 @@ class FindInFiles(AbstractSimpleTool):
         except OSError:
             self._omit_native_context(hits, "read_error", size)
             return None
-        if classify_content_from_sample(abs_path, raw[:BINARY_SAMPLE_BYTES]).is_binary:
+        if classify_content_from_sample(
+            abs_path, raw[:BINARY_SAMPLE_BYTES]
+        ).is_binary:
             self._omit_native_context(hits, "binary", size)
             return None
         decoded = decode_text_bytes(raw, encoding=None)
@@ -734,7 +817,9 @@ class FindInFiles(AbstractSimpleTool):
             return None
         return decoded.text or ""
 
-    def _fill_native_contexts(self, hits: List[Dict[str, Any]], text: str) -> None:
+    def _fill_native_contexts(
+        self, hits: List[Dict[str, Any]], text: str
+    ) -> None:
         needed: List[int] = []
         spans: List[Tuple[int, int]] = []
         for m in hits:
@@ -763,7 +848,9 @@ class FindInFiles(AbstractSimpleTool):
             by_file.setdefault(m["file"], []).append(m)
 
         for abs_path, hits in by_file.items():
-            text = await self._aread_native_context_text(abs_path, hits, max_bytes)
+            text = await self._aread_native_context_text(
+                abs_path, hits, max_bytes
+            )
             if text is not None:
                 self._fill_native_contexts(hits, text)
 
@@ -785,7 +872,11 @@ class FindInFiles(AbstractSimpleTool):
             start = match.start()
             end = match.end()
             start_line = self._offset_to_line(line_starts, start, text_len)
-            end_line = start_line if end <= start else self._offset_to_line(line_starts, end - 1, text_len)
+            end_line = (
+                start_line
+                if end <= start
+                else self._offset_to_line(line_starts, end - 1, text_len)
+            )
             results.append(
                 {
                     "file": report_path,
@@ -798,7 +889,9 @@ class FindInFiles(AbstractSimpleTool):
                         start,
                         end,
                     ),
-                    "context": self._build_match_context(lines, start_line, end_line),
+                    "context": self._build_match_context(
+                        lines, start_line, end_line
+                    ),
                 }
             )
             if len(results) >= limit_eff:
@@ -832,7 +925,10 @@ class FindInFiles(AbstractSimpleTool):
 
     @staticmethod
     def _relevance_key(
-        abs_path: str, depth: int, needle_strings: List[str], effective_ci: bool
+        abs_path: str,
+        depth: int,
+        needle_strings: List[str],
+        effective_ci: bool,
     ) -> Tuple[int, int, str]:
         """Which matches survive ``limit`` — the one ranking for both engines:
         files whose name carries the needle first, then shallower, then by path."""
@@ -849,7 +945,11 @@ class FindInFiles(AbstractSimpleTool):
     def _depth_under(self, root: str, abs_path: str) -> int:
         root_n = self._backend.normpath(root).rstrip("/\\")
         abs_n = self._backend.normpath(abs_path)
-        if abs_n.startswith(root_n) and len(abs_n) > len(root_n) and abs_n[len(root_n)] in "/\\":
+        if (
+            abs_n.startswith(root_n)
+            and len(abs_n) > len(root_n)
+            and abs_n[len(root_n)] in "/\\"
+        ):
             rel = abs_n[len(root_n) + 1 :]
             return rel.count("/") + rel.count("\\")
         return 0
@@ -871,7 +971,10 @@ class FindInFiles(AbstractSimpleTool):
         if prefilter:
             return f"the in-sandbox prefilter {prefilter}", False
         if show_excluded_dirs:
-            return "show_excluded_dirs forces the host walk, so the in-sandbox prefilter is skipped", False
+            return (
+                "show_excluded_dirs forces the host walk, so the in-sandbox prefilter is skipped",
+                False,
+            )
         if fallback_reason not in _PREFILTER_FALLBACK_REASONS:
             return (
                 f"native grep is unavailable here ({fallback_reason}), so nothing narrowed "
@@ -883,21 +986,32 @@ class FindInFiles(AbstractSimpleTool):
         # это «нативного пути нет», а не отказ инструмента: та же защита стоит
         # ниже, на маршруте нативного grep.
         try:
-            native_ok = getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)
+            native_ok = getattr(backend, "has_grep", False) and getattr(
+                backend, "has_find", False
+            )
         except Exception:
             native_ok = False
         if not native_ok:
-            return "grep or find is unavailable in the sandbox, so no prefilter is possible", False
+            return (
+                "grep or find is unavailable in the sandbox, so no prefilter is possible",
+                False,
+            )
         from gc_core.utils.native_fs_search import prefilter_terms
 
-        if self._needle_strings(needles) and prefilter_terms(needles, case_insensitive=effective_ci) is None:
+        if (
+            self._needle_strings(needles)
+            and prefilter_terms(needles, case_insensitive=effective_ci) is None
+        ):
             # Игла есть, но для sandbox-фильтра непригодна — совет «добавь
             # фиксированную подстроку» здесь дезориентирует.
             return (
                 "the pattern's fixed substring cannot drive the in-sandbox prefilter "
                 "(non-ASCII under case_insensitive, or control characters)"
             ), False
-        return "the pattern has no fixed substring for an in-sandbox prefilter", True
+        return (
+            "the pattern has no fixed substring for an in-sandbox prefilter",
+            True,
+        )
 
     def _native_failure_guidance(self, failure: str) -> str:
         what = "timed out" if failure == "native_timeout" else "failed"
@@ -924,7 +1038,11 @@ class FindInFiles(AbstractSimpleTool):
         limit_requested: Optional[int] = None,
     ) -> str:
         if limit_capped:
-            requested = str(limit_requested) if limit_requested is not None else "the requested value"
+            requested = (
+                str(limit_requested)
+                if limit_requested is not None
+                else "the requested value"
+            )
             return (
                 f"Results truncated (showing up to {limit_eff} matches). "
                 f"Requested limit {requested} was capped; increasing "
@@ -1000,9 +1118,15 @@ class FindInFiles(AbstractSimpleTool):
         # Optional or_group any-branch (or_simple / affix_or with pure inner)
         if needles.or_group is not None and needles.required_literal is None:
             # or_simple: optional cheap any-branch; still full re if any branch hits
-            if not any(self._literal_in(text, b, needles.effective_ci) for b in needles.or_group):
+            if not any(
+                self._literal_in(text, b, needles.effective_ci)
+                for b in needles.or_group
+            ):
                 return [], False
-        elif needles.or_group is not None and needles.required_literal is not None:
+        elif (
+            needles.or_group is not None
+            and needles.required_literal is not None
+        ):
             # affix_or with pure OR: required already passed; optional or_group
             # does not skip re (soundness of required alone); still run re.
             pass
@@ -1062,11 +1186,15 @@ class FindInFiles(AbstractSimpleTool):
                 effective_ci=effective_ci,
             )
 
-        text, _bytes_read, skip = await self._open_decode_text(path, file_size=size)
+        text, _bytes_read, skip = await self._open_decode_text(
+            path, file_size=size
+        )
         if skip == "read_error":
             return self._error("read_failed", message="Failed to read file")
         if skip in ("binary", "encoding"):
-            _sr, _g = self._cap_stop_info(limit_capped, limit_requested, limit_eff, count=0)
+            _sr, _g = self._cap_stop_info(
+                limit_capped, limit_requested, limit_eff, count=0
+            )
             return self._build_response(
                 matches=[],
                 count=0,
@@ -1090,7 +1218,9 @@ class FindInFiles(AbstractSimpleTool):
         if needles.required_literal is not None and not self._literal_in(
             text, needles.required_literal, needles.effective_ci
         ):
-            _sr, _g = self._cap_stop_info(limit_capped, limit_requested, limit_eff, count=0)
+            _sr, _g = self._cap_stop_info(
+                limit_capped, limit_requested, limit_eff, count=0
+            )
             return self._build_response(
                 matches=[],
                 count=0,
@@ -1124,9 +1254,15 @@ class FindInFiles(AbstractSimpleTool):
             stop_reason = "match_limit"
             more_matches_may_exist = True
             scan_complete = False
-            guidance = self._match_limit_guidance(limit_eff, limit_capped=limit_capped, limit_requested=limit_requested)
+            guidance = self._match_limit_guidance(
+                limit_eff,
+                limit_capped=limit_capped,
+                limit_requested=limit_requested,
+            )
         elif limit_capped:
-            stop_reason, guidance = self._cap_stop_info(True, limit_requested, limit_eff, count=count)
+            stop_reason, guidance = self._cap_stop_info(
+                True, limit_requested, limit_eff, count=count
+            )
 
         return self._build_response(
             matches=matches,
@@ -1183,12 +1319,17 @@ class FindInFiles(AbstractSimpleTool):
             soft.append({"path": norm, "reason": "missing"})
             return None, None
         if await backend.is_file(norm):
-            return None, f"exclude_dirs entry is a file, not a directory: {norm}"
+            return (
+                None,
+                f"exclude_dirs entry is a file, not a directory: {norm}",
+            )
         if not await backend.is_dir(norm):
             return None, f"exclude_dirs entry is not a directory: {norm}"
         return norm, None
 
-    def _start_inside_exclude(self, start_path: str, accepted: List[str]) -> Optional[str]:
+    def _start_inside_exclude(
+        self, start_path: str, accepted: List[str]
+    ) -> Optional[str]:
         start_norm = os.path.normpath(start_path)
         for e in accepted:
             if start_norm == e or self._path_is_under(start_norm, e):
@@ -1207,7 +1348,11 @@ class FindInFiles(AbstractSimpleTool):
         if exclude_dirs is None:
             return [], [], None
         if not isinstance(exclude_dirs, list):
-            return None, [], "exclude_dirs must be an array of absolute directory paths"
+            return (
+                None,
+                [],
+                "exclude_dirs must be an array of absolute directory paths",
+            )
 
         soft: List[Dict[str, str]] = []
         accepted: List[str] = []
@@ -1216,7 +1361,9 @@ class FindInFiles(AbstractSimpleTool):
         for item in exclude_dirs:
             if not isinstance(item, str) or not item.strip():
                 continue  # empty drop
-            norm, err = await self._acheck_exclude_entry(item.strip(), backend, soft)
+            norm, err = await self._acheck_exclude_entry(
+                item.strip(), backend, soft
+            )
             if err is not None:
                 return None, [], err
             if norm is not None and norm not in seen:
@@ -1232,7 +1379,11 @@ class FindInFiles(AbstractSimpleTool):
 
         inside = self._start_inside_exclude(start_path, accepted)
         if inside is not None:
-            return None, [], f"start path is inside exclude_dirs entry: {inside}"
+            return (
+                None,
+                [],
+                f"start path is inside exclude_dirs entry: {inside}",
+            )
 
         return accepted, soft, None
 
@@ -1245,7 +1396,9 @@ class FindInFiles(AbstractSimpleTool):
         prefix = anc_n + os.sep
         return path_n.startswith(prefix)
 
-    def _is_excluded_by_call(self, dirpath: str, exclude_abs: List[str]) -> bool:
+    def _is_excluded_by_call(
+        self, dirpath: str, exclude_abs: List[str]
+    ) -> bool:
         return any(self._path_is_under(dirpath, e) for e in exclude_abs)
 
     # ------------------------------------------------------------------
@@ -1340,7 +1493,9 @@ class FindInFiles(AbstractSimpleTool):
         return out
 
     @staticmethod
-    def _narrower_path_hints(top: List[Dict[str, Any]], limit_n: int, n: int) -> List[str]:
+    def _narrower_path_hints(
+        top: List[Dict[str, Any]], limit_n: int, n: int
+    ) -> List[str]:
         """Retry-with-narrower-path and exclude_dirs hints from the top-level breakdown."""
         hints: List[str] = []
         retry_hint = FindInFiles._retry_path_hint(top, limit_n)
@@ -1352,8 +1507,12 @@ class FindInFiles(AbstractSimpleTool):
         return hints
 
     @staticmethod
-    def _retry_path_hint(top: List[Dict[str, Any]], limit_n: int) -> Optional[str]:
-        fitting = [t for t in top if int(t.get("candidate_count") or 0) <= limit_n]
+    def _retry_path_hint(
+        top: List[Dict[str, Any]], limit_n: int
+    ) -> Optional[str]:
+        fitting = [
+            t for t in top if int(t.get("candidate_count") or 0) <= limit_n
+        ]
         retry = fitting[:2] if fitting else top[-1:]
         if not retry:
             return None
@@ -1368,17 +1527,21 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     @staticmethod
-    def _exclude_dirs_hint(top: List[Dict[str, Any]], limit_n: int, n: int) -> Optional[str]:
-        oversized = [t for t in top if int(t.get("candidate_count") or 0) > limit_n]
+    def _exclude_dirs_hint(
+        top: List[Dict[str, Any]], limit_n: int, n: int
+    ) -> Optional[str]:
+        oversized = [
+            t for t in top if int(t.get("candidate_count") or 0) > limit_n
+        ]
         if not oversized and top and n > 0:
-            heavy = [t for t in top if int(t.get("candidate_count") or 0) >= n * 0.5]
+            heavy = [
+                t for t in top if int(t.get("candidate_count") or 0) >= n * 0.5
+            ]
             oversized = heavy[:1]
         if not oversized:
             return None
         t = oversized[0]
-        return (
-            f'You may also pass exclude_dirs=["{t["path"]}"] ({t["candidate_count"]} candidates) to shrink the surface.'
-        )
+        return f'You may also pass exclude_dirs=["{t["path"]}"] ({t["candidate_count"]} candidates) to shrink the surface.'
 
     def _refuse_guidance(
         self,
@@ -1394,12 +1557,16 @@ class FindInFiles(AbstractSimpleTool):
         shown = int(breakdown.get("top_level_dirs_shown") or 0)
         total = int(breakdown.get("top_level_dirs_total") or 0)
         if total > shown and shown > 0:
-            parts.append(f"Showing top {shown} of {total} top-level dirs by candidate count (desc).")
+            parts.append(
+                f"Showing top {shown} of {total} top-level dirs by candidate count (desc)."
+            )
 
         top: List[Dict[str, Any]] = list(breakdown.get("top_level_dirs") or [])
         parts.extend(self._narrower_path_hints(top, limit_n, n))
         if pattern_mode is PatternMode.COMPLEX:
-            parts.append("You may simplify the pattern or use query_mode=text if a literal search is enough.")
+            parts.append(
+                "You may simplify the pattern or use query_mode=text if a literal search is enough."
+            )
         return " ".join(parts)
 
     @staticmethod
@@ -1438,24 +1605,36 @@ class FindInFiles(AbstractSimpleTool):
         )
         from gc_core.utils.pattern_native_gate import is_safe_grep_include
 
-        if show_excluded_dirs or fallback_reason not in _PREFILTER_FALLBACK_REASONS:
+        if (
+            show_excluded_dirs
+            or fallback_reason not in _PREFILTER_FALLBACK_REASONS
+        ):
             return None, None
         terms = prefilter_terms(needles, case_insensitive=effective_ci)
         if terms is None:
             return None, None
         backend = self._backend
         try:
-            if not (getattr(backend, "has_grep", False) and getattr(backend, "has_find", False)):
+            if not (
+                getattr(backend, "has_grep", False)
+                and getattr(backend, "has_find", False)
+            ):
                 return None, None
         except Exception:
             return None, None
-        native_glob = file_pattern if file_pattern and is_safe_grep_include(file_pattern) else None
+        native_glob = (
+            file_pattern
+            if file_pattern and is_safe_grep_include(file_pattern)
+            else None
+        )
         return await anative_prefilter_candidates(
             backend,
             path,
             terms=terms,
             case_insensitive=effective_ci,
-            exclude_dir_names=hard_exclude_names_for_grep(config.exclude_dir_names),
+            exclude_dir_names=hard_exclude_names_for_grep(
+                config.exclude_dir_names
+            ),
             exclude_nested_dot_dirs=True,
             file_pattern=native_glob,
             exclude_paths=accepted_excludes,
@@ -1482,7 +1661,7 @@ class FindInFiles(AbstractSimpleTool):
                 rel = os.path.basename(abs_n)
             yield WalkEntry(rel or ".", False)
 
-    async def _try_native_grep_directory(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+    async def _try_native_grep_directory(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         *,
         path: str,
@@ -1534,7 +1713,9 @@ class FindInFiles(AbstractSimpleTool):
         if show_excluded_dirs:
             return None, "show_excluded_dirs"
 
-        plan = is_grep_native_safe(pattern, query_mode=query_mode, case_insensitive=effective_ci)
+        plan = is_grep_native_safe(
+            pattern, query_mode=query_mode, case_insensitive=effective_ci
+        )
         exclude_names = hard_exclude_names_for_grep(config.exclude_dir_names)
         exclude_dot = True
         refusal = native_grep_refusal(
@@ -1557,7 +1738,12 @@ class FindInFiles(AbstractSimpleTool):
         needle_strings = self._needle_strings(needles)
 
         def _rank(abs_path: str):
-            return self._relevance_key(abs_path, self._depth_under(path, abs_path), needle_strings, effective_ci)
+            return self._relevance_key(
+                abs_path,
+                self._depth_under(path, abs_path),
+                needle_strings,
+                effective_ci,
+            )
 
         result = await arun_native_grep(
             self._backend,
@@ -1601,18 +1787,26 @@ class FindInFiles(AbstractSimpleTool):
             ), None
 
         ranked = sorted(result.matches, key=lambda m: _rank(m["file"]))
-        total_matches = result.total_matches if result.total_matches is not None else len(ranked)
+        total_matches = (
+            result.total_matches
+            if result.total_matches is not None
+            else len(ranked)
+        )
         shown = ranked[:limit_eff]
         for m in shown:
             m["line_content"] = self._clip_line_content(m["line_content"])
             m.pop("context", None)
         await self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
-            m["file"] = tool_report_abspath(m["file"], workspace=self._workspace)
+            m["file"] = tool_report_abspath(
+                m["file"], workspace=self._workspace
+            )
 
         count = len(shown)
         if result.hit_capture_cap and count < limit_eff:
-            guidance, hit_dirs = self._native_capped_guidance(path, result, config)
+            guidance, hit_dirs = self._native_capped_guidance(
+                path, result, config
+            )
             return self._build_response(
                 matches=shown,
                 count=count,
@@ -1623,7 +1817,11 @@ class FindInFiles(AbstractSimpleTool):
                 more_matches_may_exist=True,
                 **common,
             ), None
-        hit_limit = bool(result.truncated) or total_matches > limit_eff or count >= limit_eff
+        hit_limit = (
+            bool(result.truncated)
+            or total_matches > limit_eff
+            or count >= limit_eff
+        )
         stop_reason, guidance = self._native_stop_info(
             hit_limit,
             limit_eff=limit_eff,
@@ -1647,30 +1845,47 @@ class FindInFiles(AbstractSimpleTool):
         """Guidance + density breakdown when grep output hit the capture cap."""
         hit_dirs = self._hit_dirs_breakdown(
             start_path=path,
-            files=(result.files_seen if result.files_seen is not None else [m["file"] for m in result.matches]),
+            files=(
+                result.files_seen
+                if result.files_seen is not None
+                else [m["file"] for m in result.matches]
+            ),
             config=config,
         )
         guidance = self._output_capped_guidance()
         if hit_dirs and hit_dirs.get("top_level_dirs"):
-            dens = ", ".join(f"{d['path']} ({d['match_files']} files)" for d in hit_dirs["top_level_dirs"][:3])
+            dens = ", ".join(
+                f"{d['path']} ({d['match_files']} files)"
+                for d in hit_dirs["top_level_dirs"][:3]
+            )
             guidance += f" Matches so far are densest in: {dens}."
         return guidance, hit_dirs
 
     def _native_stop_info(
-        self, hit_limit: bool, *, limit_eff: int, limit_capped: bool, limit_requested: int, count: int
+        self,
+        hit_limit: bool,
+        *,
+        limit_eff: int,
+        limit_capped: bool,
+        limit_requested: int,
+        count: int,
     ) -> Tuple[Optional[str], Optional[str]]:
         if hit_limit:
             return "match_limit", self._match_limit_guidance(
-                limit_eff, limit_capped=limit_capped, limit_requested=limit_requested
+                limit_eff,
+                limit_capped=limit_capped,
+                limit_requested=limit_requested,
             )
         if limit_capped:
-            return self._cap_stop_info(True, limit_requested, limit_eff, count=count)
+            return self._cap_stop_info(
+                True, limit_requested, limit_eff, count=count
+            )
         return None, None
 
     # ------------------------------------------------------------------
     # directory (§3 / §5 / §6)
     # ------------------------------------------------------------------
-    async def _search_directory(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+    async def _search_directory(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         path: str,
         compiled: re.Pattern,
@@ -1693,7 +1908,11 @@ class FindInFiles(AbstractSimpleTool):
     ) -> str:
         backend = self._backend
         report_path = tool_report_abspath(path, workspace=self._workspace)
-        accepted_excludes, exclude_soft_errors, excl_err = await self._normalize_exclude_dirs(
+        (
+            accepted_excludes,
+            exclude_soft_errors,
+            excl_err,
+        ) = await self._normalize_exclude_dirs(
             exclude_dirs,
             start_path=path,
             config=config,
@@ -1753,9 +1972,15 @@ class FindInFiles(AbstractSimpleTool):
             config=config,
             show_excluded_dirs=show_excluded_dirs,
         )
-        prefilter = "grep" if prefilter_paths is not None else prefilter_failure
+        prefilter = (
+            "grep" if prefilter_paths is not None else prefilter_failure
+        )
         common["prefilter"] = prefilter
-        candidates, files_too_large, walk_error = await self._acollect_candidates(
+        (
+            candidates,
+            files_too_large,
+            walk_error,
+        ) = await self._acollect_candidates(
             path=path,
             config=config,
             accepted_excludes=accepted_excludes,
@@ -1771,7 +1996,11 @@ class FindInFiles(AbstractSimpleTool):
 
         n = len(candidates)
         blind_limit = int(config.max_unfiltered_host_reads)
-        if bool(getattr(backend, "is_sandbox", False)) and prefilter_paths is None and n > blind_limit:
+        if (
+            bool(getattr(backend, "is_sandbox", False))
+            and prefilter_paths is None
+            and n > blind_limit
+        ):
             return self._blind_reads_response(
                 path=path,
                 candidates=candidates,
@@ -1798,13 +2027,21 @@ class FindInFiles(AbstractSimpleTool):
             )
 
         needle_strings = self._needle_strings(needles)
-        candidates.sort(key=lambda item: self._relevance_key(item[0], item[1], needle_strings, effective_ci))
+        candidates.sort(
+            key=lambda item: self._relevance_key(
+                item[0], item[1], needle_strings, effective_ci
+            )
+        )
         params = _ScanParams(
             compiled=compiled,
             needles=needles,
             pattern_mode=pattern_mode,
             limit_eff=limit_eff,
-            max_re_opens=(config.max_open_files_affix_or if pattern_mode is PatternMode.AFFIX_OR else None),
+            max_re_opens=(
+                config.max_open_files_affix_or
+                if pattern_mode is PatternMode.AFFIX_OR
+                else None
+            ),
         )
         shared = _ScanShared()
         workers = 2 if n >= config.content_workers_threshold else 1
@@ -1812,7 +2049,9 @@ class FindInFiles(AbstractSimpleTool):
             if workers == 1:
                 await self._ascan_cooperatively(candidates, shared, params)
             else:
-                await self._ascan_in_parallel(candidates, shared, params, workers)
+                await self._ascan_in_parallel(
+                    candidates, shared, params, workers
+                )
         except PermissionError as exc:
             return self._error("permission_denied", message=str(exc))
         except Exception as exc:
@@ -1820,14 +2059,16 @@ class FindInFiles(AbstractSimpleTool):
 
         all_matches = shared.matches[:limit_eff]
         count = len(all_matches)
-        stop_reason, guidance, scan_complete, more_matches_may_exist = self._python_scan_stop_info(
-            shared,
-            count=count,
-            limit_eff=limit_eff,
-            limit_capped=limit_capped,
-            limit_requested=limit_requested,
-            report_path=report_path,
-            files_too_large=files_too_large,
+        stop_reason, guidance, scan_complete, more_matches_may_exist = (
+            self._python_scan_stop_info(
+                shared,
+                count=count,
+                limit_eff=limit_eff,
+                limit_capped=limit_capped,
+                limit_requested=limit_requested,
+                report_path=report_path,
+                files_too_large=files_too_large,
+            )
         )
         return self._build_response(
             matches=all_matches,
@@ -1839,12 +2080,18 @@ class FindInFiles(AbstractSimpleTool):
             guidance=guidance,
             scan_complete=scan_complete,
             more_matches_may_exist=more_matches_may_exist,
-            excluded_dirs=(self._sort_excluded_dirs(excluded_dirs) if show_excluded_dirs else None),
+            excluded_dirs=(
+                self._sort_excluded_dirs(excluded_dirs)
+                if show_excluded_dirs
+                else None
+            ),
             search_backend="python",
             **common,
         )
 
-    def _make_rg_pass(self, cfg_dict: Dict[str, Any], rg_context: Any) -> Callable[[str], bool]:
+    def _make_rg_pass(
+        self, cfg_dict: Dict[str, Any], rg_context: Any
+    ) -> Callable[[str], bool]:
         """Read-guard predicate for the walk: hidden names and guarded paths are out."""
         rg_cfg = parse_read_guard_config(cfg_dict)
         rg_active = rg_cfg.enabled
@@ -1887,7 +2134,14 @@ class FindInFiles(AbstractSimpleTool):
         root_norm = os.path.normpath(path)
 
         def _record(dirpath: str, reason: str) -> None:
-            excluded_dirs.append({"path": tool_report_abspath(dirpath, workspace=self._workspace), "reason": reason})
+            excluded_dirs.append(
+                {
+                    "path": tool_report_abspath(
+                        dirpath, workspace=self._workspace
+                    ),
+                    "reason": reason,
+                }
+            )
 
         def _should_descend(dirpath: str) -> bool:
             name = os.path.basename(os.path.normpath(dirpath))
@@ -1903,7 +2157,9 @@ class FindInFiles(AbstractSimpleTool):
             if skip_reason is not None:
                 _record(dirpath, skip_reason)
                 return False
-            if accepted_excludes and self._is_excluded_by_call(dirpath, accepted_excludes):
+            if accepted_excludes and self._is_excluded_by_call(
+                dirpath, accepted_excludes
+            ):
                 _record(dirpath, "call_exclude_dirs")
                 return False
             return rg_pass(dirpath)
@@ -1926,7 +2182,9 @@ class FindInFiles(AbstractSimpleTool):
         """``(candidates, files_too_large, error_response)`` — walk the tree once."""
         backend = self._backend
         exclude_names = effective_exclude_dir_names(config.exclude_dir_names)
-        exclude_dot = HARD_EXCLUDE_NESTED_DOT_DIRS or bool(config.exclude_dot_dirs)
+        exclude_dot = HARD_EXCLUDE_NESTED_DOT_DIRS or bool(
+            config.exclude_dot_dirs
+        )
         should_descend = self._make_should_descend(
             path=path,
             exclude_names=exclude_names,
@@ -1935,10 +2193,16 @@ class FindInFiles(AbstractSimpleTool):
             excluded_dirs=excluded_dirs,
             rg_pass=rg_pass,
         )
-        glob_matcher = self._build_file_pattern_matcher(file_pattern) if file_pattern else None
+        glob_matcher = (
+            self._build_file_pattern_matcher(file_pattern)
+            if file_pattern
+            else None
+        )
         candidates: List[Tuple[str, int, str, int]] = []
         files_too_large = 0
-        prune_names = () if show_excluded_dirs else tuple(sorted(exclude_names))
+        prune_names = (
+            () if show_excluded_dirs else tuple(sorted(exclude_names))
+        )
         prune_dot = bool(exclude_dot) and not show_excluded_dirs
         try:
             entries = (
@@ -1955,7 +2219,11 @@ class FindInFiles(AbstractSimpleTool):
             async for entry in entries:
                 await yielder.tick()
                 candidate, too_large = await self._acandidate_from_entry(
-                    entry, path=path, glob_matcher=glob_matcher, rg_pass=rg_pass, max_bytes=max_bytes
+                    entry,
+                    path=path,
+                    glob_matcher=glob_matcher,
+                    rg_pass=rg_pass,
+                    max_bytes=max_bytes,
                 )
                 files_too_large += too_large
                 if candidate is not None:
@@ -2018,7 +2286,9 @@ class FindInFiles(AbstractSimpleTool):
         common: Dict[str, Any],
     ) -> str:
         n = len(candidates)
-        breakdown = self._build_breakdown(start_path=path, candidates=candidates, config=config)
+        breakdown = self._build_breakdown(
+            start_path=path, candidates=candidates, config=config
+        )
         why, needle_helps = self._blind_read_reason(
             prefilter=prefilter,
             fallback_reason=fallback_reason,
@@ -2034,7 +2304,11 @@ class FindInFiles(AbstractSimpleTool):
                 f"{n} candidate files would be read from the host one by one because "
                 f"{why}; the limit is {blind_limit}. Nothing was read. Narrow path or "
                 "file_pattern (see top_level_dirs)"
-                + (", or give the pattern a fixed substring." if needle_helps else ".")
+                + (
+                    ", or give the pattern a fixed substring."
+                    if needle_helps
+                    else "."
+                )
             ),
             scan_complete=False,
             more_matches_may_exist=True,
@@ -2057,7 +2331,9 @@ class FindInFiles(AbstractSimpleTool):
         common: Dict[str, Any],
     ) -> str:
         n = len(candidates)
-        breakdown = self._build_breakdown(start_path=path, candidates=candidates, config=config)
+        breakdown = self._build_breakdown(
+            start_path=path, candidates=candidates, config=config
+        )
         guidance = self._refuse_guidance(
             pattern_mode=pattern_mode,
             n=n,
@@ -2074,7 +2350,11 @@ class FindInFiles(AbstractSimpleTool):
             candidate_count=n,
             candidate_limit=candidate_limit,
             breakdown=breakdown,
-            excluded_dirs=(self._sort_excluded_dirs(excluded_dirs) if show_excluded_dirs else None),
+            excluded_dirs=(
+                self._sort_excluded_dirs(excluded_dirs)
+                if show_excluded_dirs
+                else None
+            ),
             **common,
         )
 
@@ -2087,14 +2367,23 @@ class FindInFiles(AbstractSimpleTool):
             shared.stop = True
             shared.stop_reason = "match_limit"
             return False
-        if params.max_re_opens is not None and shared.files_opened_regex >= params.max_re_opens:
+        if (
+            params.max_re_opens is not None
+            and shared.files_opened_regex >= params.max_re_opens
+        ):
             shared.stop = True
             shared.stop_reason = "too_many_files_opened"
             return False
         return True
 
     @staticmethod
-    def _note_decoded(shared: _ScanShared, br: int, skip: Optional[str], text: Optional[str], limit_eff: int) -> bool:
+    def _note_decoded(
+        shared: _ScanShared,
+        br: int,
+        skip: Optional[str],
+        text: Optional[str],
+        limit_eff: int,
+    ) -> bool:
         """Under the lock: account bytes/skips; True — the text is worth matching."""
         shared.bytes_read += br
         if skip == "binary":
@@ -2114,7 +2403,10 @@ class FindInFiles(AbstractSimpleTool):
 
     @staticmethod
     def _absorb_file_matches(
-        shared: _ScanShared, file_matches: List[Dict[str, Any]], ran_re: bool, limit_eff: int
+        shared: _ScanShared,
+        file_matches: List[Dict[str, Any]],
+        ran_re: bool,
+        limit_eff: int,
     ) -> None:
         """Under the lock: merge one file's matches into the shared buffer."""
         if ran_re:
@@ -2129,23 +2421,35 @@ class FindInFiles(AbstractSimpleTool):
             shared.stop_reason = "match_limit"
 
     async def _aprocess_candidate(
-        self, item: Tuple[str, int, str, int], shared: _ScanShared, params: _ScanParams
+        self,
+        item: Tuple[str, int, str, int],
+        shared: _ScanShared,
+        params: _ScanParams,
     ) -> None:
         abs_path, _depth, _rel, fsize = item
         with shared.lock:
             if not self._claim_slot(shared, params):
                 return
             shared.content_paths_touched += 1
-        text, br, skip = await self._open_decode_text(abs_path, file_size=fsize)
+        text, br, skip = await self._open_decode_text(
+            abs_path, file_size=fsize
+        )
         with shared.lock:
-            if not self._note_decoded(shared, br, skip, text, params.limit_eff):
+            if not self._note_decoded(
+                shared, br, skip, text, params.limit_eff
+            ):
                 return
-        if params.needles.has_prefilter and not self._prefilter_allows(params.needles, text):
+        if params.needles.has_prefilter and not self._prefilter_allows(
+            params.needles, text
+        ):
             return
         with shared.lock:
             if shared.stop or len(shared.matches) >= params.limit_eff:
                 return
-            if params.max_re_opens is not None and shared.files_opened_regex >= params.max_re_opens:
+            if (
+                params.max_re_opens is not None
+                and shared.files_opened_regex >= params.max_re_opens
+            ):
                 shared.stop = True
                 shared.stop_reason = "too_many_files_opened"
                 return
@@ -2160,10 +2464,15 @@ class FindInFiles(AbstractSimpleTool):
             limit_remaining=remaining,
         )
         with shared.lock:
-            self._absorb_file_matches(shared, file_matches, ran_re, params.limit_eff)
+            self._absorb_file_matches(
+                shared, file_matches, ran_re, params.limit_eff
+            )
 
     async def _ascan_cooperatively(
-        self, candidates: List[Tuple[str, int, str, int]], shared: _ScanShared, params: _ScanParams
+        self,
+        candidates: List[Tuple[str, int, str, int]],
+        shared: _ScanShared,
+        params: _ScanParams,
     ) -> None:
         """Разбор файлов инлайн, но с уступками loop.
 
@@ -2218,7 +2527,9 @@ class FindInFiles(AbstractSimpleTool):
                 await yielder.tick()
                 await self._aprocess_candidate(item, shared, params)
 
-        results = await asyncio.gather(*(_worker() for _ in range(workers)), return_exceptions=True)
+        results = await asyncio.gather(
+            *(_worker() for _ in range(workers)), return_exceptions=True
+        )
         for res in results:
             if isinstance(res, BaseException):
                 raise res
@@ -2243,7 +2554,11 @@ class FindInFiles(AbstractSimpleTool):
             stop_reason = "match_limit"
             more_matches_may_exist = True
             scan_complete = False
-            guidance = self._match_limit_guidance(limit_eff, limit_capped=limit_capped, limit_requested=limit_requested)
+            guidance = self._match_limit_guidance(
+                limit_eff,
+                limit_capped=limit_capped,
+                limit_requested=limit_requested,
+            )
         elif shared.stop_reason == "too_many_files_opened":
             stop_reason = "too_many_files_opened"
             more_matches_may_exist = True
@@ -2254,16 +2569,22 @@ class FindInFiles(AbstractSimpleTool):
                 "shell rg is a fallback."
             )
         elif limit_capped:
-            stop_reason, guidance = self._cap_stop_info(True, limit_requested, limit_eff, count=count)
+            stop_reason, guidance = self._cap_stop_info(
+                True, limit_requested, limit_eff, count=count
+            )
         if files_too_large or shared.skipped_encoding:
             scan_complete = False
             more_matches_may_exist = True
         if guidance is None:
-            guidance = self._skipped_files_guidance(shared.skipped_encoding, files_too_large)
+            guidance = self._skipped_files_guidance(
+                shared.skipped_encoding, files_too_large
+            )
         return stop_reason, guidance, scan_complete, more_matches_may_exist
 
     @staticmethod
-    def _skipped_files_guidance(skipped_encoding: int, files_too_large: int) -> Optional[str]:
+    def _skipped_files_guidance(
+        skipped_encoding: int, files_too_large: int
+    ) -> Optional[str]:
         if skipped_encoding:
             return (
                 f"{skipped_encoding} file(s) could not be decoded as text and were "
@@ -2330,7 +2651,7 @@ class FindInFiles(AbstractSimpleTool):
             payload["top_level_dirs_shown"] = len(top)
             payload["top_level_dirs_total"] = total
 
-    def _build_response(  # noqa: PLR0913  # S107: won't fix, см. docs/code-quality.md
+    def _build_response(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         *,
         matches: List[Dict[str, Any]],
@@ -2406,7 +2727,9 @@ class FindInFiles(AbstractSimpleTool):
 
         # Refuse breakdown only (too_many_candidate_files / unfiltered_host_reads).
         if stop_reason in _REFUSE_STOP_REASONS:
-            self._add_refusal_fields(payload, candidate_count, candidate_limit, breakdown)
+            self._add_refusal_fields(
+                payload, candidate_count, candidate_limit, breakdown
+            )
 
         # Opt-in full skip list (show_excluded_dirs); omit empty.
         if excluded_dirs:

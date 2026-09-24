@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.config_modules.quality_gate import digest_limits_from_params
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.message_format import dialog_history
 
@@ -26,7 +28,9 @@ def _is_turn_finish_call(message: dict[str, Any]) -> bool:
     return str(message.get("name") or "") in _FINISH_TOOL_NAMES
 
 
-def _without_last_turn_finish_call(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _without_last_turn_finish_call(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Drop the pending finish call and its output from the judge digest (§5.2)."""
     for idx in range(len(messages) - 1, -1, -1):
         if _is_turn_finish_call(messages[idx]):
@@ -35,7 +39,10 @@ def _without_last_turn_finish_call(messages: list[dict[str, Any]]) -> list[dict[
                 message
                 for pos, message in enumerate(messages)
                 if pos != idx
-                and not (message.get("type") == "function_call_output" and message.get("call_id") == call_id)
+                and not (
+                    message.get("type") == "function_call_output"
+                    and message.get("call_id") == call_id
+                )
             ]
     return list(messages)
 
@@ -54,12 +61,18 @@ def build_finish_gate_trace_digest(
 
     Axis A intent lives in ``state.current_user_intent``; not duplicated in the digest.
     """
-    history_messages = [m for m in (getattr(state, "messages", None) or []) if isinstance(m, dict)]
+    history_messages = [
+        m
+        for m in (getattr(state, "messages", None) or [])
+        if isinstance(m, dict)
+    ]
     if exclude_pending_turn_finish:
         history_messages = _without_last_turn_finish_call(history_messages)
 
     qg_params = None
-    if isinstance(cfg, dict) and isinstance(cfg.get("quality_gate_params"), dict):
+    if isinstance(cfg, dict) and isinstance(
+        cfg.get("quality_gate_params"), dict
+    ):
         qg_params = cfg["quality_gate_params"]
     limits = digest_limits_from_params(qg_params)
     tags = projection_tags_from_config(cfg)

@@ -6,7 +6,11 @@ cut_message = 350
 
 def cut_message_f(s):
     s = str(s)
-    return s if len(str(s)) < cut_message else str(s)[:cut_message] + "\n...[cutted]"
+    return (
+        s
+        if len(str(s)) < cut_message
+        else str(s)[:cut_message] + "\n...[cutted]"
+    )
 
 
 def format_type_message(message):
@@ -43,7 +47,9 @@ def format_type_message(message):
 
 
 def format_type_functions_call(message):
-    tmpl = f"\n\n>>>>>>>>>>\ncall_id: {message['call_id']}:\n{message['name']}\n"
+    tmpl = (
+        f"\n\n>>>>>>>>>>\ncall_id: {message['call_id']}:\n{message['name']}\n"
+    )
     try:
         args = []
         for k, v in json.loads(message["arguments"]).items():
@@ -72,7 +78,9 @@ def format_others_responses(message):
         return "\n\n>>>>>>>>>>\nsystem: <local system prompt. See debug logs>"
     if message.get("role") == "user":
         return f"\n\n>>>>>>>>>>\nuser: {message['content']}"
-    tmpl = "\n\n>>>>>>>>>>\n" + json.dumps(message, ensure_ascii=False, indent=2)
+    tmpl = "\n\n>>>>>>>>>>\n" + json.dumps(
+        message, ensure_ascii=False, indent=2
+    )
     return tmpl
 
 
@@ -111,7 +119,9 @@ def _canonical_to_chat_completions_message(message):
         role = message.get("role", "assistant")
         converted = {
             "role": role,
-            "content": _extract_text_from_canonical_message_content(message.get("content")),
+            "content": _extract_text_from_canonical_message_content(
+                message.get("content")
+            ),
         }
         if "reasoning_content" in message:
             converted["reasoning_content"] = message["reasoning_content"]

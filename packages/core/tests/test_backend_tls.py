@@ -40,7 +40,10 @@ def test_backend_config_default_use_ssl_bool_maps(tmp_path):
     from gc_core.config import load_config
 
     p = tmp_path / "config.yml"
-    p.write_text(yaml.safe_dump({"backend": {"api_mode": "chat_completions"}}), encoding="utf-8")
+    p.write_text(
+        yaml.safe_dump({"backend": {"api_mode": "chat_completions"}}),
+        encoding="utf-8",
+    )
     cfg = load_config(str(p))
     assert cfg["use_ssl"] is True
     assert cfg["cert_path"] is None
@@ -50,8 +53,13 @@ def test_backend_config_default_use_ssl_bool_maps(tmp_path):
 def test_get_backend_client_cert():
     from gc_core.utils.ssl_config import get_backend_client_cert
 
-    assert get_backend_client_cert({"cert_path": "/c", "key_path": "/k"}) == ("/c", "/k")
-    assert get_backend_client_cert({"cert_path": "/c"}) is None  # only one → None
+    assert get_backend_client_cert({"cert_path": "/c", "key_path": "/k"}) == (
+        "/c",
+        "/k",
+    )
+    assert (
+        get_backend_client_cert({"cert_path": "/c"}) is None
+    )  # only one → None
     assert get_backend_client_cert({}) is None
 
 
@@ -87,7 +95,10 @@ def test_responses_passes_verify_and_cert(monkeypatch):
         monkeypatch,
         stream_response(
             sse_body(
-                {"type": "response.completed", "response": {"id": "r1", "output": []}},
+                {
+                    "type": "response.completed",
+                    "response": {"id": "r1", "output": []},
+                },
                 done=False,
             )
         ),
@@ -132,8 +143,16 @@ def test_mcp_use_ssl_alias_unified():
     from gc_core.config_modules.mcp import McpServerConfig
 
     for key in ("use-ssl", "use_ssl", "verify-ssl", "verify_ssl"):
-        c = McpServerConfig(**{"transport": "http", "url": "https://x", key: "/ca.pem"})
+        c = McpServerConfig(
+            **{"transport": "http", "url": "https://x", key: "/ca.pem"}
+        )
         assert c.verify_ssl == "/ca.pem", key
-    assert McpServerConfig(transport="http", url="https://x").verify_ssl is True
-    dumped = McpServerConfig(**{"transport": "http", "url": "https://x", "use-ssl": False}).model_dump(by_alias=True)
-    assert dumped["verify-ssl"] is False  # get_verify_ssl читает ключ verify-ssl
+    assert (
+        McpServerConfig(transport="http", url="https://x").verify_ssl is True
+    )
+    dumped = McpServerConfig(
+        **{"transport": "http", "url": "https://x", "use-ssl": False}
+    ).model_dump(by_alias=True)
+    assert (
+        dumped["verify-ssl"] is False
+    )  # get_verify_ssl читает ключ verify-ssl

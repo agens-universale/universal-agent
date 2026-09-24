@@ -8,7 +8,9 @@ from gc_tui.services.mcp_manager import McpManager, McpRow
 def test_rows_merge_installable_wired_manual(monkeypatch):
     from recommended_mcp.runtime import cli as cli
 
-    monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office", "playwright"])
+    monkeypatch.setattr(
+        cli, "installable_names", lambda config=None: ["office", "playwright"]
+    )
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "manual_server_names", lambda uc: ["corp-jira"])
     monkeypatch.setattr(cli, "descriptions", lambda config=None: {})
@@ -28,25 +30,41 @@ def test_rows_manual_excludes_managed_names(monkeypatch):
     в ручной блок — там только настоящие ручные (corp-jira)."""
     from recommended_mcp.runtime import cli as cli
 
-    monkeypatch.setattr(cli, "installable_names", lambda config=None: ["office", "duckduckgo_search"])
+    monkeypatch.setattr(
+        cli,
+        "installable_names",
+        lambda config=None: ["office", "duckduckgo_search"],
+    )
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     # рантайм mcp-servers содержит и подключённый office, и ручной corp-jira
-    monkeypatch.setattr(cli, "manual_server_names", lambda uc: ["office", "duckduckgo_search", "corp-jira"])
+    monkeypatch.setattr(
+        cli,
+        "manual_server_names",
+        lambda uc: ["office", "duckduckgo_search", "corp-jira"],
+    )
     m = McpManager(config=None, user_config={"mcp-servers": {}})
     rows = m.rows()
     manual = [r.name for r in rows if r.manual]
-    assert manual == ["corp-jira"]  # office/duckduckgo — управляемые, не дублируются
+    assert manual == [
+        "corp-jira"
+    ]  # office/duckduckgo — управляемые, не дублируются
     assert sum(1 for r in rows if r.name == "office") == 1
 
 
 def test_state_delegates(monkeypatch):
     from recommended_mcp.runtime import cli as cli
 
-    monkeypatch.setattr(cli, "load_manifest_entries", lambda config=None: ([], "root"))
+    monkeypatch.setattr(
+        cli, "load_manifest_entries", lambda config=None: ([], "root")
+    )
     monkeypatch.setattr(
         cli,
         "installed_state",
-        lambda name, config=None, *, manifest=None: {"installed": True, "version": "1.2", "update": None},
+        lambda name, config=None, *, manifest=None: {
+            "installed": True,
+            "version": "1.2",
+            "update": None,
+        },
     )
     st = McpManager().state("office")
     assert st.installed is True and st.version == "1.2"
@@ -67,7 +85,11 @@ def test_state_loads_manifest_once(monkeypatch):
     monkeypatch.setattr(
         cli,
         "installed_state",
-        lambda name, config=None, *, manifest=None: {"installed": True, "version": None, "update": None},
+        lambda name, config=None, *, manifest=None: {
+            "installed": True,
+            "version": None,
+            "update": None,
+        },
     )
     m = McpManager()
     m.state("a")

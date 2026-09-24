@@ -72,7 +72,11 @@ def resolve_skill_arg(raw: str, catalog: SkillCatalog) -> ResolveResult:
     if exact is not None:
         return exact
 
-    pool = sorted(set(catalog.canonical_ids) | set(catalog.bare_to_canonical) | set(catalog.pack_bootstrap))
+    pool = sorted(
+        set(catalog.canonical_ids)
+        | set(catalog.bare_to_canonical)
+        | set(catalog.pack_bootstrap)
+    )
     matches = difflib.get_close_matches(name, pool, n=5, cutoff=FUZZY_CUTOFF)
     if not matches:
         return Failed("not_found", [])

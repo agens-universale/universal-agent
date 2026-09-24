@@ -33,7 +33,10 @@ def load_state() -> VoiceState | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return VoiceState(
-            version=str(data["version"]), root=str(data["root"]), port=int(data["port"]), model=str(data["model"])
+            version=str(data["version"]),
+            root=str(data["root"]),
+            port=int(data["port"]),
+            model=str(data["model"]),
         )
     except (ValueError, KeyError, TypeError):
         return None
@@ -62,7 +65,10 @@ def current_model_short() -> str:
 def save_state(state: VoiceState) -> None:
     path = voice_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(asdict(state), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def clear_state() -> None:

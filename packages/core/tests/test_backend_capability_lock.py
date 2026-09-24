@@ -57,9 +57,15 @@ async def test_sub_capabilities_are_skipped_when_grep_is_missing(monkeypatch):
     из возможных ответов.
     """
     calls: list[str] = []
-    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
-    monkeypatch.setattr(capabilities, "aprobe_grep_include", _stub(True, calls, "include"))
-    monkeypatch.setattr(capabilities, "aprobe_grep_exclude_dir", _stub(True, calls, "exclude"))
+    monkeypatch.setattr(
+        capabilities, "aprobe_has_grep", _stub(False, calls, "grep")
+    )
+    monkeypatch.setattr(
+        capabilities, "aprobe_grep_include", _stub(True, calls, "include")
+    )
+    monkeypatch.setattr(
+        capabilities, "aprobe_grep_exclude_dir", _stub(True, calls, "exclude")
+    )
     backend = LocalFsBackend()
 
     await backend.awarm_capabilities()
@@ -72,7 +78,9 @@ async def test_sub_capabilities_are_skipped_when_grep_is_missing(monkeypatch):
 async def test_capability_values_are_cached_once(monkeypatch):
     """Второй прогрев проб не повторяет: кэш наполняется однократно."""
     calls: list[str] = []
-    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
+    monkeypatch.setattr(
+        capabilities, "aprobe_has_grep", _stub(False, calls, "grep")
+    )
     backend = LocalFsBackend()
 
     await backend.awarm_capabilities()

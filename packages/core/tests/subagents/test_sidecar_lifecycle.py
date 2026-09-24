@@ -62,8 +62,14 @@ def _patch_process(monkeypatch, *, apply_return):
         return apply_return
 
     monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 
@@ -107,11 +113,19 @@ def _runner_cfg(tmp_path, *, trigger=0):
 
 
 class TestSidecarIntermediateReply:
-    def test_persists_intermediate_reply_without_sink(self, tmp_path, monkeypatch):
+    def test_persists_intermediate_reply_without_sink(
+        self, tmp_path, monkeypatch
+    ):
         answer = "Сейчас проверю структуру"
         pr = _patch_process(
             monkeypatch,
-            apply_return=json.dumps({"tool": "turn_intermediate_reply", "ok": True, "answer": answer}),
+            apply_return=json.dumps(
+                {
+                    "tool": "turn_intermediate_reply",
+                    "ok": True,
+                    "answer": answer,
+                }
+            ),
         )
         run_coro(
             pr.aprocess_tool_calls(
@@ -258,7 +272,9 @@ class TestSidecarChildSummary:
                             "summary_message_content": "wrapped",
                         },
                         "summary_trace": {
-                            "final_output": {"agent_summary_text": "сжатый контекст"},
+                            "final_output": {
+                                "agent_summary_text": "сжатый контекст"
+                            },
                         },
                         "newly_summarized_message_id": "m1",
                     }
@@ -289,8 +305,14 @@ class TestSidecarChildSummary:
             return "ok"
 
         with (
-            patch.object(rsc, "history_exceeds_summary_trigger", return_value=True),
-            patch.object(rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction),
+            patch.object(
+                rsc, "history_exceeds_summary_trigger", return_value=True
+            ),
+            patch.object(
+                rsc,
+                "arun_summary_compaction",
+                side_effect=fake_run_summary_compaction,
+            ),
         ):
             await runner.arun(
                 "subagent_worker",
@@ -307,6 +329,8 @@ class TestSidecarChildSummary:
         assert summary["payload"]["synthesis"] == "сжатый контекст"
         # компакция не удаляет уже записанное
         call_idx = next(
-            i for i, r in enumerate(rows) if r["kind"] == "call" and r["payload"].get("call_id") == "before"
+            i
+            for i, r in enumerate(rows)
+            if r["kind"] == "call" and r["payload"].get("call_id") == "before"
         )
         assert call_idx < kinds.index("child_summary")

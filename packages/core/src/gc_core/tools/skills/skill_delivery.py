@@ -31,15 +31,25 @@ async def build_skill_delivery(skill_id: str, registry: Any) -> str:
 
     if refs:
         parts.append("")
-        parts.append("Available references (load by exact name via skills_read_reference): " + ", ".join(refs))
+        parts.append(
+            "Available references (load by exact name via skills_read_reference): "
+            + ", ".join(refs)
+        )
     if assets:
         if not refs:
             parts.append("")
-        parts.append("Available assets (load by exact name via skills_read_asset): " + ", ".join(assets))
+        parts.append(
+            "Available assets (load by exact name via skills_read_asset): "
+            + ", ".join(assets)
+        )
 
-    lock = [f"Skill `{skill_id}` is already loaded — the instruction is shown above; do not call skills_load again."]
+    lock = [
+        f"Skill `{skill_id}` is already loaded — the instruction is shown above; do not call skills_load again."
+    ]
     if refs or assets:
-        lock.append("Load auxiliary files by the exact names above (skills_read_reference / skills_read_asset).")
+        lock.append(
+            "Load auxiliary files by the exact names above (skills_read_reference / skills_read_asset)."
+        )
     parts.append("")
     parts.append(" ".join(lock))
     return "\n".join(parts)

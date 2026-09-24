@@ -36,7 +36,11 @@ def meta_intent_log(*contents: str, turn: int = 1) -> list[dict]:
 def intent_user_ask_texts(records) -> list[str]:
     if not records:
         return []
-    return [str(record.content) for record in records if getattr(record, "action", None) == ACTION_USER_ASK]
+    return [
+        str(record.content)
+        for record in records
+        if getattr(record, "action", None) == ACTION_USER_ASK
+    ]
 
 
 def intent_jsonl_lines(records) -> list[str]:
@@ -73,7 +77,9 @@ def seed_state_intent(
             ts=TS,
         )
         state.flush_current_user_intent()
-    current_items = [current] if isinstance(current, str) else list(current or [])
+    current_items = (
+        [current] if isinstance(current, str) else list(current or [])
+    )
     for text in current_items:
         state.current_user_intent = append_user_ask(
             state.current_user_intent,

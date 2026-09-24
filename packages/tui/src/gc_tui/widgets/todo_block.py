@@ -37,7 +37,9 @@ class TodoBlock(ClickModelMixin, Widget):
     """
     can_focus = True
 
-    def __init__(self, rows: Sequence[Widget], *, event_no: int = 0, **kwargs) -> None:
+    def __init__(
+        self, rows: Sequence[Widget], *, event_no: int = 0, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self._rows = list(rows)
         self._event_no = event_no

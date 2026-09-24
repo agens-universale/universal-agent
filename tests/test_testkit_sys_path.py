@@ -83,5 +83,7 @@ def test_bootstrap_puts_exactly_the_package_sources(tmp_path):
     # Сам testkit приезжает в подпроцесс через PYTHONPATH, поэтому в «добавленных»
     # его нет — он уже был. Всё остальное обязан положить бутстрап.
     expected_added = expected - {str(REPO / "packages" / "testkit" / "src")}
-    assert set(out["added"]) == expected_added, sorted(set(out["added"]) ^ expected_added)
+    assert set(out["added"]) == expected_added, sorted(
+        set(out["added"]) ^ expected_added
+    )
     assert expected <= set(out["path"])

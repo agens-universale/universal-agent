@@ -54,8 +54,9 @@ def build_ssl_context(
     """
     if verify is False:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False  # NOSONAR: явный opt-in verify=False; см. docs/code-quality.md
-        ctx.verify_mode = ssl.CERT_NONE  # NOSONAR: явный opt-in verify=False; см. docs/code-quality.md
+        # Явный opt-in verify=False; обоснование: CONTRIBUTING.md.
+        ctx.check_hostname = False  # NOSONAR: явный opt-in
+        ctx.verify_mode = ssl.CERT_NONE  # NOSONAR: явный opt-in
     elif isinstance(verify, str):
         verify = os.path.expanduser(os.path.expandvars(verify))
         ctx = ssl.create_default_context(

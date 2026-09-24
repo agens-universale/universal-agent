@@ -12,7 +12,10 @@ from gc_core.states import State
 class StateRepository:
     @staticmethod
     def serialize_storage(states: Dict[str, State]) -> Dict[str, Any]:
-        return {state_id: StateSerializer.serialize(state) for state_id, state in states.items()}
+        return {
+            state_id: StateSerializer.serialize(state)
+            for state_id, state in states.items()
+        }
 
     @staticmethod
     def deserialize_storage(data: Dict[str, Any]) -> Dict[str, State]:
@@ -29,7 +32,9 @@ class StateRepository:
         return restored
 
     @staticmethod
-    def save_snapshot(states: Dict[str, State], filepath: str, **json_kwargs: Any) -> None:
+    def save_snapshot(
+        states: Dict[str, State], filepath: str, **json_kwargs: Any
+    ) -> None:
         payload = StateRepository.serialize_storage(states)
         with open(filepath, "w", encoding="utf-8") as fd:
             json.dump(payload, fd, ensure_ascii=False, **json_kwargs)

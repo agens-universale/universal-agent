@@ -6,24 +6,47 @@ from gc_tui.services.export import export_thread
 
 
 def _env(seq, ts, payload):
-    return {"type": "message", "thread_id": "tid1", "system": "cli", "seq": seq, "ts": ts, "payload": payload}
+    return {
+        "type": "message",
+        "thread_id": "tid1",
+        "system": "cli",
+        "seq": seq,
+        "ts": ts,
+        "payload": payload,
+    }
 
 
 def _segs(records, synthesis=None, n=0):
     """Один сегмент из envelope-записей (опц. compacted_by)."""
-    comp = None if synthesis is None else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
+    comp = (
+        None
+        if synthesis is None
+        else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
+    )
     return [{"index": 0, "messages": records, "compacted_by": comp}]
 
 
 def _seg(payloads, synthesis=None, n=0, index=0):
     """Сегмент из сырых payload'ов (для multi-segment тестов)."""
-    comp = None if synthesis is None else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
-    return {"index": index, "messages": [{"payload": p, "ts": "t"} for p in payloads], "compacted_by": comp}
+    comp = (
+        None
+        if synthesis is None
+        else {"ts": "t", "messages_in_segment": n, "synthesis": synthesis}
+    )
+    return {
+        "index": index,
+        "messages": [{"payload": p, "ts": "t"} for p in payloads],
+        "compacted_by": comp,
+    }
 
 
 def _sample_records():
     return [
-        _env(1, "2026-05-30T10:12:03Z", {"role": "user", "content": "вопрос", "id": "m_u1"}),
+        _env(
+            1,
+            "2026-05-30T10:12:03Z",
+            {"role": "user", "content": "вопрос", "id": "m_u1"},
+        ),
         _env(
             2,
             "2026-05-30T10:18:44Z",
@@ -32,15 +55,26 @@ def _sample_records():
                 "type": "message",
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": "ответ", "annotations": []}],
+                "content": [
+                    {"type": "output_text", "text": "ответ", "annotations": []}
+                ],
             },
         ),
     ]
 
 
 def test_json_wrapper_shape():
-    meta = {"backend_api_mode": "chat_completions", "last_summary_archive_suffix": None}
-    out = export_thread(_segs(_sample_records()), fmt="json", meta=meta, thread_id="tid1", system="cli")
+    meta = {
+        "backend_api_mode": "chat_completions",
+        "last_summary_archive_suffix": None,
+    }
+    out = export_thread(
+        _segs(_sample_records()),
+        fmt="json",
+        meta=meta,
+        thread_id="tid1",
+        system="cli",
+    )
     doc = json.loads(out)
 
     assert set(doc.keys()) == {"thread", "segments"}
@@ -59,10 +93,16 @@ def test_json_wrapper_shape():
 
 def test_json_segments_model():
     segments = [
-        _seg([{"role": "user", "content": "вопрос-0"}], synthesis="СИНТЕЗ-1", n=1),
+        _seg(
+            [{"role": "user", "content": "вопрос-0"}],
+            synthesis="СИНТЕЗ-1",
+            n=1,
+        ),
         _seg([{"role": "user", "content": "вопрос-1"}], index=1),
     ]
-    out = export_thread(segments, fmt="json", meta={}, thread_id="t1", system="cli")
+    out = export_thread(
+        segments, fmt="json", meta={}, thread_id="t1", system="cli"
+    )
     data = json.loads(out)
     assert data["thread"]["summarizations"] == 1
     assert len(data["segments"]) == 2
@@ -73,18 +113,28 @@ def test_json_segments_model():
 
 
 def test_json_empty_records():
-    out = export_thread([], fmt="json", meta={}, thread_id="tid1", system="cli")
+    out = export_thread(
+        [], fmt="json", meta={}, thread_id="tid1", system="cli"
+    )
     doc = json.loads(out)
     assert doc["segments"] == []
     assert doc["thread"]["messages_count"] == 0
 
 
 def _txt(records, meta=None):
-    return export_thread(_segs(records), fmt="txt", meta=meta or {}, thread_id="tid1", system="cli")
+    return export_thread(
+        _segs(records),
+        fmt="txt",
+        meta=meta or {},
+        thread_id="tid1",
+        system="cli",
+    )
 
 
 def test_txt_header_and_numbering():
-    out = _txt(_sample_records(), meta={"backend_api_mode": "chat_completions"})
+    out = _txt(
+        _sample_records(), meta={"backend_api_mode": "chat_completions"}
+    )
     assert out.startswith("===== Thread tid1")
     assert "2 messages" in out
     assert "chat_completions" in out
@@ -96,10 +146,20 @@ def test_txt_header_and_numbering():
 
 def test_txt_has_inline_summary_block():
     segments = [
-        _seg([{"role": "user", "content": "вопрос-0"}], synthesis="СИНТЕЗ-1", n=1),
+        _seg(
+            [{"role": "user", "content": "вопрос-0"}],
+            synthesis="СИНТЕЗ-1",
+            n=1,
+        ),
         _seg([{"role": "user", "content": "вопрос-1"}], index=1),
     ]
-    out = export_thread(segments, fmt="txt", meta={"last_summary_archive_suffix": "x"}, thread_id="t1", system="cli")
+    out = export_thread(
+        segments,
+        fmt="txt",
+        meta={"last_summary_archive_suffix": "x"},
+        thread_id="t1",
+        system="cli",
+    )
     assert "вопрос-0" in out
     assert "КОНТЕКСТ СЖАТ #1" in out
     assert "СИНТЕЗ-1" in out
@@ -171,7 +231,10 @@ def test_txt_call_output_pairing_and_full_content():
 
 
 def test_txt_technical_user_message_labeled():
-    from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, wrap_technical_user_content
+    from gc_core.message_policy.user_message_policy import (
+        TECHNICAL_TYPE_TECHNICAL,
+        wrap_technical_user_content,
+    )
 
     records = [
         _env(
@@ -180,7 +243,10 @@ def test_txt_technical_user_message_labeled():
             {
                 "role": "user",
                 "id": "m_t",
-                "content": wrap_technical_user_content("служебная заметка", technical_type=TECHNICAL_TYPE_TECHNICAL),
+                "content": wrap_technical_user_content(
+                    "служебная заметка",
+                    technical_type=TECHNICAL_TYPE_TECHNICAL,
+                ),
             },
         )
     ]

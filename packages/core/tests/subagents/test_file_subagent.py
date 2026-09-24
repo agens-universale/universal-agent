@@ -4,7 +4,11 @@ import asyncio
 
 import pytest
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
-from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES, BoundFileSubagent, FileDefinedSubagent
+from gc_core.tools.subagents.custom.file_subagent import (
+    REQUIRED_TOOL_NAMES,
+    BoundFileSubagent,
+    FileDefinedSubagent,
+)
 
 REQUIRED = (
     "turn_finish",
@@ -38,21 +42,38 @@ class TestRequiredTools:
 
     def test_allowlist_without_required_is_not_a_problem(self):
         # Главное изменение: ядро не нужно упоминать в tools.
-        assert FileDefinedSubagent.required_tools_banned(_definition(tools=("fs_read_file",))) == []
+        assert (
+            FileDefinedSubagent.required_tools_banned(
+                _definition(tools=("fs_read_file",))
+            )
+            == []
+        )
 
     def test_empty_allowlist_is_not_a_problem(self):
-        assert FileDefinedSubagent.required_tools_banned(_definition(tools=())) == []
+        assert (
+            FileDefinedSubagent.required_tools_banned(_definition(tools=()))
+            == []
+        )
 
     @pytest.mark.parametrize("banned", REQUIRED)
     def test_stop_tools_ban_is_reported(self, banned):
         # Запрет не исполняется, но оператор должен узнать, что он проигнорирован.
-        assert FileDefinedSubagent.required_tools_banned(_definition(stop_tools=(banned,))) == [banned]
+        assert FileDefinedSubagent.required_tools_banned(
+            _definition(stop_tools=(banned,))
+        ) == [banned]
 
     def test_all_bans_reported_at_once(self):
-        assert FileDefinedSubagent.required_tools_banned(_definition(stop_tools=REQUIRED)) == sorted(REQUIRED)
+        assert FileDefinedSubagent.required_tools_banned(
+            _definition(stop_tools=REQUIRED)
+        ) == sorted(REQUIRED)
 
     def test_unrelated_stop_tools_are_ignored(self):
-        assert FileDefinedSubagent.required_tools_banned(_definition(stop_tools=("exec_python",))) == []
+        assert (
+            FileDefinedSubagent.required_tools_banned(
+                _definition(stop_tools=("exec_python",))
+            )
+            == []
+        )
 
     def test_required_set_is_exact(self):
         assert set(REQUIRED) == REQUIRED_TOOL_NAMES
@@ -73,7 +94,11 @@ class TestSpecification:
 class TestInstance:
     def _instance(self, **kw):
         return asyncio.run(
-            FileDefinedSubagent.create_instance(definition=_definition(**kw), task="сделай Х", reason="потому что")
+            FileDefinedSubagent.create_instance(
+                definition=_definition(**kw),
+                task="сделай Х",
+                reason="потому что",
+            )
         )
 
     def test_agent_name_comes_from_definition(self):
@@ -117,7 +142,10 @@ class TestBoundFileSubagent:
     def test_spec_matches_tool_specification(self):
         defn = _definition()
         bound = FileDefinedSubagent.bound(defn)
-        assert bound.get_agent_specification() == FileDefinedSubagent.tool_specification(defn)
+        assert (
+            bound.get_agent_specification()
+            == FileDefinedSubagent.tool_specification(defn)
+        )
 
     def test_create_instance_proxies_task_and_reason(self):
         bound = FileDefinedSubagent.bound(_definition())
@@ -143,7 +171,9 @@ class TestBoundFileSubagent:
         # definition только из bound; случайный definition в kwargs не переопределяет.
         bound = FileDefinedSubagent.bound(_definition())
         other = _definition(role="Другая роль")
-        inst = asyncio.run(bound.create_instance(task="t", reason="r", definition=other))
+        inst = asyncio.run(
+            bound.create_instance(task="t", reason="r", definition=other)
+        )
         assert inst.definition.role == "Ты — писатель."
 
     def test_class_get_agent_specification_raises_with_bound_hint(self):

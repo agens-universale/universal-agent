@@ -65,7 +65,9 @@ class BackendConfig(BaseModel):
     def validate_api_mode(cls, value: str) -> str:
         normalized = str(value).strip().lower()
         if normalized not in {"responses", "chat_completions"}:
-            raise ValueError("backend.api_mode должен быть 'responses' или 'chat_completions'")
+            raise ValueError(
+                "backend.api_mode должен быть 'responses' или 'chat_completions'"
+            )
         return normalized
 
     @field_validator("chat_completions_max_tokens", mode="before")
@@ -86,9 +88,13 @@ class BackendConfig(BaseModel):
         try:
             n = int(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError("backend.request_timeout_sec должен быть положительным целым числом") from exc
+            raise ValueError(
+                "backend.request_timeout_sec должен быть положительным целым числом"
+            ) from exc
         if n <= 0:
-            raise ValueError("backend.request_timeout_sec должен быть положительным целым числом")
+            raise ValueError(
+                "backend.request_timeout_sec должен быть положительным целым числом"
+            )
         return n
 
     @field_validator("chat_completion_kwargs", mode="before")

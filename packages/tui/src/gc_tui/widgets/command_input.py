@@ -7,7 +7,12 @@ from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import TextArea
 
-from gc_tui.services.paste_chips import ChipStore, expand, should_collapse, token_spans
+from gc_tui.services.paste_chips import (
+    ChipStore,
+    expand,
+    should_collapse,
+    token_spans,
+)
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _ACT_SELECT_ALL = "выделить всё"
@@ -23,13 +28,23 @@ class CommandTextArea(TextArea):
     # Textual TextArea: ctrl+a = cursor_line_start. Нам нужен select-all
     # (Backspace/копирование); priority перебивает дефолт + ЙЦУКЕН.
     BINDINGS = [
-        Binding("ctrl+a", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
-        Binding("ctrl+ф", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
-        Binding("ctrl+A", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
-        Binding("ctrl+Ф", "select_all", _ACT_SELECT_ALL, show=False, priority=True),
+        Binding(
+            "ctrl+a", "select_all", _ACT_SELECT_ALL, show=False, priority=True
+        ),
+        Binding(
+            "ctrl+ф", "select_all", _ACT_SELECT_ALL, show=False, priority=True
+        ),
+        Binding(
+            "ctrl+A", "select_all", _ACT_SELECT_ALL, show=False, priority=True
+        ),
+        Binding(
+            "ctrl+Ф", "select_all", _ACT_SELECT_ALL, show=False, priority=True
+        ),
         # macOS: option+backspace (терминал в режиме Option-as-Meta шлёт alt+backspace).
         # В дефолтах TextArea клавиша не занята; Win/Linux — прежнее поведение контрактом.
-        Binding("alt+backspace", "delete_word_left", "удалить слово", show=False),
+        Binding(
+            "alt+backspace", "delete_word_left", "удалить слово", show=False
+        ),
     ]
 
     class Submitted(Message):
@@ -60,7 +75,9 @@ class CommandTextArea(TextArea):
         super().__init__(*args, **kwargs)
         # Состояние «плашек» объёмной вставки (когезивно с буфером ввода).
         self._chips = ChipStore()
-        self._expand_chip_id: int | None = None  # последняя свёрнутая плашка (без таймера)
+        self._expand_chip_id: int | None = (
+            None  # последняя свёрнутая плашка (без таймера)
+        )
 
     async def _on_key(self, event: events.Key) -> None:
         if event.key in self._NEWLINE_KEYS:
@@ -127,9 +144,14 @@ class CommandTextArea(TextArea):
         # 1. та же паста в окне «развернуть» → развернуть последнюю плашку инлайн
         #    (только если плашка ещё в буфере; иначе — обычная вставка ниже:
         #    Esc/очистка могли стереть label, оставив orphan expand-окно)
-        if self._expand_chip_id is not None and text == self._chips.get(self._expand_chip_id):
+        if self._expand_chip_id is not None and text == self._chips.get(
+            self._expand_chip_id
+        ):
             chip_id = self._expand_chip_id
-            if any(cid == chip_id for cid, *_ in token_spans(self.text, self._chips)):
+            if any(
+                cid == chip_id
+                for cid, *_ in token_spans(self.text, self._chips)
+            ):
                 self._expand_chip_inline(chip_id)
                 self._close_expand_window()
                 return
@@ -227,7 +249,10 @@ class CommandTextArea(TextArea):
         переносится на несколько визуальных — курсор может быть в row 0, но
         визуально ниже. Экран спрашивает это, решая «↑ → история или вверх».
         """
-        return self.wrapped_document.location_to_offset(self.cursor_location).y == 0
+        return (
+            self.wrapped_document.location_to_offset(self.cursor_location).y
+            == 0
+        )
 
     def cursor_on_last_visual_line(self) -> bool:
         """Курсор на самой нижней ВИЗУАЛЬНОЙ строке (с учётом soft-wrap)."""

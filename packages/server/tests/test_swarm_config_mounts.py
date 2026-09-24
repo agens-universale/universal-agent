@@ -85,7 +85,10 @@ def test_build_swarm_config_with_explicit_cli_venv_root():
 def test_build_swarm_config_with_agent_dep_dir():
     cfg = build_swarm_config(
         {
-            "swarm": {"enabled": True, "agent_dep_dir": "/opt/gc-cli/mcp-deps"},
+            "swarm": {
+                "enabled": True,
+                "agent_dep_dir": "/opt/gc-cli/mcp-deps",
+            },
         }
     )
     assert cfg["agent_dep_dir"] == "/opt/gc-cli/mcp-deps"

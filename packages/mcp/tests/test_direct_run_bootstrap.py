@@ -49,26 +49,41 @@ def _bare_python() -> Path:
     """Поддерживаемый интерпретатор без нашего .venv: базовый префикс текущего."""
     too_old: list[str] = []
     for name in ("python3", "python", "python3.exe", "python.exe"):
-        cand = Path(sys.base_prefix) / ("Scripts" if os.name == "nt" else "bin") / name
+        cand = (
+            Path(sys.base_prefix)
+            / ("Scripts" if os.name == "nt" else "bin")
+            / name
+        )
         if cand.is_file():
             version = subprocess.run(
-                [str(cand), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+                [
+                    str(cand),
+                    "-c",
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+                ],
                 capture_output=True,
                 text=True,
             )
             if version.returncode == 0:
-                major, minor = (int(part) for part in version.stdout.strip().split(".", 1))
+                major, minor = (
+                    int(part) for part in version.stdout.strip().split(".", 1)
+                )
                 if (major, minor) >= (3, 11):
                     return cand
                 too_old.append(f"{cand} ({major}.{minor})")
     if too_old:
-        pytest.skip("базовый интерпретатор не удовлетворяет requires-python >=3.11: " + ", ".join(too_old))
+        pytest.skip(
+            "базовый интерпретатор не удовлетворяет requires-python >=3.11: "
+            + ", ".join(too_old)
+        )
     pytest.skip(f"базовый интерпретатор не найден в {sys.base_prefix}")
 
 
 def _env_without_repo(extra_path: Path) -> dict[str, str]:
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(extra_path)  # только заглушка yaml, репозитория тут нет
+    env["PYTHONPATH"] = str(
+        extra_path
+    )  # только заглушка yaml, репозитория тут нет
     env["PYTHONNOUSERSITE"] = "1"
     return env
 
@@ -87,7 +102,9 @@ def test_direct_run_finds_our_packages(script, tmp_path):
         text=True,
     )
     if probe.returncode == 0:
-        pytest.skip("базовому интерпретатору gc_core виден и без бутстрапа — проверять нечего")
+        pytest.skip(
+            "базовому интерпретатору gc_core виден и без бутстрапа — проверять нечего"
+        )
 
     res = subprocess.run(
         [str(python), str(_RECIPES / script), "--help"],
@@ -96,6 +113,8 @@ def test_direct_run_finds_our_packages(script, tmp_path):
         capture_output=True,
         text=True,
     )
-    assert "No module named" not in res.stderr, f"{script}: бутстрап не нашёл наши исходники\n{res.stderr}"
+    assert "No module named" not in res.stderr, (
+        f"{script}: бутстрап не нашёл наши исходники\n{res.stderr}"
+    )
     assert res.returncode == 0, res.stderr
     assert "usage" in res.stdout.lower(), res.stdout

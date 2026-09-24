@@ -1,6 +1,12 @@
 """Юнит-тесты сервиса paste_chips — без Textual."""
 
-from gc_tui.services.paste_chips import ChipStore, chip_label, expand, should_collapse, token_spans
+from gc_tui.services.paste_chips import (
+    ChipStore,
+    chip_label,
+    expand,
+    should_collapse,
+    token_spans,
+)
 
 
 def test_should_collapse_by_lines_boundary():
@@ -70,7 +76,10 @@ def test_expand_interleaved_order():
     _, l1 = s.add("ALPHA\nALPHA\nALPHA\nALPHA\nALPHA")
     _, l2 = s.add("y" * 500)
     text = f"{l1} middle {l2} end"
-    assert expand(text, s) == "ALPHA\nALPHA\nALPHA\nALPHA\nALPHA middle " + "y" * 500 + " end"
+    assert (
+        expand(text, s)
+        == "ALPHA\nALPHA\nALPHA\nALPHA\nALPHA middle " + "y" * 500 + " end"
+    )
 
 
 def test_expand_no_chips_is_identity():
@@ -83,7 +92,9 @@ def test_expand_ignores_removed_chip():
     _, l1 = s.add("A\nA\nA\nA\nA")
     text = f"x {l1} y"
     s.remove(1)
-    assert expand(text, s) == f"x {l1} y"  # маппинга нет → подпись остаётся литералом
+    assert (
+        expand(text, s) == f"x {l1} y"
+    )  # маппинга нет → подпись остаётся литералом
 
 
 def test_expand_does_not_reexpand_embedded_label():

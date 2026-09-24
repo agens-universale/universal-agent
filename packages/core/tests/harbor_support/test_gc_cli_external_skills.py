@@ -31,5 +31,7 @@ def test_apply_injected_skills_without_container_skills_uses_empty_sentinel():
 
 
 def test_native_nudge_added_only_when_skills():
-    assert "skills_list" in GcCliExternal._nudge_instruction("do X", "/harbor/skills")
+    assert "skills_list" in GcCliExternal._nudge_instruction(
+        "do X", "/harbor/skills"
+    )
     assert GcCliExternal._nudge_instruction("do X", None) == "do X"

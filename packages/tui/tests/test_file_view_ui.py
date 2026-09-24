@@ -9,7 +9,9 @@ from textual.widgets.text_area import Selection
 async def test_view_command_opens_file(tmp_path):
     pytest.importorskip("textual")
     f = tmp_path / "sample.txt"
-    f.write_text("\n".join(f"line-{i}" for i in range(1, 41)) + "\n", encoding="utf-8")
+    f.write_text(
+        "\n".join(f"line-{i}" for i in range(1, 41)) + "\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.file_view import FileViewerScreen
@@ -46,7 +48,9 @@ async def test_view_python_uses_syntax_highlight(tmp_path):
         body = viewer.query_one("#file-view-body", TextArea)
         assert "def hello():" in body.text
         # Без textual[syntax] подсветка через pygments → _highlights.
-        styles = {name for spans in body._highlights.values() for _, _, name in spans}
+        styles = {
+            name for spans in body._highlights.values() for _, _, name in spans
+        }
         assert "keyword" in styles or "keyword.function" in styles
         assert any(styles)  # не пустая карта
 
@@ -85,7 +89,9 @@ async def test_view_usage_without_path(tmp_path):
 async def test_view_remembers_page_across_reopen(tmp_path):
     pytest.importorskip("textual")
     f = tmp_path / "long.txt"
-    f.write_text("\n".join(f"L{i}" for i in range(1, 201)) + "\n", encoding="utf-8")
+    f.write_text(
+        "\n".join(f"L{i}" for i in range(1, 201)) + "\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.file_view import FileViewerScreen
@@ -122,7 +128,9 @@ async def test_view_arrow_hold_coalesces_moves(tmp_path):
     import asyncio
 
     f = tmp_path / "thr.txt"
-    f.write_text("\n".join(f"T{i}" for i in range(1, 201)) + "\n", encoding="utf-8")
+    f.write_text(
+        "\n".join(f"T{i}" for i in range(1, 201)) + "\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.file_view import FileViewerScreen
@@ -154,7 +162,9 @@ async def test_view_arrow_hold_coalesces_moves(tmp_path):
 async def test_view_pagedown_changes_window(tmp_path):
     pytest.importorskip("textual")
     f = tmp_path / "p.txt"
-    f.write_text("\n".join(f"R{i}" for i in range(1, 101)) + "\n", encoding="utf-8")
+    f.write_text(
+        "\n".join(f"R{i}" for i in range(1, 101)) + "\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.file_view import FileViewerScreen
@@ -170,12 +180,16 @@ async def test_view_pagedown_changes_window(tmp_path):
         viewer = pilot.app.screen
         assert isinstance(viewer, FileViewerScreen)
         assert viewer._page == 10
-        assert viewer._settings == FileViewSettings.from_mapping({"page_lines": 10})
+        assert viewer._settings == FileViewSettings.from_mapping(
+            {"page_lines": 10}
+        )
         await pilot.press("pagedown")
         await pilot.pause()
         # после page down с overlap 1: start = 1 + (10-1) = 10
         assert viewer._start_line == 10
-        body_lines = viewer.query_one("#file-view-body", TextArea).text.splitlines()
+        body_lines = viewer.query_one(
+            "#file-view-body", TextArea
+        ).text.splitlines()
         assert body_lines[0] == "R10"
         assert "R1" not in body_lines
 
@@ -200,7 +214,9 @@ async def test_view_get_selected_text_returns_window_lines(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_get_selected_text_uses_mouse_selection(tmp_path, monkeypatch):
+async def test_view_get_selected_text_uses_mouse_selection(
+    tmp_path, monkeypatch
+):
     """Мышиное/программное выделение в TextArea имеет приоритет над fallback."""
     pytest.importorskip("textual")
     f = tmp_path / "sel.txt"
@@ -253,7 +269,10 @@ async def test_view_get_selected_text_after_pagedown(tmp_path):
     """После PgDown get_selected_text возвращает текст новой страницы."""
     pytest.importorskip("textual")
     f = tmp_path / "pages.txt"
-    f.write_text("\n".join(f"LINE{i:03d}" for i in range(1, 101)) + "\n", encoding="utf-8")
+    f.write_text(
+        "\n".join(f"LINE{i:03d}" for i in range(1, 101)) + "\n",
+        encoding="utf-8",
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.file_view import FileViewerScreen

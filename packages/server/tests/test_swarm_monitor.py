@@ -122,7 +122,9 @@ def test_check_one_swarm_swallows_exceptions(monkeypatch, caplog):
     def boom(*a, **kw):
         raise RuntimeError("simulated")
 
-    monkeypatch.setattr("gc_server.swarm.monitor.lifecycle.check_and_finalize", boom)
+    monkeypatch.setattr(
+        "gc_server.swarm.monitor.lifecycle.check_and_finalize", boom
+    )
     # Не должно бросить наверх.
     m._check_one_swarm("err")
     # active_count не изменился (ошибка → ранний return).
@@ -137,8 +139,12 @@ def test_check_one_swarm_passes_correct_args(monkeypatch):
     """
     m = SwarmMonitor("/threads", "/sandbox")
     m.register_active("xxx")
-    mock_finalize = MagicMock(return_value={"swarm_meta": {"status": "running"}})
-    monkeypatch.setattr("gc_server.swarm.monitor.lifecycle.check_and_finalize", mock_finalize)
+    mock_finalize = MagicMock(
+        return_value={"swarm_meta": {"status": "running"}}
+    )
+    monkeypatch.setattr(
+        "gc_server.swarm.monitor.lifecycle.check_and_finalize", mock_finalize
+    )
     m._check_one_swarm("xxx")
     mock_finalize.assert_called_once_with(
         "/threads",

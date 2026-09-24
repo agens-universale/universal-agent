@@ -198,12 +198,16 @@ class ThinkingIndicator(Static):
         self._sink = sink
         self._reasoning_tag = reasoning_tag
         self._reasoning_clock = reasoning_clock
-        self._started_at: float = started_at if started_at is not None else clock()
+        self._started_at: float = (
+            started_at if started_at is not None else clock()
+        )
         self._frame: int = 0
         self._state: str = state
         self._frozen_elapsed: int | None = frozen_elapsed
         self._rotator = PhraseRotator(THINKING_PHRASES)
-        super().__init__(self._render_text(), classes="thinking-indicator", markup=False)
+        super().__init__(
+            self._render_text(), classes="thinking-indicator", markup=False
+        )
 
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
@@ -274,7 +278,10 @@ class ThinkingIndicator(Static):
             # frozen_elapsed=None — восстановление старой сессии без сохранённого
             # времени → «Выполнил» без «за N» (не выдумываем 0с).
             if self._frozen_elapsed is not None:
-                text.append(f"Выполнил за {format_duration(self._frozen_elapsed)}", style=_DIM)
+                text.append(
+                    f"Выполнил за {format_duration(self._frozen_elapsed)}",
+                    style=_DIM,
+                )
             else:
                 text.append("Выполнил", style=_DIM)
             return text
@@ -306,7 +313,9 @@ class ThinkingIndicator(Static):
         if self._state == _STATE_STOPPED_TOOL_CALLS:
             text.append("⏹", style=_DIM)
             text.append(" ")
-            text.append("Остановлено: превышен лимит вызовов инструментов", style=_DIM)
+            text.append(
+                "Остановлено: превышен лимит вызовов инструментов", style=_DIM
+            )
             return text
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())
@@ -329,7 +338,9 @@ class ThinkingIndicator(Static):
         elapsed = int(self._clock() - self._started_at)
         parens = f" ({format_duration(elapsed)}"
         if self._state == _STATE_THINKING:
-            units = self._sink.progress_units() if self._sink is not None else 0
+            units = (
+                self._sink.progress_units() if self._sink is not None else 0
+            )
             if units > 0:
                 parens += f" · ↓ {format_compact_int(units)} токенов"
             clk = self._reasoning_clock
@@ -342,7 +353,9 @@ class ThinkingIndicator(Static):
                         if round(secs) == 0:
                             parens += " · обдумал"  # <0.5с → без «за 0с»
                         else:
-                            parens += f" · обдумал за {format_duration(round(secs))}"
+                            parens += (
+                                f" · обдумал за {format_duration(round(secs))}"
+                            )
         parens += ")"
         text.append(parens)
         return text

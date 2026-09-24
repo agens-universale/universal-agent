@@ -163,7 +163,8 @@ def gc_paths() -> dict[str, Path]:
         }
     elif is_unix:
         defaults = {
-            "state": _xdg_or("XDG_STATE_HOME", home / ".local" / "state") / "gc",
+            "state": _xdg_or("XDG_STATE_HOME", home / ".local" / "state")
+            / "gc",
             "config": _xdg_or("XDG_CONFIG_HOME", home / ".config") / "gc",
             "cache": _xdg_or("XDG_CACHE_HOME", home / ".cache") / "gc",
             "data": _xdg_or("XDG_DATA_HOME", home / ".local" / "share") / "gc",
@@ -194,7 +195,11 @@ def effective_config_dir() -> Path:
     MCP-wiring → оба согласованно уезжают в ~/.gc при залоченном ~/.config.
     """
     config_dir = gc_paths()["config"]
-    if env.gc_config_dir is None and env.gc_home is None and not _config_dir_usable(config_dir):
+    if (
+        env.gc_config_dir is None
+        and env.gc_home is None
+        and not _config_dir_usable(config_dir)
+    ):
         return Path.home() / ".gc"
     return config_dir
 

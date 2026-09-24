@@ -52,7 +52,9 @@ def test_cancel_discards_audio():
 
 def test_elapsed_seconds_uses_clock():
     now = {"t": 100.0}
-    rec = MicRecorder(stream_factory=lambda cb: FakeStream(cb), clock=lambda: now["t"])
+    rec = MicRecorder(
+        stream_factory=lambda cb: FakeStream(cb), clock=lambda: now["t"]
+    )
     rec.start()
     now["t"] = 107.3
     assert rec.elapsed_seconds == pytest.approx(7.3)
@@ -120,7 +122,13 @@ def test_band_levels_follow_signal_frequency():
     rec.start()
     assert rec.band_levels == (0.0,) * 7
     # чистый синус 1200 Гц — должен зажечь ровно «свою» полосу (индекс 3)
-    sine = array.array("h", [int(20000 * math.sin(2 * math.pi * 1200 * n / 16000)) for n in range(512)]).tobytes()
+    sine = array.array(
+        "h",
+        [
+            int(20000 * math.sin(2 * math.pi * 1200 * n / 16000))
+            for n in range(512)
+        ],
+    ).tobytes()
     box["stream"].callback(sine, 512, None, None)
     rec.analyse()
     bands = rec.band_levels
@@ -140,7 +148,9 @@ def _harmonic_comb(f0: float, amp: int = 9000, n: int = 512) -> bytes:
     out = array.array("h")
     for i in range(n):
         t = i / 16000
-        v = sum(math.sin(2 * math.pi * f * t) for f in harmonics) / len(harmonics)
+        v = sum(math.sin(2 * math.pi * f * t) for f in harmonics) / len(
+            harmonics
+        )
         out.append(int(max(-32000, min(32000, amp * v))))
     return out.tobytes()
 
@@ -163,12 +173,16 @@ def test_bands_hear_the_whole_band_not_one_frequency():
         per_pitch[f0] = rec.band_levels[:5]  # 150…2000 Гц — тело голоса
 
     for f0, bands in per_pitch.items():
-        assert all(b > gate for b in bands), f"основной тон {f0} Гц: полосы ниже гейта — {bands}"
+        assert all(b > gate for b in bands), (
+            f"основной тон {f0} Гц: полосы ниже гейта — {bands}"
+        )
     # Главное свойство: высота голоса на показания почти не влияет. Со старым
     # одночастотным зондом разброс тут был кратным — полоса то ловила гармонику, то нет.
     for i in range(5):
         values = [per_pitch[f0][i] for f0 in per_pitch]
-        assert max(values) < 3 * min(values), f"полоса {i} пляшет от основного тона: {values}"
+        assert max(values) < 3 * min(values), (
+            f"полоса {i} пляшет от основного тона: {values}"
+        )
 
 
 def test_band_mapping_follows_frequency():
@@ -180,11 +194,19 @@ def test_band_mapping_follows_frequency():
         box = {}
         rec = MicRecorder(stream_factory=_factory(box))
         rec.start()
-        tone = array.array("h", [int(15000 * math.sin(2 * math.pi * freq * n / 16000)) for n in range(512)]).tobytes()
+        tone = array.array(
+            "h",
+            [
+                int(15000 * math.sin(2 * math.pi * freq * n / 16000))
+                for n in range(512)
+            ],
+        ).tobytes()
         box["stream"].callback(tone, 512, None, None)
         rec.analyse()
         bands = rec.band_levels
-        assert bands[index] == max(bands), f"{freq} Гц зажёг не свою полосу: {bands}"
+        assert bands[index] == max(bands), (
+            f"{freq} Гц зажёг не свою полосу: {bands}"
+        )
 
 
 def test_audio_callback_does_no_analysis():
@@ -212,7 +234,9 @@ def test_bands_decay_without_new_audio():
     box = {}
     rec = MicRecorder(stream_factory=_factory(box))
     rec.start()
-    box["stream"].callback(array.array("h", [8192] * 512).tobytes(), 512, None, None)
+    box["stream"].callback(
+        array.array("h", [8192] * 512).tobytes(), 512, None, None
+    )
     rec.analyse()
     loud = rec.level
     rec.analyse()  # звука не пришло
@@ -233,7 +257,9 @@ def test_analyse_takes_loudest_block_of_the_frame():
     box["stream"].callback(loud, 512, None, None)  # пик в середине кадра
     box["stream"].callback(quiet, 512, None, None)
     rec.analyse()
-    assert rec.level == pytest.approx(0.25, abs=0.01)  # уровень громкого, не последнего
+    assert rec.level == pytest.approx(
+        0.25, abs=0.01
+    )  # уровень громкого, не последнего
 
 
 def test_stream_asks_for_small_blocks():

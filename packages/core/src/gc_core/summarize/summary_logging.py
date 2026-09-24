@@ -287,13 +287,17 @@ def log_compaction_completed(
                 "num_batches": num_batches,
                 "memory_delta_chars": memory_delta_chars,
                 "threshold": log_ctx.trigger_threshold_chars,
-                "archive_suffix": f"__pre_summary__{archive}" if archive else None,
+                "archive_suffix": f"__pre_summary__{archive}"
+                if archive
+                else None,
             },
         )
     if not log_ctx.is_cli_mode:
         return
     _cli_print(f"Сжатие завершено: {log_ctx.rule_label}")
-    _cli_print(f"  было={serialized_before} стало={serialized_after} коэффициент={compression_ratio}")
+    _cli_print(
+        f"  было={serialized_before} стало={serialized_after} коэффициент={compression_ratio}"
+    )
     if archive:
         _cli_print(f"  архив треда: __pre_summary__{archive}")
 
@@ -326,7 +330,9 @@ def log_compaction_failed(
             },
         )
     if log_ctx.is_cli_mode:
-        _cli_print(f"Ошибка суммаризации ({log_ctx.rule_label}): error={error}")
+        _cli_print(
+            f"Ошибка суммаризации ({log_ctx.rule_label}): error={error}"
+        )
 
 
 def log_summary_slice_fallback(
@@ -418,6 +424,9 @@ def _normalize_archive_suffix(archive_suffix: str | None) -> str | None:
 
 def _started_cli_detail(log_ctx: SummaryCompactionLog) -> str:
     line = f"  thread={log_ctx.thread_id} объём={log_ctx.trigger_volume}"
-    if log_ctx.trigger_threshold_chars is not None and log_ctx.trigger_threshold_chars > 0:
+    if (
+        log_ctx.trigger_threshold_chars is not None
+        and log_ctx.trigger_threshold_chars > 0
+    ):
         line += f" порог={log_ctx.trigger_threshold_chars}"
     return line

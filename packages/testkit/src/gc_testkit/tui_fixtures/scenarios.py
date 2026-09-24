@@ -26,7 +26,11 @@ def scenario_full_dialog(user_messages: list) -> list[dict]:
             "type": "message",
             "seq": seq,
             "ts_utc": "2026-05-21T12:00:01+00:00",
-            "payload": {"id": "m1", "type": "reasoning", "summary": "анализирую"},
+            "payload": {
+                "id": "m1",
+                "type": "reasoning",
+                "summary": "анализирую",
+            },
         }
     )
     seq += 1
@@ -56,7 +60,9 @@ def scenario_full_dialog(user_messages: list) -> list[dict]:
                 "id": "fco1",
                 "type": "function_call_output",
                 "call_id": "c1",
-                "output": json.dumps({"tool": "read_file", "ok": True, "lines": 312}),
+                "output": json.dumps(
+                    {"tool": "read_file", "ok": True, "lines": 312}
+                ),
             },
         }
     )
@@ -87,7 +93,13 @@ def scenario_full_dialog(user_messages: list) -> list[dict]:
                 "id": "fco2",
                 "type": "function_call_output",
                 "call_id": "c2",
-                "output": json.dumps({"tool": "read_file", "ok": False, "error": "ENOENT: нет такого файла"}),
+                "output": json.dumps(
+                    {
+                        "tool": "read_file",
+                        "ok": False,
+                        "error": "ENOENT: нет такого файла",
+                    }
+                ),
             },
         }
     )
@@ -124,7 +136,13 @@ def scenario_full_dialog(user_messages: list) -> list[dict]:
                 "id": "fco3",
                 "type": "function_call_output",
                 "call_id": "c3",
-                "output": json.dumps({"tool": "submit_solution", "ok": True, "status": "submitted"}),
+                "output": json.dumps(
+                    {
+                        "tool": "submit_solution",
+                        "ok": True,
+                        "status": "submitted",
+                    }
+                ),
             },
         }
     )

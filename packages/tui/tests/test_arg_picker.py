@@ -9,7 +9,9 @@ from gc_tui.services.stores.file_store import FileTaskStore
 def _mk_app(tmp_path):
     from gc_tui.app import TuiApp
 
-    return TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    return TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
 
 
 def test_export_command_has_arg_options():
@@ -33,7 +35,10 @@ async def test_picker_opens_on_export_space(tmp_path):
         pilot.app.query_one("#cmdinput").text = "/export "
         await pilot.pause(0.1)
         assert len(pilot.app.query(ArgPicker)) == 1
-        rows = "\n".join(str(s.render()) for s in pilot.app.query_one(ArgPicker).query(".palette-row"))
+        rows = "\n".join(
+            str(s.render())
+            for s in pilot.app.query_one(ArgPicker).query(".palette-row")
+        )
         assert "txt" in rows and "json" in rows
 
 
@@ -45,7 +50,10 @@ async def test_picker_filters_by_prefix(tmp_path):
     async with _mk_app(tmp_path).run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/export j"
         await pilot.pause(0.1)
-        rows = "\n".join(str(s.render()) for s in pilot.app.query_one(ArgPicker).query(".palette-row"))
+        rows = "\n".join(
+            str(s.render())
+            for s in pilot.app.query_one(ArgPicker).query(".palette-row")
+        )
         assert "json" in rows
         assert "txt" not in rows
 
@@ -69,7 +77,13 @@ async def test_tab_completes_value_and_closes(tmp_path):
 async def test_enter_runs_export_with_selected_value(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
-    append_new_thread_messages(str(tmp_path), "cli", "tidX", [{"role": "user", "content": "q", "id": "m1"}], set())
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        "tidX",
+        [{"role": "user", "content": "q", "id": "m1"}],
+        set(),
+    )
     from gc_tui.widgets.arg_picker import ArgPicker
 
     async with _mk_app(tmp_path).run_test() as pilot:
@@ -141,7 +155,9 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
         picker = pilot.app.query_one(ArgPicker)
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
-        assert picker.query_one(".palette-footer").query(".palette-keys")  # hint внутри докнутого подвала
+        assert picker.query_one(".palette-footer").query(
+            ".palette-keys"
+        )  # hint внутри докнутого подвала
         assert picker.desired_height == len(picker.children) + 3
         # рамка обнимает контент: регион hint внутри региона пикера
         assert hint[0].region.bottom <= picker.region.bottom
@@ -161,11 +177,15 @@ async def test_hint_visible_on_open_with_small_screen_no_scroll(tmp_path):
         inp.text = "/export "
         await pilot.pause(0.1)
         picker = pilot.app.query_one(ArgPicker)
-        assert picker.region.height < picker.desired_height  # клэмп реально сработал
+        assert (
+            picker.region.height < picker.desired_height
+        )  # клэмп реально сработал
         hint = picker.query(".palette-keys")
         assert len(hint) == 1
         assert hint[0].region.bottom <= 16  # на экране
-        assert hint[0].region.bottom <= picker.region.bottom  # внутри рамки пикера, видна без скролла
+        assert (
+            hint[0].region.bottom <= picker.region.bottom
+        )  # внутри рамки пикера, видна без скролла
 
 
 _LONG_REASON = (
@@ -220,8 +240,12 @@ async def test_wrapping_hint_keeps_the_whole_reason_on_screen(tmp_path):
         picker = await _picker_with_hint(pilot, _LONG_REASON)
         hint = picker.query(".palette-keys")[0]
         assert hint.region.height > 1  # причина правда переносится
-        assert hint.region.bottom <= picker.region.bottom  # и целиком внутри рамки
-        assert str(hint.render()).startswith("C:/Users/dmitr/.gc/profiles/broken-enc.yml")
+        assert (
+            hint.region.bottom <= picker.region.bottom
+        )  # и целиком внутри рамки
+        assert str(hint.render()).startswith(
+            "C:/Users/dmitr/.gc/profiles/broken-enc.yml"
+        )
 
 
 @pytest.mark.asyncio

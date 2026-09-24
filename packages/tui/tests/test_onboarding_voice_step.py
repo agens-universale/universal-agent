@@ -4,7 +4,12 @@ import pytest
 
 pytest.importorskip("textual")
 
-from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS, STEP_MCP, STEP_VOICE
+from gc_tui.screens.onboarding import (
+    STEP_CONFIRM,
+    STEP_LEVELS,
+    STEP_MCP,
+    STEP_VOICE,
+)
 
 
 class FakeVoice:
@@ -46,7 +51,12 @@ def _screen(app, voice):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     return OnboardingScreen(
-        config={}, config_path="X:/nope/config.yml", review_all=True, on_commit=lambda: None, mcp=FakeMcp(), voice=voice
+        config={},
+        config_path="X:/nope/config.yml",
+        review_all=True,
+        on_commit=lambda: None,
+        mcp=FakeMcp(),
+        voice=voice,
     )
 
 
@@ -82,34 +92,51 @@ async def test_voice_step_default_cursor_and_options(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_voice_step_local_option_desc_shows_short_model(monkeypatch, tmp_path):
+async def test_voice_step_local_option_desc_shows_short_model(
+    monkeypatch, tmp_path
+):
     """Описание «Локальный сервис» собирается динамически: базовая строка из
     _VOICE_OPTIONS + короткое имя модели батарейки (не установлена → DEFAULT_MODEL)."""
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import paths as vpaths
 
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "state.json",
+    )
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
         await _to_voice_step(pilot, screen)
         texts = [str(w.render()) for w in screen.query(".onb-option")]
-        assert any("распознаёт офлайн, на вашем компьютере; скачает ~0.9 ГБ" in t for t in texts)
+        assert any(
+            "распознаёт офлайн, на вашем компьютере; скачает ~0.9 ГБ" in t
+            for t in texts
+        )
         # модель — во второй строке описания, вместе с ценой в ресурсах
-        cost = [str(w.render()) for w in screen.query(".onb-hint") if "RAM" in str(w.render())]
+        cost = [
+            str(w.render())
+            for w in screen.query(".onb-hint")
+            if "RAM" in str(w.render())
+        ]
         assert cost and "faster-whisper-small" in cost[0]
 
 
 @pytest.mark.asyncio
-async def test_voice_step_local_confirm_shows_short_model(monkeypatch, tmp_path):
+async def test_voice_step_local_confirm_shows_short_model(
+    monkeypatch, tmp_path
+):
     """Экран подтверждения: значение «голос» для local включает короткое имя модели."""
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import paths as vpaths
 
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "state.json",
+    )
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -131,7 +158,12 @@ def test_voice_step_footer_follows_mark():
     отдельным пунктом строка уходит за 100 колонок."""
     from gc_tui.screens.onboarding import OnboardingScreen
 
-    scr = OnboardingScreen(config={}, config_path="X:/nope/config.yml", review_all=True, on_commit=lambda: None)
+    scr = OnboardingScreen(
+        config={},
+        config_path="X:/nope/config.yml",
+        review_all=True,
+        on_commit=lambda: None,
+    )
     scr._step = scr._steps.index(STEP_VOICE)
     footer = scr._footer_text()
     assert "Space/Enter — выбрать" in footer and "PgDn — далее" in footer
@@ -139,7 +171,9 @@ def test_voice_step_footer_follows_mark():
     scr._voice_choice = "local"  # курсор по умолчанию на «Локальном сервисе»
     footer = scr._footer_text()
     assert "Space — выбрать" in footer and "Enter — далее" in footer
-    assert "выбрать  ·  Enter — далее" in footer  # Space идёт перед ролью Enter
+    assert (
+        "выбрать  ·  Enter — далее" in footer
+    )  # Space идёт перед ролью Enter
     assert "Enter — выбрать" not in footer and "PgDn — далее" not in footer
     assert len(footer) <= 90
 
@@ -148,7 +182,12 @@ def test_mcp_step_footer_keeps_space_hint():
     """На шаге MCP Space — тумблер чекбоксов (не дубль Enter'а): подсказка остаётся."""
     from gc_tui.screens.onboarding import OnboardingScreen
 
-    scr = OnboardingScreen(config={}, config_path="X:/nope/config.yml", review_all=True, on_commit=lambda: None)
+    scr = OnboardingScreen(
+        config={},
+        config_path="X:/nope/config.yml",
+        review_all=True,
+        on_commit=lambda: None,
+    )
     scr._step = scr._steps.index(STEP_MCP)
     assert "Space — выбрать" in scr._footer_text()
 
@@ -294,7 +333,9 @@ async def test_voice_variants_cursor_never_holds_focus_in_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_voice_reselect_away_from_cloud_collapses_fields_and_keeps_draft(monkeypatch):
+async def test_voice_reselect_away_from_cloud_collapses_fields_and_keeps_draft(
+    monkeypatch,
+):
     """Перевыбор с «Свой endpoint» сворачивает поля сразу, а набранное не теряется:
     возврат на endpoint снова показывает введённый URL."""
     from gc_tui.app import TuiApp
@@ -308,7 +349,9 @@ async def test_voice_reselect_away_from_cloud_collapses_fields_and_keeps_draft(m
         await pilot.press("down")
         await pilot.press("enter")  # ● endpoint + поля
         await pilot.pause()
-        screen.query_one("#voice-url", Input).value = "https://stt.x/v1/audio/transcriptions"
+        screen.query_one(
+            "#voice-url", Input
+        ).value = "https://stt.x/v1/audio/transcriptions"
         await pilot.press("down")  # курсор → «Без голосового ввода»
         await pilot.press("enter")  # перевыбор
         await pilot.pause()
@@ -317,7 +360,10 @@ async def test_voice_reselect_away_from_cloud_collapses_fields_and_keeps_draft(m
         await pilot.press("up")
         await pilot.press("enter")  # снова endpoint
         await pilot.pause()
-        assert screen.query_one("#voice-url", Input).value == "https://stt.x/v1/audio/transcriptions"
+        assert (
+            screen.query_one("#voice-url", Input).value
+            == "https://stt.x/v1/audio/transcriptions"
+        )
 
 
 @pytest.mark.asyncio
@@ -408,7 +454,9 @@ async def test_pageup_after_cloud_confirm_not_stuck(monkeypatch):
         await pilot.press("down")  # курсор на «Свой endpoint»
         await pilot.press("enter")  # раскрыть поля (фокус в URL)
         await pilot.pause()
-        screen.query_one("#voice-url", Input).value = "https://stt.x/v1/audio/transcriptions"
+        screen.query_one(
+            "#voice-url", Input
+        ).value = "https://stt.x/v1/audio/transcriptions"
         # submit() требует модель (спека §4.2, ошибка формы, не молчаливый whisper-1) —
         # тест проверяет живучесть PgUp, а не валидацию, поэтому модель тоже задаём.
         screen.query_one("#voice-model", Input).value = "wh-1"
@@ -458,8 +506,14 @@ async def test_commit_local_starts_service_after_reload(monkeypatch, tmp_path):
     voice = FakeVoice()
     async with app.run_test() as pilot:
         seen = []
-        monkeypatch.setattr(autostart, "ensure_voice_service", lambda cfg: seen.append(cfg) or True)
-        new_cfg = {"voice": {"url": "http://127.0.0.1:8735/v1/audio/transcriptions"}}
+        monkeypatch.setattr(
+            autostart,
+            "ensure_voice_service",
+            lambda cfg: seen.append(cfg) or True,
+        )
+        new_cfg = {
+            "voice": {"url": "http://127.0.0.1:8735/v1/audio/transcriptions"}
+        }
         screen = _screen(app, voice)
         screen._config_path = str(tmp_path / "config.yml")
         (tmp_path / "config.yml").write_text("model: m\n", encoding="utf-8")
@@ -489,14 +543,20 @@ async def test_commit_cloud_unwires_managed(monkeypatch, tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         calls = []
-        monkeypatch.setattr(wire_mod, "unwire_voice", lambda: calls.append("unwire") or True)
+        monkeypatch.setattr(
+            wire_mod, "unwire_voice", lambda: calls.append("unwire") or True
+        )
         screen = _screen(app, FakeVoice(installed=True))
         screen._config_path = str(tmp_path / "config.yml")
         (tmp_path / "config.yml").write_text("model: m\n", encoding="utf-8")
         await app.push_screen(screen)
         await _to_voice_step(pilot, screen)
         screen._voice_choice = "cloud"
-        screen._voice_cloud = {"url": "https://stt.x/v1/audio/transcriptions", "token": "sk", "model": "wh-1"}
+        screen._voice_cloud = {
+            "url": "https://stt.x/v1/audio/transcriptions",
+            "token": "sk",
+            "model": "wh-1",
+        }
         monkeypatch.setattr(screen, "_commit_config", lambda: True)
         screen._commit()
         assert calls == ["unwire"]
@@ -511,7 +571,9 @@ async def test_commit_local_does_not_unwire(monkeypatch, tmp_path):
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         calls = []
-        monkeypatch.setattr(wire_mod, "unwire_voice", lambda: calls.append("unwire") or True)
+        monkeypatch.setattr(
+            wire_mod, "unwire_voice", lambda: calls.append("unwire") or True
+        )
         screen = _screen(app, FakeVoice())
         screen._config_path = str(tmp_path / "config.yml")
         (tmp_path / "config.yml").write_text("model: m\n", encoding="utf-8")
@@ -539,8 +601,13 @@ async def test_voice_cloud_field_placeholders(monkeypatch):
         await pilot.press("down")
         await pilot.press("enter")
         await pilot.pause()
-        assert screen.query_one("#voice-url", Input).placeholder == "https://…/v1/audio/transcriptions"
-        assert screen.query_one("#voice-model", Input).placeholder == "whisper-1"
+        assert (
+            screen.query_one("#voice-url", Input).placeholder
+            == "https://…/v1/audio/transcriptions"
+        )
+        assert (
+            screen.query_one("#voice-model", Input).placeholder == "whisper-1"
+        )
         assert not screen.query("#voice-lang")
 
 
@@ -559,14 +626,19 @@ async def test_voice_cloud_draft_survives_pageup(monkeypatch):
         await pilot.press("down")
         await pilot.press("enter")  # ● endpoint + поля
         await pilot.pause()
-        screen.query_one("#voice-url", Input).value = "https://stt.x/v1/audio/transcriptions"
+        screen.query_one(
+            "#voice-url", Input
+        ).value = "https://stt.x/v1/audio/transcriptions"
         await pilot.press("pageup")  # назад на шаг MCP
         await pilot.pause()
         assert screen._step_id() == STEP_MCP
         await pilot.press("pagedown")  # и снова вперёд
         await pilot.pause()
         assert screen._step_id() == STEP_VOICE
-        assert screen.query_one("#voice-url", Input).value == "https://stt.x/v1/audio/transcriptions"
+        assert (
+            screen.query_one("#voice-url", Input).value
+            == "https://stt.x/v1/audio/transcriptions"
+        )
 
 
 @pytest.mark.asyncio
@@ -593,13 +665,26 @@ async def test_voice_cloud_fields_are_framed_editor(monkeypatch):
         labels = [
             str(w.render())
             for w in ed.query(".onb-hint")
-            if not any(c in w.classes for c in ("voice-url-preset-hint", "voice-model-hint", "voice-lang-hint"))
+            if not any(
+                c in w.classes
+                for c in (
+                    "voice-url-preset-hint",
+                    "voice-model-hint",
+                    "voice-lang-hint",
+                )
+            )
         ]
         assert labels == ["URL", "Токен", "Модель"]
         assert "set-framed" in ed.query_one("#voice-token", Input).classes
-        for wid, group_id in (("#voice-url", "#voice-url-group"), ("#voice-model", "#voice-model-group")):
+        for wid, group_id in (
+            ("#voice-url", "#voice-url-group"),
+            ("#voice-model", "#voice-model-group"),
+        ):
             field = ed.query_one(wid, Input)
-            assert "group-field" in field.classes and "set-framed" not in field.classes
+            assert (
+                "group-field" in field.classes
+                and "set-framed" not in field.classes
+            )
             assert field.parent is ed.query_one(group_id)
         assert not screen.query("#voice-lang")
 
@@ -628,13 +713,17 @@ async def test_editor_lookup_survives_a_pending_removal(monkeypatch):
         doomed.remove()  # отложенное удаление: пока в дереве
         # Новый встаёт СРАЗУ ПОСЛЕ обречённого и в того же родителя — так и делает
         # перерисовка шага; иначе симуляция ловила бы не тот порядок обхода дерева.
-        fresh = VoiceEndpointEditor(values={"url": "https://new.example/v1"}, autofocus=False)
+        fresh = VoiceEndpointEditor(
+            values={"url": "https://new.example/v1"}, autofocus=False
+        )
         doomed.parent.mount(fresh, after=doomed)
         assert len(list(screen.query(VoiceEndpointEditor))) == 2, (
             "не удалось воспроизвести два матча — тест перестал проверять то, что должен"
         )
 
-        assert screen._voice_endpoint_editor() is fresh, "взят обречённый редактор вместо свежего"
+        assert screen._voice_endpoint_editor() is fresh, (
+            "взят обречённый редактор вместо свежего"
+        )
         # Чем был плох голый query_one на этом месте: он не падает на двух матчах, а
         # МОЛЧА отдаёт первый — обречённый. То есть шаг сабмитил бы значения прошлого
         # рендера, и заметить это было бы нечем.
@@ -663,11 +752,16 @@ async def test_voice_cloud_invalid_url_error_inside_editor(monkeypatch):
         assert screen._step_id() == STEP_VOICE  # остались на шаге
         ed = screen.query_one(VoiceEndpointEditor)
         assert any("http" in str(w.render()) for w in ed.query(".onb-warn"))
-        assert str(screen.query_one("#onb-body", Static).render()) == "Голосовой ввод"
+        assert (
+            str(screen.query_one("#onb-body", Static).render())
+            == "Голосовой ввод"
+        )
 
 
 @pytest.mark.asyncio
-async def test_service_start_does_not_block_wizard_finish(monkeypatch, tmp_path):
+async def test_service_start_does_not_block_wizard_finish(
+    monkeypatch, tmp_path
+):
     """Финал мастера не должен замирать: после свежей установки порт мёртв, и
     ensure_voice_service блокирующе ждёт готовности (до 15 с). Подъём уходит на
     воркер ПРИЛОЖЕНИЯ (экран мастера тут же сменяется на TraceScreen), результат —
@@ -684,7 +778,9 @@ async def test_service_start_does_not_block_wizard_finish(monkeypatch, tmp_path)
         entered = threading.Event()
         release = threading.Event()
         toasts = []
-        monkeypatch.setattr(app, "notify", lambda msg, **kw: toasts.append(msg), raising=False)
+        monkeypatch.setattr(
+            app, "notify", lambda msg, **kw: toasts.append(msg), raising=False
+        )
 
         def _slow(cfg):
             entered.set()
@@ -704,7 +800,9 @@ async def test_service_start_does_not_block_wizard_finish(monkeypatch, tmp_path)
 
         t0 = time.monotonic()
         screen._commit()
-        assert time.monotonic() - t0 < 1.0, "финал мастера ждал подъёма сервиса"
+        assert time.monotonic() - t0 < 1.0, (
+            "финал мастера ждал подъёма сервиса"
+        )
         for _ in range(60):
             await pilot.pause()
             if entered.is_set():
@@ -730,7 +828,9 @@ def _voice_editor(screen):
 
 
 def _model_rows(screen):
-    return [str(w.render()) for w in screen.query(".voice-model-row") if w.display]
+    return [
+        str(w.render()) for w in screen.query(".voice-model-row") if w.display
+    ]
 
 
 def _list_hint(screen, cls: str):
@@ -739,7 +839,9 @@ def _list_hint(screen, cls: str):
     return str(hints[-1].render()) if hints else None
 
 
-async def _to_cloud_fields(pilot, screen, url="https://s.x/v1/audio/transcriptions"):
+async def _to_cloud_fields(
+    pilot, screen, url="https://s.x/v1/audio/transcriptions"
+):
     """Пометить «Свой endpoint» — под ним разворачиваются поля, фокус в URL."""
     from textual.widgets import Input
 
@@ -764,11 +866,15 @@ async def test_model_field_loads_the_list_from_the_endpoint():
         await app.push_screen(screen)
         await _to_voice_step(pilot, screen)
         ed = await _to_cloud_fields(pilot, screen)
-        assert voice.model_calls == []  # пока курсор не в поле — в сеть не ходим
+        assert (
+            voice.model_calls == []
+        )  # пока курсор не в поле — в сеть не ходим
         ed.focus_field("model")
         await pilot.pause()
         await pilot.pause()
-        assert voice.model_calls == [("https://s.x/v1/audio/transcriptions", "", True)]
+        assert voice.model_calls == [
+            ("https://s.x/v1/audio/transcriptions", "", True)
+        ]
         assert ed.model_list is not None and ed.model_list.is_open
 
 
@@ -810,7 +916,9 @@ async def test_arrows_walk_an_open_list_not_the_mode_rows():
         before = screen._idx.get(STEP_VOICE)
         await pilot.press("down")
         await pilot.pause()
-        assert screen._idx.get(STEP_VOICE) == before  # курсор шага не сдвинулся
+        assert (
+            screen._idx.get(STEP_VOICE) == before
+        )  # курсор шага не сдвинулся
 
 
 @pytest.mark.asyncio
@@ -897,7 +1005,11 @@ async def test_alt_down_reopens_the_list_only_from_the_model_field():
 
 
 def _url_rows(screen):
-    return [str(w.render()) for w in screen.query(".voice-url-preset-row") if w.display]
+    return [
+        str(w.render())
+        for w in screen.query(".voice-url-preset-row")
+        if w.display
+    ]
 
 
 @pytest.mark.asyncio
@@ -906,7 +1018,9 @@ async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highl
     список НЕ раскрывает (канон форм 2026-08-17: пресет-лист раскрыт, только пока
     значение складывается), а Alt+↓ раскрывает его ЦЕЛИКОМ, курсор — на СОВПАВШЕМ
     пресете. Тот же канон, что у адреса «Подключения»."""
-    from gc_core.config_modules.voice_endpoint_presets import DEFAULT_VOICE_ENDPOINT_PRESETS
+    from gc_core.config_modules.voice_endpoint_presets import (
+        DEFAULT_VOICE_ENDPOINT_PRESETS,
+    )
     from gc_tui.app import TuiApp
 
     app = TuiApp(config={"model": "M"})
@@ -918,7 +1032,9 @@ async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highl
         ed = await _to_cloud_fields(pilot, screen, url=groq.url)
         await pilot.press("tab")  # курсор → в поля, на «URL»
         await pilot.pause()
-        assert ed.url_list is not None and not ed.url_list.is_open  # адрес задан
+        assert (
+            ed.url_list is not None and not ed.url_list.is_open
+        )  # адрес задан
         await pilot.press("alt+down")  # явная просьба показать список
         await pilot.pause()
         assert ed.url_list.is_open
@@ -931,7 +1047,9 @@ async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highl
 async def test_enter_on_a_foreign_url_preset_substitutes_and_clears_the_model():
     """Enter по ЧУЖОМУ пресету — реальным путём через `on_key` экрана (не напрямую
     через редактор): URL подставлен, «Модель» стёрта (спека §4.1), список свёрнут."""
-    from gc_core.config_modules.voice_endpoint_presets import DEFAULT_VOICE_ENDPOINT_PRESETS
+    from gc_core.config_modules.voice_endpoint_presets import (
+        DEFAULT_VOICE_ENDPOINT_PRESETS,
+    )
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
@@ -943,7 +1061,9 @@ async def test_enter_on_a_foreign_url_preset_substitutes_and_clears_the_model():
         openai = DEFAULT_VOICE_ENDPOINT_PRESETS[0]
         ed = await _to_cloud_fields(pilot, screen, url=openai.url)
         screen.query_one("#voice-model", Input).value = "whisper-1"
-        await pilot.press("tab")  # в поля, на «URL» (адрес задан — список свёрнут)
+        await pilot.press(
+            "tab"
+        )  # в поля, на «URL» (адрес задан — список свёрнут)
         await pilot.pause()
         await pilot.press("alt+down")  # раскрыть явно: подсветка на OpenAI
         await pilot.pause()
@@ -1025,7 +1145,9 @@ async def test_advancing_after_a_url_pick_with_empty_model_shows_the_form_error(
         await pilot.press("enter")  # «далее»
         await pilot.pause()
         assert screen._step_id() == STEP_VOICE
-        assert any("выберите модель" in str(w.render()) for w in ed.query(".onb-warn"))
+        assert any(
+            "выберите модель" in str(w.render()) for w in ed.query(".onb-warn")
+        )
 
 
 # --- поля живут под своей опцией (курсор), Tab ходит по ним ---------------------
@@ -1075,12 +1197,17 @@ async def test_typed_values_survive_a_trip_off_the_option():
         await _to_voice_step(pilot, screen)
         await pilot.press("down")
         await pilot.pause()
-        screen.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        screen.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("up")
         await pilot.pause()
         await pilot.press("down")
         await pilot.pause()
-        assert screen.query_one("#voice-url", Input).value == "https://s.x/v1/audio/transcriptions"
+        assert (
+            screen.query_one("#voice-url", Input).value
+            == "https://s.x/v1/audio/transcriptions"
+        )
 
 
 @pytest.mark.asyncio
@@ -1097,7 +1224,9 @@ async def test_marking_keeps_the_fields_and_what_was_typed():
         await _to_voice_step(pilot, screen)
         await pilot.press("down")
         await pilot.pause()
-        screen.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        screen.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         field = screen.query_one("#voice-url", Input)
         await pilot.press("space")
         await pilot.pause()
@@ -1139,7 +1268,9 @@ async def test_tab_moves_between_groups(tmp_path):
         # сам — стрелка тогда уходит списку, а не курсору формы (свой сценарий, см.
         # test_arrows_walk_an_open_list_not_the_mode_rows). Задаём НЕ-пресетный адрес
         # заранее, чтобы список молчал и тест остался про саму ленту полей.
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         assert scr._voice_cursor_group() == "variants"
         variant_before = scr._voice_cursor_position()  # строка «Свой endpoint»
         await pilot.press("tab")
@@ -1152,14 +1283,18 @@ async def test_tab_moves_between_groups(tmp_path):
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
-        assert scr._voice_cursor_position() == variant_before, "позиция должна помниться"
+        assert scr._voice_cursor_position() == variant_before, (
+            "позиция должна помниться"
+        )
         # Клавиша съедена экраном, а не отдана focus_next: тот увёл бы фокус в соседнее
         # поле, а курсор в вариантах фокуса в полях не держит вовсе (спека §4.2.6).
         assert pilot.app.focused is None
         await pilot.press("tab")
         await pilot.pause()
         assert scr._voice_cursor_group() == "fields"
-        assert scr._voice_cursor_field() == "token", "позиция группы полей тоже помнится"
+        assert scr._voice_cursor_field() == "token", (
+            "позиция группы полей тоже помнится"
+        )
 
 
 @pytest.mark.asyncio
@@ -1173,7 +1308,9 @@ async def test_arrows_in_fields_do_not_move_variants(tmp_path):
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # НЕ-пресетный адрес — иначе список URL раскрывается сам (спека 2026-08-05 §3)
         # и первая же стрелка уходит ему, а не курсору формы (см. test_tab_moves_between_groups).
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         variant_before = scr._idx.get(STEP_VOICE, 0)
         choice_before = scr._voice_choice
         await pilot.press("tab")  # в поля
@@ -1181,7 +1318,9 @@ async def test_arrows_in_fields_do_not_move_variants(tmp_path):
         await pilot.pause()
         assert scr._voice_cursor_group() == "fields"
         assert scr._voice_cursor_field() == "token"
-        assert scr._idx.get(STEP_VOICE, 0) == variant_before, "строка режима не сдвинулась"
+        assert scr._idx.get(STEP_VOICE, 0) == variant_before, (
+            "строка режима не сдвинулась"
+        )
         assert scr._voice_choice == choice_before
         assert scr.query_one("#voice-token", Input).has_focus
 
@@ -1198,7 +1337,9 @@ async def test_tab_is_swallowed_when_no_second_group(tmp_path):
         await pilot.pause()
         assert scr._voice_cursor_group() == "variants"
         assert scr._voice_cursor_position() == 0
-        assert pilot.app.focused is focused_before, "Tab не должен водить фокус мимо ленты"
+        assert pilot.app.focused is focused_before, (
+            "Tab не должен водить фокус мимо ленты"
+        )
 
 
 @pytest.mark.asyncio
@@ -1210,7 +1351,9 @@ async def test_tab_collapses_open_list_before_leaving(tmp_path):
 
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
         # Без адреса список не раскрывается вовсе (идти некуда) — задаём его.
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab")  # в поля
         for _ in range(3):  # дойти до поля со списком
             if scr._voice_cursor_field() == "model":
@@ -1239,21 +1382,33 @@ async def test_cursor_in_fields_leaves_no_highlighted_variant(tmp_path):
         # 2026-08-05 §3), и Tab тащит за собой чужую асинхронность (монтаж строк
         # списка): тест про один курсор, а не про поведение списка (см. соседние
         # test_tab_moves_between_groups/test_arrows_in_fields_do_not_move_variants).
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
 
         # `.onb-voice-row`, а не общий `.onb-option`: тот несёт и строки раскрытых
         # списков поля («URL» — пресеты, «Модель» — ответ сервера, см. комментарий
         # `onboarding._VOICE_OPTIONS`), и запрос по нему смешал бы их со строками режима.
         def highlighted():
-            return [str(w.render()) for w in scr.query(".onb-voice-row") if "selected" in w.classes]
+            return [
+                str(w.render())
+                for w in scr.query(".onb-voice-row")
+                if "selected" in w.classes
+            ]
 
         def marked():
-            return [str(w.render()) for w in scr.query(".onb-voice-row") if "▸" in str(w.render())]
+            return [
+                str(w.render())
+                for w in scr.query(".onb-voice-row")
+                if "▸" in str(w.render())
+            ]
 
         assert len(highlighted()) == 1 and "Свой endpoint" in highlighted()[0]
         await pilot.press("tab")  # курсор → в поля
         await pilot.pause()
-        assert highlighted() == [], "подсветка строки при курсоре в полях — второй курсор"
+        assert highlighted() == [], (
+            "подсветка строки при курсоре в полях — второй курсор"
+        )
         assert len(marked()) == 1 and "Свой endpoint" in marked()[0]
         await pilot.press("tab")  # …и обратно
         await pilot.pause()
@@ -1273,7 +1428,9 @@ async def test_marking_does_not_reopen_a_list_shut_by_escape(tmp_path):
     from textual.widgets import Input
 
     async with wizard_voice_step(tmp_path, mode="cloud") as (pilot, scr):
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab")  # в поля
         for _ in range(3):
             if scr._voice_cursor_field() == "model":
@@ -1292,7 +1449,9 @@ async def test_marking_does_not_reopen_a_list_shut_by_escape(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_field_cursor_resets_with_the_group_on_leaving_the_step(monkeypatch, tmp_path):
+async def test_field_cursor_resets_with_the_group_on_leaving_the_step(
+    monkeypatch, tmp_path
+):
     """Позиция в группе полей сбрасывается ВМЕСТЕ с группой: поля пересобраны, и вход в
     них обязан начинаться с URL. Иначе первый Tab после возврата встаёт на «Модель» — а
     вход на это поле сразу дёргает список с сервера, ничего не спросив."""
@@ -1310,7 +1469,9 @@ async def test_field_cursor_resets_with_the_group_on_leaving_the_step(monkeypatc
         await pilot.press("down")  # курсор → «Свой endpoint»
         await pilot.press("space")  # ● endpoint
         await pilot.pause()
-        screen.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        screen.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         await pilot.press("tab")  # в поля
         for _ in range(3):
             if screen._voice_cursor_field() == "model":
@@ -1331,7 +1492,9 @@ async def test_field_cursor_resets_with_the_group_on_leaving_the_step(monkeypatc
         await pilot.press("tab")
         await pilot.pause()
         assert screen._voice_cursor_field() == "url"
-        assert len(voice.model_calls) == calls_before, "вход в поля не должен звать сервер"
+        assert len(voice.model_calls) == calls_before, (
+            "вход в поля не должен звать сервер"
+        )
 
 
 @pytest.mark.asyncio
@@ -1346,7 +1509,9 @@ async def test_returning_to_the_step_starts_in_the_variants_group(tmp_path):
         await pilot.press("space")  # ● «Свой endpoint»
         await pilot.press("tab")  # курсор → в поля
         await pilot.pause()
-        scr.query_one("#voice-url", Input).value = "https://s.x/v1/audio/transcriptions"
+        scr.query_one(
+            "#voice-url", Input
+        ).value = "https://s.x/v1/audio/transcriptions"
         # submit() требует модель (спека §4.2) — без неё PgDn не продвинет шаг, и тест
         # (о сбросе группы курсора, не о валидации) не дойдёт до подтверждения.
         scr.query_one("#voice-model", Input).value = "wh-1"
@@ -1419,7 +1584,11 @@ async def test_local_option_always_shows_its_cost():
         await _to_voice_step(pilot, screen)
 
         def cost_rows():
-            return [str(w.render()) for w in screen.query(".onb-hint") if w.display and "RAM" in str(w.render())]
+            return [
+                str(w.render())
+                for w in screen.query(".onb-hint")
+                if w.display and "RAM" in str(w.render())
+            ]
 
         assert len(cost_rows()) == 1 and _VOICE_LOCAL_COST in cost_rows()[0]
         for _ in range(3):  # весь круг по опциям — строка на месте
@@ -1443,7 +1612,11 @@ async def test_no_key_hints_inside_the_step_body():
         await _to_voice_step(pilot, screen)
 
         def key_hints():
-            return [str(w.render()) for w in screen.query(".onb-hint") if w.display and "Tab" in str(w.render())]
+            return [
+                str(w.render())
+                for w in screen.query(".onb-hint")
+                if w.display and "Tab" in str(w.render())
+            ]
 
         for _ in range(3):  # весь круг по опциям, в т.ч. с полями
             assert key_hints() == []
@@ -1456,12 +1629,17 @@ def test_local_cost_line_names_both_resources():
     — что сервис занимает память, пока работает, и так ясно."""
     from gc_tui.screens.onboarding import _VOICE_LOCAL_COST
 
-    assert "~1 ГБ RAM" in _VOICE_LOCAL_COST and "CPU до 4 потоков" in _VOICE_LOCAL_COST
+    assert (
+        "~1 ГБ RAM" in _VOICE_LOCAL_COST
+        and "CPU до 4 потоков" in _VOICE_LOCAL_COST
+    )
     assert len(_VOICE_LOCAL_COST) <= 60
 
 
 @pytest.mark.asyncio
-async def test_desc_column_moves_left_without_the_installed_mark(monkeypatch, tmp_path):
+async def test_desc_column_moves_left_without_the_installed_mark(
+    monkeypatch, tmp_path
+):
     """Колонка описаний считается по самой длинной левой части, а не константой: без
     статуса «установлен» строки короче, и держать описания на прежнем месте значило бы
     оставить между ними дыру. Статус берётся из состояния сервиса — уводим его в tmp,
@@ -1470,7 +1648,10 @@ async def test_desc_column_moves_left_without_the_installed_mark(monkeypatch, tm
     from gc_tui.voice_runtime import paths as vpaths
 
     monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "state.json",
+    )
     app = TuiApp(config={"model": "M"})
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
@@ -1493,7 +1674,9 @@ async def test_cost_line_sits_tight_under_its_option_with_air_before_the_next():
     from gc_tui.app import TuiApp
 
     app = TuiApp(config={"model": "M"})
-    async with app.run_test(size=(150, 40)) as pilot:  # шире строки: проверяем раскладку, не перенос
+    async with app.run_test(
+        size=(150, 40)
+    ) as pilot:  # шире строки: проверяем раскладку, не перенос
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
         await _to_voice_step(pilot, screen)
@@ -1503,17 +1686,28 @@ async def test_cost_line_sits_tight_under_its_option_with_air_before_the_next():
             for key in ("Локальный сервис", "RAM", "Свой endpoint"):
                 if key in s:
                     rows[key] = w.region
-        local, cost, cloud = rows["Локальный сервис"], rows["RAM"], rows["Свой endpoint"]
+        local, cost, cloud = (
+            rows["Локальный сервис"],
+            rows["RAM"],
+            rows["Свой endpoint"],
+        )
         assert cost.y == local.y + 1  # вплотную под своей опцией
         assert cost.height == 1  # на широком окне — одной строкой
         assert cloud.y == cost.y + 2  # и воздух перед следующей опцией
         # Единый столбец: описания опций и вторая строка начинаются на одной ЭКРАННОЙ
         # колонке. Считать по индексу в тексте нельзя — у строки-опции есть собственный
         # отступ в колонку, у второй строки его нет.
-        screen_rows = ["".join(seg.text for seg in strip) for strip in screen._compositor.render_strips()]
+        screen_rows = [
+            "".join(seg.text for seg in strip)
+            for strip in screen._compositor.render_strips()
+        ]
         col = {
             probe: screen_rows[y].index(probe)
-            for probe, y in (("распознаёт", local.y), ("faster-whisper-small", cost.y), ("любой OpenAI", cloud.y))
+            for probe, y in (
+                ("распознаёт", local.y),
+                ("faster-whisper-small", cost.y),
+                ("любой OpenAI", cloud.y),
+            )
         }
         assert len(set(col.values())) == 1, col
 
@@ -1530,9 +1724,14 @@ async def test_cost_line_keeps_its_column_when_it_wraps():
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
         await _to_voice_step(pilot, screen)
-        cost = next(w for w in screen.query(".onb-hint") if "RAM" in str(w.render()))
+        cost = next(
+            w for w in screen.query(".onb-hint") if "RAM" in str(w.render())
+        )
         assert cost.region.height > 1  # окно узкое — строка переносится
-        rows = ["".join(seg.text for seg in strip) for strip in screen._compositor.render_strips()]
+        rows = [
+            "".join(seg.text for seg in strip)
+            for strip in screen._compositor.render_strips()
+        ]
         col = rows[cost.region.y].index("faster-whisper-small")
         for extra in range(1, cost.region.height):
             line = rows[cost.region.y + extra]
@@ -1580,8 +1779,13 @@ def _isolate_voice_state(monkeypatch, tmp_path):
     же приём, что test_onboarding_screen.py)."""
     from gc_tui.voice_runtime import paths as vpaths
 
-    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "voice_data" / "state.json")
+    monkeypatch.setattr(
+        vpaths, "voice_data_dir", lambda: tmp_path / "voice_data"
+    )
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "voice_data" / "state.json",
+    )
 
 
 def _write_cloud_config(tmp_path, *, url: str, token: str, model: str) -> str:
@@ -1625,7 +1829,11 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     config = {
         "voice": {
@@ -1636,7 +1844,10 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
         }
     }
     cfg_path = _write_cloud_config(
-        tmp_path, url=config["voice"]["url"], token=config["voice"]["token"], model=config["voice"]["model"]
+        tmp_path,
+        url=config["voice"]["url"],
+        token=config["voice"]["token"],
+        model=config["voice"]["model"],
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, config)
@@ -1645,15 +1856,24 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
         await _goto_voice_step(pilot, screen)
         assert screen._voice_choice == "cloud"
         assert _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "cloud"
-        assert screen.query_one("#voice-url", Input).value == "https://stt.example.com/v1/audio/transcriptions"
-        assert screen.query_one("#voice-model", Input).value == "whisper-large-v3"
+        assert (
+            screen.query_one("#voice-url", Input).value
+            == "https://stt.example.com/v1/audio/transcriptions"
+        )
+        assert (
+            screen.query_one("#voice-model", Input).value == "whisper-large-v3"
+        )
         token_field = screen.query_one("#voice-token", Input)
         assert token_field.value == ""  # секрет не подставляется
-        assert token_field.placeholder == display_secret("sk-real-secret-value")
+        assert token_field.placeholder == display_secret(
+            "sk-real-secret-value"
+        )
 
 
 @pytest.mark.asyncio
-async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monkeypatch):
+async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(
+    tmp_path, monkeypatch
+):
     """Голосовой шаг мастера: Ctrl+U на «Токене» стирает СОХРАНЁННЫЙ секрет.
 
     Тот же смысл и та же клавиша, что на шаге «Подключение» и в /settings — иначе
@@ -1667,7 +1887,11 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     config = {
         "voice": {
@@ -1678,7 +1902,10 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
         }
     }
     cfg_path = _write_cloud_config(
-        tmp_path, url=config["voice"]["url"], token=config["voice"]["token"], model=config["voice"]["model"]
+        tmp_path,
+        url=config["voice"]["url"],
+        token=config["voice"]["token"],
+        model=config["voice"]["model"],
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, config)
@@ -1692,7 +1919,9 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
         await pilot.pause()
         await pilot.press("down")  # на «Токен»
         await pilot.pause()
-        assert screen.focused is not None and screen.focused.id == "voice-token"
+        assert (
+            screen.focused is not None and screen.focused.id == "voice-token"
+        )
         ed = _voice_editor(screen)
 
         await pilot.press("ctrl+u")
@@ -1702,7 +1931,9 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(tmp_path, monke
         assert ed.token_cleared is True
 
         screen._capture_voice_fields()  # то же, что делает уход с шага
-        assert screen._voice_token_cleared is True, "пометка обязана пережить пересборку"
+        assert screen._voice_token_cleared is True, (
+            "пометка обязана пережить пересборку"
+        )
 
 
 @pytest.mark.asyncio
@@ -1716,7 +1947,11 @@ async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice(installed=True)
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=True, service_alive=True, port=8765, model="faster-whisper-small", mode="local"
+        installed=True,
+        service_alive=True,
+        port=8765,
+        model="faster-whisper-small",
+        mode="local",
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, {})
@@ -1727,7 +1962,9 @@ async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_prefill_reads_raw_document_not_merged_config(tmp_path, monkeypatch):
+async def test_prefill_reads_raw_document_not_merged_config(
+    tmp_path, monkeypatch
+):
     """Источник префилла — СЫРОЙ config.yml (config_path), а не self._config: тот
     слит с managed-слоем и с уже раскрытыми ${ENV:...} (канон /settings,
     _voice_raw_cloud). Конфликтующие значения в merged-словаре и в реальном файле —
@@ -1743,7 +1980,11 @@ async def test_prefill_reads_raw_document_not_merged_config(tmp_path, monkeypatc
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     # merged (в памяти, self._config) — то, что видел бы старый код; в файле — другое,
     # ровно так расходятся managed-слой/${ENV:...} с сырым документом в жизни.
@@ -1756,7 +1997,10 @@ async def test_prefill_reads_raw_document_not_merged_config(tmp_path, monkeypatc
         }
     }
     cfg_path = _write_cloud_config(
-        tmp_path, url="https://stt.example.com/v1/audio/transcriptions", token="sk-raw-secret", model="whisper-large-v3"
+        tmp_path,
+        url="https://stt.example.com/v1/audio/transcriptions",
+        token="sk-raw-secret",
+        model="whisper-large-v3",
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, merged_config)
@@ -1764,15 +2008,22 @@ async def test_prefill_reads_raw_document_not_merged_config(tmp_path, monkeypatc
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
         assert (
-            screen.query_one("#voice-url", Input).value == "https://stt.example.com/v1/audio/transcriptions"
+            screen.query_one("#voice-url", Input).value
+            == "https://stt.example.com/v1/audio/transcriptions"
         )  # из файла, не merged
-        assert screen.query_one("#voice-model", Input).value == "whisper-large-v3"
+        assert (
+            screen.query_one("#voice-model", Input).value == "whisper-large-v3"
+        )
         token_field = screen.query_one("#voice-token", Input)
-        assert token_field.placeholder == display_secret("sk-raw-secret")  # не маска "local"
+        assert token_field.placeholder == display_secret(
+            "sk-raw-secret"
+        )  # не маска "local"
 
 
 @pytest.mark.asyncio
-async def test_voice_step_prefill_noop_when_nothing_configured(tmp_path, monkeypatch):
+async def test_voice_step_prefill_noop_when_nothing_configured(
+    tmp_path, monkeypatch
+):
     """mode == "off" — ничего не настроено (первичный сценарий, --init-config на
     пустом конфиге): префилл не выбирает ничего, курсор остаётся дефолтным —
     «Локальный сервис», как и до фичи.
@@ -1799,7 +2050,9 @@ async def test_voice_step_prefill_noop_when_nothing_configured(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_prefill_reads_snapshot_only_once_per_step_visit(tmp_path, monkeypatch):
+async def test_prefill_reads_snapshot_only_once_per_step_visit(
+    tmp_path, monkeypatch
+):
     """Гейт префилла — «прочитали снимок один раз», а не «пока выбор не сделан»:
     при mode == "off" выбор так и остаётся пустым, а тело шага голоса пересобирается
     на КАЖДОЕ движение курсора (смена опции меняет _voice_body_shape) — без
@@ -1815,7 +2068,13 @@ async def test_prefill_reads_snapshot_only_once_per_step_visit(tmp_path, monkeyp
 
     def _snap(cfg):
         calls.append(1)
-        return VoiceStatus(installed=False, service_alive=False, port=None, model=None, mode="off")
+        return VoiceStatus(
+            installed=False,
+            service_alive=False,
+            port=None,
+            model=None,
+            mode="off",
+        )
 
     voice.status_cheap = _snap
     async with app.run_test() as pilot:
@@ -1831,7 +2090,9 @@ async def test_prefill_reads_snapshot_only_once_per_step_visit(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypatch):
+async def test_passing_through_voice_step_keeps_cloud_backend(
+    tmp_path, monkeypatch
+):
     """Главная защита: пролистывание шага голоса (PgDn), НЕ трогая ничего, не
     подменяет уже рабочий облачный провайдер локальным сервисом — регресс из
     Task 7 (_voice_advance брал вариант под курсором, а тот по умолчанию нулевой)."""
@@ -1843,7 +2104,11 @@ async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypa
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     config = {
         "voice": {
@@ -1854,7 +2119,10 @@ async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypa
         }
     }
     cfg_path = _write_cloud_config(
-        tmp_path, url=config["voice"]["url"], token=config["voice"]["token"], model=config["voice"]["model"]
+        tmp_path,
+        url=config["voice"]["url"],
+        token=config["voice"]["token"],
+        model=config["voice"]["model"],
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, config)
@@ -1868,7 +2136,9 @@ async def test_passing_through_voice_step_keeps_cloud_backend(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_commit_cloud_empty_token_keeps_saved_secret(tmp_path, monkeypatch):
+async def test_commit_cloud_empty_token_keeps_saved_secret(
+    tmp_path, monkeypatch
+):
     """Критический регресс: префилл ставит voice.token = "" (канон «пустое поле =
     оставить сохранённый», секрет в поле не кладём), но пролистывание шага писало
     его в файл БЕЗ подстановки сохранённого — коммит стирал рабочий токен на диске.
@@ -1884,7 +2154,11 @@ async def test_commit_cloud_empty_token_keeps_saved_secret(tmp_path, monkeypatch
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     config = {
         "voice": {
@@ -1895,7 +2169,10 @@ async def test_commit_cloud_empty_token_keeps_saved_secret(tmp_path, monkeypatch
         }
     }
     cfg_path = _write_cloud_config(
-        tmp_path, url=config["voice"]["url"], token=config["voice"]["token"], model=config["voice"]["model"]
+        tmp_path,
+        url=config["voice"]["url"],
+        token=config["voice"]["token"],
+        model=config["voice"]["model"],
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, config)
@@ -1916,7 +2193,9 @@ async def test_commit_cloud_empty_token_keeps_saved_secret(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(tmp_path, monkeypatch):
+async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(
+    tmp_path, monkeypatch
+):
     """Предсуществующий крэш стал достижимым БЕЗ осознанных действий: префилл сам
     ставит _voice_choice = "cloud", человек уводит курсор на другую опцию и жмёт
     PgDn — раньше это падало NoMatches (поля живут под курсором, а не под пометкой,
@@ -1932,7 +2211,11 @@ async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(tmp_path,
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     config = {
         "voice": {
@@ -1953,12 +2236,16 @@ async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(tmp_path,
         await pilot.press("pagedown")  # раньше здесь падал NoMatches
         await pilot.pause()
         assert screen._step_id() == STEP_VOICE  # не продвинулись
-        assert _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "cloud"  # курсор вернулся
+        assert (
+            _VOICE_OPTIONS[screen._idx[STEP_VOICE]][0] == "cloud"
+        )  # курсор вернулся
         assert screen.query(VoiceEndpointEditor)  # поля снова раскрыты
 
 
 @pytest.mark.asyncio
-async def test_model_list_uses_saved_token_when_field_empty(tmp_path, monkeypatch):
+async def test_model_list_uses_saved_token_when_field_empty(
+    tmp_path, monkeypatch
+):
     """Список моделей уходит с СОХРАНЁННЫМ токеном, когда поле токена пусто (канон
     saved_token из /settings, VoiceEndpointEditor.list_source_auth): без него запрос
     на рабочем облаке 401-ит — под полем «Модель» повисает «не удалось получить
@@ -1970,7 +2257,10 @@ async def test_model_list_uses_saved_token_when_field_empty(tmp_path, monkeypatc
     voice = FakeVoice()
     voice.models = _MODELS
     cfg_path = _write_cloud_config(
-        tmp_path, url="https://s.x/v1/audio/transcriptions", token="sk-saved-secret", model="whisper-1"
+        tmp_path,
+        url="https://s.x/v1/audio/transcriptions",
+        token="sk-saved-secret",
+        model="whisper-1",
     )
     async with app.run_test() as pilot:
         screen = _screen(app, voice)
@@ -1981,14 +2271,18 @@ async def test_model_list_uses_saved_token_when_field_empty(tmp_path, monkeypatc
         ed.focus_field("model")
         await pilot.pause()
         await pilot.pause()
-        assert voice.model_calls == [("https://s.x/v1/audio/transcriptions", "sk-saved-secret", True)]
+        assert voice.model_calls == [
+            ("https://s.x/v1/audio/transcriptions", "sk-saved-secret", True)
+        ]
 
 
 # --- Раунд фиксов 2 -------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_voice_cloud_draft_token_does_not_leak_saved_secret(tmp_path, monkeypatch):
+async def test_voice_cloud_draft_token_does_not_leak_saved_secret(
+    tmp_path, monkeypatch
+):
     """Регресс: подставленный при коммите сохранённый токен не имеет права осесть в
     черновике (`self._voice_cloud`) — черновик восстанавливает ПОЛЯ при возврате на
     шаг, а поле токена намеренно держат пустым (секрет — не в поле, см. префилл).
@@ -2008,7 +2302,11 @@ async def test_voice_cloud_draft_token_does_not_leak_saved_secret(tmp_path, monk
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
-        installed=False, service_alive=False, port=None, model=None, mode="cloud"
+        installed=False,
+        service_alive=False,
+        port=None,
+        model=None,
+        mode="cloud",
     )
     config = {
         "voice": {
@@ -2019,14 +2317,19 @@ async def test_voice_cloud_draft_token_does_not_leak_saved_secret(tmp_path, monk
         }
     }
     cfg_path = _write_cloud_config(
-        tmp_path, url=config["voice"]["url"], token=config["voice"]["token"], model=config["voice"]["model"]
+        tmp_path,
+        url=config["voice"]["url"],
+        token=config["voice"]["token"],
+        model=config["voice"]["model"],
     )
     async with app.run_test() as pilot:
         screen = _screen_with_config(app, voice, config)
         screen._config_path = cfg_path
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
-        await pilot.press("pagedown")  # submit полей (токен не трогали) → далее
+        await pilot.press(
+            "pagedown"
+        )  # submit полей (токен не трогали) → далее
         await pilot.pause()
         await pilot.press("pageup")  # обратно на шаг голоса
         await pilot.pause()
@@ -2043,7 +2346,9 @@ async def test_voice_cloud_draft_token_does_not_leak_saved_secret(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_model_list_carries_verify_ssl_and_proxy_from_config(tmp_path, monkeypatch):
+async def test_model_list_carries_verify_ssl_and_proxy_from_config(
+    tmp_path, monkeypatch
+):
     """Список моделей «Своего endpoint» обязан ходить с TLS-настройкой и прокси
     ДЕЙСТВУЮЩЕГО конфига (канон /settings — `SettingsScreen._mount_voice_section`
     передаёт `verify_ssl=`/`config_proxy=` в тот же `VoiceEndpointEditor`): в
@@ -2065,7 +2370,9 @@ async def test_model_list_carries_verify_ssl_and_proxy_from_config(tmp_path, mon
         ed.focus_field("model")
         await pilot.pause()
         await pilot.pause()
-        assert voice.model_calls == [("https://s.x/v1/audio/transcriptions", "", False)]
+        assert voice.model_calls == [
+            ("https://s.x/v1/audio/transcriptions", "", False)
+        ]
         assert voice.model_proxies == ["http://corp:3128"]
 
 
@@ -2073,7 +2380,9 @@ async def test_model_list_carries_verify_ssl_and_proxy_from_config(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_model_list_prefers_typed_connection_proxy_over_config(tmp_path, monkeypatch):
+async def test_model_list_prefers_typed_connection_proxy_over_config(
+    tmp_path, monkeypatch
+):
     """Регресс: набранный на шаге «Подключение» прокси обязан перевешивать конфиг —
     в мастере это ОДИН проход, и на первичном запуске конфига с рабочим прокси нет
     вовсе (человек его только что вписал). Раньше `_mount_voice_fields` брал прокси
@@ -2083,7 +2392,9 @@ async def test_model_list_prefers_typed_connection_proxy_over_config(tmp_path, m
     from gc_tui.app import TuiApp
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    config = {"proxy": "http://stale-config-proxy:1"}  # в конфиге — ДРУГОЙ прокси
+    config = {
+        "proxy": "http://stale-config-proxy:1"
+    }  # в конфиге — ДРУГОЙ прокси
     app = TuiApp(config={"model": "M"})
     voice = FakeVoice()
     voice.models = _MODELS
@@ -2091,7 +2402,9 @@ async def test_model_list_prefers_typed_connection_proxy_over_config(tmp_path, m
         screen = _screen_with_config(app, voice, config)
         await app.push_screen(screen)
         await _goto_voice_step(pilot, screen)
-        screen._values["proxy"] = "http://typed-on-connection-step:2"  # шаг пройден
+        screen._values["proxy"] = (
+            "http://typed-on-connection-step:2"  # шаг пройден
+        )
         ed = await _to_cloud_fields(pilot, screen)
         ed.focus_field("model")
         await pilot.pause()
@@ -2100,7 +2413,9 @@ async def test_model_list_prefers_typed_connection_proxy_over_config(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_model_list_falls_back_to_config_proxy_when_connection_step_not_visited(tmp_path, monkeypatch):
+async def test_model_list_falls_back_to_config_proxy_when_connection_step_not_visited(
+    tmp_path, monkeypatch
+):
     """Парный случай: шаг «Подключение» не проходили (`self._values["proxy"]` —
     ключа нет вовсе, а не пустая строка — «не трогали», а не «стёрли осознанно»),
     но в конфиге прокси уже есть (повторный проход мастера / прыжок сразу на шаг

@@ -76,15 +76,21 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
             try:
                 value = conv(value)
             except Exception:
-                facts.append(f"{old}: значение не удалось перенести в {new} — задайте заново ({_SYNC_HINT})")
+                facts.append(
+                    f"{old}: значение не удалось перенести в {new} — задайте заново ({_SYNC_HINT})"
+                )
                 continue
         if not explicit_new:
             _set_path(raw, new, value)
             facts.append(f"{old} переименован в {new} — {_SYNC_HINT}")
         else:
-            facts.append(f"{old} устарел: действует явно заданный {new}, старое значение отброшено — {_SYNC_HINT}")
+            facts.append(
+                f"{old} устарел: действует явно заданный {new}, старое значение отброшено — {_SYNC_HINT}"
+            )
     for old, why in REMOVED.items():
         present, _ = _pop_path(raw, old)
         if present:
-            facts.append(f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}")
+            facts.append(
+                f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}"
+            )
     return facts

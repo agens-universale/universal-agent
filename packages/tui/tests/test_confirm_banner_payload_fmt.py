@@ -43,7 +43,9 @@ def test_t16_fmt_payload_value_preserves_short_multiline():
     """Short multiline payload is fully preserved."""
     from gc_tui.widgets.confirm_banner import _fmt_payload_value
 
-    payload = "curl https://api.example.com \\\n  -H 'Accept: json' \\\n  -d 'data'"
+    payload = (
+        "curl https://api.example.com \\\n  -H 'Accept: json' \\\n  -d 'data'"
+    )
     result = _fmt_payload_value(payload)
     assert result == payload.strip()
     assert result.count("\n") == 2  # both newlines preserved

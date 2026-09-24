@@ -21,7 +21,9 @@ def _fresh_state():
     state.shared = None
     state.user_intent_log = []
     state.current_user_intent = []
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+        ToolCallOutputsStore,
+    )
 
     state.tool_call_outputs_store = ToolCallOutputsStore(max_entries=10)
     return state
@@ -146,7 +148,9 @@ def test_apply_file_edits_returns_sha256(tmp_path):
     p = tmp_path / "b.txt"
     p.write_text("hello world\n", encoding="utf-8")
     tool = with_local_ctx(ApplyFileEdits)
-    res = json.loads(tool(path=str(p), edits=[{"search": "world", "replace": "там"}]))
+    res = json.loads(
+        tool(path=str(p), edits=[{"search": "world", "replace": "там"}])
+    )
     assert res["ok"] is True
     assert res["sha256"] == hashlib.sha256(p.read_bytes()).hexdigest()
 

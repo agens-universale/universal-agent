@@ -23,7 +23,13 @@ from gc_tui.editors import models_section as m
 from gc_tui.editors.models_section import value_style
 from gc_tui.palette import DEEP_DIM, DIM, INK
 from test_profile_editor import _fill_entry
-from test_profiles_crud import _flash, _notice, _profiles_screen, _put_cursor, _write
+from test_profiles_crud import (
+    _flash,
+    _notice,
+    _profiles_screen,
+    _put_cursor,
+    _write,
+)
 from textual.widgets import Static
 
 _BASE_URL = "http://base-host/v1/chat/completions"
@@ -135,7 +141,9 @@ def _profile_path(tmp_path):
 def _cursor_to(ed, kind: str, **match) -> None:
     """Курсор редактора на строку нужного рода: индексы строк знает он сам."""
     for i, row in enumerate(ed._rows()):
-        if row["kind"] == kind and all(row.get(k) == v for k, v in match.items()):
+        if row["kind"] == kind and all(
+            row.get(k) == v for k, v in match.items()
+        ):
             ed._idx = i
             ed._refresh_rows()
             return
@@ -176,10 +184,14 @@ async def _profile_view(
     monkeypatch.chdir(project)
     base_cfg = _write(
         tmp_path / "base" / "config.yml",
-        base if base is not None else _base_config_text(registry=registry, assign=assign),
+        base
+        if base is not None
+        else _base_config_text(registry=registry, assign=assign),
     )
     profile_file = (
-        project / ".gc" / "profiles" / "work.yml" if root == "project" else tmp_path / "base" / "profiles" / "work.yml"
+        project / ".gc" / "profiles" / "work.yml"
+        if root == "project"
+        else tmp_path / "base" / "profiles" / "work.yml"
     )
     _write(profile_file, PROFILE_SKELETON if profile is None else profile)
 
@@ -196,7 +208,9 @@ async def _profile_view(
 # --- строки: реестр основного конфига виден из профиля ------------------------
 
 
-async def test_fresh_profile_shows_the_full_effective_view(tmp_path, monkeypatch):
+async def test_fresh_profile_shows_the_full_effective_view(
+    tmp_path, monkeypatch
+):
     """Свежесозданный профиль (бланк — один комментарий) над базой с реестром:
     записи ОСНОВНОГО конфига стоят строками (§2), приглушённые и подписанные
     словом «основной конфиг», а указатель уровня у живой записи остаётся
@@ -221,7 +235,9 @@ async def test_fresh_profile_shows_the_full_effective_view(tmp_path, monkeypatch
         assert m._PROFILE_EMPTY_HINT not in texts
 
 
-async def test_shadow_reads_the_base_file_not_the_merged_runtime(tmp_path, monkeypatch):
+async def test_shadow_reads_the_base_file_not_the_merged_runtime(
+    tmp_path, monkeypatch
+):
     """Тень — документ БАЗОВОГО файла, а не merged-конфиг экрана (§3, страж 14).
 
     Экран знает адрес `merged-host` (так выглядит запуск с активным ДРУГИМ
@@ -235,10 +251,14 @@ async def test_shadow_reads_the_base_file_not_the_merged_runtime(tmp_path, monke
         opus = _entry_row(ed, "opus")
         assert "base-host" in opus.plain
         assert "merged-host" not in opus.plain
-        assert "flash-host" in _entry_row(ed, "flash").plain  # свой url записи цел
+        assert (
+            "flash-host" in _entry_row(ed, "flash").plain
+        )  # свой url записи цел
 
 
-async def test_an_own_entry_under_a_base_alias_stands_in_its_position(tmp_path, monkeypatch):
+async def test_an_own_entry_under_a_base_alias_stands_in_its_position(
+    tmp_path, monkeypatch
+):
     """Порядок §4: строки — записи основного файла и профиля, слитые по алиасу;
     унаследованные идут в порядке основного файла, свои-новые — после, в порядке
     файла профиля. Своя запись под ИМЕНЕМ записи основного конфига (файл профиля
@@ -254,13 +274,23 @@ async def test_an_own_entry_under_a_base_alias_stands_in_its_position(tmp_path, 
         "  opus:\n"
         '    model: "anthropic/claude-opus-4"\n'
     )
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        _p,
+        _scr,
+        ed,
+    ):
         ed._row_width = lambda: 100
         assert _entry_aliases(ed) == ["flash", "opus", "glm"]
-        flash, opus, glm = (_entry_row(ed, a) for a in ("flash", "opus", "glm"))
+        flash, opus, glm = (
+            _entry_row(ed, a) for a in ("flash", "opus", "glm")
+        )
         # Унаследованная строка приглушена ЦЕЛИКОМ; ярче прочего в ней ровно
         # один кусок — работающий указатель уровня (стрелка — общий DIM).
-        assert _row_style_set(flash) == {_rgb(DEEP_DIM), _rgb(DIM), _rgb(value_style("default"))}
+        assert _row_style_set(flash) == {
+            _rgb(DEEP_DIM),
+            _rgb(DIM),
+            _rgb(value_style("default")),
+        }
         assert "основной конфиг" in flash.plain
         assert _value_color(opus, "opus") == _rgb(INK)
         assert ed._origin_cell("opus") == ""  # своя — колонка молчит
@@ -270,22 +300,35 @@ async def test_an_own_entry_under_a_base_alias_stands_in_its_position(tmp_path, 
         assert ed._origin_cell("glm") == ""
 
 
-async def test_an_own_entry_shows_the_keys_it_inherits_per_key(tmp_path, monkeypatch):
+async def test_an_own_entry_shows_the_keys_it_inherits_per_key(
+    tmp_path, monkeypatch
+):
     """Строки слиты по алиасу ПОКЛЮЧНО — тем же `deep_merge`, каким собирает
     запись загрузчик, и витрина обязана показывать то же, что будет работать.
     Профиль задал только `model` — адрес продолжает доставаться от записи
     основного конфига, а хвост ячейки честно говорит, что он не свой и ОТКУДА он:
     от заслонённой записи, а не из «Подключения»."""
     profile = 'models:\n  flash:\n    model: "google/gemini-3.0-flash"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        _p,
+        _scr,
+        ed,
+    ):
         ed._row_width = lambda: 100
-        assert ed._address_cell("flash") == "flash-host · адрес из основного конфига"
+        assert (
+            ed._address_cell("flash")
+            == "flash-host · адрес из основного конфига"
+        )
         flash = _entry_row(ed, "flash")
-        assert "google/gemini-3.0-flash" in flash.plain  # id — свой, он заслоняет
+        assert (
+            "google/gemini-3.0-flash" in flash.plain
+        )  # id — свой, он заслоняет
         assert ed._origin_cell("flash") == ""
 
 
-async def test_a_partial_backend_overlay_still_inherits_the_base_address(tmp_path, monkeypatch):
+async def test_a_partial_backend_overlay_still_inherits_the_base_address(
+    tmp_path, monkeypatch
+):
     """Слияние ПОКЛЮЧНОЕ даже внутри вложенного `backend` — не заменой словаря
     целиком: страж выше бьёт по плоскому `model`, где поверхностный и рекурсивный
     мёрдж неразличимы (у своей записи попросту нет ключа `backend`). Профиль,
@@ -306,22 +349,37 @@ async def test_a_partial_backend_overlay_still_inherits_the_base_address(tmp_pat
         '      completions_url: "http://flash-host/v1/chat/completions"\n'
     )
     profile = 'models:\n  flash:\n    backend:\n      proxy: "socks5://own-proxy:1080"\n'
-    async with _profile_view(tmp_path, monkeypatch, base=base, profile=profile) as (_p, _scr, ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, base=base, profile=profile
+    ) as (_p, _scr, ed):
         ed._row_width = lambda: 100
         assert ed._entry("flash")["backend"] == {
             "completions_url": "http://flash-host/v1/chat/completions",
             "proxy": "socks5://own-proxy:1080",
         }
-        assert ed._entry_address("flash") == "http://flash-host/v1/chat/completions"
-        assert "из основного" not in ed._address_cell("flash")  # адрес — не общий
+        assert (
+            ed._entry_address("flash")
+            == "http://flash-host/v1/chat/completions"
+        )
+        assert "из основного" not in ed._address_cell(
+            "flash"
+        )  # адрес — не общий
 
 
-async def test_an_own_address_keeps_the_inherited_model_id(tmp_path, monkeypatch):
+async def test_an_own_address_keeps_the_inherited_model_id(
+    tmp_path, monkeypatch
+):
     """Обратная половина того же: профиль задал только `url` — провайдерский id
     остаётся от записи основного конфига, а хвоста про адрес из «Подключения» у
     ячейки адреса больше нет (адрес стал своим)."""
-    profile = 'models:\n  flash:\n    url: "http://own-host/v1/chat/completions"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _scr, ed):
+    profile = (
+        'models:\n  flash:\n    url: "http://own-host/v1/chat/completions"\n'
+    )
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        _p,
+        _scr,
+        ed,
+    ):
         ed._row_width = lambda: 100
         assert ed._entry_model("flash") == "google/gemini-2.5-flash"
         flash = _entry_row(ed, "flash")
@@ -337,18 +395,28 @@ async def test_picker_mirrors_origin_brightness(tmp_path, monkeypatch):
     но и происхождением — свои ярко, унаследованные приглушены. Основной секции
     это не касается (без тени label_style не ставится — прежний DIM)."""
     body = 'models:\n  delta:\n    model: "d/delta"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=body) as (pilot, scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=body) as (
+        pilot,
+        scr,
+        ed,
+    ):
         _cursor_to(ed, "slot", level="default")
         await pilot.press("enter")
         await pilot.pause()
         by = {r["label"]: r for r in ed._picker["rows"][1:]}
         assert by["delta"]["label_style"] == INK  # своя — ярко, как в реестре
-        assert by["flash"]["label_style"] == DEEP_DIM  # унаследованная — приглушена
+        assert (
+            by["flash"]["label_style"] == DEEP_DIM
+        )  # унаследованная — приглушена
         assert _value_color(by["delta"]["desc"], "d/delta") == _rgb(DIM)
-        assert _value_color(by["flash"]["desc"], by["flash"]["desc"].plain.split()[0]) == _rgb(DEEP_DIM)
+        assert _value_color(
+            by["flash"]["desc"], by["flash"]["desc"].plain.split()[0]
+        ) == _rgb(DEEP_DIM)
 
 
-async def test_del_on_an_inherited_row_refuses_instead_of_reporting_success(tmp_path, monkeypatch):
+async def test_del_on_an_inherited_row_refuses_instead_of_reporting_success(
+    tmp_path, monkeypatch
+):
     """Del на унаследованной строке — отказ СРАЗУ, без confirm-баннера (ревизия
     владельца по смоку A+B): баннер «точно удалить?» обещал бы удаление, которого
     не случится ни при каком ответе — вопрос ложен, а не преждевременен. Отказ —
@@ -381,7 +449,9 @@ def _confirm_banner(ed) -> str:
     return " ".join(str(w.render()) for w in ed.query(".models-confirm"))
 
 
-async def test_enter_on_an_inherited_row_refuses_instead_of_opening_a_form(tmp_path, monkeypatch):
+async def test_enter_on_an_inherited_row_refuses_instead_of_opening_a_form(
+    tmp_path, monkeypatch
+):
     """Enter на унаследованной строке — отказ с причиной, а не форма.
 
     Править в этом файле нечего: запись живёт в основном конфиге, а копия под тем
@@ -393,7 +463,10 @@ async def test_enter_on_an_inherited_row_refuses_instead_of_opening_a_form(tmp_p
 
     async with _profile_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         base_file = tmp_path / "base" / "config.yml"
-        base_before, before = base_file.read_bytes(), _profile_path(tmp_path).read_bytes()
+        base_before, before = (
+            base_file.read_bytes(),
+            _profile_path(tmp_path).read_bytes(),
+        )
         _cursor_to(ed, "entry", alias="flash")
         await pilot.press("enter")
         await pilot.pause()
@@ -405,7 +478,9 @@ async def test_enter_on_an_inherited_row_refuses_instead_of_opening_a_form(tmp_p
     assert _profile_path(tmp_path).read_bytes() == before
 
 
-async def test_a_removal_that_could_not_touch_the_file_reports_a_refusal(tmp_path, monkeypatch):
+async def test_a_removal_that_could_not_touch_the_file_reports_a_refusal(
+    tmp_path, monkeypatch
+):
     """Удаление, которое ничего не удалило, не смеет рапортовать успех.
 
     Рукописная flow-форма секции (`models: {glm: {...}}`): запись в документе
@@ -413,7 +488,11 @@ async def test_a_removal_that_could_not_touch_the_file_reports_a_refusal(tmp_pat
     именно отказ. Живой смок ревью показывал обратное: строка оставалась на
     месте, а плашка говорила об успехе."""
     profile = 'models: {glm: {model: "my/own"}}\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (pilot, scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        pilot,
+        scr,
+        ed,
+    ):
         before = _profile_path(tmp_path).read_bytes()
         assert ed._entry_origin("glm") == "own"
         _cursor_to(ed, "entry", alias="glm")
@@ -430,13 +509,19 @@ async def test_a_removal_that_could_not_touch_the_file_reports_a_refusal(tmp_pat
     assert _profile_path(tmp_path).read_bytes() == before
 
 
-async def test_the_last_own_entry_does_not_promise_an_empty_registry(tmp_path, monkeypatch):
+async def test_the_last_own_entry_does_not_promise_an_empty_registry(
+    tmp_path, monkeypatch
+):
     """`last`-логика баннера («реестр станет пустым — уровни выключатся») считается
     по ЭФФЕКТИВНОМУ реестру (§5): своя запись бывает последней в файле профиля, а
     уровни после её удаления продолжат работать записями основного конфига —
     обещать их выключение значило бы пугать несуществующим."""
     profile = 'models:\n  glm:\n    model: "zhipu/glm-4"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (pilot, _s, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        pilot,
+        _s,
+        ed,
+    ):
         assert ed._own_aliases == ["glm"]  # единственная СВОЯ запись
         _cursor_to(ed, "entry", alias="glm")
         await pilot.press("delete")
@@ -447,7 +532,9 @@ async def test_the_last_own_entry_does_not_promise_an_empty_registry(tmp_path, m
         assert "Enter — удалить · Esc — отмена" in banner
 
 
-async def test_a_shadowed_own_entry_does_not_promise_an_empty_registry_or_broken_links(tmp_path, monkeypatch):
+async def test_a_shadowed_own_entry_does_not_promise_an_empty_registry_or_broken_links(
+    tmp_path, monkeypatch
+):
     """Тень под ТЕМ ЖЕ ИМЕНЕМ — не «другой алиас» соседнего стража, а ровно та
     раскладка, где `last` и `references` обе лгут: своя запись «gc» перекрывает
     базовую «gc», и `_effective_aliases` совпадает с `[alias]` СЛУЧАЙНО — она
@@ -466,20 +553,28 @@ async def test_a_shadowed_own_entry_does_not_promise_an_empty_registry_or_broken
         '    model: "base-x"\n'
     )
     profile = 'models:\n  gc:\n    model: "profile-y"\nslots:\n  default: "gc"\nassign:\n  summary: "gc"\n'
-    async with _profile_view(tmp_path, monkeypatch, base=base, profile=profile) as (pilot, _s, ed):
-        assert ed._effective_aliases == ["gc"]  # тень и своя — один и тот же алиас
+    async with _profile_view(
+        tmp_path, monkeypatch, base=base, profile=profile
+    ) as (pilot, _s, ed):
+        assert ed._effective_aliases == [
+            "gc"
+        ]  # тень и своя — один и тот же алиас
         _cursor_to(ed, "entry", alias="gc")
         await pilot.press("delete")
         await pilot.pause()
         banner = _confirm_banner(ed)
         assert "Удалить запись «gc» из реестра?" in banner
-        assert "Реестр станет пустым" not in banner  # запись базы остаётся на месте
+        assert (
+            "Реестр станет пустым" not in banner
+        )  # запись базы остаётся на месте
         assert "ссылки снимутся" not in banner  # каскад их сохранит
         assert "slots.default" not in banner
         assert "assign.summary" not in banner
 
 
-async def test_removal_from_an_inactive_profile_is_judged_on_its_own_stack(tmp_path, monkeypatch):
+async def test_removal_from_an_inactive_profile_is_judged_on_its_own_stack(
+    tmp_path, monkeypatch
+):
     """Открыт НЕАКТИВНЫЙ профиль (указатель базы — на другой, `a`), у обоих есть
     запись `x`, у открытого на неё смотрит `slots.default`. Стек вопросов об
     удалении строился по указателю: «алиас переживёт» (он есть в `a`), баннер
@@ -488,15 +583,25 @@ async def test_removal_from_an_inactive_profile_is_judged_on_its_own_stack(tmp_p
     Стек открытого профиля — «база + он сам»: баннер называет ссылку, каскад
     снимает её вместе с записью."""
     base = f'profile: "a"\nlevel: default\nbackend:\n  completions_url: "{_BASE_URL}"\nagent:\n  model: "test-model"\n'
-    _write(tmp_path / "base" / "profiles" / "a.yml", 'models:\n  x:\n    model: "a-x"\n')
+    _write(
+        tmp_path / "base" / "profiles" / "a.yml",
+        'models:\n  x:\n    model: "a-x"\n',
+    )
     profile = 'models:\n  x:\n    model: "work-x"\nslots:\n  default: "x"\n'
-    async with _profile_view(tmp_path, monkeypatch, base=base, profile=profile) as (pilot, scr, ed):
-        assert (scr._config.get("profile") or None) != "work"  # предпосылка: не активен
+    async with _profile_view(
+        tmp_path, monkeypatch, base=base, profile=profile
+    ) as (pilot, scr, ed):
+        assert (
+            scr._config.get("profile") or None
+        ) != "work"  # предпосылка: не активен
         _cursor_to(ed, "entry", alias="x")
         await pilot.press("delete")
         await pilot.pause()
         banner = _confirm_banner(ed)
-        assert "На неё ссылаются slots.default — ссылки снимутся вместе с ней." in banner
+        assert (
+            "На неё ссылаются slots.default — ссылки снимутся вместе с ней."
+            in banner
+        )
         await pilot.press("enter")
         await pilot.pause()
         assert "удалена" in _flash(scr)
@@ -504,15 +609,23 @@ async def test_removal_from_an_inactive_profile_is_judged_on_its_own_stack(tmp_p
     assert (doc.get("models") or {}) == {}
     assert (doc.get("slots") or {}) == {}  # висячего слота нет
     # Соседний профиль, объявлявший ту же запись, остался как был.
-    assert _doc(tmp_path / "base" / "profiles" / "a.yml")["models"] == {"x": {"model": "a-x"}}
+    assert _doc(tmp_path / "base" / "profiles" / "a.yml")["models"] == {
+        "x": {"model": "a-x"}
+    }
 
 
-async def test_the_registry_footer_promises_by_row_origin(tmp_path, monkeypatch):
+async def test_the_registry_footer_promises_by_row_origin(
+    tmp_path, monkeypatch
+):
     """Страж 5: футер позиционный по ПРОИСХОЖДЕНИЮ строки. На унаследованной не
     работают ни Del, ни Enter — футер их и не обещает (канон `_FOOTER_RESERVE`:
     недоступное не обещаем). Своя строка — как была."""
     profile = 'models:\n  glm:\n    model: "zhipu/glm-4"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (pilot, scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        pilot,
+        scr,
+        ed,
+    ):
         # Курсор водим клавишами: футер обновляется вместе с ним, и обещание,
         # посчитанное мимо этого пути, ничего бы не доказало.
         assert _entry_aliases(ed) == ["flash", "opus", "glm"]
@@ -526,7 +639,9 @@ async def test_the_registry_footer_promises_by_row_origin(tmp_path, monkeypatch)
         assert "Del — удалить" in footer and "Enter — изменить" in footer
 
 
-async def test_creating_an_entry_named_like_a_base_one_is_refused(tmp_path, monkeypatch):
+async def test_creating_an_entry_named_like_a_base_one_is_refused(
+    tmp_path, monkeypatch
+):
     """Страж 12: создание с именем унаследованной записи — ошибка формы; файл
     профиля не тронут. Дублем это не является (своей записи с таким именем в
     профиле нет), но и занять имя, которым уже зовётся строка реестра, нельзя:
@@ -558,7 +673,9 @@ async def test_creating_an_entry_named_like_a_base_one_is_refused(tmp_path, monk
 # --- лестница: колонка происхождения живёт дольше указателя -------------------
 
 
-async def test_the_origin_column_survives_longer_than_the_pointer(tmp_path, monkeypatch):
+async def test_the_origin_column_survives_longer_than_the_pointer(
+    tmp_path, monkeypatch
+):
     """Свип ширин 12…139 живым ресайзом (замер — `region.height` смонтированной
     строки, длина текста тут не показатель: хвостовые пробелы Rich не считает).
 
@@ -567,7 +684,11 @@ async def test_the_origin_column_survives_longer_than_the_pointer(tmp_path, monk
     уже нет, а слово «основной конфиг» ещё стоит); у унаследованной строки
     хвост про адрес из «Подключения» подавлен — двух происхождений в одной
     строке не бывает ни на какой ширине."""
-    async with _profile_view(tmp_path, monkeypatch, size=(80, 40)) as (pilot, _scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, size=(80, 40)) as (
+        pilot,
+        _scr,
+        ed,
+    ):
         origin_outlived_pointer = False
         for width in range(12, 140):
             await pilot.resize_terminal(width, 40)
@@ -585,13 +706,19 @@ async def test_the_origin_column_survives_longer_than_the_pointer(tmp_path, monk
             )
             if ed._row_width() < 2:
                 continue
-            wrapped = [str(w.render()) for w in ed.query(".models-row") if w.region.height != 1]
+            wrapped = [
+                str(w.render())
+                for w in ed.query(".models-row")
+                if w.region.height != 1
+            ]
             assert not wrapped, (width, ed._row_width(), wrapped[:2])
             base = _entry_row(ed, "opus").plain
             assert "адрес из" not in base, (width, base)
             if "основной конфиг" in base and "←" not in base:
                 origin_outlived_pointer = True
-        assert origin_outlived_pointer, "колонка происхождения ушла раньше указателя"
+        assert origin_outlived_pointer, (
+            "колонка происхождения ушла раньше указателя"
+        )
 
 
 # --- нижняя половина: слоты и привязки на эффективных данных (Task B) ---------
@@ -630,9 +757,15 @@ async def test_slot_value_shows_three_states(tmp_path, monkeypatch):
     `light`, и по нему матрица `LEVEL_FALLBACK` привела бы к «не задан → light»
     — а работает уровень max через `default` основного конфига."""
     profile = 'slots:\n  light: "flash"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _s, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        _p,
+        _s,
+        ed,
+    ):
         ed._row_width = lambda: 100  # грамматика строки, а не геометрия окна
-        own, inherited, unset = (_slot_row(ed, lvl) for lvl in ("light", "default", "max"))
+        own, inherited, unset = (
+            _slot_row(ed, lvl) for lvl in ("light", "default", "max")
+        )
         assert _value_color(own, "flash") == _rgb(INK)  # свой ключ — ярко
         assert "основной" not in own.plain
         assert "основной → flash" in inherited.plain
@@ -653,7 +786,9 @@ async def test_assign_three_states_and_picker_first_row(tmp_path, monkeypatch):
     обоих случаях снимает СВОЙ ключ (`value is None`), а подпись у неё — первое
     слово значения строки (канон тождества «подпись строки ↔ первый пункт»)."""
     profile = 'assign:\n  finish_gate: "max"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile, assign=True) as (pilot, _s, ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile=profile, assign=True
+    ) as (pilot, _s, ed):
         ed._row_width = lambda: 100
         own = _assign_row(ed, "finish_gate")
         inherited = _assign_row(ed, "summary")
@@ -689,7 +824,9 @@ async def test_assign_three_states_and_picker_first_row(tmp_path, monkeypatch):
         assert "работает активным уровнем" in first["desc"].plain
 
 
-async def test_the_value_column_counts_the_inherited_binding_label(tmp_path, monkeypatch):
+async def test_the_value_column_counts_the_inherited_binding_label(
+    tmp_path, monkeypatch
+):
     """Сетка нижней половины считает колонку значения по подписям СТРОК, а строка
     привязки — такой же её житель, как строка слота.
 
@@ -698,17 +835,23 @@ async def test_the_value_column_counts_the_inherited_binding_label(tmp_path, mon
     алиаса в списке реестра — ровно на приставку. Не учтя её, сетка обрежет
     единственное, ради чего строка и написана, — имя модели, которой потребитель
     работает."""
-    async with _profile_view(tmp_path, monkeypatch, base=_BASE_LONG_ASSIGN) as (_p, _s, ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, base=_BASE_LONG_ASSIGN
+    ) as (_p, _s, ed):
         ed._row_width = lambda: 120  # грамматика строки, а не геометрия окна
         label = f"основной → {_LONG_ALIAS}"
         # Посылка фикстуры: колонку подпирает привязка, а не слоты и не реестр —
         # иначе страж мерил бы не ту половину расчёта.
-        assert max(len(ed._slot_unset_label(lvl)) for lvl in LEVELS) < len(label)
+        assert max(len(ed._slot_unset_label(lvl)) for lvl in LEVELS) < len(
+            label
+        )
         assert max(len(a) for a in ed._effective_aliases) < len(label)
         assert label in _assign_row(ed, "summary").plain
 
 
-async def test_slot_write_goes_to_the_profile_and_unset_returns_to_base(tmp_path, monkeypatch):
+async def test_slot_write_goes_to_the_profile_and_unset_returns_to_base(
+    tmp_path, monkeypatch
+):
     """Выбор в пикере пишет `slots.<уровень>` в ФАЙЛ ПРОФИЛЯ, снятие первой
     строкой возвращает уровень основному конфигу — а его файл секция не трогает
     ни в ту, ни в другую сторону (страж 2).
@@ -732,7 +875,9 @@ async def test_slot_write_goes_to_the_profile_and_unset_returns_to_base(tmp_path
         # унаследованные строки приглушены целиком — и подпись, и id.
         for r in rows[1:]:
             assert r["label_style"] == DEEP_DIM
-            assert _value_color(r["desc"], r["desc"].plain.split()[0]) == _rgb(DEEP_DIM)
+            assert _value_color(r["desc"], r["desc"].plain.split()[0]) == _rgb(
+                DEEP_DIM
+            )
         await pilot.press("down")
         await pilot.press("down")  # основной → flash → opus
         await pilot.press("enter")
@@ -754,7 +899,9 @@ async def test_slot_write_goes_to_the_profile_and_unset_returns_to_base(tmp_path
         assert base_file.read_bytes() == base_before
 
 
-async def test_needs_default_slot_on_the_effective_config(tmp_path, monkeypatch):
+async def test_needs_default_slot_on_the_effective_config(
+    tmp_path, monkeypatch
+):
     """Страж 11 (§7): вопрос «какая по умолчанию» задаётся, когда неоднозначным
     станет ЭФФЕКТИВНЫЙ конфиг, — своего реестра для этого мало.
 
@@ -766,11 +913,19 @@ async def test_needs_default_slot_on_the_effective_config(tmp_path, monkeypatch)
         # база задаёт default
         assert ed._needs_default_slot([("upsert_model", "glm", {})]) is False
 
-    async with _profile_view(tmp_path, monkeypatch, registry=False) as (_p, _s, ed):
+    async with _profile_view(tmp_path, monkeypatch, registry=False) as (
+        _p,
+        _s,
+        ed,
+    ):
         # легаси-база, одна модель
         assert ed._needs_default_slot([("upsert_model", "glm", {})]) is False
 
-    async with _profile_view(tmp_path, monkeypatch, base=_BASE_ONE_MODEL) as (pilot, scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, base=_BASE_ONE_MODEL) as (
+        pilot,
+        scr,
+        ed,
+    ):
         assert ed._needs_default_slot([("upsert_model", "glm", {})]) is True
         await pilot.press("n")
         await pilot.pause()
@@ -799,10 +954,14 @@ def _validate_merged(base_text: str, profile: dict) -> None:
             merged[key] = {**merged[key], **value}
         else:
             merged[key] = value
-    validate_config_text_with_sections(yaml.safe_dump(merged, allow_unicode=True))
+    validate_config_text_with_sections(
+        yaml.safe_dump(merged, allow_unicode=True)
+    )
 
 
-async def test_empty_effective_registry_keeps_the_empty_state(tmp_path, monkeypatch):
+async def test_empty_effective_registry_keeps_the_empty_state(
+    tmp_path, monkeypatch
+):
     """Страж 8 (§10): гейт пустого состояния — ЭФФЕКТИВНЫЙ реестр. Легаси-база
     без реестра и пустой профиль — показывать нечем, слоты скрыты (легаси
     резолвится мимо реестра).
@@ -812,14 +971,22 @@ async def test_empty_effective_registry_keeps_the_empty_state(tmp_path, monkeypa
     «модели действуют из основного конфига», то есть ровно то, чего по первой
     не существует. Состояние здесь всегда одно («реестра нет нигде»), и
     объяснять его двумя константами не за что."""
-    async with _profile_view(tmp_path, monkeypatch, registry=False) as (_p, scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, registry=False) as (
+        _p,
+        scr,
+        ed,
+    ):
         assert ed.registry_empty
         assert ed._rows() == []
-        assert [str(w.render()) for w in ed.query(Static)] == [m._PROFILE_EMPTY_HINT]
+        assert [str(w.render()) for w in ed.query(Static)] == [
+            m._PROFILE_EMPTY_HINT
+        ]
         assert "модели действуют из основного конфига" not in _texts(scr)
 
 
-async def test_slots_over_a_base_registry_are_shown_not_named_as_overrides(tmp_path, monkeypatch):
+async def test_slots_over_a_base_registry_are_shown_not_named_as_overrides(
+    tmp_path, monkeypatch
+):
     """§11 в согласии с гейтом §10: «показаны формами» — тот же предикат, что и
     полный экран (эффективный реестр непуст), а не наличие `models` в файле.
 
@@ -828,12 +995,20 @@ async def test_slots_over_a_base_registry_are_shown_not_named_as_overrides(tmp_p
     конфигурация над легаси-базой строк не даёт вовсе — и тогда превью её
     единственный носитель."""
     profile = 'slots:\n  light: "flash"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, scr, ed):
-        assert [row["level"] for row in ed._rows() if row["kind"] == "slot"] == list(LEVELS)
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        _p,
+        scr,
+        ed,
+    ):
+        assert [
+            row["level"] for row in ed._rows() if row["kind"] == "slot"
+        ] == list(LEVELS)
         assert scr._profile_overlay_names() == []
         assert "также переопределяет" not in _texts(scr)
 
-    async with _profile_view(tmp_path, monkeypatch, profile=profile, registry=False) as (_p, scr, ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile=profile, registry=False
+    ) as (_p, scr, ed):
         assert ed._rows() == []
         assert scr._profile_overlay_names() == ["slots"]
         assert "профиль также переопределяет: slots" in _texts(scr)
@@ -853,7 +1028,9 @@ async def test_picker_rows_never_wrap(tmp_path, monkeypatch):
     двухколоночный курсор, перенесённый на вторую строку, надувает высоту
     списка, тот перерастает `max-height` и заводит скроллбар, скроллбар отнимает
     колонку — и замер не сходится никогда."""
-    async with _profile_view(tmp_path, monkeypatch, assign=True, size=(80, 40)) as (pilot, _scr, ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, assign=True, size=(80, 40)
+    ) as (pilot, _scr, ed):
         _cursor_to(ed, "assign", consumer="summary")
         await pilot.press("enter")
         await pilot.pause()
@@ -898,7 +1075,9 @@ def _preview(ed, kind: str) -> str:
     return ed._block_preview(kind).plain
 
 
-async def test_profile_previews_count_what_belongs_to_the_profile(tmp_path, monkeypatch):
+async def test_profile_previews_count_what_belongs_to_the_profile(
+    tmp_path, monkeypatch
+):
     """Страж 7, ветка K>0: реестр — «N моделей · K в профиле» (K — записи файла
     профиля), назначения — «N · в профиле K».
 
@@ -908,31 +1087,47 @@ async def test_profile_previews_count_what_belongs_to_the_profile(tmp_path, monk
     Уровни — раскладка ЭФФЕКТИВНАЯ: `light` профиль не трогал, и превью на
     своих данных писало бы «light→—» при работающем «light→opus»."""
     profile = 'models:\n  glm:\n    model: "zhipu/glm-4"\nslots:\n  default: "glm"\nassign:\n  finish_gate: "max"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile, assign=True) as (_p, _scr, ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile=profile, assign=True
+    ) as (_p, _scr, ed):
         assert _preview(ed, "entry") == "3 модели · 1 в профиле"
         assert "flash-host" not in _preview(ed, "entry")
         assert _preview(ed, "slot") == "light→opus · default→glm · max→—"
         assert _preview(ed, "assign") == "15 · в профиле 1"
         # Уровень в превью красится своим цветом — как везде на экране (§12.4).
-        assert _value_color(ed._block_preview("slot"), "light") == _rgb(value_style("light"))
+        assert _value_color(ed._block_preview("slot"), "light") == _rgb(
+            value_style("light")
+        )
 
 
-async def test_a_profile_that_owns_nothing_says_only_the_count(tmp_path, monkeypatch):
+async def test_a_profile_that_owns_nothing_says_only_the_count(
+    tmp_path, monkeypatch
+):
     """Страж 7, ветка K=0: хвоста нет вовсе — ни «0 в профиле», ни «все
     активная». Свежий профиль ничего своего не несёт, и приписка про ноль была
     бы шумом на каждой шапке."""
-    async with _profile_view(tmp_path, monkeypatch, assign=True) as (_p, _scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, assign=True) as (
+        _p,
+        _scr,
+        ed,
+    ):
         assert _preview(ed, "entry") == "2 модели"
         assert _preview(ed, "assign") == "15"
         assert _preview(ed, "slot") == "light→opus · default→flash · max→—"
 
 
-async def test_an_entry_under_a_base_alias_counts_as_the_profile_share(tmp_path, monkeypatch):
+async def test_an_entry_under_a_base_alias_counts_as_the_profile_share(
+    tmp_path, monkeypatch
+):
     """K — записи ФАЙЛА профиля, а не «те, которых нет в основном»: запись под
     именем записи основного конфига живёт в профиле, и не считать её значило бы
     писать «2 модели» о профиле, своя половина у которого есть."""
     profile = 'models:\n  opus:\n    model: "anthropic/claude-opus-4"\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (_p, _scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, profile=profile) as (
+        _p,
+        _scr,
+        ed,
+    ):
         assert ed._entry_origin("opus") == "own"
         assert _preview(ed, "entry") == "2 модели · 1 в профиле"
 
@@ -959,7 +1154,9 @@ def test_the_writer_leaves_exactly_the_empty_anchor_the_showcase_must_ignore():
     import yaml
     from gc_core import onboarding_config_writer as ocw
 
-    text = ocw.remove_mapping_entry('slots:\n  light: "flash"\n', "slots", "light")
+    text = ocw.remove_mapping_entry(
+        'slots:\n  light: "flash"\n', "slots", "light"
+    )
     assert yaml.safe_load(text) == {"slots": {}}
 
 
@@ -969,18 +1166,24 @@ async def test_empty_anchor_sections_are_not_overrides(tmp_path, monkeypatch):
     носитель) с одним лишь `slots: {}` не переопределяет НИЧЕГО: витрина обязана
     читать пустую секцию как её отсутствие, иначе снятие последнего слота
     оставляло бы вечную строку «профиль также переопределяет: slots»."""
-    async with _profile_view(tmp_path, monkeypatch, profile="slots: {}\n", registry=False) as (_p, scr, _ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile="slots: {}\n", registry=False
+    ) as (_p, scr, _ed):
         assert scr._profile_overlay_names() == []
         assert "также переопределяет" not in _texts(scr)
 
     # Голый якорь без значения (`slots:` — рукописная форма того же) читается
     # так же: секция есть, переопределять ей нечем.
-    async with _profile_view(tmp_path, monkeypatch, profile="slots:\nassign:\n", registry=False) as (_p, scr, _ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile="slots:\nassign:\n", registry=False
+    ) as (_p, scr, _ed):
         assert scr._profile_overlay_names() == []
 
     # А непустая секция остаётся переопределением — иначе страж зеленел бы и на
     # витрине, замолчавшей вообще обо всём.
-    async with _profile_view(tmp_path, monkeypatch, profile='level: "max"\n', registry=False) as (_p, scr, _ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile='level: "max"\n', registry=False
+    ) as (_p, scr, _ed):
         assert scr._profile_overlay_names() == ["level"]
 
 
@@ -1024,7 +1227,9 @@ async def test_a_disabled_file_viewer_is_never_promised(tmp_path, monkeypatch):
 
     Канон «недоступное не обещаем»: отказ-нотисом было бы хуже — он появляется
     в ответ на обещание, которого экран не давал."""
-    async with _profile_view(tmp_path, monkeypatch, profile='level: "max"\n', file_view=False) as (pilot, scr, _ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile='level: "max"\n', file_view=False
+    ) as (pilot, scr, _ed):
         assert "v — просмотр файла" not in _footer(scr)
         assert "v — просмотр файла" not in scr._profile_overlay_hint()
         await pilot.press("v")
@@ -1033,17 +1238,23 @@ async def test_a_disabled_file_viewer_is_never_promised(tmp_path, monkeypatch):
         assert _notice(scr) == "" and _flash(scr) == ""
 
 
-async def test_the_overlay_hint_names_the_way_to_see_those_sections(tmp_path, monkeypatch):
+async def test_the_overlay_hint_names_the_way_to_see_those_sections(
+    tmp_path, monkeypatch
+):
     """Подсказка строки «также переопределяет» — единственное место, где названы
     секции, форм для которых нет. Она же говорит, чем их посмотреть: иначе факт
     «правятся в YAML» оставлял бы человека без всякого хода."""
-    async with _profile_view(tmp_path, monkeypatch, profile='level: "max"\n', registry=False) as (_p, scr, _ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile='level: "max"\n', registry=False
+    ) as (_p, scr, _ed):
         texts = _texts(scr)
         assert "профиль также переопределяет: level" in texts
         assert "v — просмотр файла" in scr._profile_overlay_hint()
 
 
-async def test_v_typed_into_a_form_field_stays_in_the_field(tmp_path, monkeypatch):
+async def test_v_typed_into_a_form_field_stays_in_the_field(
+    tmp_path, monkeypatch
+):
     """В поле формы `v` печатается, а не открывает просмотрщик.
 
     Меряет РЕЗУЛЬТАТ, а не механизм: держит его сегодня `showing_list` (открытая
@@ -1066,7 +1277,9 @@ async def test_v_typed_into_a_form_field_stays_in_the_field(tmp_path, monkeypatc
         assert alias.value == "v"
 
 
-async def test_the_open_picker_neither_promises_nor_takes_the_viewer_key(tmp_path, monkeypatch):
+async def test_the_open_picker_neither_promises_nor_takes_the_viewer_key(
+    tmp_path, monkeypatch
+):
     """Обещание и действие держатся ОДНОГО состояния: пока раскрыт список
     значений, футер про `v` молчит — и клавиша молчит вместе с ним, иначе
     просмотрщик лёг бы поверх висящего выбора."""
@@ -1125,7 +1338,9 @@ async def test_the_add_row_of_the_main_section_never_promises_del(tmp_path):
         assert "Del" not in _footer(scr)
 
 
-async def test_saving_an_own_entry_reports_a_saved_entry(tmp_path, monkeypatch):
+async def test_saving_an_own_entry_reports_a_saved_entry(
+    tmp_path, monkeypatch
+):
     """Итог записи один и тот же на обе роли секции: пишется всегда СВОЙ файл
     цели, и второго смысла у сохранения больше нет."""
     async with _profile_view(tmp_path, monkeypatch) as (pilot, scr, _ed):
@@ -1142,7 +1357,9 @@ async def test_saving_an_own_entry_reports_a_saved_entry(tmp_path, monkeypatch):
 # и дефект тестом было бы не видно.
 
 
-async def test_opening_a_profile_does_not_rebind_the_projection_pipeline(tmp_path, monkeypatch):
+async def test_opening_a_profile_does_not_rebind_the_projection_pipeline(
+    tmp_path, monkeypatch
+):
     """Открытый профиль показывают, а не активируют: собрать его стек нужно, но
     эффективный конфиг сессии обязан остаться прежним.
 
@@ -1151,15 +1368,23 @@ async def test_opening_a_profile_does_not_rebind_the_projection_pipeline(tmp_pat
     иначе исходящий трейс и derived-sink'и начали бы читать чужие tags /
     strip_think до следующего `reload_config`."""
     profile = 'strip_tags_projection:\n  tags: ["scratchpad"]\n'
-    async with _profile_view(tmp_path, monkeypatch, profile=profile, base=_BASE_ONE_MODEL) as (_p, scr, _ed):
-        before = dict(scr.app.effective_config().get("strip_tags_projection") or {})
+    async with _profile_view(
+        tmp_path, monkeypatch, profile=profile, base=_BASE_ONE_MODEL
+    ) as (_p, scr, _ed):
+        before = dict(
+            scr.app.effective_config().get("strip_tags_projection") or {}
+        )
         scr._open_profile_config("work")
-        after = dict(scr.app.effective_config().get("strip_tags_projection") or {})
+        after = dict(
+            scr.app.effective_config().get("strip_tags_projection") or {}
+        )
         assert after == before
         assert after.get("tags") != ["scratchpad"]
 
 
-async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(tmp_path, monkeypatch):
+async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(
+    tmp_path, monkeypatch
+):
     """Вторая побочка того же вызова: профиль с `use_ssl: false` глушил
     `InsecureRequestWarning` ВСЕМУ процессу — включая соединения активного
     профиля, который проверку сертификата не отключал.
@@ -1177,7 +1402,9 @@ async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(tmp_
 
     from gc_core import config as config_mod
 
-    assert not hasattr(config_mod, "urllib3"), "в `config` вернулся urllib3 — а с ним вернётся и глушилка на процесс"
+    assert not hasattr(config_mod, "urllib3"), (
+        "в `config` вернулся urllib3 — а с ним вернётся и глушилка на процесс"
+    )
     source = pathlib.Path(config_mod.__file__).read_text(encoding="utf-8")
     assert "disable_warnings" not in source, (
         "в `config` снова глушат предупреждения — это бьёт по всему процессу, "
@@ -1186,7 +1413,9 @@ async def test_opening_a_profile_does_not_silence_tls_warnings_process_wide(tmp_
 
     # И сам путь остаётся рабочим: профиль с `use_ssl: false` открывается.
     profile = "backend:\n  use_ssl: false\n"
-    async with _profile_view(tmp_path, monkeypatch, profile=profile, base=_BASE_ONE_MODEL) as (_p, scr, _ed):
+    async with _profile_view(
+        tmp_path, monkeypatch, profile=profile, base=_BASE_ONE_MODEL
+    ) as (_p, scr, _ed):
         scr._open_profile_config("work")
 
 
@@ -1236,8 +1465,12 @@ _SHADOWED_URL = "https://base.example/v1/chat/completions"
 
 
 @asynccontextmanager
-async def _namesake_view(tmp_path, monkeypatch, *, profile: str = _NAMESAKE_PROFILE):
-    async with _profile_view(tmp_path, monkeypatch, base=_SHADOW_BASE, profile=profile) as (pilot, scr, ed):
+async def _namesake_view(
+    tmp_path, monkeypatch, *, profile: str = _NAMESAKE_PROFILE
+):
+    async with _profile_view(
+        tmp_path, monkeypatch, base=_SHADOW_BASE, profile=profile
+    ) as (pilot, scr, ed):
         ed._row_width = lambda: 120  # грамматика строки, а не геометрия окна
         yield pilot, scr, ed
 
@@ -1266,12 +1499,16 @@ def _form_text(form, widget_id: str) -> str:
 def _inherit_row(form) -> str:
     """Первая строка раскрытого пресет-листа адреса — пункт «наследовать»: над
     пустым полем список раскрыт с входа в форму (курсор стоит на адресе)."""
-    rows = [str(w.render()) for w in form.query(".mef-preset-row") if w.display]
+    rows = [
+        str(w.render()) for w in form.query(".mef-preset-row") if w.display
+    ]
     assert rows, "пресет-лист над пустым адресом не раскрыт"
     return rows[0]
 
 
-async def test_a_namesake_row_names_the_shadowed_record_as_the_address_source(tmp_path, monkeypatch):
+async def test_a_namesake_row_names_the_shadowed_record_as_the_address_source(
+    tmp_path, monkeypatch
+):
     """Строка тёзки, у которой тень несёт СВОЁ подключение: адрес ей достаётся от
     заслонённой записи, и хвост зовёт её, а не «Подключение», — иначе он называет
     не тот хост, на который уйдёт запрос (живой смок: `base.example · адрес из
@@ -1285,7 +1522,9 @@ async def test_a_namesake_row_names_the_shadowed_record_as_the_address_source(tm
         assert cell in _entry_row(ed, "gpt").plain
 
 
-async def test_a_namesake_over_a_record_without_a_connection_keeps_the_old_tail(tmp_path, monkeypatch):
+async def test_a_namesake_over_a_record_without_a_connection_keeps_the_old_tail(
+    tmp_path, monkeypatch
+):
     """Сторож: у `fast` тень своего подключения не несёт — адрес по-прежнему из
     «Подключения» (стека открытого профиля), и хвост прежний. Судится по
     ПОДКЛЮЧЕНИЮ тени, а не по её наличию: тень есть у обеих тёзок стенда."""
@@ -1296,15 +1535,21 @@ async def test_a_namesake_over_a_record_without_a_connection_keeps_the_old_tail(
         assert ed._address_cell("glm") == "base-host · адрес из «Подключения»"
 
 
-async def test_the_namesake_form_says_the_pair_comes_from_the_shadowed_record(tmp_path, monkeypatch):
+async def test_the_namesake_form_says_the_pair_comes_from_the_shadowed_record(
+    tmp_path, monkeypatch
+):
     """Шапка пары тёзки: наследуется от записи основного конфига, не от раздела."""
     async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         form = await _open_entry_form(pilot, scr, ed, "gpt")
         assert form.own_connection() is False
-        assert _form_text(form, "mef-pair") == ("Адрес и токен: наследуются из записи основного конфига")
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из записи основного конфига"
+        )
 
 
-async def test_the_namesake_form_names_the_shadowed_address_under_the_field(tmp_path, monkeypatch):
+async def test_the_namesake_form_names_the_shadowed_address_under_the_field(
+    tmp_path, monkeypatch
+):
     """Под пустым адресом — тот, что реально действует: адрес заслонённой записи,
     а не «Подключения» открытого профиля. Пункт «наследовать» первым в списке —
     тем же источником и тем же адресом: два входа в одно действие (§5) не имеют
@@ -1321,7 +1566,9 @@ async def test_the_namesake_form_names_the_shadowed_address_under_the_field(tmp_
         assert "Подключени" not in row, row
 
 
-async def test_the_namesake_form_masks_the_shadowed_token_under_the_field(tmp_path, monkeypatch):
+async def test_the_namesake_form_masks_the_shadowed_token_under_the_field(
+    tmp_path, monkeypatch
+):
     """Под токеном — маска того, что уйдёт с запросом: токен заслонённой записи
     (маской, как и всякий секрет), а не общий «Bearer SMO***». Строка галки
     называет тот же источник."""
@@ -1335,10 +1582,14 @@ async def test_the_namesake_form_masks_the_shadowed_token_under_the_field(tmp_pa
         assert "SMO" not in token.placeholder
         assert token.has_class("has-saved")  # маска, не подсказка
         assert token.disabled is True and token.value == ""
-        assert "токен приходит из записи основного конфига" in _form_text(form, "mef-noauth")
+        assert "токен приходит из записи основного конфига" in _form_text(
+            form, "mef-noauth"
+        )
 
 
-async def test_the_namesake_form_names_the_shadowed_model_id_as_the_default(tmp_path, monkeypatch):
+async def test_the_namesake_form_names_the_shadowed_model_id_as_the_default(
+    tmp_path, monkeypatch
+):
     """Пустое поле id у тёзки — не «равен алиасу»: действует `model` заслонённой
     записи, так сливает запись загрузчик."""
     from textual.widgets import Input
@@ -1346,39 +1597,62 @@ async def test_the_namesake_form_names_the_shadowed_model_id_as_the_default(tmp_
     async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         form = await _open_entry_form(pilot, scr, ed, "gpt")
         assert form.query_one("#mef-model", Input).value == ""
-        assert _placeholder(form, "mef-model") == ("если не указать — openai/gpt-5.5 из основного конфига")
+        assert _placeholder(form, "mef-model") == (
+            "если не указать — openai/gpt-5.5 из основного конфига"
+        )
 
 
-async def test_a_form_over_a_record_without_a_shadow_keeps_every_old_text(tmp_path, monkeypatch):
+async def test_a_form_over_a_record_without_a_shadow_keeps_every_old_text(
+    tmp_path, monkeypatch
+):
     """Сторож: `glm` — своя запись без тени. Все прежние слова на месте: пара из
     раздела «Подключение», адрес и токен стека открытого профиля, id равен алиасу,
     пункт «наследовать» зовёт раздел."""
     async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         form = await _open_entry_form(pilot, scr, ed, "glm")
-        assert _form_text(form, "mef-pair") == ("Адрес и токен: наследуются из раздела «Подключение»")
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из раздела «Подключение»"
+        )
         assert _placeholder(form, "mef-url") == f"наследуется: {_BASE_URL}"
         assert _placeholder(form, "mef-token") == "наследуется: Bearer SMO***"
-        assert "токен приходит из раздела «Подключение»" in _form_text(form, "mef-noauth")
-        assert _placeholder(form, "mef-model") == "если не указать — id модели равен алиасу"
+        assert "токен приходит из раздела «Подключение»" in _form_text(
+            form, "mef-noauth"
+        )
+        assert (
+            _placeholder(form, "mef-model")
+            == "если не указать — id модели равен алиасу"
+        )
         row = _inherit_row(form)
-        assert "раздел «Подключение» · наследовать" in row and "base-host" in row, row
+        assert (
+            "раздел «Подключение» · наследовать" in row and "base-host" in row
+        ), row
 
 
-async def test_a_namesake_over_a_record_without_a_connection_inherits_the_pair_from_the_section(tmp_path, monkeypatch):
+async def test_a_namesake_over_a_record_without_a_connection_inherits_the_pair_from_the_section(
+    tmp_path, monkeypatch
+):
     """`fast`: тень есть, своего подключения в ней нет — пара по-прежнему из раздела
     «Подключение» (прежние слова), а id — от тени: источник у пары и у id разный, и
     судятся они порознь."""
     async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         form = await _open_entry_form(pilot, scr, ed, "fast")
-        assert _form_text(form, "mef-pair") == ("Адрес и токен: наследуются из раздела «Подключение»")
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из раздела «Подключение»"
+        )
         assert _placeholder(form, "mef-url") == f"наследуется: {_BASE_URL}"
         assert _placeholder(form, "mef-token") == "наследуется: Bearer SMO***"
-        assert "токен приходит из раздела «Подключение»" in _form_text(form, "mef-noauth")
-        assert _placeholder(form, "mef-model") == ("если не указать — qwen/qwen3-8b из основного конфига")
+        assert "токен приходит из раздела «Подключение»" in _form_text(
+            form, "mef-noauth"
+        )
+        assert _placeholder(form, "mef-model") == (
+            "если не указать — qwen/qwen3-8b из основного конфига"
+        )
         assert "раздел «Подключение» · наследовать" in _inherit_row(form)
 
 
-async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of_them(tmp_path, monkeypatch):
+async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of_them(
+    tmp_path, monkeypatch
+):
     """Форма говорит о тени, но не пишет её: поля унаследованного пусты, `submit()`
     без правок не отдаёт ни одного ключа, и после Enter в файле профиля у тёзки
     ровно то, что было, — унаследованное копией в профиль не уезжает. Основной
@@ -1404,7 +1678,9 @@ async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of
     assert document["models"]["gpt"] == {"backend": {"use_ssl": False}}
 
 
-async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(tmp_path, monkeypatch):
+async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(
+    tmp_path, monkeypatch
+):
     """Ctrl+U на тёзке со СВОЕЙ парой ведёт себя как прежде: снимает адрес и токен
     разом, `submit()` отдаёт удаление обоих ключей, файл теряет их оба. Новое здесь
     только слово: возвращается запись к паре ЗАСЛОНЁННОЙ записи, и шапка с
@@ -1413,7 +1689,11 @@ async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(tmp_
     from textual.widgets import Input
 
     profile = 'models:\n  gpt:\n    url: "https://own.example/v1/chat/completions"\n    token: "OWN-TOKEN"\n'
-    async with _namesake_view(tmp_path, monkeypatch, profile=profile) as (pilot, scr, ed):
+    async with _namesake_view(tmp_path, monkeypatch, profile=profile) as (
+        pilot,
+        scr,
+        ed,
+    ):
         form = await _open_entry_form(pilot, scr, ed, "gpt")
         assert form.own_connection() is True
         assert _form_text(form, "mef-pair") == "Адрес и токен: свои"
@@ -1423,7 +1703,9 @@ async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(tmp_
         assert form.query_one("#mef-url", Input).value == ""
         assert form.query_one("#mef-token", Input).disabled is True
         assert form.own_connection() is False
-        assert _form_text(form, "mef-pair") == ("Адрес и токен: наследуются из записи основного конфига")
+        assert _form_text(form, "mef-pair") == (
+            "Адрес и токен: наследуются из записи основного конфига"
+        )
         assert _placeholder(form, "mef-url") == f"наследуется: {_SHADOWED_URL}"
         assert _placeholder(form, "mef-token") == "наследуется: Bearer BAS***"
         ok, alias, fields = form.submit()
@@ -1441,7 +1723,9 @@ async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(tmp_
         assert form.clear_token() is False  # пары нет — клавиша не наша
 
 
-async def test_a_raced_removal_of_a_namesake_names_the_shadow_and_reloads(tmp_path, monkeypatch):
+async def test_a_raced_removal_of_a_namesake_names_the_shadow_and_reloads(
+    tmp_path, monkeypatch
+):
     """Вторая половина ветки `removed=False` (L20): тёзку унесли из файла профиля
     между баннером и Enter, строка ПРОДОЛЖАЕТ стоять тенью — прежний текст
     («запись основного конфига — удалите в секции «Модели»») здесь правда, но
@@ -1458,9 +1742,13 @@ async def test_a_raced_removal_of_a_namesake_names_the_shadow_and_reloads(tmp_pa
         await pilot.press("enter")
         await pilot.pause()
         notice = _notice(scr)
-        assert "✗ не удалено" in notice and "основного конфига" in notice, notice
+        assert "✗ не удалено" in notice and "основного конфига" in notice, (
+            notice
+        )
         ed = _editor(scr)
-        assert ed._entry_origin("gpt") == "base", "список не перечитан: строка всё ещё читается своей записью профиля"
+        assert ed._entry_origin("gpt") == "base", (
+            "список не перечитан: строка всё ещё читается своей записью профиля"
+        )
 
 
 # --- секрет-политика: литеральный токен в ПРОЕКТНОМ профиле (M14 ревью MR #80) ---
@@ -1478,7 +1766,9 @@ async def _write_literal_token_entry(pilot, scr):
     form = scr.query(ModelEntryForm).last()
     form.query_one("#mef-alias", Input).value = "sec"
     form.query_one("#mef-model", Input).value = "prov/model-x"
-    form.query_one("#mef-url", Input).value = "http://own-host/v1/chat/completions"
+    form.query_one(
+        "#mef-url", Input
+    ).value = "http://own-host/v1/chat/completions"
     form.query_one("#mef-token", Input).value = "sk-LITERAL-SECRET-999"
     form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
     await pilot.pause()
@@ -1486,7 +1776,9 @@ async def _write_literal_token_entry(pilot, scr):
     await pilot.pause()
 
 
-async def test_writing_a_literal_token_into_a_project_profile_warns_with_the_path(tmp_path, monkeypatch):
+async def test_writing_a_literal_token_into_a_project_profile_warns_with_the_path(
+    tmp_path, monkeypatch
+):
     """Политика docs/configuration.md: «литеральный токен в проектном профиле даёт
     предупреждение» — но загрузчик (`load_profile_document(warn_literal_tokens=…)`)
     срабатывает только при сборке стека и только для АКТИВНОГО профиля. Запись из
@@ -1498,20 +1790,34 @@ async def test_writing_a_literal_token_into_a_project_profile_warns_with_the_pat
 
     from gc_core.config_modules.profiles import load_profile_document
 
-    async with _profile_view(tmp_path, monkeypatch, root="project") as (pilot, scr, ed):
+    async with _profile_view(tmp_path, monkeypatch, root="project") as (
+        pilot,
+        scr,
+        ed,
+    ):
         target = Path(ed._target)
         await _write_literal_token_entry(pilot, scr)
-        assert _doc(target)["models"]["sec"]["token"] == "sk-LITERAL-SECRET-999"
+        assert (
+            _doc(target)["models"]["sec"]["token"] == "sk-LITERAL-SECRET-999"
+        )
         assert "сохранена" in _flash(scr)  # запись состоялась, рядом — ⚠
         loader_notices: list = []
-        load_profile_document(target, warn_literal_tokens=True, notices=loader_notices)
-        assert loader_notices, "предпосылка: загрузчик сам ругается на этот файл"
+        load_profile_document(
+            target, warn_literal_tokens=True, notices=loader_notices
+        )
+        assert loader_notices, (
+            "предпосылка: загрузчик сам ругается на этот файл"
+        )
         notice = _notice(scr)
-        assert f"⚠ {loader_notices[0]}" in notice, notice  # слова загрузчика, один в один
+        assert f"⚠ {loader_notices[0]}" in notice, (
+            notice
+        )  # слова загрузчика, один в один
         assert str(target) in notice  # полный путь, не basename
 
 
-async def test_writing_a_literal_token_into_a_base_profile_stays_quiet(tmp_path, monkeypatch):
+async def test_writing_a_literal_token_into_a_base_profile_stays_quiet(
+    tmp_path, monkeypatch
+):
     """Сторож границы политики: тот же литеральный токен в профиле БАЗОВОГО корня —
     без предупреждения (файл вне репозитория, политика — про проектный)."""
     async with _profile_view(tmp_path, monkeypatch) as (pilot, scr, _ed):

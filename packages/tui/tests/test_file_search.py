@@ -38,7 +38,12 @@ def _session(index):
     """Сеанс, его поток (единственный новый) и список отданных результатов."""
     results = []
     before = set(threading.enumerate())
-    session = FileSearchSession(index, lambda query, entries, truncated: results.append((query, entries, truncated)))
+    session = FileSearchSession(
+        index,
+        lambda query, entries, truncated: results.append(
+            (query, entries, truncated)
+        ),
+    )
     (thread,) = set(threading.enumerate()) - before
     return session, thread, results
 
@@ -49,7 +54,12 @@ def test_result_arrives_from_search_thread():
     session = FileSearchSession(
         index,
         lambda query, entries, truncated: seen.append(
-            (query, entries, truncated, threading.current_thread() is threading.main_thread())
+            (
+                query,
+                entries,
+                truncated,
+                threading.current_thread() is threading.main_thread(),
+            )
         ),
     )
     session.want("abc")
@@ -110,7 +120,9 @@ def test_close_during_build_skips_search_and_ends_thread():
     assert index.build_entered.wait(5)
     started = time.perf_counter()
     session.close()
-    assert time.perf_counter() - started < 1.0  # close не ждёт поток (сборка ещё придержана)
+    assert (
+        time.perf_counter() - started < 1.0
+    )  # close не ждёт поток (сборка ещё придержана)
     index.build_gate.set()
     thread.join(5)
     assert not thread.is_alive()
@@ -149,14 +161,18 @@ def test_search_failure_gives_empty_result_and_thread_survives(caplog):
 
     index.search = search
     session, _thread, results = _session(index)
-    with caplog.at_level(logging.WARNING, logger="gc_tui.services.file_search"):
+    with caplog.at_level(
+        logging.WARNING, logger="gc_tui.services.file_search"
+    ):
         session.want("bad")
         assert session.wait_idle(5)
     session.want("ok")
     assert session.wait_idle(5)
     assert results == [("bad", [], False), ("ok", ["ok.py"], False)]
     assert any(
-        "file search failed" in r.getMessage() and "proj-root" in r.getMessage() and "'bad'" in r.getMessage()
+        "file search failed" in r.getMessage()
+        and "proj-root" in r.getMessage()
+        and "'bad'" in r.getMessage()
         for r in caplog.records
     )
     session.close()
@@ -180,7 +196,9 @@ def test_build_failure_gives_empty_result_once():
 
 def test_one_daemon_thread_serves_all_queries():
     before = set(threading.enumerate())
-    session = FileSearchSession(_FakeIndex(), lambda query, entries, truncated: None)
+    session = FileSearchSession(
+        _FakeIndex(), lambda query, entries, truncated: None
+    )
     for query in ("a", "ab", "abc", "abcd"):
         session.want(query)
     assert session.wait_idle(5)

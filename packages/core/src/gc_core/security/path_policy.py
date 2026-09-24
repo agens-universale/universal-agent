@@ -28,7 +28,9 @@ class ToolSecurityContext:
     command_moderation_mode: str = "allow"
     allowed_command_examples: list[str] = field(default_factory=list)
     denied_command_examples: list[str] = field(default_factory=list)
-    url_allowed_schemes: list[str] = field(default_factory=lambda: ["http", "https"])
+    url_allowed_schemes: list[str] = field(
+        default_factory=lambda: ["http", "https"]
+    )
     url_blacklist: list[str] = field(default_factory=list)
     url_policy_enabled: bool = False
     url_policy_mode: str = "deny"
@@ -57,14 +59,18 @@ class WriteGuardViolation(ValueError):
         super().__init__(self.error["message"])
 
 
-def normalize_path_for_policy(path: str | os.PathLike[str], base_dir: str | os.PathLike[str]) -> Path:
+def normalize_path_for_policy(
+    path: str | os.PathLike[str], base_dir: str | os.PathLike[str]
+) -> Path:
     raw_path = os.fspath(path)
     if not raw_path:
         raise ValueError("path must not be empty")
     if os.path.isabs(raw_path):
         absolute_path = os.path.abspath(raw_path)
     else:
-        absolute_path = os.path.abspath(os.path.join(os.fspath(base_dir), raw_path))
+        absolute_path = os.path.abspath(
+            os.path.join(os.fspath(base_dir), raw_path)
+        )
     return resolve_existing_parent(Path(absolute_path))
 
 
@@ -77,7 +83,9 @@ def resolve_existing_parent(path: Path) -> Path:
     while not existing_parent.exists():
         next_parent = existing_parent.parent
         if next_parent == existing_parent:
-            raise FileNotFoundError(f"No existing parent found for path: {path}")
+            raise FileNotFoundError(
+                f"No existing parent found for path: {path}"
+            )
         existing_parent = next_parent
 
     resolved_parent = existing_parent.resolve(strict=True)
@@ -107,7 +115,10 @@ def is_within_any_root(
     *,
     case_insensitive: bool = False,
 ) -> bool:
-    return any(is_within_root(candidate, root, case_insensitive=case_insensitive) for root in roots)
+    return any(
+        is_within_root(candidate, root, case_insensitive=case_insensitive)
+        for root in roots
+    )
 
 
 def check_write_path_allowed(
@@ -122,11 +133,16 @@ def check_write_path_allowed(
     effective_base_dir = base_dir or launch_root
     target = normalize_path_for_policy(candidate_path, effective_base_dir)
     root = normalize_path_for_policy(launch_root, effective_base_dir)
-    extra_roots = [normalize_path_for_policy(path, effective_base_dir) for path in (extra_write_roots or [])]
+    extra_roots = [
+        normalize_path_for_policy(path, effective_base_dir)
+        for path in (extra_write_roots or [])
+    ]
     allowed_roots = [root, *extra_roots]
     if case_insensitive is None:
         case_insensitive = os.name == "nt"
-    if is_within_any_root(target, allowed_roots, case_insensitive=case_insensitive):
+    if is_within_any_root(
+        target, allowed_roots, case_insensitive=case_insensitive
+    ):
         return target
     raise WriteGuardViolation(
         launch_root=str(root),
@@ -163,27 +179,42 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
             mode=str(write_guard_cfg.get("mode", "deny")).strip().lower(),
             extra_paths=list(write_guard_cfg.get("extra_paths") or []),
         ),
-        command_moderation_mode=str(moderation.get("mode", "allow")).strip().lower(),
-        allowed_command_examples=list(moderation.get("allowed_command_examples") or []),
-        denied_command_examples=list(moderation.get("denied_command_examples") or []),
-        url_allowed_schemes=list(url_policy_cfg.get("allowed_schemes") or ["http", "https"]),
+        command_moderation_mode=str(moderation.get("mode", "allow"))
+        .strip()
+        .lower(),
+        allowed_command_examples=list(
+            moderation.get("allowed_command_examples") or []
+        ),
+        denied_command_examples=list(
+            moderation.get("denied_command_examples") or []
+        ),
+        url_allowed_schemes=list(
+            url_policy_cfg.get("allowed_schemes") or ["http", "https"]
+        ),
         url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
         url_policy_enabled=bool(url_policy_cfg.get("enabled", False)),
-        url_policy_mode=str(url_policy_cfg.get("mode", "deny")).strip().lower(),
+        url_policy_mode=str(url_policy_cfg.get("mode", "deny"))
+        .strip()
+        .lower(),
         ctx=ctx,
         state=state,
         logger=logger,
     )
 
 
-def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_result_factory):
+def _protected_write_block(
+    candidate_path, context, func, args, kwargs, blocked_result_factory
+):
     """Floor carve-out (Spec B §6): блок записи в защищённый путь или None (можно писать).
 
     Генератор, как и тело гарда: подтверждение человека идёт запросом
     `yield OffLoop(...)` драйверу, поэтому звать — через `yield from`.
     """
     from gc_core.security.confirm_port import request_confirm
-    from gc_core.security.protected_paths import protected_decision, protection_enabled
+    from gc_core.security.protected_paths import (
+        protected_decision,
+        protection_enabled,
+    )
 
     _cfg = getattr(context.ctx, "config_dict", None) or {}
     if not protection_enabled(_cfg):
@@ -240,7 +271,16 @@ def _protected_write_block(candidate_path, context, func, args, kwargs, blocked_
     return None
 
 
-def _resolve_write_violation(exc, context, candidate_path, operation, func, args, kwargs, blocked_result_factory):
+def _resolve_write_violation(
+    exc,
+    context,
+    candidate_path,
+    operation,
+    func,
+    args,
+    kwargs,
+    blocked_result_factory,
+):
     """Нарушение периметра по режиму: (True, None) — писать можно; (False, blocked) — отказ.
 
     Генератор: подтверждение в режиме ask — запрос `yield OffLoop(...)`
@@ -295,7 +335,9 @@ def _resolve_write_violation(exc, context, candidate_path, operation, func, args
         context,
         tool_name=tool_name,
         decision="blocked",
-        reason_code="policy_deny" if wg_mode == "deny" else "policy_ask_cancelled",
+        reason_code="policy_deny"
+        if wg_mode == "deny"
+        else "policy_ask_cancelled",
         error_type=exc.error.get("type"),
     )
     return False, _blocked_result(
@@ -307,7 +349,15 @@ def _resolve_write_violation(exc, context, candidate_path, operation, func, args
     )
 
 
-def _write_guard_flow(func, args, kwargs, path_arg, path_extractor, operation, blocked_result_factory):
+def _write_guard_flow(
+    func,
+    args,
+    kwargs,
+    path_arg,
+    path_extractor,
+    operation,
+    blocked_result_factory,
+):
     """Тело декоратора — генератор: `(yield)` — точка вызова самого тула."""
     context = resolve_tool_context(*args, **kwargs)
     # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
@@ -434,7 +484,9 @@ def audit_policy_decision(
     # Внутрь payload, а не в extra=: событие сериализуется в текст сообщения,
     # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
     # логгера дополнительно ставит trace_id верхним полем записи.
-    trace_id = trace_id_from_config(getattr(getattr(context, "ctx", None), "config_dict", None))
+    trace_id = trace_id_from_config(
+        getattr(getattr(context, "ctx", None), "config_dict", None)
+    )
     if trace_id:
         event["trace_id"] = trace_id
     try:
@@ -446,7 +498,9 @@ def audit_policy_decision(
         return
 
 
-def _extract_config_dict(self_obj: Any, ctx: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+def _extract_config_dict(
+    self_obj: Any, ctx: Any, kwargs: dict[str, Any]
+) -> dict[str, Any]:
     explicit = kwargs.get("config_dict")
     if isinstance(explicit, dict):
         return explicit
@@ -623,7 +677,9 @@ def _read_confirmation_line() -> str | None:
         time.sleep(_CONFIRM_POLL_SEC)
 
 
-def _read_console_line(console: Any, *, give_up: Callable[[], bool]) -> str | None:
+def _read_console_line(
+    console: Any, *, give_up: Callable[[], bool]
+) -> str | None:
     """Строка с консоли Windows опросом нажатий; ``None`` — вопрос бросили.
 
     `kbhit` не блокирует, поэтому брошенный вызов замечает метку и уходит, не
@@ -679,7 +735,10 @@ def prompt_user_confirmation(
 
     Prefer request_confirm / prompt_user_confirmation_choice for new code.
     """
-    from gc_core.security.confirm_port import CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER
+    from gc_core.security.confirm_port import (
+        CONFIRM_ALLOW_ONCE,
+        CONFIRM_ALLOW_REMEMBER,
+    )
 
     choice = prompt_user_confirmation_choice(
         title=title,
@@ -725,7 +784,9 @@ def _blocked_result(
     if blocked_result_factory is not None:
         return blocked_result_factory(error)
     self_obj = args[0] if args else None
-    tool_blocked_result = getattr(self_obj, "_write_guard_blocked_result", None)
+    tool_blocked_result = getattr(
+        self_obj, "_write_guard_blocked_result", None
+    )
     if callable(tool_blocked_result):
         return tool_blocked_result(error, *args[1:], **kwargs)
     return json.dumps(

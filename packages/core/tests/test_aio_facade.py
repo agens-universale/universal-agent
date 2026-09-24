@@ -141,7 +141,10 @@ def _finish_with_prose(prose: str, report: str = "готово") -> dict:
 async def test_facade_streams_deltas(tmp_path, monkeypatch):
     """stream() отдаёт дельты ответа и доигрывает ход до конца."""
     cfg = parity_config(tmp_path, monkeypatch)
-    install(monkeypatch, ScriptedBackend([_finish_with_prose("считаю ответ"), judge_accept()]))
+    install(
+        monkeypatch,
+        ScriptedBackend([_finish_with_prose("считаю ответ"), judge_accept()]),
+    )
 
     seen = []
     async with await AsyncAgent.create(cfg) as agent:

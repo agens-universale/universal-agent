@@ -16,7 +16,11 @@ def test_plan_groups_by_parent_and_seq():
             "seq": 2,
             "parent_call_id": "p1",
             "kind": "result",
-            "payload": {"type": "function_call_output", "call_id": "c1", "output": "ok"},
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": "ok",
+            },
         },
         {
             "seq": 1,
@@ -105,10 +109,16 @@ def test_apply_calls_hooks_in_order():
     )
     apply_sidecar_nested_actions(
         actions,
-        mount_nested_tool=lambda **kw: seen.append(("tool", kw["tool_call_id"])),
-        finish_nested_tool=lambda **kw: seen.append(("finish", kw["tool_call_id"], kw["ok"])),
+        mount_nested_tool=lambda **kw: seen.append(
+            ("tool", kw["tool_call_id"])
+        ),
+        finish_nested_tool=lambda **kw: seen.append(
+            ("finish", kw["tool_call_id"], kw["ok"])
+        ),
         mount_nested_prose=lambda **kw: seen.append(("prose", kw["prose"])),
-        mount_nested_summary=lambda **kw: seen.append(("summary", kw["prose"])),
+        mount_nested_summary=lambda **kw: seen.append(
+            ("summary", kw["prose"])
+        ),
     )
     assert seen == [
         ("tool", "c_err"),
@@ -147,10 +157,16 @@ def test_session_todo_every_call_plans_nested_todo_action():
     stream = [
         [{"content": "a", "status": "pending"}],
         [{"content": "a", "status": "completed"}],  # статусы
-        [{"content": "a", "status": "completed"}, {"content": "b", "status": "pending"}],  # состав
+        [
+            {"content": "a", "status": "completed"},
+            {"content": "b", "status": "pending"},
+        ],  # состав
         [],  # очистка
     ]
-    records = [_todo_call("p1", f"c{i}", i, todos) for i, todos in enumerate(stream, start=1)]
+    records = [
+        _todo_call("p1", f"c{i}", i, todos)
+        for i, todos in enumerate(stream, start=1)
+    ]
     actions = plan_sidecar_nested_actions(records)
     assert [a.kind for a in actions] == ["mount_nested_todo"] * 4
     assert actions[-1].todo_items == []
@@ -186,8 +202,14 @@ def test_live_and_sidecar_channels_agree_on_todo_routing():
         [{"content": "a", "status": "completed"}],
         [],
     ]
-    records = [_todo_call("p1", f"c{i}", i, todos) for i, todos in enumerate(stream, start=1)]
-    sidecar_kinds = ["todo" if a.kind == "mount_nested_todo" else "tool" for a in plan_sidecar_nested_actions(records)]
+    records = [
+        _todo_call("p1", f"c{i}", i, todos)
+        for i, todos in enumerate(stream, start=1)
+    ]
+    sidecar_kinds = [
+        "todo" if a.kind == "mount_nested_todo" else "tool"
+        for a in plan_sidecar_nested_actions(records)
+    ]
 
     events = [
         SubagentProgressEvent(
@@ -222,7 +244,12 @@ def test_result_for_expanded_todo_call_is_noop():
     todos = [{"content": "a", "status": "pending"}]
     records = [
         _todo_call("p1", "c1", 1, todos),
-        {"parent_call_id": "p1", "seq": 2, "kind": "result", "payload": {"call_id": "c1"}},
+        {
+            "parent_call_id": "p1",
+            "seq": 2,
+            "kind": "result",
+            "payload": {"call_id": "c1"},
+        },
     ]
     actions = plan_sidecar_nested_actions(records)
     finish = [a for a in actions if a.kind == "finish_nested_tool"]
@@ -240,7 +267,11 @@ def test_session_todo_garbage_arguments_plan_generic_tool_row():
         "parent_call_id": "p1",
         "seq": 1,
         "kind": "call",
-        "payload": {"call_id": "c1", "name": "session_todo", "arguments": "оборванный json{{{"},
+        "payload": {
+            "call_id": "c1",
+            "name": "session_todo",
+            "arguments": "оборванный json{{{",
+        },
     }
     actions = plan_sidecar_nested_actions([rec])
     assert [a.kind for a in actions] == ["mount_nested_tool"]

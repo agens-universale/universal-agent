@@ -14,7 +14,9 @@ class _SafeReprDumper(yaml.SafeDumper):
 # Catch-all по MRO: точные типы (dict/list/str/int/bool/None) идут штатными
 # репрезентерами SafeDumper, всё прочее (pydantic-модели, Path, enum, …) —
 # строкой. Так /config не падает на реальном app._config (RepresenterError).
-_SafeReprDumper.add_multi_representer(object, lambda dumper, data: dumper.represent_str(str(data)))
+_SafeReprDumper.add_multi_representer(
+    object, lambda dumper, data: dumper.represent_str(str(data))
+)
 
 
 def safe_yaml_dump(data) -> str:

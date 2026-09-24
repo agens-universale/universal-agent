@@ -103,8 +103,14 @@ FILE_TOOLS = [
 ]
 
 
-@pytest.mark.parametrize("tool_cls,build", FILE_TOOLS, ids=lambda v: v.__name__ if isinstance(v, type) else "")
-async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, tmp_path):
+@pytest.mark.parametrize(
+    "tool_cls,build",
+    FILE_TOOLS,
+    ids=lambda v: v.__name__ if isinstance(v, type) else "",
+)
+async def test_file_tool_acall_runs_body_on_the_calling_thread(
+    tool_cls, build, tmp_path
+):
     """``acall`` исполняет тело инлайн, не отдавая его в пул.
 
     Зонд следит за ПУЛОМ, а не за телом. Прежний наследовал тул и подменял
@@ -140,8 +146,11 @@ async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, 
     assert args or not [
         p
         for p in inspect.signature(tool.acall).parameters.values()
-        if p.default is inspect.Parameter.empty and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
-    ], f"{tool_cls.__name__}: не удалось собрать аргументы — тест стал бы пустым"
+        if p.default is inspect.Parameter.empty
+        and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+    ], (
+        f"{tool_cls.__name__}: не удалось собрать аргументы — тест стал бы пустым"
+    )
 
     went_to_pool = []
     real_to_thread = asyncio.to_thread
@@ -184,12 +193,20 @@ async def test_project_memory_acall_runs_file_work_on_the_calling_thread():
     probe._path = object()  # не None — иначе тул откажет до диспетчеризации
 
     assert await probe.acall(action="read") == "ok"
-    assert seen["thread"] == threading.get_ident(), "project_memory.acall увёл файловую работу в другой поток"
+    assert seen["thread"] == threading.get_ident(), (
+        "project_memory.acall увёл файловую работу в другой поток"
+    )
 
 
 def _tools_data(tool_cls):
     spec = tool_cls.tool_description()
-    return {spec["name"]: {"tool_fabric": tool_cls, "spec": spec, "description": ""}}
+    return {
+        spec["name"]: {
+            "tool_fabric": tool_cls,
+            "spec": spec,
+            "description": "",
+        }
+    }
 
 
 async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):

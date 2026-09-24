@@ -2,7 +2,11 @@ from gc_tui.services.trace_mapper import map_message
 
 
 def test_user_event_uses_display_content():
-    msg = {"role": "user", "content": "<skill>\nдавай обсудим", "display_content": "давай обсудим"}
+    msg = {
+        "role": "user",
+        "content": "<skill>\nдавай обсудим",
+        "display_content": "давай обсудим",
+    }
     ev = map_message(msg, no=1, ts="")
     assert ev.kind == "user"
     assert ev.summary == "давай обсудим"

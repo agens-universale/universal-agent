@@ -72,7 +72,9 @@ Return format (JSON string):
         if rejection is not None:
             return rejection
         await asyncio.sleep(seconds)
-        return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
+        return self._result(
+            ok=True, seconds=seconds, slept_seconds=seconds, error=None
+        )
 
     def _reject_bad_seconds(self, seconds: float | int | None) -> "str | None":
         """Готовый отказ, если аргумент негоден. Общий для обоих входов.
@@ -86,7 +88,11 @@ Return format (JSON string):
                 ok=False,
                 seconds=None,
                 slept_seconds=None,
-                error={"type": "invalid_argument", "field": "seconds", "message": "seconds is required"},
+                error={
+                    "type": "invalid_argument",
+                    "field": "seconds",
+                    "message": "seconds is required",
+                },
             )
 
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
@@ -102,7 +108,10 @@ Return format (JSON string):
                 ok=False,
                 seconds=seconds,
                 slept_seconds=None,
-                error={"type": "invalid_argument", "message": "seconds must be >= 0"},
+                error={
+                    "type": "invalid_argument",
+                    "message": "seconds must be >= 0",
+                },
             )
 
         if seconds > self.max_seconds:

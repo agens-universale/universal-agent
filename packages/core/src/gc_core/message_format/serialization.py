@@ -3,7 +3,10 @@
 import re
 from typing import Any, Dict, List, Sequence
 
-from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
+from gc_core.message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+    user_content_to_text,
+)
 from gc_core.message_projection import project_assistant_text
 
 _ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
@@ -77,13 +80,19 @@ def message_text_for_summary(
         arguments = message.get("arguments")
         return f"[{label}] {name}\n{_message_content_to_text(arguments)}"
     if msg_type in ("function_call_output", "tool_call_output"):
-        label = "function_call_output" if msg_type == "function_call_output" else "tool_call_output"
+        label = (
+            "function_call_output"
+            if msg_type == "function_call_output"
+            else "tool_call_output"
+        )
         output = message.get("output")
         return f"[{label}]\n{_message_content_to_text(output)}"
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        content = project_assistant_text(raw_content, tags=tags, strip_think=strip_think)
+        content = project_assistant_text(
+            raw_content, tags=tags, strip_think=strip_think
+        )
     else:
         content = _message_content_to_text(raw_content)
     return f"[{role}] {content}".strip()
@@ -112,7 +121,9 @@ def message_raw_payload_chars_for_trigger(
     role = str(message.get("role") or "")
     raw_content = message.get("content")
     if role.strip().lower() == "assistant":
-        projected = project_assistant_text(raw_content, tags=tags, strip_think=strip_think)
+        projected = project_assistant_text(
+            raw_content, tags=tags, strip_think=strip_think
+        )
         if projected:
             return len(projected)
         return len(_message_content_to_text(raw_content))
@@ -126,7 +137,12 @@ def calc_history_chars_for_trigger(
     strip_think: bool = True,
 ) -> int:
     """Суммарный объём истории в «сырых» символах для ``chat_completions_summary_trigger_chars``."""
-    return sum(message_raw_payload_chars_for_trigger(m, tags=tags, strip_think=strip_think) for m in messages)
+    return sum(
+        message_raw_payload_chars_for_trigger(
+            m, tags=tags, strip_think=strip_think
+        )
+        for m in messages
+    )
 
 
 def calc_messages_chars_total(
@@ -138,5 +154,9 @@ def calc_messages_chars_total(
     """Суммарная длина сериализованного треда (каноничный вид для промпта LLM)."""
     total = 0
     for message in messages:
-        total += len(message_text_for_summary(message, tags=tags, strip_think=strip_think))
+        total += len(
+            message_text_for_summary(
+                message, tags=tags, strip_think=strip_think
+            )
+        )
     return total

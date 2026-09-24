@@ -23,7 +23,8 @@ async def test_send_records_pending_in_meta(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -35,7 +36,9 @@ async def test_send_records_pending_in_meta(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -61,7 +64,8 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
@@ -73,7 +77,9 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -99,7 +105,9 @@ async def test_polling_user_event_promotes_pending(tmp_path):
         async def arun(self, messages, *, thread_id, **kw):
             import time
 
-            time.sleep(0.4)  # pending mount до появления .jsonl (auto-create гонка)
+            time.sleep(
+                0.4
+            )  # pending mount до появления .jsonl (auto-create гонка)
             data_path = Path(tmp_path) / f"data_cli_{thread_id}.jsonl"
             meta_path = Path(tmp_path) / f"meta_cli_{thread_id}.json"
             data_path.write_text(
@@ -108,13 +116,20 @@ async def test_polling_user_event_promotes_pending(tmp_path):
                         "type": "message",
                         "seq": 1,
                         "ts_utc": "2026-05-26T00:00:00+00:00",
-                        "payload": {"id": "u1", "role": "user", "content": messages[0]},
+                        "payload": {
+                            "id": "u1",
+                            "role": "user",
+                            "content": messages[0],
+                        },
                     }
                 )
                 + "\n",
                 encoding="utf-8",
             )
-            meta_path.write_text(json.dumps({"thread_id": thread_id, "messages_count": 1}), encoding="utf-8")
+            meta_path.write_text(
+                json.dumps({"thread_id": thread_id, "messages_count": 1}),
+                encoding="utf-8",
+            )
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -125,7 +140,9 @@ async def test_polling_user_event_promotes_pending(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -137,10 +154,14 @@ async def test_polling_user_event_promotes_pending(tmp_path):
             replies = pilot.app.query(UserReplyContainer)
             return len(replies) == 1 and replies[0].state == "normal"
 
-        await wait_until(pilot, _promoted, "pending промоутился в normal без дубликата")
+        await wait_until(
+            pilot, _promoted, "pending промоутился в normal без дубликата"
+        )
 
         replies = pilot.app.query(UserReplyContainer)
-        assert len(replies) == 1, "Не должно быть дубликата — pending промоутится in-place"
+        assert len(replies) == 1, (
+            "Не должно быть дубликата — pending промоутится in-place"
+        )
         assert replies[0].state == "normal"
 
         tid = app.tui_state.active_task_id
@@ -169,7 +190,8 @@ async def test_pending_cap_drops_oldest(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             self._evt = threading.Event()
             self._evt.wait(timeout=30.0)
@@ -181,7 +203,9 @@ async def test_pending_cap_drops_oldest(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     fake = _Fake()
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -209,7 +233,10 @@ async def test_pending_cap_drops_oldest(tmp_path):
             inp.text = f"msg-{i}"
             await pilot.press("enter")
             await wait_until(
-                lambda i=i: any(r["content"] == f"msg-{i}" for r in _read_pending(tmp_path, tid)),
+                lambda i=i: any(
+                    r["content"] == f"msg-{i}"
+                    for r in _read_pending(tmp_path, tid)
+                ),
                 f"pending-запись msg-{i}",
             )
 
@@ -231,7 +258,8 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             raise RuntimeError("model unavailable")
 
@@ -241,7 +269,9 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -271,7 +301,8 @@ async def test_error_shown_resets_between_runs(tmp_path):
         async def arun(self, messages, *, thread_id, **kw):
             call["n"] += 1
             (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}), encoding="utf-8"
+                json.dumps({"thread_id": thread_id, "messages_count": 0}),
+                encoding="utf-8",
             )
             raise RuntimeError(f"fail #{call['n']}")
 
@@ -281,7 +312,9 @@ async def test_error_shown_resets_between_runs(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -293,7 +326,9 @@ async def test_error_shown_resets_between_runs(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.5)
 
-        trace_texts = [str(s.render()) for s in pilot.app.screen.query("#trace Static")]
+        trace_texts = [
+            str(s.render()) for s in pilot.app.screen.query("#trace Static")
+        ]
         flat = "\n".join(trace_texts)
         assert "fail #1" in flat
         assert "fail #2" in flat
@@ -332,7 +367,9 @@ async def test_restart_renders_failed_from_meta(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)
@@ -342,7 +379,11 @@ async def test_restart_renders_failed_from_meta(tmp_path):
         assert replies[0].state == "failed"
 
         # pending → failed в meta
-        meta = json.loads((Path(tmp_path) / f"meta_cli_{tid}.json").read_text(encoding="utf-8"))
+        meta = json.loads(
+            (Path(tmp_path) / f"meta_cli_{tid}.json").read_text(
+                encoding="utf-8"
+            )
+        )
         records = meta["tui"]["pending_user_messages"]
         assert records[0]["status"] == "failed"
 
@@ -376,13 +417,17 @@ async def test_restart_with_only_failed_pendings_no_normalize_write(tmp_path):
     meta_path.write_text(json.dumps(initial_meta), encoding="utf-8")
     mtime_before = meta_path.stat().st_mtime_ns
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)
 
     mtime_after = meta_path.stat().st_mtime_ns
-    assert mtime_after == mtime_before, "Meta не должна перезаписываться, если нечего нормализовать"
+    assert mtime_after == mtime_before, (
+        "Meta не должна перезаписываться, если нечего нормализовать"
+    )
 
 
 @pytest.mark.asyncio
@@ -398,7 +443,9 @@ async def test_mount_failed_skips_delivered_via_attach(tmp_path):
     threads_dir.mkdir()
     # .jsonl: user-message "ok-text" уже в трассе (зеркальное отображение того,
     # что прошлая сессия TUI отправила агенту и тот зеркалил в history).
-    with open(threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8") as f:
+    with open(
+        threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8"
+    ) as f:
         f.write(
             json.dumps(
                 {
@@ -443,12 +490,18 @@ async def test_mount_failed_skips_delivered_via_attach(tmp_path):
         await pilot.pause()
         # Ровно 1 user-reply (из .jsonl trace), без failed-дубля.
         replies = list(screen.query(UserReplyContainer))
-        assert len(replies) == 1, f"должно быть 1 user-reply (из trace), got {len(replies)}"
-        assert replies[0]._state == "normal", f"должен быть state=normal, got {replies[0]._state}"
+        assert len(replies) == 1, (
+            f"должно быть 1 user-reply (из trace), got {len(replies)}"
+        )
+        assert replies[0]._state == "normal", (
+            f"должен быть state=normal, got {replies[0]._state}"
+        )
         # meta очищена.
         meta = screen._store.get_task_meta(thread_id)
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
-        assert not pum, f"pending_user_messages должен быть пуст после cross-check, got {pum}"
+        assert not pum, (
+            f"pending_user_messages должен быть пуст после cross-check, got {pum}"
+        )
 
 
 @pytest.mark.asyncio
@@ -463,7 +516,9 @@ async def test_mount_failed_renders_truly_orphaned(tmp_path):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
     # .jsonl пустой — никаких user-message в trace.
-    (threads_dir / f"data_cli_{thread_id}.jsonl").write_text("", encoding="utf-8")
+    (threads_dir / f"data_cli_{thread_id}.jsonl").write_text(
+        "", encoding="utf-8"
+    )
     # meta: pending record с текстом, которого нет в trace.
     (threads_dir / f"meta_cli_{thread_id}.json").write_text(
         json.dumps(
@@ -517,7 +572,9 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
     threads_dir.mkdir()
     # Live .jsonl: только summary-message + некий пост-summary user-message.
     # Сообщение "delivered-old-msg" в живом .jsonl НЕТ (оно было до summary-прохода).
-    with open(threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8") as f:
+    with open(
+        threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8"
+    ) as f:
         f.write(
             json.dumps(
                 {
@@ -526,7 +583,10 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
                     "system": "cli",
                     "seq": 1,
                     "ts": "2026-05-29T10:00:00+00:00",
-                    "payload": {"role": "user", "content": '<technical type="dialog_summary">summary</technical>'},
+                    "payload": {
+                        "role": "user",
+                        "content": '<technical type="dialog_summary">summary</technical>',
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -593,7 +653,9 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
         # meta: pending очищен.
         meta = screen._store.get_task_meta(thread_id)
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
-        assert not pum, f"pending должен быть очищен через user_messages_log, got: {pum}"
+        assert not pum, (
+            f"pending должен быть очищен через user_messages_log, got: {pum}"
+        )
 
 
 @pytest.mark.asyncio
@@ -607,7 +669,9 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
     thread_id = "delivered-via-intent000000000000"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
-    with open(threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8") as f:
+    with open(
+        threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8"
+    ) as f:
         f.write(
             json.dumps(
                 {
@@ -616,7 +680,10 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
                     "system": "cli",
                     "seq": 1,
                     "ts": "2026-05-29T10:00:00+00:00",
-                    "payload": {"role": "user", "content": '<technical type="dialog_summary">summary</technical>'},
+                    "payload": {
+                        "role": "user",
+                        "content": '<technical type="dialog_summary">summary</technical>',
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -687,7 +754,9 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
         )
         meta = screen._store.get_task_meta(thread_id)
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
-        assert not pum, f"pending должен быть очищен через user_intent_log, got: {pum}"
+        assert not pum, (
+            f"pending должен быть очищен через user_intent_log, got: {pum}"
+        )
 
 
 @pytest.mark.asyncio
@@ -702,7 +771,9 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
     thread_id = "superseded000000000000000000000a"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
-    with open(threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8") as f:
+    with open(
+        threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8"
+    ) as f:
         f.write(
             json.dumps(
                 {
@@ -711,7 +782,10 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
                     "system": "cli",
                     "seq": 1,
                     "ts": "2026-06-04T20:40:37+00:00",
-                    "payload": {"role": "user", "content": "опиши этот проект"},
+                    "payload": {
+                        "role": "user",
+                        "content": "опиши этот проект",
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -761,10 +835,14 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
         screen.attach_active_task(thread_id)
         await pilot.pause()
         texts = [r._text for r in screen.query(UserReplyContainer)]
-        assert "опиши проект" not in texts, f"устаревшее failed не должно висеть, got: {texts}"
+        assert "опиши проект" not in texts, (
+            f"устаревшее failed не должно висеть, got: {texts}"
+        )
         meta = screen._store.get_task_meta(thread_id)
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
-        assert not pum, f"устаревшее failed должно быть вычищено из meta, got: {pum}"
+        assert not pum, (
+            f"устаревшее failed должно быть вычищено из meta, got: {pum}"
+        )
 
 
 @pytest.mark.asyncio
@@ -778,7 +856,9 @@ async def test_mount_failed_keeps_latest_failed_after_delivered(tmp_path):
     thread_id = "latestfailed00000000000000000000"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
-    with open(threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8") as f:
+    with open(
+        threads_dir / f"data_cli_{thread_id}.jsonl", "w", encoding="utf-8"
+    ) as f:
         f.write(
             json.dumps(
                 {
@@ -831,7 +911,9 @@ async def test_mount_failed_keeps_latest_failed_after_delivered(tmp_path):
         await pilot.pause()
         replies = list(screen.query(UserReplyContainer))
         texts = [r._text for r in replies]
-        assert "последнее упало" in texts, f"последнее failed должно остаться для retry, got: {texts}"
+        assert "последнее упало" in texts, (
+            f"последнее failed должно остаться для retry, got: {texts}"
+        )
         meta = screen._store.get_task_meta(thread_id)
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert any(r.get("content") == "последнее упало" for r in pum), (

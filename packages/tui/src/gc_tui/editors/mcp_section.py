@@ -35,9 +35,13 @@ class McpSectionEditor(Vertical):
         self._mgr = manager
         self._on_change = on_change
         self._rows = manager.rows()
-        self._states: dict[str, object] = {}  # name -> McpState (после воркера, Task 6)
+        self._states: dict[
+            str, object
+        ] = {}  # name -> McpState (после воркера, Task 6)
         self._idx = 0  # курсор среди управляемых (не ручных)
-        self._action_kind: str | None = None  # курсор на строке-действии: "missing"/"update"/None
+        self._action_kind: str | None = (
+            None  # курсор на строке-действии: "missing"/"update"/None
+        )
         self._wave_i = 0
         self._pending = None  # {"kind": "remove"|"install", "names": [...]} в режиме подтверждения
 
@@ -54,7 +58,11 @@ class McpSectionEditor(Vertical):
         if self._action_kind is not None:
             return None
         managed = self._managed
-        return managed[self._idx] if managed and self._idx < len(managed) else None
+        return (
+            managed[self._idx]
+            if managed and self._idx < len(managed)
+            else None
+        )
 
     @property
     def current_action(self) -> str | None:
@@ -64,13 +72,19 @@ class McpSectionEditor(Vertical):
     def compose(self) -> ComposeResult:
         for i, row in enumerate(self._managed):
             selected = i == self._idx and self._action_kind is None
-            cls = "mcp-row mcp-row-managed onb-dyn set-spaced" + (" selected" if selected else "")
+            cls = "mcp-row mcp-row-managed onb-dyn set-spaced" + (
+                " selected" if selected else ""
+            )
             yield Static(self._row_text(row, i), classes=cls, markup=False)
         manual = self._manual
         if manual:
             yield Static("─" * 40, classes="mcp-divider onb-dyn", markup=False)
             for row in manual:
-                yield Static(self._row_text(row, -1), classes="mcp-row mcp-manual onb-dyn set-spaced", markup=False)
+                yield Static(
+                    self._row_text(row, -1),
+                    classes="mcp-row mcp-manual onb-dyn set-spaced",
+                    markup=False,
+                )
 
     def _row_text(self, row, i: int) -> Text:
         t = Text()
@@ -112,7 +126,9 @@ class McpSectionEditor(Vertical):
         st = self._states.get(row.name)
         t = Text()
         if st is None:
-            t.append_text(wave_glyph(self._wave_i))  # статус ещё грузится (Task 6)
+            t.append_text(
+                wave_glyph(self._wave_i)
+            )  # статус ещё грузится (Task 6)
             return t
         if row.wired:
             t.append("подключён", style=OK)
@@ -136,7 +152,11 @@ class McpSectionEditor(Vertical):
             return
         if self._action_kind is not None and self._action_kind not in kinds:
             self._action_kind = None
-        pos = self._idx if self._action_kind is None else len(managed) + kinds.index(self._action_kind)
+        pos = (
+            self._idx
+            if self._action_kind is None
+            else len(managed) + kinds.index(self._action_kind)
+        )
         pos = (pos + delta) % total
         if pos < len(managed):
             self._idx, self._action_kind = pos, None
@@ -164,7 +184,9 @@ class McpSectionEditor(Vertical):
 
     def _wave_tick(self) -> None:
         # волна крутится, пока есть строки без статуса
-        if not self.is_mounted or all(r.name in self._states for r in self._managed):
+        if not self.is_mounted or all(
+            r.name in self._states for r in self._managed
+        ):
             if getattr(self, "_wave_timer", None):
                 self._wave_timer.stop()
                 self._wave_timer = None
@@ -195,12 +217,23 @@ class McpSectionEditor(Vertical):
 
     # --- строки-действия ⤓/⟳ (за разделителем, скрываются если нечего делать) ---
     def _missing_names(self) -> list:
-        return [r.name for r in self._managed if (st := self._states.get(r.name)) is not None and st.installed is False]
+        return [
+            r.name
+            for r in self._managed
+            if (st := self._states.get(r.name)) is not None
+            and st.installed is False
+        ]
 
     def _updatable_names(self) -> list:
         """Подключённые с ОБНАРУЖЕННЫМ обновлением (pypi-пин ≠ установленной) — для
         счётчика «N обновлений»; source-рецепты сигнала не дают."""
-        return [r.name for r in self._managed if r.wired and (st := self._states.get(r.name)) is not None and st.update]
+        return [
+            r.name
+            for r in self._managed
+            if r.wired
+            and (st := self._states.get(r.name)) is not None
+            and st.update
+        ]
 
     def _connected_names(self) -> list:
         """Все подключённые серверы — цель «Обновить все подключённые» (идемпотентная
@@ -231,7 +264,9 @@ class McpSectionEditor(Vertical):
             t.append("Обновить все подключённые", style=INK)
             detail = f"    {len(names)} шт: {', '.join(names)}"
             if upd:
-                word = _ru_plural(len(upd), "обновление", "обновления", "обновлений")
+                word = _ru_plural(
+                    len(upd), "обновление", "обновления", "обновлений"
+                )
                 detail += f" · {len(upd)} {word}"
             t.append(detail, style=DIM)
         return t
@@ -242,7 +277,10 @@ class McpSectionEditor(Vertical):
             self._action_kind = None
         # Набор строк-действий не изменился → обновляем текст на месте (курсор ▸),
         # без remove+mount: снос в Textual асинхронен, а move() дёргает это часто.
-        mounted = [getattr(w, "_action_kind", None) for w in self.query(".mcp-action-row")]
+        mounted = [
+            getattr(w, "_action_kind", None)
+            for w in self.query(".mcp-action-row")
+        ]
         if mounted == kinds:
             self._refresh_action_text()
             return
@@ -251,12 +289,18 @@ class McpSectionEditor(Vertical):
         if not kinds:
             return
         try:
-            anchor = self.query_one(".mcp-divider")  # разделитель управляемые/ручные (Task 5)
+            anchor = self.query_one(
+                ".mcp-divider"
+            )  # разделитель управляемые/ручные (Task 5)
         except NoMatches:
             anchor = None
-        widgets = [Static("─" * 40, classes="mcp-action onb-dyn", markup=False)]
+        widgets = [
+            Static("─" * 40, classes="mcp-action onb-dyn", markup=False)
+        ]
         for kind in kinds:
-            cls = "mcp-action mcp-action-row onb-dyn set-spaced" + (" selected" if self._action_kind == kind else "")
+            cls = "mcp-action mcp-action-row onb-dyn set-spaced" + (
+                " selected" if self._action_kind == kind else ""
+            )
             w = Static(self._action_row_text(kind), classes=cls, markup=False)
             w._action_kind = kind
             widgets.append(w)
@@ -366,7 +410,10 @@ class McpSectionEditor(Vertical):
             return False
         self._pending = {"kind": "install", "names": list(names)}
         banner = Static(
-            Text(f"{verb}: {', '.join(names)}? Enter — {verb.lower()} · Esc — отмена", style=WARN),
+            Text(
+                f"{verb}: {', '.join(names)}? Enter — {verb.lower()} · Esc — отмена",
+                style=WARN,
+            ),
             classes=f"mcp-confirm onb-dyn {KEEP_IN_VIEW}",
             markup=False,
         )
@@ -378,9 +425,13 @@ class McpSectionEditor(Vertical):
         """Enter вне режима подтверждения: решает цель (недостающие/обновления/выбранный
         сервер) и показывает confirm — ничего не устанавливает сразу."""
         if self._action_kind == "missing":
-            return self.request_install(self._missing_names(), verb="Установить")
+            return self.request_install(
+                self._missing_names(), verb="Установить"
+            )
         if self._action_kind == "update":
-            return self.request_install(self._connected_names(), verb="Обновить")
+            return self.request_install(
+                self._connected_names(), verb="Обновить"
+            )
         row = self.current_row
         if row is None or row.wired or row.manual:
             return False

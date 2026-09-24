@@ -16,14 +16,22 @@ _CHROME = 5  # хром футера: padding'и + зазор между кол�
 
 def _need(scr) -> int:
     """Ширина, которую правая колонка заявляет по факту композиции."""
-    return max(cell_len(line) for line in scr._compose_footer_right().plain.split("\n"))
+    return max(
+        cell_len(line)
+        for line in scr._compose_footer_right().plain.split("\n")
+    )
 
 
 def _left_rows(scr, total: int, need: int) -> int:
-    from gc_tui.services.notices_ui import footer_left_rows, format_notices_badge
+    from gc_tui.services.notices_ui import (
+        footer_left_rows,
+        format_notices_badge,
+    )
 
     return footer_left_rows(
-        scr._footer_left_commands(), format_notices_badge(scr._collect_footer_notices()), width=total - need - _CHROME
+        scr._footer_left_commands(),
+        format_notices_badge(scr._collect_footer_notices()),
+        width=total - need - _CHROME,
     )
 
 
@@ -41,14 +49,18 @@ async def test_right_column_leaves_room_for_notices_suffix():
         scr = app.screen_stack[0]
         assert isinstance(scr, TraceScreen)
         # три предупреждения — суффикс «  ·  ⚠3 · F4/notices»
-        app.collect_footer_notices = lambda: [Notice("warning", f"c{i}", f"msg{i}") for i in range(3)]
+        app.collect_footer_notices = lambda: [
+            Notice("warning", f"c{i}", f"msg{i}") for i in range(3)
+        ]
         await pilot.pause()
         need = _need(scr)
         left = cell_len(scr._footer_left_text())
         assert need + left + _CHROME <= 120, (
             f"правая часть {need} + левая {left} > ширины окна 120: правая часть налезет на счётчик уведомлений"
         )
-        assert _left_rows(scr, 120, need) == 1, "левую загнали в два ряда там, где места хватало на один"
+        assert _left_rows(scr, 120, need) == 1, (
+            "левую загнали в два ряда там, где места хватало на один"
+        )
         # Односторонние assert'ы выше не ловят излишне зажатую правую часть —
         # она тогда режется без нужды; имя модели на этой ширине обязано быть целым.
         assert "anthropic/claude-opus-5" in scr._compose_footer_right().plain
@@ -71,7 +83,13 @@ async def test_right_column_without_notices_is_unchanged():
 
 # --- Лесенка жертв: жертва обязана что-то давать, а стоп-клавиша неприкосновенна ---
 
-_PRICING = {"enabled": True, "input": 1.0, "output": 2.0, "currency": "₽", "per_tokens": 1_000_000}
+_PRICING = {
+    "enabled": True,
+    "input": 1.0,
+    "output": 2.0,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+}
 
 
 class _RunningRunner:
@@ -109,11 +127,16 @@ def _with_prices(app, scr, *, running=False):
     }
     app.tui_state.active_task_id = "t1"
     scr._active_task_id = "t1"
-    app.active_runner = _RunningRunner((_billed(2_000_000, 0, 20.0), _billed(1_000_000, 0, 10.0)), running=running)
+    app.active_runner = _RunningRunner(
+        (_billed(2_000_000, 0, 20.0), _billed(1_000_000, 0, 10.0)),
+        running=running,
+    )
 
 
 @pytest.mark.asyncio
-async def test_profile_name_survives_when_dropping_it_frees_nothing(tmp_path, monkeypatch):
+async def test_profile_name_survives_when_dropping_it_frees_nothing(
+    tmp_path, monkeypatch
+):
     """Цены стоят на второй строке и шире шапки — значит ширину правой колонки
     диктуют ОНИ, и снятие имени профиля не освобождает ни колонки. Раньше лесенка
     всё равно доходила до последней ступени и отдавала имя вместе со стрелкой
@@ -131,7 +154,9 @@ async def test_profile_name_survives_when_dropping_it_frees_nothing(tmp_path, mo
     async with app.run_test(size=(60, 30)) as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(
-            app, "active_profile_ref", lambda: ProfileRef(name="work", path=_P("x"), root_kind="project")
+            app,
+            "active_profile_ref",
+            lambda: ProfileRef(name="work", path=_P("x"), root_kind="project"),
         )
         _with_prices(app, scr)
         await pilot.pause()
@@ -143,7 +168,9 @@ async def test_profile_name_survives_when_dropping_it_frees_nothing(tmp_path, mo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("width", [55, 60, 65, 70, 80])
-async def test_stop_key_keeps_its_room_on_narrow_window(tmp_path, monkeypatch, width):
+async def test_stop_key_keeps_its_room_on_narrow_window(
+    tmp_path, monkeypatch, width
+):
     """Во время хода слева живёт «Ctrl+C/stop» — усечь её нечем, а другого способа
     остановить агента нет. Правая колонка обязана оставить ей место, пожертвовав
     ценами; раньше последняя ступень возвращалась безусловно и выдавливала левую

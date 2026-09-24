@@ -38,13 +38,18 @@ def test_resolve_manifest_path_default(tmp_path: Path) -> None:
     assert resolve_manifest_path(root, None) == default.resolve()
 
 
-def test_resolve_manifest_path_custom_relative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_manifest_path_custom_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path / "recommended_mcp"
     root.mkdir()
     custom = root / "config.local.yml"
     custom.write_text("mcps: []\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    assert resolve_manifest_path(root, Path("recommended_mcp/config.local.yml")) == custom.resolve()
+    assert (
+        resolve_manifest_path(root, Path("recommended_mcp/config.local.yml"))
+        == custom.resolve()
+    )
 
 
 def test_resolve_manifest_path_missing_raises(tmp_path: Path) -> None:
@@ -244,7 +249,9 @@ def test_command_without_command_raises(tmp_path: Path) -> None:
               type: command
     """,
     )
-    with pytest.raises(ManifestError, match="run.type=command requires run.command"):
+    with pytest.raises(
+        ManifestError, match="run.type=command requires run.command"
+    ):
         load_manifest(f)
 
 
@@ -277,7 +284,9 @@ def test_pypi_without_package_raises(tmp_path: Path) -> None:
               type: pypi
     """,
     )
-    with pytest.raises(ManifestError, match="install.type=pypi requires install.package"):
+    with pytest.raises(
+        ManifestError, match="install.type=pypi requires install.package"
+    ):
         load_manifest(f)
 
 
@@ -313,11 +322,15 @@ def test_source_without_source_field_raises(tmp_path: Path) -> None:
               type: source
     """,
     )
-    with pytest.raises(ManifestError, match="install.type=source requires install.source"):
+    with pytest.raises(
+        ManifestError, match="install.type=source requires install.source"
+    ):
         load_manifest(f)
 
 
-def test_load_agent_dep_dir_default_uses_gc_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_agent_dep_dir_default_uses_gc_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     f = _write(tmp_path, "mcps: []\n")
     fake_data = tmp_path / "share" / "gc"
     monkeypatch.setattr(
@@ -343,7 +356,9 @@ def test_load_agent_dep_dir_explicit_override(tmp_path: Path) -> None:
     assert load_agent_dep_dir(f) == Path("/opt/my-node")
 
 
-def test_default_agent_dep_dir_matches_gc_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_default_agent_dep_dir_matches_gc_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     fake_data = tmp_path / "data" / "gc"
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.gc_paths",
@@ -422,7 +437,10 @@ def test_load_repo_url(tmp_path):
     from recommended_mcp.manifest import load_repo_url
 
     cfg = tmp_path / "config.yml"
-    cfg.write_text("repo_url: https://example.org/repo\nrepo_ref: v1\nmcps: []\n", encoding="utf-8")
+    cfg.write_text(
+        "repo_url: https://example.org/repo\nrepo_ref: v1\nmcps: []\n",
+        encoding="utf-8",
+    )
     assert load_repo_url(cfg) == ("https://example.org/repo", "v1")
     cfg2 = tmp_path / "c2.yml"
     cfg2.write_text("mcps: []\n", encoding="utf-8")
@@ -466,7 +484,9 @@ def test_every_source_entry_declares_dist():
     entries = load_manifest(default_manifest_path(recipe_root()))
     for e in entries:
         if e.install.type == "source":
-            assert e.install.dist, f"{e.name}: source-запись обязана иметь install.dist"
+            assert e.install.dist, (
+                f"{e.name}: source-запись обязана иметь install.dist"
+            )
 
 
 def test_manifest_parses_optional_flag(tmp_path):
@@ -510,10 +530,15 @@ def test_manifest_dist_matches_pyproject_when_source_present():
     for e in load_manifest(default_manifest_path(root)):
         if e.install.type == "source" and e.install.dist and e.install.source:
             name = inst._source_dir_name(e.install.source)
-            if not any((c / "pyproject.toml").is_file() for c in inst._vendor_candidates(name, root)):
+            if not any(
+                (c / "pyproject.toml").is_file()
+                for c in inst._vendor_candidates(name, root)
+            ):
                 continue
             checked += 1
-            no_dist = dataclasses.replace(e, install=dataclasses.replace(e.install, dist=None))
+            no_dist = dataclasses.replace(
+                e, install=dataclasses.replace(e.install, dist=None)
+            )
             assert e.install.dist == inst._dist_name(no_dist, root), (
                 f"{e.name}: install.dist={e.install.dist} != имя из pyproject"
             )

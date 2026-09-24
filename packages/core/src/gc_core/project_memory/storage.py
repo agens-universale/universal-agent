@@ -13,7 +13,9 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from gc_core.config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS
+from gc_core.config_modules.project_memory import (
+    DEFAULT_PROJECT_MEMORY_MAX_CHARS,
+)
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text, read_user_text_or_none
 
@@ -145,7 +147,9 @@ def append(
     primary write succeeds (mkdir parents as needed). Backup failures are silenced.
     """
     if not isinstance(delta, str) or not delta.strip():
-        raise ProjectMemoryError("empty_content", "delta must be non-empty for append.")
+        raise ProjectMemoryError(
+            "empty_content", "delta must be non-empty for append."
+        )
     with _lock:
         # Дописывание — это read-modify-write: непрочитанное «существующее» уходит
         # в файл ПУСТЫМ, то есть стирает память проекта дописанной заметкой. Поэтому
@@ -158,7 +162,11 @@ def append(
             raise ProjectMemoryError("io_error", str(exc)) from exc
         existing_stripped = existing.strip()
         delta_stripped = delta.strip()
-        new_text = f"{existing_stripped}\n\n{delta_stripped}" if existing_stripped else delta_stripped
+        new_text = (
+            f"{existing_stripped}\n\n{delta_stripped}"
+            if existing_stripped
+            else delta_stripped
+        )
         if len(new_text) > max_chars:
             raise ProjectMemoryError(
                 "limit_exceeded",
@@ -195,7 +203,9 @@ def write(
     primary write succeeds (mkdir parents as needed). Backup failures are silenced.
     """
     if not isinstance(content, str) or not content.strip():
-        raise ProjectMemoryError("empty_content", "content must be non-empty for write.")
+        raise ProjectMemoryError(
+            "empty_content", "content must be non-empty for write."
+        )
     new_text = content.strip()
     if len(new_text) > max_chars:
         raise ProjectMemoryError(

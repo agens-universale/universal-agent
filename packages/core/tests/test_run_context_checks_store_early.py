@@ -22,9 +22,13 @@ async def test_bad_store_fails_before_mcp_discovery(monkeypatch, tmp_path):
 
     async def _tools_should_not_run(*args, **kwargs):
         called.append(True)
-        raise AssertionError("дискавери не должна начаться на негодном хранилище")
+        raise AssertionError(
+            "дискавери не должна начаться на негодном хранилище"
+        )
 
-    monkeypatch.setattr(run_context, "abuild_tools_data", _tools_should_not_run)
+    monkeypatch.setattr(
+        run_context, "abuild_tools_data", _tools_should_not_run
+    )
 
     with pytest.raises(Exception):
         await run_context.acreate_run_context(
@@ -32,7 +36,9 @@ async def test_bad_store_fails_before_mcp_discovery(monkeypatch, tmp_path):
             thread_store=_BadStore(),
         )
 
-    assert called == [], "контекст дошёл до дискавери MCP с негодным хранилищем"
+    assert called == [], (
+        "контекст дошёл до дискавери MCP с негодным хранилищем"
+    )
 
 
 def test_check_precedes_the_build_in_source():
@@ -41,14 +47,27 @@ def test_check_precedes_the_build_in_source():
     Поведенческий тест выше поймает регрессию только через подмену; этот
     краснеет на самой перестановке строк.
     """
-    tree = ast.parse(pathlib.Path(run_context.__file__).read_text(encoding="utf-8"))
-    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context")
+    tree = ast.parse(
+        pathlib.Path(run_context.__file__).read_text(encoding="utf-8")
+    )
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef)
+        and n.name == "acreate_run_context"
+    )
 
     check_at = [
-        n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "athread_store"
+        n.lineno
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", None) == "athread_store"
     ]
     build_at = [
-        n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "abuild_tools_data"
+        n.lineno
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", None) == "abuild_tools_data"
     ]
 
     assert check_at, "проверка хранилища исчезла из acreate_run_context"

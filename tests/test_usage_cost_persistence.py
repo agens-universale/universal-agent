@@ -14,7 +14,9 @@ from gc_testkit import run_coro
 
 def test_cost_survives_meta_write_and_read():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
+    acc.add(
+        CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$"
+    )
 
     meta = {"token_usage": acc.to_meta()}
     restored = UsageAccount.from_meta(meta["token_usage"])
@@ -78,7 +80,9 @@ class _Coord:
 def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     """Ручной /compact: фактическая цена и billed_calls доживают до записанной meta."""
     baseline = UsageAccount()
-    baseline.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
+    baseline.add(
+        CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$"
+    )
 
     _store = FileThreadStore(str(tmp_path))
 
@@ -107,7 +111,12 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
-        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x", "backend_api_mode": "chat_completions"},
+        config_dict={
+            "model": "M",
+            "max_steps": 30,
+            "system_prompt_id": "x",
+            "backend_api_mode": "chat_completions",
+        },
         tools_spec=[],
         tools_description=[],
     )

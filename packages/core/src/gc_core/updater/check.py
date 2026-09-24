@@ -23,7 +23,13 @@ def _git_ls_remote(url: str, ref: str) -> Optional[str]:
     try:
         with preserve_console_mode():  # subprocess на Windows сбрасывает режим
             out = subprocess.run(  # консоли — иначе Ctrl+C после проверки
-                ["git", "ls-remote", "--exit-code", url, ref],  # обновлений рвёт приложение
+                [
+                    "git",
+                    "ls-remote",
+                    "--exit-code",
+                    url,
+                    ref,
+                ],  # обновлений рвёт приложение
                 capture_output=True,
                 text=True,
                 timeout=_LS_TIMEOUT,
@@ -44,13 +50,17 @@ def check_for_update(
     ref = source.ref or "HEAD"
     remote = ls_remote(source.url, ref)
     if remote is None:
-        return CheckResult("unknown", None, "не удалось связаться с источником")
+        return CheckResult(
+            "unknown", None, "не удалось связаться с источником"
+        )
     if source.commit and remote == source.commit:
         return CheckResult("current", remote, "установлена последняя версия")
     return CheckResult("update", remote, "доступна новая версия")
 
 
-def record_check_result(now: float, remote_commit, installed_commit=None, path=None) -> None:
+def record_check_result(
+    now: float, remote_commit, installed_commit=None, path=None
+) -> None:
     """Стамп времени (троттл) + последний известный remote-коммит + установленный НА
     МОМЕНТ проверки (для валидности вердикта). remote/installed пишутся, только если
     remote известен — при unknown/ошибке (None) прошлый вердикт сохраняется (транзиентная
@@ -74,7 +84,12 @@ def update_available_from_state(state: dict, installed_commit) -> bool:
     держится до обновления, а не только в день чека."""
     remote = state.get("last_update_remote_commit")
     checked = state.get("last_update_checked_installed")
-    return bool(remote) and bool(installed_commit) and checked == installed_commit and remote != installed_commit
+    return (
+        bool(remote)
+        and bool(installed_commit)
+        and checked == installed_commit
+        and remote != installed_commit
+    )
 
 
 def _update_cfg(config: dict) -> dict:

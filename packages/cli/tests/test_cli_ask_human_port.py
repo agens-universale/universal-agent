@@ -121,7 +121,9 @@ async def test_no_reader_thread_on_posix(pipe_stdin):
     task = asyncio.create_task(port("вопрос?"))
     await asyncio.sleep(0.2)
 
-    assert _reader_threads() == [], "поток-читатель вернулся — вместе с ним вернётся R2.6"
+    assert _reader_threads() == [], (
+        "поток-читатель вернулся — вместе с ним вернётся R2.6"
+    )
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -129,7 +131,9 @@ async def test_no_reader_thread_on_posix(pipe_stdin):
 
 
 @pytest.mark.asyncio
-async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdin):
+async def test_interrupted_question_leaves_the_line_to_the_next_reader(
+    pipe_stdin,
+):
     """Главная регрессия R2.6: набранное не уходит осиротевшему читателю.
 
     Человек прерывает первый вопрос и отвечает на второй. Ответ обязан достаться
@@ -160,7 +164,9 @@ async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdi
     assert caught == [], "Ctrl+C ушёл мимо перехвата вопроса"
 
     pipe_stdin.send("ответ-на-второй\n\n")
-    assert await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ-на-второй"
+    assert (
+        await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ-на-второй"
+    )
 
 
 @pytest.mark.asyncio
@@ -308,7 +314,9 @@ async def test_stdin_without_fileno_falls_back_to_a_daemon_thread(monkeypatch):
 
     threads = _reader_threads()
     assert threads, "запасной путь не поднял читателя"
-    assert all(t.daemon for t in threads), "читатель не daemon — задержит выход"
+    assert all(t.daemon for t in threads), (
+        "читатель не daemon — задержит выход"
+    )
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -329,7 +337,8 @@ def test_cli_installs_the_port():
     installs = [
         n
         for n in ast.walk(tree)
-        if isinstance(n, ast.Assign) and any(getattr(t, "attr", None) == "ask_human" for t in n.targets)
+        if isinstance(n, ast.Assign)
+        and any(getattr(t, "attr", None) == "ask_human" for t in n.targets)
     ]
     assert len(installs) >= 2, (
         "ctx.ask_human ставится не на всех входах CLI — в `--init` вопрос агента "

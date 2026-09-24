@@ -9,7 +9,10 @@ to match.
 
 from __future__ import annotations
 
-from gc_core.tools.connect_mcp.agent_tools import _normalize_schema_recursive, normalize_tool_spec_for_agent
+from gc_core.tools.connect_mcp.agent_tools import (
+    _normalize_schema_recursive,
+    normalize_tool_spec_for_agent,
+)
 
 
 def test_normalize_preserves_anyof_without_forcing_type() -> None:
@@ -28,7 +31,9 @@ def test_normalize_preserves_anyof_without_forcing_type() -> None:
     # After fix: either no `type`, or `type` value compatible with anyOf — but NOT
     # an unrelated default like "string".
     if "type" in normalized:
-        assert normalized["type"] != "string", "type='string' contradicts anyOf=[integer, null] and breaks validation"
+        assert normalized["type"] != "string", (
+            "type='string' contradicts anyOf=[integer, null] and breaks validation"
+        )
 
 
 def test_normalize_preserves_oneof_without_forcing_type() -> None:
@@ -53,7 +58,9 @@ def test_normalize_preserves_allof_without_forcing_type() -> None:
         assert normalized["type"] != "string"
 
 
-def test_normalize_still_defaults_string_when_no_type_and_no_combinator() -> None:
+def test_normalize_still_defaults_string_when_no_type_and_no_combinator() -> (
+    None
+):
     """Plain dicts without type/properties/items/anyOf still fall back to string."""
     raw = {"description": "Some param", "title": "Z"}
     normalized = _normalize_schema_recursive(raw, param_name="z")
@@ -143,7 +150,10 @@ def test_inline_defs_ref_for_openai_strict_workbook() -> None:
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "sheets": {"type": "array", "items": {"type": "object"}},
+                        "sheets": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
                     },
                     "required": ["sheets"],
                 },
@@ -151,7 +161,11 @@ def test_inline_defs_ref_for_openai_strict_workbook() -> None:
             "properties": {
                 "path": {"type": "string", "title": "Path"},
                 "workbook": {"$ref": "#/$defs/WorkbookSpec"},
-                "overwrite": {"type": "boolean", "default": False, "title": "Overwrite"},
+                "overwrite": {
+                    "type": "boolean",
+                    "default": False,
+                    "title": "Overwrite",
+                },
             },
             "required": ["path", "workbook"],
         },
@@ -165,7 +179,9 @@ def test_inline_defs_ref_for_openai_strict_workbook() -> None:
     assert "$defs" not in normalized["parameters"]
 
 
-def test_nested_object_required_includes_all_properties_for_openai_strict() -> None:
+def test_nested_object_required_includes_all_properties_for_openai_strict() -> (
+    None
+):
     """Pydantic optional fields must appear in nested ``required`` under strict mode."""
     cell_style = {
         "type": "object",
@@ -223,9 +239,9 @@ def test_nested_object_required_includes_all_properties_for_openai_strict() -> N
         },
     }
     normalized = normalize_tool_spec_for_agent(tool_spec, openai_strict=True)
-    cell_items = normalized["parameters"]["properties"]["workbook"]["properties"]["sheets"]["items"]["properties"][
-        "cell_styles"
-    ]["items"]
+    cell_items = normalized["parameters"]["properties"]["workbook"][
+        "properties"
+    ]["sheets"]["items"]["properties"]["cell_styles"]["items"]
     assert set(cell_items["required"]) == {"range", "align", "bold"}
     assert cell_items["x-optional-keys"] == ["align", "bold"]
     assert set(normalized["parameters"]["required"]) == {"path", "workbook"}
@@ -343,7 +359,10 @@ def test_anyof_array_object_items_get_additional_properties_false() -> None:
                 "sort": {
                     "anyOf": [
                         {
-                            "items": {"additionalProperties": True, "type": "object"},
+                            "items": {
+                                "additionalProperties": True,
+                                "type": "object",
+                            },
                             "type": "array",
                         },
                         {"type": "null"},
@@ -385,10 +404,18 @@ def test_non_strict_preserves_server_required_default() -> None:
             "required": ["owner", "repo"],
         },
     }
-    ns = normalize_tool_spec_for_agent(tool_spec)  # default: openai_strict=False
+    ns = normalize_tool_spec_for_agent(
+        tool_spec
+    )  # default: openai_strict=False
     assert ns["parameters"]["required"] == ["owner", "repo"]
     assert ns.get("strict") is False
 
     s = normalize_tool_spec_for_agent(tool_spec, openai_strict=True)
-    assert set(s["parameters"]["required"]) == {"owner", "repo", "base", "page", "per_page"}
+    assert set(s["parameters"]["required"]) == {
+        "owner",
+        "repo",
+        "base",
+        "page",
+        "per_page",
+    }
     assert s.get("strict") is True

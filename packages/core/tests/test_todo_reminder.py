@@ -1,4 +1,7 @@
-from gc_core.message_policy.todo_reminder import apply_todo_reminder, build_todo_reminder_text
+from gc_core.message_policy.todo_reminder import (
+    apply_todo_reminder,
+    build_todo_reminder_text,
+)
 from gc_core.states import SharedStateData, State
 
 OPEN_ITEMS = [
@@ -27,7 +30,12 @@ CFG = {"todo_params": {"reminder_steps": 3}}
 
 
 def _tick(state, cfg=CFG, step_messages=None):
-    return apply_todo_reminder([], state, cfg, step_messages=step_messages or [{"role": "assistant", "id": "a1"}])
+    return apply_todo_reminder(
+        [],
+        state,
+        cfg,
+        step_messages=step_messages or [{"role": "assistant", "id": "a1"}],
+    )
 
 
 def test_fires_after_n_steps_with_open_items():
@@ -71,7 +79,9 @@ def test_counter_resets_when_tool_used_in_batch():
         [],
         state,
         CFG,
-        step_messages=[{"type": "function_call", "name": "session_todo", "id": "c1"}],
+        step_messages=[
+            {"type": "function_call", "name": "session_todo", "id": "c1"}
+        ],
     )
     assert out == []
     assert state.todo_reminder_cnt == 0
@@ -87,7 +97,10 @@ def test_zero_steps_disables():
 
 def test_stop_tools_disables():
     state = _state(OPEN_ITEMS)
-    cfg = {"todo_params": {"reminder_steps": 1}, "stop_tools": ["session_todo"]}
+    cfg = {
+        "todo_params": {"reminder_steps": 1},
+        "stop_tools": ["session_todo"],
+    }
     assert _tick(state, cfg=cfg) == []
 
 
@@ -115,11 +128,19 @@ def test_reminder_counter_round_trips_through_meta():
         persist_tool_usage_notice_state,
     )
 
-    state = SimpleNamespace(todo_reminder_cnt=7, tool_usage_notice_cnt={}, project_memory_content_hash=None)
+    state = SimpleNamespace(
+        todo_reminder_cnt=7,
+        tool_usage_notice_cnt={},
+        project_memory_content_hash=None,
+    )
     meta: dict = {}
     persist_tool_usage_notice_state(state, meta)
 
-    restored = SimpleNamespace(todo_reminder_cnt=0, tool_usage_notice_cnt={}, project_memory_content_hash=None)
+    restored = SimpleNamespace(
+        todo_reminder_cnt=0,
+        tool_usage_notice_cnt={},
+        project_memory_content_hash=None,
+    )
     hydrate_tool_usage_notice_state(restored, meta)
     assert restored.todo_reminder_cnt == 7
 
@@ -135,7 +156,11 @@ def test_reminder_counter_survives_meta_merge_to_base():
 
     session_meta: dict = {}
     persist_tool_usage_notice_state(
-        SimpleNamespace(todo_reminder_cnt=4, tool_usage_notice_cnt={}, project_memory_content_hash=None),
+        SimpleNamespace(
+            todo_reminder_cnt=4,
+            tool_usage_notice_cnt={},
+            project_memory_content_hash=None,
+        ),
         session_meta,
     )
     base: dict = {}

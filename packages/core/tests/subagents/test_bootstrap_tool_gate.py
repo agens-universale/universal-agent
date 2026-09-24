@@ -55,16 +55,32 @@ async def _run_with_tools(monkeypatch, tools):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
     monkeypatch.setattr(
-        runner, "_build_child_ctx", as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr"))
+        runner, "_build_child_state", as_coro(lambda role: child)
+    )
+    monkeypatch.setattr(
+        runner,
+        "_build_child_ctx",
+        as_coro(lambda tool_name: SimpleNamespace(logger=None, run_id="cr")),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
-    monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
-    monkeypatch.setattr(runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {})
-    monkeypatch.setattr(runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: BOOT_MARKER)
-    monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
+    monkeypatch.setattr(
+        runner_mod, "init_subagent_open_turn", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "get_thread_memory_registers_from_shared",
+        lambda shared: {},
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "subagent_thread_memory_bootstrap_text",
+        lambda cfg, mf: BOOT_MARKER,
+    )
+    monkeypatch.setattr(
+        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+    )
 
     async def _create(*a, **k):
         return _Inst()
@@ -86,9 +102,13 @@ async def _run_with_tools(monkeypatch, tools):
     ],
     ids=["tool_present", "tool_absent"],
 )
-async def test_bootstrap_follows_tool_availability(monkeypatch, tools, expected):
+async def test_bootstrap_follows_tool_availability(
+    monkeypatch, tools, expected
+):
     child = await _run_with_tools(monkeypatch, tools)
-    sent = any(BOOT_MARKER in str(m.get("content", "")) for m in child.messages)
+    sent = any(
+        BOOT_MARKER in str(m.get("content", "")) for m in child.messages
+    )
     assert sent is expected
 
 
@@ -96,4 +116,6 @@ async def test_unknown_tool_set_keeps_old_behaviour(monkeypatch):
     # Пустой список схем = «не знаем набор» (см. контракт None в tool_availability):
     # молча выключать bootstrap из-за незнания нельзя.
     child = await _run_with_tools(monkeypatch, [])
-    assert any(BOOT_MARKER in str(m.get("content", "")) for m in child.messages)
+    assert any(
+        BOOT_MARKER in str(m.get("content", "")) for m in child.messages
+    )

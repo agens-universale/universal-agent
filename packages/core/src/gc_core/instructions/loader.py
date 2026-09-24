@@ -12,7 +12,9 @@ _PREAMBLE = (
     "more general ones; specificity increases down this list."
 )
 _L0_TITLE = "Launch role instructions"
-AGENTSMD_OVERRIDE_IGNORED_WARNING = "agentsmd_override не применён: задан agent_md_path (путь главнее флага)"
+AGENTSMD_OVERRIDE_IGNORED_WARNING = (
+    "agentsmd_override не применён: задан agent_md_path (путь главнее флага)"
+)
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,12 @@ def _wrap(sections: list[str]) -> str:
 
 
 def _load_l0(
-    agent_md_path: str, *, is_tui: bool, agentsmd_override: bool, logger: Any | None, verbose: bool
+    agent_md_path: str,
+    *,
+    is_tui: bool,
+    agentsmd_override: bool,
+    logger: Any | None,
+    verbose: bool,
 ) -> LoadedInstructions:
     warnings: list[str] = []
     if is_tui and agentsmd_override:
@@ -45,7 +52,10 @@ def _load_l0(
         if logger is not None and verbose:
             logger.warning(
                 "agent_md_read_failed",
-                extra={"event": "agent_md_read_failed", "path": str(agent_md_path)},
+                extra={
+                    "event": "agent_md_read_failed",
+                    "path": str(agent_md_path),
+                },
             )
         return LoadedInstructions(text="", loaded_ids=[], warnings=warnings)
     text = _wrap([f"## {_L0_TITLE}\n{body.rstrip()}"])
@@ -63,7 +73,9 @@ def _load_layers(specs) -> LoadedInstructions:
         sections.append(f"## {spec.title}\n{body.rstrip()}")
     if not sections:
         return LoadedInstructions(text="", loaded_ids=[], warnings=[])
-    return LoadedInstructions(text=_wrap(sections), loaded_ids=loaded, warnings=[])
+    return LoadedInstructions(
+        text=_wrap(sections), loaded_ids=loaded, warnings=[]
+    )
 
 
 def build_instructions(
@@ -78,7 +90,11 @@ def build_instructions(
     # 1. agent_md_path задан → ТОЛЬКО L0 (замена), в любом режиме. Путь > флаг.
     if agent_md_path:
         return _load_l0(
-            agent_md_path, is_tui=is_tui, agentsmd_override=agentsmd_override, logger=logger, verbose=verbose
+            agent_md_path,
+            is_tui=is_tui,
+            agentsmd_override=agentsmd_override,
+            logger=logger,
+            verbose=verbose,
         )
 
     # 2. TUI без L0 → собрать L1–L3 (или только L3 при override).

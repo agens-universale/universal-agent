@@ -52,7 +52,9 @@ async def test_header_shows_language_and_copy_glyph():
     app = _Host(_code_panel())
     async with app.run_test(size=(60, 20)):
         assert app.query_one(".block-label", Static).visual.plain == "python"
-        assert app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        assert (
+            app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        )
 
 
 @pytest.mark.asyncio
@@ -112,7 +114,9 @@ async def test_copy_button_shows_done_glyph_then_restores():
         assert app.query_one(".block-copy", Static).visual.plain == DONE_GLYPH
         app.query_one(BlockPanel)._restore_copy_glyph()
         await pilot.pause()
-        assert app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        assert (
+            app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        )
 
 
 @pytest.mark.asyncio
@@ -151,7 +155,9 @@ async def test_label_hidden_when_language_unknown():
     app = _Host(BlockPanel.for_code("capacity: 1024", None, event_no=1))
     async with app.run_test(size=(60, 20)):
         assert app.query_one(".block-label", Static).visual.plain == ""
-        assert app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        assert (
+            app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        )
 
 
 @pytest.mark.asyncio
@@ -161,7 +167,9 @@ async def test_label_hidden_when_panel_too_narrow():
     app = _Host(_code_panel())
     async with app.run_test(size=(8, 20)):
         assert app.query_one(".block-label", Static).visual.plain == ""
-        assert app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        assert (
+            app.query_one(".block-copy", Static).visual.plain == copy_glyph()
+        )
 
 
 @pytest.mark.asyncio
@@ -187,15 +195,23 @@ async def test_drag_through_block_excludes_header():
     app = _Host(_code_panel())
     async with app.run_test(size=(60, 20)) as pilot:
         statics = list(app.query(Static))
-        top_prose = next(w for w in statics if w.visual.plain == "проза сверху")
-        bottom_prose = next(w for w in statics if w.visual.plain == "проза снизу")
+        top_prose = next(
+            w for w in statics if w.visual.plain == "проза сверху"
+        )
+        bottom_prose = next(
+            w for w in statics if w.visual.plain == "проза снизу"
+        )
 
         await pilot.mouse_down(top_prose, offset=(0, 0))
         await pilot.hover(".block-header", offset=(2, 0))
         await pilot.hover(".block-body", offset=(2, 0))
         await pilot.hover(bottom_prose, offset=(0, 0))
         await pilot.mouse_up(bottom_prose, offset=(0, 0))
-        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None, "drag selection landed")
+        await wait_until(
+            pilot,
+            lambda: app.screen.get_selected_text() is not None,
+            "drag selection landed",
+        )
 
         selected = app.screen.get_selected_text()
         assert "return x + 1" in selected  # фрагмент кода из тела — есть
@@ -256,7 +272,9 @@ async def test_double_click_focuses_panel_when_focusable():
     Здесь фокус может дать только явный self.focus() внутри обработчика."""
     from textual import events
 
-    app = _Host(BlockPanel.for_code(CODE, "python", event_no=7, focusable=True))
+    app = _Host(
+        BlockPanel.for_code(CODE, "python", event_no=7, focusable=True)
+    )
     async with app.run_test(size=(60, 20)) as pilot:
         panel = app.query_one(BlockPanel)
         # Textual сам фокусирует единственный focusable-виджет при старте —
@@ -296,7 +314,11 @@ async def test_partial_drag_inside_code_body_yields_fragment():
         await pilot.mouse_down(body, offset=(4, 1))
         await pilot.hover(body, offset=(10, 1))
         await pilot.mouse_up(body, offset=(10, 1))
-        await wait_until(pilot, lambda: app.screen.get_selected_text() is not None, "partial drag selection landed")
+        await wait_until(
+            pilot,
+            lambda: app.screen.get_selected_text() is not None,
+            "partial drag selection landed",
+        )
         selected = app.screen.get_selected_text()
         assert selected == "return "
         assert selected != CODE
@@ -318,7 +340,9 @@ async def test_partial_drag_on_clipped_line_yields_visible_part_only():
         await pilot.hover(body, offset=(body.size.width - 1, 0))
         await pilot.mouse_up(body, offset=(body.size.width - 1, 0))
         await wait_until(
-            pilot, lambda: app.screen.get_selected_text() is not None, "clipped-line drag selection landed"
+            pilot,
+            lambda: app.screen.get_selected_text() is not None,
+            "clipped-line drag selection landed",
         )
         partial = app.screen.get_selected_text()
         assert partial != long_line
@@ -336,7 +360,9 @@ async def test_partial_drag_on_clipped_line_yields_visible_part_only():
 
 
 @pytest.mark.asyncio
-async def test_focused_panel_background_is_focus_bg_not_band_bg(tui_app_factory):
+async def test_focused_panel_background_is_focus_bg_not_band_bg(
+    tui_app_factory,
+):
     """Т-C (спека §6.11): фон сфокусированной панели — $focus-bg, не $band-bg
     (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не заметит)."""
     from gc_tui import palette

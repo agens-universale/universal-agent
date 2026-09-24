@@ -20,7 +20,11 @@ from gc_testkit.harbor_fakes import bind_os_backend
 
 class _Res:
     def __init__(self, stdout="", stderr="", return_code=0):
-        self.stdout, self.stderr, self.return_code = stdout, stderr, return_code
+        self.stdout, self.stderr, self.return_code = (
+            stdout,
+            stderr,
+            return_code,
+        )
 
 
 class _Env:
@@ -78,10 +82,12 @@ async def test_the_command_is_detached_inside_the_container(loop_in_thread):
 
     command, kw = env.calls[0]
     user = shlex.quote("npm run dev")
-    assert f"setsid nohup bash -c {user} </dev/null >/dev/null 2>&1 &" in command, command
-    assert f"else nohup bash -c {user} </dev/null >/dev/null 2>&1 &" in command, (
-        f"нет запасного пути без setsid: {command}"
-    )
+    assert (
+        f"setsid nohup bash -c {user} </dev/null >/dev/null 2>&1 &" in command
+    ), command
+    assert (
+        f"else nohup bash -c {user} </dev/null >/dev/null 2>&1 &" in command
+    ), f"нет запасного пути без setsid: {command}"
     assert command.rstrip().endswith("echo $!"), command
     assert kw.get("timeout_sec") == 30, kw
 
@@ -91,18 +97,24 @@ async def test_the_launch_goes_through_the_model_channel(loop_in_thread):
     env = _Env()
     backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
 
-    await backend.aspawn_background("npm run dev", cwd="/app", env={"PORT": "3000"})
+    await backend.aspawn_background(
+        "npm run dev", cwd="/app", env={"PORT": "3000"}
+    )
 
     command, _ = env.calls[0]
     assert command.startswith("cd /app && env PORT=3000 bash -c "), command
-    assert "/etc/profile" in command, f"инициализация окружения потеряна: {command}"
+    assert "/etc/profile" in command, (
+        f"инициализация окружения потеряна: {command}"
+    )
 
 
 async def test_the_pid_is_the_last_line_after_profile_noise(loop_in_thread):
     """Профиль оболочки печатает в stdout раньше нас: pid — последняя строка."""
     env = _Env(stdout="conda activated\nwelcome\n31337\n")
 
-    started = await HarborBackend(env, loop_in_thread).aspawn_background("serve")
+    started = await HarborBackend(env, loop_in_thread).aspawn_background(
+        "serve"
+    )
 
     assert started["pid"] == 31337, started
 

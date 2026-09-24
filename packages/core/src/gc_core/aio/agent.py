@@ -36,7 +36,9 @@ class AsyncAgent:
     ходами дешевле, чем собирать заново.
     """
 
-    def __init__(self, executor: AgentExecutor, subscribers: set[asyncio.Queue]) -> None:
+    def __init__(
+        self, executor: AgentExecutor, subscribers: set[asyncio.Queue]
+    ) -> None:
         self._executor = executor
         # Живые подписчики stream(). Пустой набор — дельты никуда не копятся.
         self._subscribers = subscribers
@@ -178,12 +180,18 @@ class AsyncAgent:
                 texts, fields = undelivered_as_arun_args(tail)
                 # Тот же тред, но не с чистого листа: `start_new_thread`
                 # первого хода стёр бы то, что этот ход должен продолжить.
-                result = await self._executor.arun(texts, **{**kwargs, **fields, "start_new_thread": False})
+                result = await self._executor.arun(
+                    texts, **{**kwargs, **fields, "start_new_thread": False}
+                )
         except asyncio.CancelledError:
-            self._drop_tail([*in_flight, *_take_tail(self._executor)], "cancelled", kwargs)
+            self._drop_tail(
+                [*in_flight, *_take_tail(self._executor)], "cancelled", kwargs
+            )
             raise
         except BaseException:
-            self._drop_tail([*in_flight, *_take_tail(self._executor)], "failed", kwargs)
+            self._drop_tail(
+                [*in_flight, *_take_tail(self._executor)], "failed", kwargs
+            )
             raise
 
     def _turn_was_stopped(self) -> bool:
@@ -213,7 +221,9 @@ class AsyncAgent:
             },
         )
 
-    async def stream(self, prompt: str | list[str], **kwargs: Any) -> AsyncIterator[tuple]:
+    async def stream(
+        self, prompt: str | list[str], **kwargs: Any
+    ) -> AsyncIterator[tuple]:
         """Ход агента с живыми дельтами: ``(kind, text)``.
 
         ``kind``: ``"answer"`` — текст ответа, ``"think"`` — рассуждение,
@@ -322,7 +332,9 @@ class AsyncAgent:
         # конца процесса вместе с открытым файловым хендлером. Ветка объявляет
         # сценарий «много AsyncAgent в одном процессе» — там это линейный рост
         # дескрипторов. Хендлеры, переданные вызывающим, не трогаем.
-        release_run_logger(getattr(getattr(self._executor, "_ctx", None), "logger", None))
+        release_run_logger(
+            getattr(getattr(self._executor, "_ctx", None), "logger", None)
+        )
 
     async def _aclose_owned_mcp_sessions(self) -> None:
         """Закрыть MCP-сессии, поднятые при ``create``.

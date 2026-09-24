@@ -13,8 +13,15 @@ import pytest
 
 
 def _write_task(tmp_path, tid):
-    meta = {"thread_id": tid, "status": "running", "updated_at": "2026-06-15T12:00:00+00:00", "messages_count": 0}
-    (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(json.dumps(meta), encoding="utf-8")
+    meta = {
+        "thread_id": tid,
+        "status": "running",
+        "updated_at": "2026-06-15T12:00:00+00:00",
+        "messages_count": 0,
+    }
+    (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
     (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
@@ -22,7 +29,9 @@ def _app(tmp_path):
     from gc_tui.app import TuiApp
 
     return TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M", "backend_api_mode": "chat_completions"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
     )
 
 
@@ -40,12 +49,23 @@ async def test_short_content_chrome_follows_content(tmp_path):
     async with _app(tmp_path).run_test(size=(80, 40)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._render_record({"payload": {"id": "a1", "role": "assistant", "content": "короткий ответ"}}, live=True)
+        scr._render_record(
+            {
+                "payload": {
+                    "id": "a1",
+                    "role": "assistant",
+                    "content": "короткий ответ",
+                }
+            },
+            live=True,
+        )
         await pilot.pause(0.4)
         trace = pilot.app.query_one("#trace", VerticalScroll)
         footer = pilot.app.query_one("#footer")
         assert trace.max_scroll_y == 0  # контент влез — нет скролла
-        assert footer.region.bottom < pilot.app.size.height  # хром следует за контентом → пустота снизу
+        assert (
+            footer.region.bottom < pilot.app.size.height
+        )  # хром следует за контентом → пустота снизу
 
 
 @pytest.mark.asyncio
@@ -61,7 +81,10 @@ async def test_tall_content_caps_chrome_at_bottom(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         big = "\n".join(f"строка {i}" for i in range(60))
-        scr._render_record({"payload": {"id": "a1", "role": "assistant", "content": big}}, live=True)
+        scr._render_record(
+            {"payload": {"id": "a1", "role": "assistant", "content": big}},
+            live=True,
+        )
         await pilot.pause(0.4)
         trace = pilot.app.query_one("#trace", VerticalScroll)
         footer = pilot.app.query_one("#footer")
@@ -76,15 +99,32 @@ async def test_chrome_follows_as_content_grows(tmp_path):
     pytest.importorskip("textual")
     tid = "fc3"
     _write_task(tmp_path, tid)
-    async with _app(tmp_path).run_test(size=(80, 40)) as pilot:  # выше — короткий контент влезает под бренд-карточку
+    async with _app(tmp_path).run_test(
+        size=(80, 40)
+    ) as pilot:  # выше — короткий контент влезает под бренд-карточку
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._render_record({"payload": {"id": "a1", "role": "assistant", "content": "первая строка"}}, live=True)
+        scr._render_record(
+            {
+                "payload": {
+                    "id": "a1",
+                    "role": "assistant",
+                    "content": "первая строка",
+                }
+            },
+            live=True,
+        )
         await pilot.pause(0.4)
         footer = pilot.app.query_one("#footer")
         b1 = footer.region.bottom
         scr._render_record(
-            {"payload": {"id": "a2", "role": "assistant", "content": "\n".join(f"ещё {i}" for i in range(4))}},
+            {
+                "payload": {
+                    "id": "a2",
+                    "role": "assistant",
+                    "content": "\n".join(f"ещё {i}" for i in range(4)),
+                }
+            },
             live=True,
         )
         await pilot.pause(0.4)
@@ -121,10 +161,20 @@ async def test_ask_human_banner_keeps_footer_onscreen(tmp_path):
     async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        big = "\n".join(f"строка {i}" for i in range(60))  # #trace упрётся в потолок
-        scr._render_record({"payload": {"id": "a1", "role": "assistant", "content": big}}, live=True)
+        big = "\n".join(
+            f"строка {i}" for i in range(60)
+        )  # #trace упрётся в потолок
+        scr._render_record(
+            {"payload": {"id": "a1", "role": "assistant", "content": big}},
+            live=True,
+        )
         await pilot.pause(0.4)
-        ev = SimpleNamespace(call_id="c1", summary="В какую часть углубиться?", no=99, kind="ask_human")
+        ev = SimpleNamespace(
+            call_id="c1",
+            summary="В какую часть углубиться?",
+            no=99,
+            kind="ask_human",
+        )
         scr._on_ask_human_event(ev, live=False)  # баннер в #root перед input
         await pilot.pause(0.4)
         footer = pilot.app.query_one("#footer")
@@ -144,8 +194,12 @@ async def test_tall_ask_human_question_keeps_input_onscreen(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         await pilot.pause(0.2)
-        tall_q = "\n".join(f"пункт {i}: очень подробный вопрос агента" for i in range(40))
-        ev = SimpleNamespace(call_id="c-tall", summary=tall_q, no=1, kind="ask_human")
+        tall_q = "\n".join(
+            f"пункт {i}: очень подробный вопрос агента" for i in range(40)
+        )
+        ev = SimpleNamespace(
+            call_id="c-tall", summary=tall_q, no=1, kind="ask_human"
+        )
         scr._on_ask_human_event(ev, live=False)
         await pilot.pause(0.5)
         banner = scr._ask_human_banner

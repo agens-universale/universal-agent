@@ -8,7 +8,9 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def test_replace_first_occurrence_only(tmp_path):
     p = tmp_path / "f.txt"
     p.write_text("a b a", encoding="utf-8")
-    res = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="a", replace="X"))
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(path=str(p), search="a", replace="X")
+    )
     assert res["ok"] is True and res["replaced"] == 1
     assert res["applied"] is True
     assert res["match_count"] == 2
@@ -20,12 +22,24 @@ def test_replace_first_occurrence_only(tmp_path):
 def test_replace_multiline_and_not_found(tmp_path):
     p = tmp_path / "m.txt"
     p.write_text("line1\nline2\nline3\n", encoding="utf-8")
-    ok = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="line1\nline2", replace="top"))
+    ok = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="line1\nline2", replace="top"
+        )
+    )
     assert ok["ok"] is True
     assert ok["match_count"] == 1
     assert p.read_text(encoding="utf-8") == "top\nline3\n"
-    miss = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="zzzzzzzzzz", replace="x"))
-    assert miss["ok"] is False and miss["matched"] is False and miss["error"] is None
+    miss = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="zzzzzzzzzz", replace="x"
+        )
+    )
+    assert (
+        miss["ok"] is False
+        and miss["matched"] is False
+        and miss["error"] is None
+    )
     assert miss["match_count"] == 0
     assert miss["suggestions"] == []
 
@@ -36,19 +50,29 @@ def test_replace_validation(tmp_path):
     target.write_text("abc", encoding="utf-8")
     empty = json.loads(tool(path=str(target), search="", replace="x"))
     assert empty["ok"] is False and empty["error"]["field"] == "search"
-    nf = json.loads(tool(path=str(tmp_path / "none.txt"), search="a", replace="b"))
+    nf = json.loads(
+        tool(path=str(tmp_path / "none.txt"), search="a", replace="b")
+    )
     assert nf["ok"] is False and nf["error"]["type"] == "not_found"
 
 
 def test_occurrence_last_and_index(tmp_path):
     p = tmp_path / "o.txt"
     p.write_text("x y x y x", encoding="utf-8")
-    last = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="x", replace="Z", occurrence="last"))
+    last = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="x", replace="Z", occurrence="last"
+        )
+    )
     assert last["ok"] is True and last["line_numbers"] == [1]
     assert p.read_text(encoding="utf-8") == "x y x y Z"
 
     p.write_text("x y x y x", encoding="utf-8")
-    second = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="x", replace="Q", occurrence=2))
+    second = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="x", replace="Q", occurrence=2
+        )
+    )
     assert second["ok"] is True and second["match_count"] == 3
     assert p.read_text(encoding="utf-8") == "x y Q y x"
 
@@ -56,7 +80,11 @@ def test_occurrence_last_and_index(tmp_path):
 def test_occurrence_all_requires_expected_matches(tmp_path):
     p = tmp_path / "all_guard.txt"
     p.write_text("a b a b a", encoding="utf-8")
-    guarded = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="a", replace="z", occurrence="all"))
+    guarded = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="a", replace="z", occurrence="all"
+        )
+    )
     assert guarded["ok"] is False
     assert guarded["error"]["type"] == "invalid_argument"
 
@@ -191,22 +219,42 @@ def test_backup_created(tmp_path):
 
 def test_not_found_suggestions_by_difflib_similarity(tmp_path):
     p = tmp_path / "s.txt"
-    p.write_text("KEY: value\nretry    count\nalpha beta gamma\nunrelated\n", encoding="utf-8")
+    p.write_text(
+        "KEY: value\nretry    count\nalpha beta gamma\nunrelated\n",
+        encoding="utf-8",
+    )
 
-    by_case = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="key: value", replace="x"))
+    by_case = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="key: value", replace="x"
+        )
+    )
     assert by_case["ok"] is False and by_case["matched"] is False
     assert len(by_case["suggestions"]) >= 1
     assert by_case["suggestions"][0]["line"] == 1
-    assert by_case["suggestions"][0]["reason"] == "single-line difflib similarity"
+    assert (
+        by_case["suggestions"][0]["reason"] == "single-line difflib similarity"
+    )
     assert isinstance(by_case["suggestions"][0]["score"], float)
 
-    by_spaces = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="retry count", replace="x"))
+    by_spaces = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="retry count", replace="x"
+        )
+    )
     assert by_spaces["ok"] is False and by_spaces["matched"] is False
     assert len(by_spaces["suggestions"]) >= 1
     assert by_spaces["suggestions"][0]["line"] == 2
-    assert by_spaces["suggestions"][0]["reason"] == "single-line difflib similarity"
+    assert (
+        by_spaces["suggestions"][0]["reason"]
+        == "single-line difflib similarity"
+    )
 
-    by_casefold = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="ALPHA BETA", replace="x"))
+    by_casefold = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="ALPHA BETA", replace="x"
+        )
+    )
     assert by_casefold["ok"] is False and by_casefold["matched"] is False
     assert len(by_casefold["suggestions"]) >= 1
     assert by_casefold["suggestions"][0]["line"] == 3
@@ -215,7 +263,11 @@ def test_not_found_suggestions_by_difflib_similarity(tmp_path):
 def test_not_found_suggestions_for_multiline_search(tmp_path):
     p = tmp_path / "ml.txt"
     p.write_text("foo bar\nbaz qux\nzap zot\n", encoding="utf-8")
-    miss = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="foo baar\nbaz qxx", replace="x"))
+    miss = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="foo baar\nbaz qxx", replace="x"
+        )
+    )
     assert miss["ok"] is False and miss["matched"] is False
     assert len(miss["suggestions"]) >= 1
     assert miss["suggestions"][0]["line"] == 1
@@ -228,7 +280,11 @@ def test_not_found_suggestions_for_multiline_search(tmp_path):
 def test_not_found_suggestions_for_single_token_search(tmp_path):
     p = tmp_path / "st.txt"
     p.write_text("alpha beta gamma\n", encoding="utf-8")
-    miss = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="ALPHA", replace="x"))
+    miss = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="ALPHA", replace="x"
+        )
+    )
     assert miss["ok"] is False and miss["matched"] is False
     assert len(miss["suggestions"]) >= 1
     assert miss["suggestions"][0]["line"] == 1
@@ -239,7 +295,11 @@ def test_not_found_suggestions_limit_to_three(tmp_path):
     p = tmp_path / "lim.txt"
     lines = [f"alpha beta line {i}" for i in range(20)]
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    miss = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="Alpha   beta", replace="x"))
+    miss = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="Alpha   beta", replace="x"
+        )
+    )
     assert miss["ok"] is False and miss["matched"] is False
     assert len(miss["suggestions"]) == 3
     assert miss["suggestions_total"] == 20
@@ -250,7 +310,11 @@ def test_not_found_suggestions_limit_to_three(tmp_path):
 def test_not_found_suggestions_typo_in_token(tmp_path):
     p = tmp_path / "typo.txt"
     p.write_text("alpha beta gamma\nother stuff\n", encoding="utf-8")
-    miss = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="alpha betta gamma", replace="x"))
+    miss = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="alpha betta gamma", replace="x"
+        )
+    )
     assert miss["ok"] is False and miss["matched"] is False
     assert len(miss["suggestions"]) >= 1
     assert miss["suggestions"][0]["line"] == 1
@@ -297,7 +361,11 @@ def test_not_found_suggestions_mid_score_multiline_kept(tmp_path):
 def test_not_found_unrelated_search_has_no_suggestions(tmp_path):
     p = tmp_path / "u.txt"
     p.write_text("short\n", encoding="utf-8")
-    miss = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="zzzzzzzzzzzzzzzz", replace="x"))
+    miss = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="zzzzzzzzzzzzzzzz", replace="x"
+        )
+    )
     assert miss["ok"] is False and miss["matched"] is False
     assert miss["suggestions"] == []
     assert miss["suggestions_total"] == 0
@@ -360,7 +428,11 @@ def test_search_and_replace_rejects_nul_binary(tmp_path):
     p = tmp_path / "blob.bin"
     original = b"aaa\x00bbb"
     p.write_bytes(original)
-    res = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="aaa", replace="XXX"))
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="aaa", replace="XXX"
+        )
+    )
     assert res["ok"] is False and res["applied"] is False
     assert res["error"]["type"] == "is_binary"
     assert p.read_bytes() == original
@@ -369,7 +441,11 @@ def test_search_and_replace_rejects_nul_binary(tmp_path):
 def test_search_and_replace_utf16_le_round_trip(tmp_path):
     p = tmp_path / "utf16.txt"
     p.write_bytes(b"\xff\xfeH\x00i\x00\n\x00")
-    res = json.loads(with_local_ctx(SearchAndReplace)(path=str(p), search="Hi", replace="Yo"))
+    res = json.loads(
+        with_local_ctx(SearchAndReplace)(
+            path=str(p), search="Hi", replace="Yo"
+        )
+    )
     assert res["ok"] is True and res["applied"] is True
     assert res["encoding_used"] == "utf-16-le"
     assert p.read_bytes() == b"\xff\xfeY\x00o\x00\n\x00"

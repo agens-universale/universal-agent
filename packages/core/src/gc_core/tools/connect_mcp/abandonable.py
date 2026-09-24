@@ -39,8 +39,8 @@ logger = logging.getLogger(__name__)
 
 #: Как потоку спросить, не бросили ли вызов, ради которого он работает. Вне
 #: `run_abandonable_in` — «нет».
-_ABANDONED: contextvars.ContextVar[Callable[[], bool]] = contextvars.ContextVar(
-    "gc_call_abandoned", default=lambda: False
+_ABANDONED: contextvars.ContextVar[Callable[[], bool]] = (
+    contextvars.ContextVar("gc_call_abandoned", default=lambda: False)
 )
 
 
@@ -145,7 +145,9 @@ async def run_abandonable_in(
     return await future
 
 
-async def run_abandonable(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+async def run_abandonable(
+    fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+) -> Any:
     """Выполнить ``fn`` в потоке-демоне на пуле MCP и дождаться результата.
 
     Если вызывающего отменили (истёк ``asyncio.timeout``), поток продолжит

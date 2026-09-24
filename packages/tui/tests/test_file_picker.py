@@ -94,8 +94,12 @@ async def test_entries_set_after_compose_before_mount_are_shown():
     async with app.run_test() as pilot:
         picker = _LateData([], searching=True)
         await pilot.app.mount(picker)
-        await pilot.pause()  # отложенный _rebuild (call_after_refresh из on_mount)
-        await pilot.pause()  # его remove_children/mount_all — асинхронные, ещё один цикл
+        await (
+            pilot.pause()
+        )  # отложенный _rebuild (call_after_refresh из on_mount)
+        await (
+            pilot.pause()
+        )  # его remove_children/mount_all — асинхронные, ещё один цикл
         assert len(picker.query(".palette-row")) == 3
         assert picker._stale is False
         assert picker.styles.min_height.value == picker.desired_height
@@ -133,7 +137,9 @@ async def test_arrows_move_highlight_without_recreating_rows():
         assert [w.has_class("selected") for w in after] == [False, True, False]
         picker.move_selection(-2)  # заворот через начало
         await pilot.pause()
-        assert [w.has_class("selected") for w in picker.query(".palette-row")] == [False, False, True]
+        assert [
+            w.has_class("selected") for w in picker.query(".palette-row")
+        ] == [False, False, True]
         assert picker.selected_entry() == "c.py"
 
 
@@ -153,6 +159,10 @@ async def test_arrow_right_after_set_entries_highlights_new_rows():
         picker.move_selection(1)
         await pilot.pause()
         rows = list(picker.query(".palette-row"))
-        assert [str(w.render()).strip() for w in rows] == ["x.py", "y.py", "z.py"]
+        assert [str(w.render()).strip() for w in rows] == [
+            "x.py",
+            "y.py",
+            "z.py",
+        ]
         assert [w.has_class("selected") for w in rows] == [False, True, False]
         assert picker.selected_entry() == "y.py"

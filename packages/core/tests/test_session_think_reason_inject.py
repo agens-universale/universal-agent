@@ -10,11 +10,19 @@ from gc_core.tools import aapply_tool, abuild_tools_data
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
     yield
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
 
@@ -27,7 +35,9 @@ def _inject_config(**overrides):
         "skills_data_path": "",
         "mcp_servers": {},
         "stop_tools": [],
-        "inject_tool_fields": {"reason": "Brief rationale (1–2 sentences): goal, why now, expected outcome."},
+        "inject_tool_fields": {
+            "reason": "Brief rationale (1–2 sentences): goal, why now, expected outcome."
+        },
     }
     cfg.update(overrides)
     return cfg
@@ -43,7 +53,9 @@ async def test_apply_tool_session_think_reason_only_ok_with_inject():
     )
     raw = await aapply_tool(
         tool_name="session_think",
-        arguments=json.dumps({"reason": "Need to weigh trade-offs before editing the parser."}),
+        arguments=json.dumps(
+            {"reason": "Need to weigh trade-offs before editing the parser."}
+        ),
         ctx=ctx,
     )
     data = json.loads(raw)

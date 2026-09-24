@@ -26,39 +26,68 @@ def _wheel_layout(tmp_path: Path, name: str) -> Path:
     recipes.mkdir(exist_ok=True)
     src = recipes / "external" / "vendor" / name
     src.mkdir(parents=True)
-    (src / "pyproject.toml").write_text(f'[project]\nname = "{name}"\nversion = "1.0"\n', encoding="utf-8")
+    (src / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "1.0"\n', encoding="utf-8"
+    )
     return recipes
 
 
 def test_dist_name_pypi():
-    e = MCPEntry(name="ddg", path=Path("."), install=InstallSpec(type="pypi", package="ddgs-mcp==0.2.0"))
+    e = MCPEntry(
+        name="ddg",
+        path=Path("."),
+        install=InstallSpec(type="pypi", package="ddgs-mcp==0.2.0"),
+    )
     assert inst._dist_name(e) == "ddgs-mcp"
 
 
 def test_dist_name_source_reads_pyproject(tmp_path):
     root = _wheel_layout(tmp_path, "office-mcp")
-    e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source", source=Path("office-mcp")))
+    e = MCPEntry(
+        name="office",
+        path=Path("."),
+        install=InstallSpec(type="source", source=Path("office-mcp")),
+    )
     assert inst._dist_name(e, root=root) == "office-mcp"
 
 
 def test_uninstall_entry_pypi_calls_pip(monkeypatch):
     calls = []
-    monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
     monkeypatch.setattr(inst, "pip_argv", lambda *a: ["PY", "-m", "pip", *a])
-    e = MCPEntry(name="ddg", path=Path("."), install=InstallSpec(type="pypi", package="ddgs-mcp==0.2.0"))
+    e = MCPEntry(
+        name="ddg",
+        path=Path("."),
+        install=InstallSpec(type="pypi", package="ddgs-mcp==0.2.0"),
+    )
     inst.uninstall_entry(e, Path("."))
     assert calls and "uninstall" in calls[0] and "ddgs-mcp" in calls[0]
 
 
 def test_uninstall_entry_npx_calls_npm(monkeypatch):
     calls = []
-    monkeypatch.setattr(inst.subprocess, "run", lambda argv, **kw: calls.append(argv))
-    monkeypatch.setattr(inst, "_node_install_paths", lambda dep: {"npm": "NPM"})
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
+    monkeypatch.setattr(
+        inst, "_node_install_paths", lambda dep: {"npm": "NPM"}
+    )
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.gc_paths",
-        lambda: {"data": Path("."), "config": Path("."), "cache": Path("."), "state": Path(".")},
+        lambda: {
+            "data": Path("."),
+            "config": Path("."),
+            "cache": Path("."),
+            "state": Path("."),
+        },
     )
-    e = MCPEntry(name="pw", path=Path("."), install=InstallSpec(type="npx", npm_package="@playwright/mcp"))
+    e = MCPEntry(
+        name="pw",
+        path=Path("."),
+        install=InstallSpec(type="npx", npm_package="@playwright/mcp"),
+    )
     inst.uninstall_entry(e, Path("."))
     assert calls and "uninstall" in calls[0] and "@playwright/mcp" in calls[0]
 
@@ -67,7 +96,9 @@ def test_dist_name_wheel(tmp_path):
     dist = tmp_path / "rec" / "dist"
     dist.mkdir(parents=True)
     (dist / "office-mcp-1.0-py3-none-any.whl").write_text("", encoding="utf-8")
-    e = MCPEntry(name="office", path=Path("rec"), install=InstallSpec(type="wheel"))
+    e = MCPEntry(
+        name="office", path=Path("rec"), install=InstallSpec(type="wheel")
+    )
     assert inst._dist_name(e, root=tmp_path) == "office-mcp"
 
 
@@ -76,14 +107,22 @@ def test_dist_name_prefers_explicit_dist(tmp_path):
     e = MCPEntry(
         name="office",
         path=Path("."),
-        install=InstallSpec(type="source", source=Path("../external/office-mcp"), dist="office-mcp"),
+        install=InstallSpec(
+            type="source",
+            source=Path("../external/office-mcp"),
+            dist="office-mcp",
+        ),
     )
     assert inst._dist_name(e, root=tmp_path) == "office-mcp"
 
 
 def test_dist_name_fallback_pyproject_when_no_dist(tmp_path):
     root = _wheel_layout(tmp_path, "science-mcp")
-    e = MCPEntry(name="science", path=Path("."), install=InstallSpec(type="source", source=Path("science-mcp")))
+    e = MCPEntry(
+        name="science",
+        path=Path("."),
+        install=InstallSpec(type="source", source=Path("science-mcp")),
+    )
     assert inst._dist_name(e, root=root) == "science-mcp"
 
 
@@ -94,14 +133,22 @@ def test_dist_name_source_finds_pyproject_in_repo_layout(tmp_path):
     packages/core/pyproject.toml с name = "gc-core".
     """
     (tmp_path / "packages" / "core").mkdir(parents=True)
-    (tmp_path / "packages" / "core" / "pyproject.toml").write_text('[project]\nname = "gc-core"\n', encoding="utf-8")
+    (tmp_path / "packages" / "core" / "pyproject.toml").write_text(
+        '[project]\nname = "gc-core"\n', encoding="utf-8"
+    )
     src = tmp_path / "packages" / "mcp" / "external" / "vendor" / "office-mcp"
     src.mkdir(parents=True)
-    (src / "pyproject.toml").write_text('[project]\nname = "office-mcp"\n', encoding="utf-8")
+    (src / "pyproject.toml").write_text(
+        '[project]\nname = "office-mcp"\n', encoding="utf-8"
+    )
     root = tmp_path / "packages" / "mcp" / "src" / "recommended_mcp"
     root.mkdir(parents=True)
 
-    e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source", source=Path("office-mcp")))
+    e = MCPEntry(
+        name="office",
+        path=Path("."),
+        install=InstallSpec(type="source", source=Path("office-mcp")),
+    )
     assert inst._dist_name(e, root=root) == "office-mcp"
 
 
@@ -110,7 +157,11 @@ def test_dist_name_source_legacy_format(tmp_path, monkeypatch):
     monkeypatch.setattr(inst, "_LEGACY_SOURCE_WARNED", set())
     root = _wheel_layout(tmp_path, "office-mcp")
     e = MCPEntry(
-        name="office", path=Path("."), install=InstallSpec(type="source", source=Path("../external/office-mcp"))
+        name="office",
+        path=Path("."),
+        install=InstallSpec(
+            type="source", source=Path("../external/office-mcp")
+        ),
     )
     assert inst._dist_name(e, root=root) == "office-mcp"
 
@@ -123,17 +174,27 @@ def test_dist_name_skips_broken_pyproject_and_keeps_looking(tmp_path):
     рабочей копии.
     """
     (tmp_path / "packages" / "core").mkdir(parents=True)
-    (tmp_path / "packages" / "core" / "pyproject.toml").write_text('[project]\nname = "gc-core"\n', encoding="utf-8")
+    (tmp_path / "packages" / "core" / "pyproject.toml").write_text(
+        '[project]\nname = "gc-core"\n', encoding="utf-8"
+    )
     root = tmp_path / "packages" / "mcp" / "src" / "recommended_mcp"
     root.mkdir(parents=True)
     # Первый кандидат (раскладка колеса, root/external/vendor) — битый.
     broken = root / "external" / "vendor" / "office-mcp"
     broken.mkdir(parents=True)
-    (broken / "pyproject.toml").write_text("[project\nname = ", encoding="utf-8")
+    (broken / "pyproject.toml").write_text(
+        "[project\nname = ", encoding="utf-8"
+    )
     # Второй (рабочая копия) — целый.
     good = tmp_path / "packages" / "mcp" / "external" / "vendor" / "office-mcp"
     good.mkdir(parents=True)
-    (good / "pyproject.toml").write_text('[project]\nname = "office-mcp"\n', encoding="utf-8")
+    (good / "pyproject.toml").write_text(
+        '[project]\nname = "office-mcp"\n', encoding="utf-8"
+    )
 
-    e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source", source=Path("office-mcp")))
+    e = MCPEntry(
+        name="office",
+        path=Path("."),
+        install=InstallSpec(type="source", source=Path("office-mcp")),
+    )
     assert inst._dist_name(e, root=root) == "office-mcp"

@@ -70,7 +70,9 @@ DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # from __file__ so they work in both layouts, bypassing the source-checkout-only
 # default path helpers (which break in the non-editable image install).
 _ADAPTER_DIR = Path(__file__).resolve().parent  # .../adapters
-_PROMPTS_DIR = _ADAPTER_DIR.parent / "prompts"  # image: /opt/gc-harbor-adapters/prompts
+_PROMPTS_DIR = (
+    _ADAPTER_DIR.parent / "prompts"
+)  # image: /opt/gc-harbor-adapters/prompts
 _SKILLS_DIR = _ADAPTER_DIR.parent / "skills"
 if not _PROMPTS_DIR.is_dir():  # editable/local: fall back to repo
     # Корень репозитория ищем ПО МАРКЕРУ, а не фиксированной глубиной: адаптер
@@ -121,7 +123,9 @@ def _classify_message(m: dict, attach_observation) -> "tuple[str, str] | None":
     mtype = m.get("type")
     # Tool result → observation on the last agent step.
     if mtype == "function_call_output" or role == "tool":
-        text = _stringify_content(m.get("output") if "output" in m else m.get("content"))
+        text = _stringify_content(
+            m.get("output") if "output" in m else m.get("content")
+        )
         if attach_observation(text):
             return None
         return "user", text or "(tool result)"  # orphan → user step
@@ -129,10 +133,14 @@ def _classify_message(m: dict, attach_observation) -> "tuple[str, str] | None":
     if mtype == "function_call":
         name, args = m.get("name") or "tool", m.get("arguments")
         return "agent", f"{name}({args})" if args else f"{name}()"
-    return _ROLE_TO_SOURCE.get(role, "user"), _stringify_content(m.get("content"))
+    return _ROLE_TO_SOURCE.get(role, "user"), _stringify_content(
+        m.get("content")
+    )
 
 
-def _harbor_server_entry(server, *, os_backend_transports, logger=None) -> "tuple[str, dict] | None":
+def _harbor_server_entry(
+    server, *, os_backend_transports, logger=None
+) -> "tuple[str, dict] | None":
     """Один MCP-сервер задачи → (ключ, запись `mcp-servers`) либо None, если его
     транспорт нам неизвестен."""
     name = getattr(server, "name", None)
@@ -142,7 +150,11 @@ def _harbor_server_entry(server, *, os_backend_transports, logger=None) -> "tupl
     gc_transport = _HARBOR_TRANSPORT_MAP.get(str(transport))
     if gc_transport is None:
         if logger is not None:
-            logger.warning("MCP server %r: unsupported harbor transport %r, skipped", name, transport)
+            logger.warning(
+                "MCP server %r: unsupported harbor transport %r, skipped",
+                name,
+                transport,
+            )
         return None
     # `sse` needs a live session, which a stateless exec cannot hold, so
     # tagging it os_backend would build a config the resolver is guaranteed to
@@ -157,7 +169,11 @@ def _harbor_server_entry(server, *, os_backend_transports, logger=None) -> "tupl
             name,
             transport,
         )
-    entry: dict = {"transport": gc_transport, "server-name": str(name), "execute_on": locus}
+    entry: dict = {
+        "transport": gc_transport,
+        "server-name": str(name),
+        "execute_on": locus,
+    }
     if gc_transport == "stdio":
         entry["command"] = str(getattr(server, "command", "") or "")
         entry["args"] = [str(a) for a in (getattr(server, "args", None) or [])]
@@ -251,7 +267,11 @@ class GcCliExternal(BaseAgent):
     def _model(self) -> str:
         # runner --model → env → profile. Strip only the provider prefix
         # ("openai/"); the backend expects the full vendor path as the model id.
-        m = self.model_name or os.environ.get("GC_CLI_MODEL") or self._overrides.get("model")
+        m = (
+            self.model_name
+            or os.environ.get("GC_CLI_MODEL")
+            or self._overrides.get("model")
+        )
         if not m:
             raise RuntimeError(
                 "No model configured: pass --model to the runner, set GC_CLI_MODEL, "
@@ -267,8 +287,14 @@ class GcCliExternal(BaseAgent):
         # URL; Polar gives the /v1 base, so append the path here.
         if self._api_base:
             base = self._api_base.rstrip("/")
-            return base if base.endswith("/chat/completions") else base + "/chat/completions"
-        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get("completions_url")
+            return (
+                base
+                if base.endswith("/chat/completions")
+                else base + "/chat/completions"
+            )
+        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get(
+            "completions_url"
+        )
         if not url:
             raise RuntimeError(
                 "No LLM backend configured: the runner passed no api_base, "
@@ -282,11 +308,15 @@ class GcCliExternal(BaseAgent):
     def _polar_session_id(self) -> str | None:
         """Session id the runner registered with Polar; ``OPENAI_API_KEY`` is a fallback
         only when api_base came too, else a local key would ship as the session id."""
-        raw = self._session_id or (self._api_base and os.environ.get("OPENAI_API_KEY"))
+        raw = self._session_id or (
+            self._api_base and os.environ.get("OPENAI_API_KEY")
+        )
         return raw.strip() or None if raw else None
 
     @staticmethod
-    def _apply_polar_session(config_dict: dict, session_id: str | None) -> None:
+    def _apply_polar_session(
+        config_dict: dict, session_id: str | None
+    ) -> None:
         """Send the Polar session id on every LLM call: the core sends a state UUID, so
         completions land in an unregistered session and the merge finds no dialog.json."""
         if not session_id:
@@ -312,14 +342,18 @@ class GcCliExternal(BaseAgent):
         return config
 
     @staticmethod
-    def _apply_injected_skills(config_dict: dict, skills_path: str | None) -> None:
+    def _apply_injected_skills(
+        config_dict: dict, skills_path: str | None
+    ) -> None:
         """Configure a single backend-visible skills root.
 
         Harbor must never retain the adapter's bundled host path: the backend
         can only see container paths. A nonexistent container sentinel produces
         an intentionally empty single-source registry.
         """
-        config_dict["skills_data_path"] = skills_path or "/harbor/.gc_no_skills"
+        config_dict["skills_data_path"] = (
+            skills_path or "/harbor/.gc_no_skills"
+        )
 
     @staticmethod
     def _resolve_profile_skill_dirs(skills_root: Path) -> list[Path]:
@@ -335,7 +369,11 @@ class GcCliExternal(BaseAgent):
             return []
         if (skills_root / "SKILL.md").is_file():
             return [skills_root]
-        return [child for child in sorted(skills_root.iterdir()) if child.is_dir() and (child / "SKILL.md").is_file()]
+        return [
+            child
+            for child in sorted(skills_root.iterdir())
+            if child.is_dir() and (child / "SKILL.md").is_file()
+        ]
 
     async def _merge_profile_skills(
         self, environment: BaseEnvironment, container_root: str | None
@@ -364,7 +402,10 @@ class GcCliExternal(BaseAgent):
         await environment.exec(f"mkdir -p {shlex.quote(root)}")
         candidates = self._resolve_profile_skill_dirs(local_root)
         if not candidates:
-            self.logger.warning("No SKILL.md found under %s — no profile skills uploaded", local_root)
+            self.logger.warning(
+                "No SKILL.md found under %s — no profile skills uploaded",
+                local_root,
+            )
             return root, {}
         sources: dict[str, str] = {}
         for skill_dir in candidates:
@@ -382,7 +423,9 @@ class GcCliExternal(BaseAgent):
             sources[skill_dir.name] = "profile"
         return root, sources
 
-    async def _write_skills_debug(self, ctx: Any, sources: dict[str, str]) -> None:
+    async def _write_skills_debug(
+        self, ctx: Any, sources: dict[str, str]
+    ) -> None:
         """Dump the skills the registry actually loaded to ``logs_dir/skills.json``.
 
         Authoritative by construction: the listing comes from the same registry and
@@ -406,15 +449,23 @@ class GcCliExternal(BaseAgent):
                 "loaded": [
                     {
                         "id": sid,
-                        "source": "profile" if sources.get(sid) == "profile" else "task",
+                        "source": "profile"
+                        if sources.get(sid) == "profile"
+                        else "task",
                     }
                     for sid in loaded
                 ],
-                "skipped": sorted(k for k, v in sources.items() if v == "skipped"),
+                "skipped": sorted(
+                    k for k, v in sources.items() if v == "skipped"
+                ),
                 "counts": {
                     "loaded": len(loaded),
-                    "profile": sum(1 for v in sources.values() if v == "profile"),
-                    "skipped": sum(1 for v in sources.values() if v == "skipped"),
+                    "profile": sum(
+                        1 for v in sources.values() if v == "profile"
+                    ),
+                    "skipped": sum(
+                        1 for v in sources.values() if v == "skipped"
+                    ),
                 },
             }
             path = self.logs_dir / "skills.json"
@@ -444,7 +495,9 @@ class GcCliExternal(BaseAgent):
             "`skills_load` to load the relevant one before solving."
         )
 
-    def _populate_usage(self, context: Any, state: Any) -> dict[str, Any] | None:
+    def _populate_usage(
+        self, context: Any, state: Any
+    ) -> dict[str, Any] | None:
         """Hand `state.usage` totals to Harbor, which otherwise writes nulls.
 
         Totals cover every LLM call — main loop, summariser, finish gate, subagents.
@@ -454,7 +507,9 @@ class GcCliExternal(BaseAgent):
         unwinding a timeout. Returns the totals for the caller's metadata.
         """
         try:
-            usage = getattr(state, "usage", None) if state is not None else None
+            usage = (
+                getattr(state, "usage", None) if state is not None else None
+            )
             totals = usage.totals() if usage is not None else None
             if not totals or not totals["calls"]:
                 return totals
@@ -481,7 +536,11 @@ class GcCliExternal(BaseAgent):
         """
         try:
             archived = list(getattr(self, "_evicted_messages", None) or [])
-            current = list(getattr(state, "messages", None) or []) if state is not None else []
+            current = (
+                list(getattr(state, "messages", None) or [])
+                if state is not None
+                else []
+            )
             # Full trajectory: compaction-evicted steps (via callback) + compacted tail.
             messages = archived + current
             steps = _messages_to_steps(messages)
@@ -503,7 +562,9 @@ class GcCliExternal(BaseAgent):
             self.logger.debug(f"ATIF trajectory dumped to {path}")
             return len(steps)
         except Exception:
-            self.logger.error("Failed to write ATIF trajectory.json", exc_info=True)
+            self.logger.error(
+                "Failed to write ATIF trajectory.json", exc_info=True
+            )
             return 0
 
     @staticmethod
@@ -521,7 +582,11 @@ class GcCliExternal(BaseAgent):
 
         mapped: dict = {}
         for server in servers or []:
-            item = _harbor_server_entry(server, os_backend_transports=OS_BACKEND_TRANSPORTS, logger=logger)
+            item = _harbor_server_entry(
+                server,
+                os_backend_transports=OS_BACKEND_TRANSPORTS,
+                logger=logger,
+            )
             if item is None:
                 continue
             key, entry = item
@@ -536,7 +601,9 @@ class GcCliExternal(BaseAgent):
         return mapped
 
     @staticmethod
-    def _apply_mcp_servers(config_dict: dict, servers: list, *, logger: Any = None) -> None:
+    def _apply_mcp_servers(
+        config_dict: dict, servers: list, *, logger: Any = None
+    ) -> None:
         """Merge task MCP servers into the run config; existing entries win.
 
         An explicit entry in the agent's own config is a deliberate statement
@@ -557,8 +624,12 @@ class GcCliExternal(BaseAgent):
         meta = dict(config_dict.get("mcp-meta") or {})
         # Every MCP operation is now an exec round-trip into the container, and a
         # sim-user answer is a full LLM call on the other side.
-        meta["request_timeout_sec"] = max(int(meta.get("request_timeout_sec") or 0), 600)
-        meta["discovery_timeout_sec"] = max(int(meta.get("discovery_timeout_sec") or 0), 120)
+        meta["request_timeout_sec"] = max(
+            int(meta.get("request_timeout_sec") or 0), 600
+        )
+        meta["discovery_timeout_sec"] = max(
+            int(meta.get("discovery_timeout_sec") or 0), 120
+        )
         config_dict["mcp-meta"] = meta
 
     def _dump_outcome(self, state, *, executor, timings, context) -> None:
@@ -592,22 +663,39 @@ class GcCliExternal(BaseAgent):
             # A zero token count means "no calls"; a missing one means "not
             # counted". Record both so the difference stays visible.
             "llm_calls": totals["calls"] if totals else None,
-            "llm_calls_without_usage": (totals["missing_usage_calls"] if totals else None),
+            "llm_calls_without_usage": (
+                totals["missing_usage_calls"] if totals else None
+            ),
         }
 
-    async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
         from gc_core.agent_executor import AgentExecutor
         from gc_core.run_context import acreate_run_context
 
         loop = asyncio.get_running_loop()
         config_dict = self._build_config()
-        self._apply_mcp_servers(config_dict, getattr(self, "mcp_servers", None) or [], logger=self.logger)
+        self._apply_mcp_servers(
+            config_dict,
+            getattr(self, "mcp_servers", None) or [],
+            logger=self.logger,
+        )
         skills_dir = getattr(self, "skills_dir", None)
-        container_skills = skills_dir if skills_dir and await environment.is_dir(skills_dir) else None
+        container_skills = (
+            skills_dir
+            if skills_dir and await environment.is_dir(skills_dir)
+            else None
+        )
         skill_sources: dict[str, str] = {}
         profile_skills = self._overrides.get("skills_data_path")
         if profile_skills:
-            container_skills, skill_sources = await self._merge_profile_skills(environment, container_skills)
+            container_skills, skill_sources = await self._merge_profile_skills(
+                environment, container_skills
+            )
         self._apply_injected_skills(config_dict, container_skills)
         instruction = self._nudge_instruction(instruction, container_skills)
 
@@ -702,4 +790,6 @@ class GcCliExternal(BaseAgent):
             # ponytail: best-effort only — if stop_run() didn't unblock the thread in
             # time, the thread is still orphaned; raise the grace timeout if this needs
             # a harder kill later.
-            self._dump_outcome(state, executor=executor, timings=timings, context=context)
+            self._dump_outcome(
+                state, executor=executor, timings=timings, context=context
+            )

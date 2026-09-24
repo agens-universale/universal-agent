@@ -2,7 +2,9 @@ import copy
 import json
 
 import pytest
-from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
@@ -154,7 +156,9 @@ def test_strict_read_file_omits_optional_ok():
     spec = copy.deepcopy(ReadFile.tool_description())
     apply_injected_fields_to_spec(spec, _REASON_FIELDS)
     apply_openai_strict_parameters(spec["parameters"])
-    assert set(spec["parameters"]["required"]) == set(spec["parameters"]["properties"].keys())
+    assert set(spec["parameters"]["required"]) == set(
+        spec["parameters"]["properties"].keys()
+    )
 
     args = parse_and_validate_tool_arguments(
         tool_name="fs_read_file",
@@ -220,7 +224,9 @@ def test_strict_api_schema_keeps_full_required():
 def test_augment_optional_description_non_strict():
     spec = copy.deepcopy(SearchAndReplace.tool_description())
     augment_optional_property_descriptions(spec, openai_strict=False)
-    desc = spec["parameters"]["properties"]["expected_file_sha256"]["description"]
+    desc = spec["parameters"]["properties"]["expected_file_sha256"][
+        "description"
+    ]
     assert OPTIONAL_OMIT_HINT in desc
     assert OPTIONAL_EMPTY_AS_OMIT_HINT not in desc
     assert "If omitted" not in desc
@@ -230,7 +236,9 @@ def test_augment_optional_description_strict():
     spec = copy.deepcopy(SearchAndReplace.tool_description())
     apply_openai_strict_parameters(spec["parameters"])
     augment_optional_property_descriptions(spec, openai_strict=True)
-    desc = spec["parameters"]["properties"]["expected_file_sha256"]["description"]
+    desc = spec["parameters"]["properties"]["expected_file_sha256"][
+        "description"
+    ]
     assert OPTIONAL_EMPTY_AS_OMIT_HINT in desc
     assert OPTIONAL_OMIT_HINT not in desc
 

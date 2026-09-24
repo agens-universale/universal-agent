@@ -78,16 +78,27 @@ class TestChildConfigMutationIsolation:
     def test_child_header_mutation_does_not_leak_to_parent(self, tmp_path):
         raw = {"models": {"flash": {}}, "slots": {"default": "flash"}}
         cfg = _make_config(tmp_path, raw)
-        cfg["chat_completion_headers"] = {"Authorization": "Bearer parent-token"}
+        cfg["chat_completion_headers"] = {
+            "Authorization": "Bearer parent-token"
+        }
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
-        child_ctx.config_dict["chat_completion_headers"]["Authorization"] = "Bearer child-token"
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
+        child_ctx.config_dict["chat_completion_headers"]["Authorization"] = (
+            "Bearer child-token"
+        )
 
-        assert cfg["chat_completion_headers"]["Authorization"] == "Bearer parent-token"
+        assert (
+            cfg["chat_completion_headers"]["Authorization"]
+            == "Bearer parent-token"
+        )
 
-    def test_child_slots_mutation_does_not_leak_to_parent_router(self, tmp_path):
+    def test_child_slots_mutation_does_not_leak_to_parent_router(
+        self, tmp_path
+    ):
         """Ребёнок наследует модель субагента через `unbound_override`, а не
         через мутацию `slots` (спека §5.2 fix) — сборка child ctx не должна
         трогать ни deep-copied `child_config["slots"]`, ни (тем более) реестр
@@ -126,12 +137,16 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_planner")
+        )
 
         resolved = child_ctx.model_router.resolve("main")
         assert resolved.alias == "deepseek-max"
 
-    def test_pinned_subagent_nested_unbound_consumer_inherits_pin(self, tmp_path):
+    def test_pinned_subagent_nested_unbound_consumer_inherits_pin(
+        self, tmp_path
+    ):
         raw = {
             "models": {"flash": {}, "deepseek-max": {}},
             "slots": {"default": "flash"},
@@ -141,7 +156,9 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_planner")
+        )
 
         # "summary" has no assign binding — must inherit the subagent's own model,
         # not the active-level model ("flash") an unpinned subagent would get.
@@ -158,12 +175,16 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))  # no pin
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )  # no pin
 
         resolved = child_ctx.model_router.resolve("main")
         assert resolved.alias == "flash"
 
-    def test_existing_assign_binding_to_alias_still_resolves_in_child(self, tmp_path):
+    def test_existing_assign_binding_to_alias_still_resolves_in_child(
+        self, tmp_path
+    ):
         """Более точная привязка (finish_gate -> конкретный алиас) продолжает
         действовать у ребёнка — не перекрывается слот-оверрайдом субагента."""
         raw = {
@@ -178,12 +199,18 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_planner")
+        )
 
-        assert child_ctx.model_router.resolve("finish_gate").alias == "glm-flash"
+        assert (
+            child_ctx.model_router.resolve("finish_gate").alias == "glm-flash"
+        )
         assert child_ctx.model_router.resolve("main").alias == "deepseek-max"
 
-    def test_existing_assign_binding_to_level_still_resolves_in_child(self, tmp_path):
+    def test_existing_assign_binding_to_level_still_resolves_in_child(
+        self, tmp_path
+    ):
         """Регресс ревью: явная привязка К УРОВНЮ (не к алиасу), совпадающему со
         слотом активного уровня родителя, — «более точная привязка» по спеке
         §7 п.4/§5.2 — не должна съезжать на модель субагента. До фикса (override
@@ -201,7 +228,9 @@ class TestChildModelResolve:
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_planner")
+        )
 
         assert child_ctx.model_router.resolve("summary").alias == "flash"
         assert child_ctx.model_router.resolve("main").alias == "deepseek-max"
@@ -226,20 +255,31 @@ class TestChildModelResolve:
         ctx.tools_spec = []
         ctx.tools_description = []
         ctx.is_tui = False
-        ctx.model_router = ModelRouter(cfg, level_provider=lambda: level_box["value"])
+        ctx.model_router = ModelRouter(
+            cfg, level_provider=lambda: level_box["value"]
+        )
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
         assert child_ctx.model_router.resolve("main").alias == "flash"
 
-        level_box["value"] = "max"  # живой /level родителя меняется посреди работы
+        level_box["value"] = (
+            "max"  # живой /level родителя меняется посреди работы
+        )
         assert child_ctx.model_router.resolve("main").alias == "flash"
 
-    async def test_child_state_default_model_is_subagent_resolved_model(self, tmp_path):
+    async def test_child_state_default_model_is_subagent_resolved_model(
+        self, tmp_path
+    ):
         """state.default_model ребёнка = резолв субагента (begin_turn на старте
         child-хода, см. SubagentRunner._run_internal)."""
         raw = {
-            "models": {"flash": {}, "deepseek-max": {"model": "deepseek-v3-max"}},
+            "models": {
+                "flash": {},
+                "deepseek-max": {"model": "deepseek-v3-max"},
+            },
             "slots": {"default": "flash"},
             "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
         }
@@ -253,7 +293,11 @@ class TestChildModelResolve:
             captured["default_model"] = child_state.default_model
             return "ok"
 
-        await runner.arun("subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent)
+        await runner.arun(
+            "subagent_planner",
+            {"task": "plan it", "reason": "r"},
+            fake_run_agent,
+        )
 
         assert captured["default_model"] == "deepseek-v3-max"
 
@@ -273,10 +317,14 @@ class TestChildModelResolve:
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
-        ctx.model_router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=True)
+        ctx.model_router = ModelRouter(
+            cfg, level_provider=lambda: "default", force_legacy=True
+        )
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_planner"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_planner")
+        )
 
         main_resolved = child_ctx.model_router.resolve("main")
         assert main_resolved.alias is None
@@ -304,6 +352,8 @@ class TestChildModelResolve:
         # ctx.model_router намеренно не выставлен.
         runner = SubagentRunner(ctx, _make_orchestrator_state(), cfg)
 
-        child_ctx = _await(runner._build_child_ctx(tool_name="subagent_worker"))
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
 
         assert child_ctx.model_router is None

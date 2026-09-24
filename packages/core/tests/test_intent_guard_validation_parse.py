@@ -108,7 +108,9 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertEqual(result.conflicts, ["legacy conflict"])
 
     def test_contradictory_ok_normalized_to_accept(self) -> None:
-        with self.assertLogs("gc_core.intent_guard.validation_result", level="WARNING") as logs:
+        with self.assertLogs(
+            "gc_core.intent_guard.validation_result", level="WARNING"
+        ) as logs:
             result = parse_validator_response(_raw(action="accept", ok=False))
         assert result is not None
         self.assertTrue(result.ok)
@@ -116,8 +118,12 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertTrue(any("disagrees" in m for m in logs.output))
 
     def test_action_mismatch_normalized_with_warning(self) -> None:
-        with self.assertLogs("gc_core.intent_guard.validation_result", level="WARNING") as logs:
-            result = parse_validator_response(_raw(action="continue_work", report_ok=False))
+        with self.assertLogs(
+            "gc_core.intent_guard.validation_result", level="WARNING"
+        ) as logs:
+            result = parse_validator_response(
+                _raw(action="continue_work", report_ok=False)
+            )
         assert result is not None
         self.assertEqual(result.action, "fix_report")
         self.assertTrue(any("normalized" in m for m in logs.output))
@@ -141,7 +147,11 @@ class ParseValidatorResponseTest(unittest.TestCase):
         self.assertEqual(result.action, "accept")
 
     def test_missing_axes_returns_none(self) -> None:
-        self.assertIsNone(parse_validator_response(json.dumps({"action": "accept", "ok": True})))
+        self.assertIsNone(
+            parse_validator_response(
+                json.dumps({"action": "accept", "ok": True})
+            )
+        )
 
     def test_invalid_action_returns_none(self) -> None:
         self.assertIsNone(parse_validator_response(_raw(action="retry")))

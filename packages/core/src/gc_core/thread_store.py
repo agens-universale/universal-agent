@@ -9,10 +9,17 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
-from gc_core.message_policy.tool_usage_notice.state import merge_tool_usage_notice_meta_to_base
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
+from gc_core.message_policy.tool_usage_notice.state import (
+    merge_tool_usage_notice_meta_to_base,
+)
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_DIALOG_SUMMARY,
+    wrap_technical_user_content,
+)
 from gc_core.persistence.live_volume import (
     bump_live_volume_for_messages,
     live_volume_from_messages,
@@ -22,7 +29,9 @@ from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.atomic_io import atomic_replace
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 
 _THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -50,7 +59,9 @@ def make_message_key(message: Dict[str, Any]) -> str:
     return f"payload:{payload}"
 
 
-def ensure_message_id(message: Dict[str, Any], prefix: str = "m") -> Dict[str, Any]:
+def ensure_message_id(
+    message: Dict[str, Any], prefix: str = "m"
+) -> Dict[str, Any]:
     if not isinstance(message, dict):
         return message
     msg_id = message.get("id")
@@ -66,7 +77,9 @@ def validate_thread_id(thread_id: str) -> str:
         raise ValueError("thread_id должен быть непустой строкой")
     normalized = thread_id.strip()
     if not _THREAD_ID_PATTERN.match(normalized):
-        raise ValueError("thread_id может содержать только латинские буквы, цифры, '_' и '-'")
+        raise ValueError(
+            "thread_id может содержать только латинские буквы, цифры, '_' и '-'"
+        )
     return normalized
 
 
@@ -90,7 +103,9 @@ def sanitize_system_id(system_id: str) -> str:
         raise ValueError("system_id после санитизации стал пустым")
     if not _SYSTEM_ID_PATTERN.match(s):
         # На случай логической ошибки при замене символов.
-        raise ValueError("system_id может содержать только латинские буквы, цифры, '_' и '-'")
+        raise ValueError(
+            "system_id может содержать только латинские буквы, цифры, '_' и '-'"
+        )
     return s
 
 
@@ -104,11 +119,15 @@ def resolve_threads_dir(config_dict: Dict[str, Any]) -> str:
     """
     path_cfg = config_dict.get("threads_data_path")
     if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
-        raise ValueError("threads_data_path пуст; config_modules.root.resolve_paths() должен был его заполнить")
+        raise ValueError(
+            "threads_data_path пуст; config_modules.root.resolve_paths() должен был его заполнить"
+        )
 
     path_cfg = path_cfg.strip()
     if not os.path.isabs(path_cfg):
-        raise ValueError(f"threads_data_path должен быть абсолютным путём, получено: {path_cfg!r}")
+        raise ValueError(
+            f"threads_data_path должен быть абсолютным путём, получено: {path_cfg!r}"
+        )
     return path_cfg
 
 
@@ -120,23 +139,33 @@ def _thread_paths_legacy(threads_dir: str, thread_id: str) -> Tuple[str, str]:
     return data_path, meta_path
 
 
-def _thread_paths(threads_dir: str, system_id: str, thread_id: str) -> Tuple[str, str]:
+def _thread_paths(
+    threads_dir: str, system_id: str, thread_id: str
+) -> Tuple[str, str]:
     """Новый формат файлов с system в имени."""
     sys_norm = sanitize_system_id(system_id)
     normalized_thread_id = validate_thread_id(thread_id)
-    data_path = os.path.join(threads_dir, f"data_{sys_norm}_{normalized_thread_id}.jsonl")
-    meta_path = os.path.join(threads_dir, f"meta_{sys_norm}_{normalized_thread_id}.json")
+    data_path = os.path.join(
+        threads_dir, f"data_{sys_norm}_{normalized_thread_id}.jsonl"
+    )
+    meta_path = os.path.join(
+        threads_dir, f"meta_{sys_norm}_{normalized_thread_id}.json"
+    )
     return data_path, meta_path
 
 
-def subagent_trace_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+def subagent_trace_path(
+    threads_dir: str, system_id: str, thread_id: str
+) -> str:
     """Путь sidecar nested-трейса: data_subagents_{system}_{thread_id}.jsonl."""
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
     return os.path.join(threads_dir, f"data_subagents_{sys_norm}_{tid}.jsonl")
 
 
-def touched_journal_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+def touched_journal_path(
+    threads_dir: str, system_id: str, thread_id: str
+) -> str:
     """Путь per-trace Diff journal: touched_<system>_<thread_id>.json."""
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
@@ -155,7 +184,9 @@ def _lock_path(threads_dir: str, system_id: str, thread_id: str) -> str:
     return os.path.join(threads_dir, "locks", f"lock_{sys_norm}_{tid}.json")
 
 
-def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
+def reset_thread_files(
+    threads_dir: str, system_id: str, thread_id: str
+) -> List[str]:
     """
     Удалить файлы конкретного треда (data/meta/lock/sidecar), включая legacy data/meta.
     Возвращает список удалённых путей.
@@ -167,7 +198,9 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
     sidecar = subagent_trace_path(threads_dir, sys_norm, normalized_thread_id)
     paths.append(sidecar)
-    paths.append(touched_journal_path(threads_dir, sys_norm, normalized_thread_id))
+    paths.append(
+        touched_journal_path(threads_dir, sys_norm, normalized_thread_id)
+    )
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted: List[str] = []
@@ -181,7 +214,9 @@ def reset_thread_files(threads_dir: str, system_id: str, thread_id: str) -> List
     return deleted
 
 
-def _thread_archive_paths(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
+def _thread_archive_paths(
+    threads_dir: str, system_id: str, thread_id: str
+) -> List[str]:
     """Пути __pre_summary__-архивов треда (data+meta), созданных суммаризацией.
 
     Legacy ``touched_*__pre_summary__*`` тоже подхватываем при delete — раньше
@@ -189,13 +224,25 @@ def _thread_archive_paths(threads_dir: str, system_id: str, thread_id: str) -> L
     """
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
-    data_glob = os.path.join(threads_dir, f"data_{sys_norm}_{tid}__pre_summary__*.jsonl")
-    meta_glob = os.path.join(threads_dir, f"meta_{sys_norm}_{tid}__pre_summary__*.json")
-    touched_glob = os.path.join(threads_dir, f"touched_{sys_norm}_{tid}__pre_summary__*.json")
-    return sorted(glob.glob(data_glob)) + sorted(glob.glob(meta_glob)) + sorted(glob.glob(touched_glob))
+    data_glob = os.path.join(
+        threads_dir, f"data_{sys_norm}_{tid}__pre_summary__*.jsonl"
+    )
+    meta_glob = os.path.join(
+        threads_dir, f"meta_{sys_norm}_{tid}__pre_summary__*.json"
+    )
+    touched_glob = os.path.join(
+        threads_dir, f"touched_{sys_norm}_{tid}__pre_summary__*.json"
+    )
+    return (
+        sorted(glob.glob(data_glob))
+        + sorted(glob.glob(meta_glob))
+        + sorted(glob.glob(touched_glob))
+    )
 
 
-def delete_thread(threads_dir: str, system_id: str, thread_id: str) -> List[str]:
+def delete_thread(
+    threads_dir: str, system_id: str, thread_id: str
+) -> List[str]:
     """Полностью удалить тред: canonical + legacy + lock + sidecar + touched + __pre_summary__.
 
     Возвращает список удалённых путей. Отсутствие файла — no-op.
@@ -263,9 +310,13 @@ def append_subagent_trace_record(
     path = subagent_trace_path(threads_dir, system_id, thread_id)
     with _sidecar_seq_lock:
         if path not in _sidecar_last_seq:
-            _sidecar_last_seq[path] = _max_subagent_trace_seq(path)  # cold init: 0 если файла нет
+            _sidecar_last_seq[path] = _max_subagent_trace_seq(
+                path
+            )  # cold init: 0 если файла нет
         seq = _sidecar_last_seq[path] + 1
-        _sidecar_last_seq[path] = seq  # bump ДО write: упавший write даёт дырку, не дубль seq
+        _sidecar_last_seq[path] = (
+            seq  # bump ДО write: упавший write даёт дырку, не дубль seq
+        )
         record = {
             "ts": _utc_now_iso(),
             "seq": seq,
@@ -305,10 +356,14 @@ def restore_subagent_trace_records(
         with open(path, "w", encoding="utf-8") as f:
             for record in records:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        _sidecar_last_seq[path] = max((int(r.get("seq") or 0) for r in records), default=0)
+        _sidecar_last_seq[path] = max(
+            (int(r.get("seq") or 0) for r in records), default=0
+        )
 
 
-def read_subagent_trace(threads_dir: str, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+def read_subagent_trace(
+    threads_dir: str, system_id: str, thread_id: str
+) -> List[Dict[str, Any]]:
     """Прочитать все записи sidecar в порядке файла. Нет файла → []."""
     path = subagent_trace_path(threads_dir, system_id, thread_id)
     if not os.path.exists(path):
@@ -377,7 +432,9 @@ def load_thread_messages(
     return messages, message_keys, max_seq
 
 
-def load_thread_meta(threads_dir: str, system_id: str, thread_id: str) -> Dict[str, Any]:
+def load_thread_meta(
+    threads_dir: str, system_id: str, thread_id: str
+) -> Dict[str, Any]:
     _, meta_path = _thread_paths(threads_dir, system_id, thread_id)
     if not os.path.exists(meta_path):
         # fallback: старые файлы без system в имени
@@ -393,7 +450,9 @@ def load_thread_meta(threads_dir: str, system_id: str, thread_id: str) -> Dict[s
     return data
 
 
-def save_thread_meta(threads_dir: str, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+def save_thread_meta(
+    threads_dir: str, system_id: str, thread_id: str, meta: Dict[str, Any]
+) -> None:
     sys_norm = sanitize_system_id(system_id)
     _, meta_path = _thread_paths(threads_dir, sys_norm, thread_id)
     ensure_threads_dir(threads_dir)
@@ -412,7 +471,9 @@ def save_thread_meta(threads_dir: str, system_id: str, thread_id: str, meta: Dic
     atomic_replace(tmp_path, meta_path)
 
 
-def update_tui_meta(threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
+def update_tui_meta(
+    threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
+) -> None:
     """Слить patch в meta.tui (read-merge-write). Только TUI-owned ключи."""
     sys_norm = sanitize_system_id(system_id)
     meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
@@ -422,7 +483,9 @@ def update_tui_meta(threads_dir: str, system_id: str, thread_id: str, patch: Dic
     save_thread_meta(threads_dir, sys_norm, thread_id, meta)
 
 
-def update_runtime_meta(threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]) -> None:
+def update_runtime_meta(
+    threads_dir: str, system_id: str, thread_id: str, patch: Dict[str, Any]
+) -> None:
     """Слить patch в meta.runtime (read-merge-write). Только runtime-owned ключи."""
     from gc_core.persistence.meta_ownership import merge_runtime_into_meta
 
@@ -473,7 +536,9 @@ def patch_runtime_flag(
     save_thread_meta(threads_dir, sys_norm, thread_id, disk)
 
 
-def _carry_meta_string(new_meta: Dict[str, Any], existing_meta: Dict[str, Any], key: str) -> None:
+def _carry_meta_string(
+    new_meta: Dict[str, Any], existing_meta: Dict[str, Any], key: str
+) -> None:
     """Перенести непустое строковое поле из прежней meta."""
     value = existing_meta.get(key)
     if isinstance(value, str) and value.strip():
@@ -487,7 +552,9 @@ def _is_message_record_with_id(rec: Any, message_id: str) -> bool:
     return isinstance(payload, dict) and payload.get("id") == message_id
 
 
-def _lines_without_message(data_path: str, message_id: str) -> Tuple[List[str], int]:
+def _lines_without_message(
+    data_path: str, message_id: str
+) -> Tuple[List[str], int]:
     """Строки data_*.jsonl без message-записей с данным id и число удалённых."""
     kept: List[str] = []
     removed = 0
@@ -542,13 +609,17 @@ def discard_message_by_id(
 
     meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
     try:
-        meta["messages_count"] = max(0, int(meta.get("messages_count", 0)) - removed)
+        meta["messages_count"] = max(
+            0, int(meta.get("messages_count", 0)) - removed
+        )
     except (TypeError, ValueError):
         pass
     live_msgs, _, _ = load_thread_messages(threads_dir, sys_norm, thread_id)
     merge_tui_into_meta(
         meta,
-        live_volume_from_messages(live_msgs, tags=tags, strip_think=strip_think),
+        live_volume_from_messages(
+            live_msgs, tags=tags, strip_think=strip_think
+        ),
     )
     save_thread_meta(threads_dir, sys_norm, thread_id, meta)
     return True
@@ -565,7 +636,10 @@ def append_new_thread_messages(
     tags: Sequence[str] = (),
     strip_think: bool = True,
 ) -> int:
-    del tags, strip_think  # в сигнатуре ради совместимости — см. комментарий в конце функции
+    del (
+        tags,
+        strip_think,
+    )  # в сигнатуре ради совместимости — см. комментарий в конце функции
     if len(messages) == 0:
         return 0
 
@@ -624,8 +698,12 @@ def archive_and_replace_thread_files(
     """
     data_path, meta_path = _thread_paths(threads_dir, system_id, thread_id)
     ts_suffix = _utc_now_suffix()
-    archive_data_path = data_path.replace(".jsonl", f"__pre_summary__{ts_suffix}.jsonl")
-    archive_meta_path = meta_path.replace(".json", f"__pre_summary__{ts_suffix}.json")
+    archive_data_path = data_path.replace(
+        ".jsonl", f"__pre_summary__{ts_suffix}.jsonl"
+    )
+    archive_meta_path = meta_path.replace(
+        ".json", f"__pre_summary__{ts_suffix}.json"
+    )
 
     data_exists = os.path.exists(data_path)
     meta_exists = os.path.exists(meta_path)
@@ -703,7 +781,9 @@ class ThreadSession:
         self._proj_strip_think = bool(strip_think)
         self.runtime_messages: List[Dict[str, Any]] = []
         # Снимок known_message_keys до записи последнего step_messages (для compaction user_ask).
-        self.known_keys_snapshot_before_last_batch: Optional[frozenset[str]] = None
+        self.known_keys_snapshot_before_last_batch: Optional[
+            frozenset[str]
+        ] = None
         self._port: Any = None
 
     @property
@@ -765,7 +845,9 @@ class ThreadSession:
         return session
 
     @staticmethod
-    def _resolve_store(config_dict: Dict[str, Any], store: Any) -> "tuple[Any, str]":
+    def _resolve_store(
+        config_dict: Dict[str, Any], store: Any
+    ) -> "tuple[Any, str]":
         """Хранилище и каталог. Чистая часть, общая для sync и async."""
         if store is not None:
             return store, getattr(store, "threads_dir", "")
@@ -795,7 +877,10 @@ class ThreadSession:
         """Собрать сессию из прочитанного. Чистая часть, общая для sync и async."""
         history_messages, known_message_keys, max_seq = state
         previous_response_id = meta.get("previous_response_id")
-        if not isinstance(previous_response_id, str) or len(previous_response_id) == 0:
+        if (
+            not isinstance(previous_response_id, str)
+            or len(previous_response_id) == 0
+        ):
             previous_response_id = None
         backend_api_mode_raw = meta.get("backend_api_mode", "responses")
         backend_api_mode = str(backend_api_mode_raw).strip().lower()
@@ -818,7 +903,9 @@ class ThreadSession:
             strip_think=True,
         )
 
-    def set_runtime_messages(self, runtime_messages: List[Dict[str, Any]]) -> None:
+    def set_runtime_messages(
+        self, runtime_messages: List[Dict[str, Any]]
+    ) -> None:
         self.runtime_messages = runtime_messages
 
     def get_full_history_messages(self) -> List[Dict[str, Any]]:
@@ -832,7 +919,9 @@ class ThreadSession:
             combined.append(item)
         return combined
 
-    def _persist_batch_begin(self, step_messages: List[Dict[str, Any]]) -> Set[str]:
+    def _persist_batch_begin(
+        self, step_messages: List[Dict[str, Any]]
+    ) -> Set[str]:
         """Снимок ключей ДО записи. Чистая часть — общая для sync и async."""
         known_before = set(self.known_message_keys)
         self.known_keys_snapshot_before_last_batch = frozenset(known_before)
@@ -877,7 +966,11 @@ class ThreadSession:
         """
         base_meta = dict(base_meta or {})
         if step_messages is not None and known_before is not None:
-            fresh = [m for m in step_messages if make_message_key(m) not in known_before]
+            fresh = [
+                m
+                for m in step_messages
+                if make_message_key(m) not in known_before
+            ]
             if fresh:
                 # Параметры проекции — с develop: без них счётчик считал бы
                 # служебные теги и рассуждения, которых модель не видит.
@@ -887,7 +980,9 @@ class ThreadSession:
                     tags=self._proj_tags,
                     strip_think=self._proj_strip_think,
                 )
-        base_meta["created_at"] = self.meta.get("created_at") or base_meta.get("created_at")
+        base_meta["created_at"] = self.meta.get("created_at") or base_meta.get(
+            "created_at"
+        )
         base_meta["previous_response_id"] = self.previous_response_id
         base_meta["backend_api_mode"] = self.backend_api_mode
         base_meta["messages_count"] = self.persisted_messages_count
@@ -909,17 +1004,25 @@ class ThreadSession:
         if isinstance(self.meta.get("shared"), dict):
             base_meta["shared"] = self.meta["shared"]
         if isinstance(self.meta.get("last_backend_response_id"), str):
-            base_meta["last_backend_response_id"] = self.meta.get("last_backend_response_id")
+            base_meta["last_backend_response_id"] = self.meta.get(
+                "last_backend_response_id"
+            )
         if isinstance(self.meta.get("user_intent_log"), list):
-            base_meta["user_intent_log"] = serialize_for_meta(deserialize_list(self.meta.get("user_intent_log")))
+            base_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(self.meta.get("user_intent_log"))
+            )
         if isinstance(self.meta.get("current_user_intent"), list):
             base_meta["current_user_intent"] = serialize_for_meta(
                 deserialize_list(self.meta.get("current_user_intent"))
             )
         if "user_turn_seq" in self.meta:
-            base_meta["user_turn_seq"] = int(self.meta.get("user_turn_seq") or 0)
+            base_meta["user_turn_seq"] = int(
+                self.meta.get("user_turn_seq") or 0
+            )
         if "dialog_steps_offset" in self.meta:
-            base_meta["dialog_steps_offset"] = int(self.meta.get("dialog_steps_offset") or 0)
+            base_meta["dialog_steps_offset"] = int(
+                self.meta.get("dialog_steps_offset") or 0
+            )
         if isinstance(self.meta.get("token_usage"), dict):
             base_meta["token_usage"] = self.meta["token_usage"]
 
@@ -944,17 +1047,25 @@ class ThreadSession:
             known_keys=self.known_message_keys,
             start_seq=self.persisted_messages_count,
         )
-        self._persist_batch_apply(step_messages, known_before, written, previous_response_id)
-        base_meta = await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        self._persist_batch_apply(
+            step_messages, known_before, written, previous_response_id
+        )
+        base_meta = (
+            await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        )
         await self.port.asave_meta(
             self.system_id,
             self.thread_id,
             self._persist_batch_meta(base_meta, step_messages, known_before),
         )
 
-    def _compact_summary_message(self, summary_payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _compact_summary_message(
+        self, summary_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Сообщение-сводка, которым замещается история. Чистая часть."""
-        summary_text = str(summary_payload.get("summary_message_content") or "").strip()
+        summary_text = str(
+            summary_payload.get("summary_message_content") or ""
+        ).strip()
         return {
             "role": "user",
             "content": wrap_technical_user_content(
@@ -982,7 +1093,11 @@ class ThreadSession:
         # created_at — birth of the thread; never reset on summary.
         # Prefer in-memory, then disk snapshot taken before archive move
         # (self.meta can lag when save_thread_meta minted created_at on disk only).
-        created_at = existing_meta.get("created_at") or disk_meta.get("created_at") or now_iso
+        created_at = (
+            existing_meta.get("created_at")
+            or disk_meta.get("created_at")
+            or now_iso
+        )
         new_meta = dict(existing_meta)
         new_meta.update(
             {
@@ -999,10 +1114,19 @@ class ThreadSession:
         try:
             effective_steps_offset = int(dialog_steps_offset)
         except (TypeError, ValueError):
-            effective_steps_offset = int(existing_meta.get("dialog_steps_offset", 0) or 0)
+            effective_steps_offset = int(
+                existing_meta.get("dialog_steps_offset", 0) or 0
+            )
         new_meta["dialog_steps_offset"] = max(0, effective_steps_offset)
-        self._carry_intent_fields(new_meta, existing_meta, user_intent_log, summary_payload.get("user_turn_seq"))
-        _carry_meta_string(new_meta, existing_meta, "chat_completions_system_prompt_rendered")
+        self._carry_intent_fields(
+            new_meta,
+            existing_meta,
+            user_intent_log,
+            summary_payload.get("user_turn_seq"),
+        )
+        _carry_meta_string(
+            new_meta, existing_meta, "chat_completions_system_prompt_rendered"
+        )
         _carry_meta_string(new_meta, existing_meta, "last_backend_response_id")
         # meta.tui: disk wins (TUI-owned). meta.runtime: merge + live_* пересчёт.
         session_tui = dict(existing_meta.get("tui") or {})
@@ -1028,9 +1152,13 @@ class ThreadSession:
     ) -> None:
         """intent-поля после компакции: из summary_payload, иначе из прежней meta."""
         if isinstance(user_intent_log, list):
-            new_meta["user_intent_log"] = serialize_for_meta(deserialize_list(user_intent_log))
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(user_intent_log)
+            )
         elif isinstance(existing_meta.get("user_intent_log"), list):
-            new_meta["user_intent_log"] = serialize_for_meta(deserialize_list(existing_meta.get("user_intent_log")))
+            new_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(existing_meta.get("user_intent_log"))
+            )
         if isinstance(existing_meta.get("current_user_intent"), list):
             new_meta["current_user_intent"] = serialize_for_meta(
                 deserialize_list(existing_meta.get("current_user_intent"))
@@ -1038,7 +1166,9 @@ class ThreadSession:
         if user_turn_seq is not None:
             new_meta["user_turn_seq"] = int(user_turn_seq or 0)
         elif "user_turn_seq" in existing_meta:
-            new_meta["user_turn_seq"] = int(existing_meta.get("user_turn_seq") or 0)
+            new_meta["user_turn_seq"] = int(
+                existing_meta.get("user_turn_seq") or 0
+            )
 
     def _compact_apply(
         self,
@@ -1054,7 +1184,9 @@ class ThreadSession:
         self.previous_response_id = None
         self.meta = new_meta
 
-    async def _aarchive_via_store(self, compact_messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def _aarchive_via_store(
+        self, compact_messages: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """Замещение истории без архива — для хранилищ без файлов.
 
         Резервный путь, когда хранилище не объявляет способность
@@ -1079,7 +1211,9 @@ class ThreadSession:
             "archive_meta_path": None,
         }
 
-    async def _areplace_keeping_trace(self, compact_messages: List[Dict[str, Any]]) -> None:
+    async def _areplace_keeping_trace(
+        self, compact_messages: List[Dict[str, Any]]
+    ) -> None:
         """Пара ``areset`` + ``aappend_messages`` для хранилища без
         ``areplace_messages`` — но с трассой субагентов, спасённой вокруг сброса.
 
@@ -1106,9 +1240,16 @@ class ThreadSession:
             self.thread_id,
             extra={"event": "thread_store_replace_messages_missing"},
         )
-        trace = list(await self.port.aread_subagent_trace(self.system_id, self.thread_id) or [])
+        trace = list(
+            await self.port.aread_subagent_trace(
+                self.system_id, self.thread_id
+            )
+            or []
+        )
         await self.port.areset(self.system_id, self.thread_id)
-        await self.port.aappend_messages(self.system_id, self.thread_id, compact_messages)
+        await self.port.aappend_messages(
+            self.system_id, self.thread_id, compact_messages
+        )
         for record in trace:
             await self.port.aappend_subagent_trace(
                 self.system_id,
@@ -1144,7 +1285,9 @@ class ThreadSession:
         искал ТОЛЬКО синхронное ``archive_and_replace`` и звал его прямо на
         loop.
         """
-        disk_meta = await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        disk_meta = (
+            await self.port.aload_meta(self.system_id, self.thread_id) or {}
+        )
         summary_message = self._compact_summary_message(summary_payload)
         compact_messages = [summary_message]
 
@@ -1157,9 +1300,13 @@ class ThreadSession:
         aarchiver = getattr(self.port, "aarchive_and_replace", None)
         archiver = getattr(self.store, "archive_and_replace", None)
         if callable(aarchiver):
-            archived = await aarchiver(self.system_id, self.thread_id, compact_messages)
+            archived = await aarchiver(
+                self.system_id, self.thread_id, compact_messages
+            )
         elif callable(archiver):
-            archived = await await_callback(archiver(self.system_id, self.thread_id, compact_messages))
+            archived = await await_callback(
+                archiver(self.system_id, self.thread_id, compact_messages)
+            )
         else:
             archived = await self._aarchive_via_store(compact_messages)
 
@@ -1172,4 +1319,6 @@ class ThreadSession:
         )
         await self.port.asave_meta(self.system_id, self.thread_id, new_meta)
         self._compact_apply(compact_messages, known_message_keys, new_meta)
-        return self._compact_result(archived, compact_messages, summary_message)
+        return self._compact_result(
+            archived, compact_messages, summary_message
+        )

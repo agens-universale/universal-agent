@@ -123,6 +123,8 @@ def test_check_ignore_fail_safe_no_git(tmp_path, monkeypatch):
     monkeypatch.setattr(
         git_ops,
         "_run_git",
-        lambda *_a, **_k: git_ops.GitRunResult(ok=False, stderr="boom", returncode=-1),
+        lambda *_a, **_k: git_ops.GitRunResult(
+            ok=False, stderr="boom", returncode=-1
+        ),
     )
     assert git_ops.check_ignore(tmp_path, "any.txt") is None

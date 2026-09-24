@@ -16,7 +16,9 @@ class Notice(NamedTuple):
     level: str  # "warning" | "info"
     code: str  # стабильный id (для дедупа/тестов)
     message: str  # человекочитаемо, по-русски
-    highlights: Tuple[str, ...] = ()  # тех. имена в message (тулы/сервера/ключи) для выделения в TUI
+    highlights: Tuple[
+        str, ...
+    ] = ()  # тех. имена в message (тулы/сервера/ключи) для выделения в TUI
 
 
 _DEPRECATED_KEYS = {"backend.stream": "tui.stream"}
@@ -55,7 +57,11 @@ def _stop_tools_unknown(
 def _mcp_failed(mcp_status: Optional[Dict[str, Any]]) -> List[Notice]:
     if not isinstance(mcp_status, dict):
         return []
-    failed = sorted(name for name, st in mcp_status.items() if isinstance(st, dict) and st.get("status") == "failed")
+    failed = sorted(
+        name
+        for name, st in mcp_status.items()
+        if isinstance(st, dict) and st.get("status") == "failed"
+    )
     if not failed:
         return []
     return [
@@ -73,7 +79,14 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     for key in deprecated_keys_used or []:
         repl = _DEPRECATED_KEYS.get(key)
         if repl:
-            out.append(Notice("info", "deprecated_key", f"{key} устарел — используйте {repl}.", highlights=(key, repl)))
+            out.append(
+                Notice(
+                    "info",
+                    "deprecated_key",
+                    f"{key} устарел — используйте {repl}.",
+                    highlights=(key, repl),
+                )
+            )
     return out
 
 
@@ -125,7 +138,9 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
 
 
 def _compat(compat_notices: Optional[List[str]]) -> List[Notice]:
-    return [Notice("warning", "config_compat", msg) for msg in compat_notices or []]
+    return [
+        Notice("warning", "config_compat", msg) for msg in compat_notices or []
+    ]
 
 
 def _upgrade(upgrade_info) -> List[Notice]:
@@ -135,7 +150,14 @@ def _upgrade(upgrade_info) -> List[Notice]:
     old = getattr(upgrade_info, "old_version", None)
     new = getattr(upgrade_info, "new_version", "")
     frm = f" {old} →" if old else ""
-    return [Notice("info", "agent_upgraded", f"Агент обновлён:{frm} {new}.", highlights=(new,))]
+    return [
+        Notice(
+            "info",
+            "agent_upgraded",
+            f"Агент обновлён:{frm} {new}.",
+            highlights=(new,),
+        )
+    ]
 
 
 def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
@@ -153,7 +175,10 @@ def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
     if not str(config_dict.get("subagents_dir") or "").strip():
         return []
     try:
-        from gc_core.tools.subagents.registry import SUBAGENT_DIAGNOSTICS_KEY, resolve_subagent_definitions
+        from gc_core.tools.subagents.registry import (
+            SUBAGENT_DIAGNOSTICS_KEY,
+            resolve_subagent_definitions,
+        )
 
         resolve_subagent_definitions(config_dict)
         records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
@@ -294,7 +319,9 @@ def render_notices_for_cli(notices: List[Notice]) -> str:
     return "\n".join(f"{glyph.get(n.level, '·')} {n.message}" for n in notices)
 
 
-def warning_toasts(notices: List[Notice], *, cap: int = 3) -> Tuple[List[str], Optional[str], frozenset]:
+def warning_toasts(
+    notices: List[Notice], *, cap: int = 3
+) -> Tuple[List[str], Optional[str], frozenset]:
     """Warning-уведомления для тоста при старте: до `cap` сообщений + сводный «+N ещё»
     (info НЕ тостим — только карточка/notices). Третий элемент — frozenset warning-кодов
     для сравнения «набор изменился» (тост показываем только on-change, см. вызывающего)."""

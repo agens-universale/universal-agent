@@ -38,13 +38,19 @@ from pathlib import Path
 #: tomllib здесь не используется намеренно: он в stdlib только с 3.11, а
 #: gc-testkit объявляет requires-python >= 3.10. Проверить нужно ровно одну
 #: строку, поэтому хватает регулярки.
-_GC_CORE_NAME = re.compile(r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', re.MULTILINE)
+# До bootstrap импорт gc_core невозможен; копию проверяет test_repo_root_marker.
+# pylint: disable=duplicate-code
+_GC_CORE_NAME = re.compile(
+    r'^[ \t]*name[ \t]*=[ \t]*["\']gc-core["\'][ \t]*$', re.MULTILINE
+)
 
 
 def _declares_gc_core(candidate: Path) -> bool:
     """Лежит ли в `candidate` наш `packages/core/pyproject.toml`."""
     try:
-        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(encoding="utf-8")
+        text = (candidate / "packages" / "core" / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
     except (OSError, UnicodeDecodeError):
         return False
     return _GC_CORE_NAME.search(text) is not None
@@ -64,6 +70,9 @@ def repo_root_from(start: Path) -> Path | None:
         if _declares_gc_core(parent):
             return parent
     return None
+
+
+# pylint: enable=duplicate-code
 
 
 #: Корень, назначенный извне — см. `use_repo_root`. None = считать от `__file__`.
@@ -150,7 +159,9 @@ _LAZY_PATHS = {
     "PACKAGE_SRC_DIRS": _src_dirs,
     "INTEGRATIONS": lambda root: root / "integrations",
     "HARBOR": lambda root: root / "integrations" / "harbor",
-    "RECIPES": lambda root: root / "packages" / "mcp" / "src" / "recommended_mcp",
+    "RECIPES": lambda root: (
+        root / "packages" / "mcp" / "src" / "recommended_mcp"
+    ),
     "VENDOR": lambda root: root / "packages" / "mcp" / "external" / "vendor",
     "TUI_PKG": lambda root: root / "packages" / "tui" / "src" / "gc_tui",
 }
@@ -169,7 +180,12 @@ def __dir__() -> list[str]:
     return sorted({*globals(), *_LAZY_PATHS})
 
 
-_DIST_OF = {"gc_core": "core", "gc_cli": "cli", "gc_tui": "tui", "gc_server": "server"}
+_DIST_OF = {
+    "gc_core": "core",
+    "gc_cli": "cli",
+    "gc_tui": "tui",
+    "gc_server": "server",
+}
 
 # Пакеты, чьё содержимое развёрнуто в корень нового пакета: `tui/app.py` стал
 # `gc_tui/app.py`, а не `gc_tui/tui/app.py`.
@@ -223,5 +239,7 @@ def module_dir(old_top_level_name: str) -> Path:
         return package_dir(_FLATTENED[old_top_level_name])
     pkg = module_map().get(old_top_level_name)
     if pkg is None:
-        raise KeyError(f"неизвестный модуль {old_top_level_name!r}; проверьте {_MAP_PATH}")
+        raise KeyError(
+            f"неизвестный модуль {old_top_level_name!r}; проверьте {_MAP_PATH}"
+        )
     return package_dir(pkg) / old_top_level_name

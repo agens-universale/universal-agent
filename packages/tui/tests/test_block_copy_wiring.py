@@ -23,14 +23,20 @@ def test_main_screen_copies_and_pushes_session_buffer(monkeypatch):
         {
             "copy_to_clipboard": lambda self, text: None,
             "run_worker": None,
-            "_push_session_copy_buffer": lambda self, payload: pushed.append(payload),
+            "_push_session_copy_buffer": lambda self, payload: pushed.append(
+                payload
+            ),
             "cancel_pending_select_copy": lambda self: cancelled.append(True),
         },
     )()
     monkeypatch.setattr(
-        "gc_tui.screens.main.copy_out", lambda _app, text, **kw: copied.append(text) or True, raising=False
+        "gc_tui.screens.main.copy_out",
+        lambda _app, text, **kw: copied.append(text) or True,
+        raising=False,
     )
-    monkeypatch.setattr(type(screen), "app", property(lambda self: app), raising=False)
+    monkeypatch.setattr(
+        type(screen), "app", property(lambda self: app), raising=False
+    )
 
     screen.on_copy_block_request(CopyBlockRequest("print(1)"))
 
@@ -50,14 +56,20 @@ def test_preview_screen_copies_without_session_buffer(monkeypatch):
         (),
         {
             "copy_to_clipboard": lambda self, text: None,
-            "_push_session_copy_buffer": lambda self, payload: pushed.append(payload),
+            "_push_session_copy_buffer": lambda self, payload: pushed.append(
+                payload
+            ),
             "cancel_pending_select_copy": lambda self: cancelled.append(True),
         },
     )()
     monkeypatch.setattr(
-        "gc_tui.screens.preview.copy_out", lambda _app, text, **kw: copied.append(text) or True, raising=False
+        "gc_tui.screens.preview.copy_out",
+        lambda _app, text, **kw: copied.append(text) or True,
+        raising=False,
     )
-    monkeypatch.setattr(type(screen), "app", property(lambda self: app), raising=False)
+    monkeypatch.setattr(
+        type(screen), "app", property(lambda self: app), raising=False
+    )
 
     screen.on_copy_block_request(CopyBlockRequest("| a |\n|---|\n| 1 |"))
 

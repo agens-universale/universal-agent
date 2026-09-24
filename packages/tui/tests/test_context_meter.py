@@ -57,8 +57,12 @@ def test_filled_count_and_track(chars, threshold, pct):
 def test_reverse_gradient_direction():
     """Полная плашка: левый край = ACCENT(teal), правый = RUN_COLOR(amber)."""
     m = render_context_meter(1000, 1000)  # 100% → все залиты
-    assert _bg_hex(m.spans[0]) == gradient_color(1.0).lower()  # i=0 → 1-0 → teal
-    assert _bg_hex(m.spans[_WIDTH - 1]) == gradient_color(0.0).lower()  # i=W-1 → 0 → amber
+    assert (
+        _bg_hex(m.spans[0]) == gradient_color(1.0).lower()
+    )  # i=0 → 1-0 → teal
+    assert (
+        _bg_hex(m.spans[_WIDTH - 1]) == gradient_color(0.0).lower()
+    )  # i=W-1 → 0 → amber
 
 
 def test_amber_hidden_until_full():

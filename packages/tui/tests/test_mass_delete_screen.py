@@ -24,12 +24,18 @@ async def test_mass_delete_keep_last_count_and_submit():
     from textual.widgets import Input, Static
 
     now = datetime(2026, 6, 6, tzinfo=UTC)
-    tasks = [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
+    tasks = [
+        _task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00")
+        for i in range(5)
+    ]
     result = {}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=tasks, now=now), lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=tasks, now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -55,7 +61,10 @@ async def test_mass_delete_mode_toggle_to_older_than():
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=tasks, now=now), lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=tasks, now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -78,7 +87,10 @@ async def test_mass_delete_escape_returns_none():
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=[], now=now), lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=[], now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         await pilot.press("escape")
@@ -97,12 +109,18 @@ async def test_mass_delete_superscript_digit_is_not_a_count():
     from textual.widgets import Input, Static
 
     now = datetime(2026, 6, 6, tzinfo=UTC)
-    tasks = [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
+    tasks = [
+        _task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00")
+        for i in range(5)
+    ]
     result = {"v": "unset"}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=tasks, now=now), lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=tasks, now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen

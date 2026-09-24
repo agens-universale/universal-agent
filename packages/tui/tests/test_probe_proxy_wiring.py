@@ -20,7 +20,9 @@ def test_requests_get_ex_passes_resolved_proxies(monkeypatch):
     fake = MagicMock()
     fake.status_code = 200
     fake.json.return_value = {"data": [{"id": "m1"}]}
-    with patch("gc_core.utils.http_session.NO_NETRC_SESSION.get", return_value=fake) as get:
+    with patch(
+        "gc_core.utils.http_session.NO_NETRC_SESSION.get", return_value=fake
+    ) as get:
         reply = mp._requests_get_ex(
             "https://openrouter.ai/api/v1/models",
             {},

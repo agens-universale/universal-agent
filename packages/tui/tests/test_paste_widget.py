@@ -92,7 +92,9 @@ async def test_enter_resets_chip_state(tmp_path):
     from gc_tui.app import TuiApp
 
     class _Fake:  # no-op executor: Enter не должен
-        async def arun(self, messages, *, thread_id, **kw):  # строить реальный AgentExecutor
+        async def arun(
+            self, messages, *, thread_id, **kw
+        ):  # строить реальный AgentExecutor
             pass
 
     app = TuiApp(threads_dir=str(tmp_path))
@@ -154,7 +156,9 @@ async def test_cr_separated_paste_collapses_like_lf():
         inp._handle_paste("a\rb\rc\rd\re")  # 5 строк через \r, <500 симв
         await pilot.pause()
         assert inp.text == "[Вставка #1 · 5 строк]"  # свернулось по «строкам»
-        assert inp._chips.get(1) == "a\nb\nc\nd\ne"  # хранится с нормализованными \n
+        assert (
+            inp._chips.get(1) == "a\nb\nc\nd\ne"
+        )  # хранится с нормализованными \n
 
 
 @pytest.mark.asyncio
@@ -182,7 +186,9 @@ async def test_expand_works_always_no_timer():
         inp._handle_paste(BIG5)
         await pilot.pause()
         assert inp._expand_chip_id == 1  # окно «развернуть» открыто
-        assert getattr(inp, "_expand_timer", None) is None  # без авто-закрытия по таймеру
+        assert (
+            getattr(inp, "_expand_timer", None) is None
+        )  # без авто-закрытия по таймеру
         inp._handle_paste(BIG5)  # повторная вставка → разворот
         await pilot.pause()
         assert inp.text == BIG5
@@ -221,10 +227,14 @@ async def test_ctrl_v_pastes_when_focus_on_trace(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из трейса")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        row = TraceRow(prefix=">", content="строка", kind_class="line-agent", event_no=1)
+        row = TraceRow(
+            prefix=">", content="строка", kind_class="line-agent", event_no=1
+        )
         scr.query_one("#trace").mount(row)
         await pilot.pause()
         row.focus()

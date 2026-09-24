@@ -27,7 +27,9 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
     wire = "Используй skill `x`.\nИНСТР\nдавай"
     display = "давай"
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
 
@@ -38,7 +40,9 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
         await pilot.pause()
 
         count_before = len(list(scr.query(UserReplyContainer)))
-        assert count_before == 1, f"должен быть 1 pending-виджет, получили {count_before}"
+        assert count_before == 1, (
+            f"должен быть 1 pending-виджет, получили {count_before}"
+        )
 
         # Polling возвращает TraceEvent, у которого summary = display_content,
         # но full_payload содержит оригинальный wire.
@@ -48,15 +52,23 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
             kind="user",
             title="",
             summary=display,
-            full_payload={"role": "user", "content": wire, "display_content": display},
+            full_payload={
+                "role": "user",
+                "content": wire,
+                "display_content": display,
+            },
             message_id="m1",
         )
         scr._render_event(ev, live=True)
         await pilot.pause()
 
         count_after = len(list(scr.query(UserReplyContainer)))
-        assert count_after == 1, f"НЕ должен появляться дубликат: до={count_before}, после={count_after}"
-        assert "c1" not in scr._pending_user_widgets, "После реконсайла c1 должен быть удалён из _pending_user_widgets"
+        assert count_after == 1, (
+            f"НЕ должен появляться дубликат: до={count_before}, после={count_after}"
+        )
+        assert "c1" not in scr._pending_user_widgets, (
+            "После реконсайла c1 должен быть удалён из _pending_user_widgets"
+        )
 
 
 @pytest.mark.asyncio
@@ -69,7 +81,9 @@ async def test_skill_reply_without_payload_falls_back_to_summary(tmp_path):
 
     text = "обычное сообщение"
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
 
@@ -116,7 +130,9 @@ async def test_mount_failed_skips_skill_message_via_display_content(tmp_path):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
 
-    (threads_dir / f"data_cli_{thread_id}.jsonl").write_text("", encoding="utf-8")
+    (threads_dir / f"data_cli_{thread_id}.jsonl").write_text(
+        "", encoding="utf-8"
+    )
     (threads_dir / f"meta_cli_{thread_id}.json").write_text(
         json.dumps(
             {
@@ -148,7 +164,9 @@ async def test_mount_failed_skips_skill_message_via_display_content(tmp_path):
         screen.attach_active_task(thread_id)
         await pilot.pause()
 
-        failed = [w for w in screen.query(UserReplyContainer) if w._state == "failed"]
+        failed = [
+            w for w in screen.query(UserReplyContainer) if w._state == "failed"
+        ]
         assert len(failed) == 0, (
             f"Skill-реплика не должна монтироваться как failed (content совпал с delivered): "
             f"{[w._text for w in failed]}"
@@ -170,7 +188,9 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
 
-    (threads_dir / f"data_cli_{thread_id}.jsonl").write_text("", encoding="utf-8")
+    (threads_dir / f"data_cli_{thread_id}.jsonl").write_text(
+        "", encoding="utf-8"
+    )
     (threads_dir / f"meta_cli_{thread_id}.json").write_text(
         json.dumps(
             {
@@ -202,7 +222,9 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
         screen.attach_active_task(thread_id)
         await pilot.pause()
 
-        failed = [w for w in screen.query(UserReplyContainer) if w._state == "failed"]
+        failed = [
+            w for w in screen.query(UserReplyContainer) if w._state == "failed"
+        ]
         assert len(failed) == 1, (
             f"Настоящий orphan должен быть смонтирован как failed, "
             f"got {len(failed)} failed: {[w._text for w in screen.query(UserReplyContainer)]}"
@@ -232,7 +254,9 @@ def test_skill_marker_css_rule_exists():
     block = match.group(1)
     # Нижний отступ может задаваться как margin-bottom, так и шорткатом margin:
     # (напр. `margin: 1 0` → top И bottom). Оба варианта дают зазор под маркером.
-    has_bottom_margin = "margin-bottom" in block or re.search(r"\bmargin\s*:", block)
+    has_bottom_margin = "margin-bottom" in block or re.search(
+        r"\bmargin\s*:", block
+    )
     assert has_bottom_margin, (
         f".skill-marker должен задавать нижний отступ (margin-bottom или margin:), блок: {block!r}"
     )
@@ -245,13 +269,17 @@ async def test_skill_marker_has_css_class(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._mount_skill_marker("qa-x", loaded=True)
         await pilot.pause()
 
-        markers = [w for w in scr.query(TraceRow) if w.has_class("skill-marker")]
+        markers = [
+            w for w in scr.query(TraceRow) if w.has_class("skill-marker")
+        ]
         assert len(markers) == 1, (
             f"_mount_skill_marker должен добавлять класс skill-marker, нашли {len(markers)} виджетов с таким классом"
         )

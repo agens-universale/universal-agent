@@ -143,7 +143,9 @@ class CopyBufferScreen(Screen):
         if self._store is not None and self._active_task_id:
             try:
                 saved = clamp_copy_buffer(current, max_size=COPY_BUFFER_MAX)
-                self._store.update_tui_meta(self._active_task_id, {"copy_buffer": saved})
+                self._store.update_tui_meta(
+                    self._active_task_id, {"copy_buffer": saved}
+                )
             except Exception:
                 pass  # best-effort: не роняем закрытие экрана
         self.app.pop_screen()

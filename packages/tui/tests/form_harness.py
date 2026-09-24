@@ -119,7 +119,9 @@ def recording_loader(loads, models=()):
 
 
 @asynccontextmanager
-async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None):
+async def settings_connection(
+    tmp_path, *, probe=None, wait_probe=True, url=None
+):
     """/settings → секция «Подключение» на настоящем config.yml во временном каталоге.
 
     **Отдаёт экран, когда автопроба входа в секцию уже осела.** Вход ставит
@@ -143,7 +145,11 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
     from gc_tui import app as app_mod
     from test_settings_screen import _cfg, _mk_screen, _write_cfg
 
-    cfg_file = _write_cfg(tmp_path) if url is None else _write_cfg(tmp_path, url=f'"{url}"')
+    cfg_file = (
+        _write_cfg(tmp_path)
+        if url is None
+        else _write_cfg(tmp_path, url=f'"{url}"')
+    )
     # Конфиг приложения — тот же, что у экрана: вход в секцию забирает его у
     # приложения (SettingsScreen._sync_config_from_app), и с пустым конфигом
     # секция осталась бы без адреса.
@@ -160,12 +166,18 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
         open_settings_section(scr, "Подключение")
         await pilot.pause()
         if wait_probe:
-            await wait_until(pilot, lambda: scr._draft_checked is not None, "автопроба секции «Подключение» осела")
+            await wait_until(
+                pilot,
+                lambda: scr._draft_checked is not None,
+                "автопроба секции «Подключение» осела",
+            )
         yield pilot, scr
 
 
 @asynccontextmanager
-async def settings_voice_section(tmp_path, *, mode="cloud", probe=None, list_models=None, installed=False):
+async def settings_voice_section(
+    tmp_path, *, mode="cloud", probe=None, list_models=None, installed=False
+):
     """/settings → секция «Голосовой ввод».
 
     `mode` — действующий режим ("local" | "cloud" | "off"), `installed` — стоит ли
@@ -212,7 +224,10 @@ async def settings_mcp_section(tmp_path, *, servers=()):
     from gc_tui.services.mcp_manager import McpRow, McpState
     from test_settings_screen import _cfg, _mk_screen, _write_cfg
 
-    rows = [s if isinstance(s, McpRow) else McpRow(s, wired=False, manual=False) for s in servers]
+    rows = [
+        s if isinstance(s, McpRow) else McpRow(s, wired=False, manual=False)
+        for s in servers
+    ]
 
     class _FakeManager:
         def __init__(self, **kw):
@@ -262,7 +277,13 @@ async def mounted_model_editor(tmp_path, *, models):
     from gc_tui.editors.model import ModelEditor
     from test_editors_model import _harness
 
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True, fetch=lambda *a, **k: list(models))
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: list(models),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await wait_until(pilot, lambda: ed.models_loaded, "models loaded")
@@ -270,7 +291,9 @@ async def mounted_model_editor(tmp_path, *, models):
 
 
 @asynccontextmanager
-async def wizard_voice_step(tmp_path, *, mode="cloud", installed=False, models=None):
+async def wizard_voice_step(
+    tmp_path, *, mode="cloud", installed=False, models=None
+):
     """Мастер первого запуска на шаге «Голосовой ввод», курсор — на строке `mode`
     ("local" | "cloud" | "skip"). Пометку (Space) хелпер НЕ ставит: показ полей
     зависит от курсора, а выбор — отдельное действие, и тесты про него разные.
@@ -292,7 +315,9 @@ async def wizard_voice_step(tmp_path, *, mode="cloud", installed=False, models=N
             # По кольцу: курсор может стоять не на нулевой строке (шаг открывается
             # на ДЕЙСТВУЮЩЕМ режиме, _prefill_voice_from_config), и простая разность
             # шагов молча дала бы ноль нажатий вместо доводки до нужной строки.
-            steps = (keys.index(mode) - screen._idx.get(STEP_VOICE, 0)) % len(keys)
+            steps = (keys.index(mode) - screen._idx.get(STEP_VOICE, 0)) % len(
+                keys
+            )
             for _ in range(steps):
                 await pilot.press("down")
             await pilot.pause()
@@ -323,7 +348,9 @@ async def wizard_connection_step(tmp_path):
             async with app.run_test() as pilot:
                 screen = _screen(voice=FakeVoice())
                 await app.push_screen(screen)
-                await pilot.pause()  # ConnectionEditor.focus_input идёт call_after_refresh
+                await (
+                    pilot.pause()
+                )  # ConnectionEditor.focus_input идёт call_after_refresh
                 await pilot.pause()
                 yield pilot, screen
     finally:
@@ -335,8 +362,14 @@ def _isolated_voice_data(tmp_path):
     """Каталог данных голосовой батарейки — на tmp: `_voice_installed`,
     `current_model_short` и статус секции читают реальный ~/.gc иначе."""
     with (
-        mock.patch("gc_tui.voice_runtime.paths.voice_data_dir", lambda: tmp_path / "voice_data"),
-        mock.patch("gc_tui.voice_runtime.state.voice_state_path", lambda: tmp_path / "voice_data" / "state.json"),
+        mock.patch(
+            "gc_tui.voice_runtime.paths.voice_data_dir",
+            lambda: tmp_path / "voice_data",
+        ),
+        mock.patch(
+            "gc_tui.voice_runtime.state.voice_state_path",
+            lambda: tmp_path / "voice_data" / "state.json",
+        ),
     ):
         yield
 

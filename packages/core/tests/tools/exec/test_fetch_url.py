@@ -87,12 +87,34 @@ def test_fetch_url_validation():
     tool = with_local_ctx(FetchUrl)
     assert json.loads(_call(tool, url=""))["error"]["field"] == "url"
     assert json.loads(_call(tool, url="ftp://x"))["error"]["field"] == "url"
-    assert json.loads(_call(tool, url="https://x", timeout=-1))["error"]["field"] == "timeout"
-    assert json.loads(_call(tool, url="https://x", max_preview_chars=0))["error"]["field"] == "max_preview_chars"
-    assert json.loads(_call(tool, url="https://x", offset=-1))["error"]["field"] == "offset"
-    assert json.loads(_call(tool, url="https://x", limit=0))["error"]["field"] == "limit"
-    assert json.loads(_call(tool, url="https://x", proxy="not-a-proxy"))["error"]["field"] == "proxy"
-    assert json.loads(_call(tool, url="https://x", proxy=123))["error"]["field"] == "proxy"
+    assert (
+        json.loads(_call(tool, url="https://x", timeout=-1))["error"]["field"]
+        == "timeout"
+    )
+    assert (
+        json.loads(_call(tool, url="https://x", max_preview_chars=0))["error"][
+            "field"
+        ]
+        == "max_preview_chars"
+    )
+    assert (
+        json.loads(_call(tool, url="https://x", offset=-1))["error"]["field"]
+        == "offset"
+    )
+    assert (
+        json.loads(_call(tool, url="https://x", limit=0))["error"]["field"]
+        == "limit"
+    )
+    assert (
+        json.loads(_call(tool, url="https://x", proxy="not-a-proxy"))["error"][
+            "field"
+        ]
+        == "proxy"
+    )
+    assert (
+        json.loads(_call(tool, url="https://x", proxy=123))["error"]["field"]
+        == "proxy"
+    )
 
 
 def test_fetch_url_policy_blocks_before_request(monkeypatch):
@@ -103,7 +125,12 @@ def test_fetch_url_policy_blocks_before_request(monkeypatch):
 
     data = json.loads(
         _call(
-            with_local_ctx(FetchUrl, config_dict=_url_policy_config(url_blacklist=["blocked.example"])),
+            with_local_ctx(
+                FetchUrl,
+                config_dict=_url_policy_config(
+                    url_blacklist=["blocked.example"]
+                ),
+            ),
             url="https://blocked.example/page",
         )
     )
@@ -114,7 +141,9 @@ def test_fetch_url_policy_blocks_before_request(monkeypatch):
     assert data["error"]["matched_rule"] == "blocked.example"
 
 
-def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monkeypatch):
+def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(
+    monkeypatch,
+):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("request should not be executed for blocked URL")
 
@@ -122,7 +151,10 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monk
 
     data = json.loads(
         _call(
-            with_local_ctx(FetchUrl, config_dict=_url_policy_config(allowed_schemes=["https"])),
+            with_local_ctx(
+                FetchUrl,
+                config_dict=_url_policy_config(allowed_schemes=["https"]),
+            ),
             url="http://example.com",
         )
     )
@@ -133,19 +165,33 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(monk
 
 def test_fetch_url_binary(monkeypatch):
     _install(monkeypatch, _resp("", content_type="application/pdf"))
-    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com/a.pdf"))
-    assert data["ok"] is True and data["is_binary"] is True and data["content"] == "binary data"
+    data = json.loads(
+        _call(with_local_ctx(FetchUrl), url="https://example.com/a.pdf")
+    )
+    assert (
+        data["ok"] is True
+        and data["is_binary"] is True
+        and data["content"] == "binary data"
+    )
 
 
 def test_fetch_url_extraction_fallback(monkeypatch):
-    _install(monkeypatch, _resp("<html><body><p>hello world</p></body></html>"))
-    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: None)
+    _install(
+        monkeypatch, _resp("<html><body><p>hello world</p></body></html>")
+    )
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura, "extract", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         fetch_url_module,
         "Document",
-        lambda *a, **k: SimpleNamespace(summary=lambda html_partial=True: "<p>fallback</p>"),
+        lambda *a, **k: SimpleNamespace(
+            summary=lambda html_partial=True: "<p>fallback</p>"
+        ),
     )
-    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com"))
+    data = json.loads(
+        _call(with_local_ctx(FetchUrl), url="https://example.com")
+    )
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["content"]
@@ -156,7 +202,9 @@ def test_fetch_url_request_failure(monkeypatch):
         raise httpx.ConnectError("boom")
 
     _install(monkeypatch, _raise)
-    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com"))
+    data = json.loads(
+        _call(with_local_ctx(FetchUrl), url="https://example.com")
+    )
     assert data["ok"] is False
     assert data["error"]["type"] == "request_failed"
 
@@ -169,12 +217,18 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
         return _resp("<html></html>")
 
     _install(monkeypatch, _get)
-    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura,
+        "extract",
+        lambda *a, **k: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    )
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = CallableTool(FetchUrl(state=state))
 
-    first = json.loads(_call(tool, url="https://example.com", offset=5, limit=10))
+    first = json.loads(
+        _call(tool, url="https://example.com", offset=5, limit=10)
+    )
     assert first["ok"] is True
     assert first["content"] == "FGHIJKLMNO"
     assert first["total_chars"] == 26
@@ -182,9 +236,14 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
     assert first["has_more"] is True
     assert first["next_offset"] == 15
     assert first["cache_hit"] is False
-    assert state.shared.fetch_url_cache["https://example.com"]["content"] == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    assert (
+        state.shared.fetch_url_cache["https://example.com"]["content"]
+        == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    )
 
-    second = json.loads(_call(tool, url="https://example.com", offset=20, limit=10))
+    second = json.loads(
+        _call(tool, url="https://example.com", offset=20, limit=10)
+    )
     assert second["ok"] is True
     assert second["content"] == "UVWXYZ"
     assert second["returned_chars"] == 6
@@ -195,14 +254,18 @@ def test_fetch_url_caches_full_content_and_slices(monkeypatch):
 
 
 def test_fetch_url_offset_beyond_end_returns_empty_from_cache(monkeypatch):
-    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "short")
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura, "extract", lambda *a, **k: "short"
+    )
     _install(monkeypatch, _resp("<html></html>"))
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = CallableTool(FetchUrl(state=state))
     _ = json.loads(_call(tool, url="https://example.com", offset=0, limit=5))
 
-    data = json.loads(_call(tool, url="https://example.com", offset=99, limit=5))
+    data = json.loads(
+        _call(tool, url="https://example.com", offset=99, limit=5)
+    )
     assert data["ok"] is True
     assert data["content"] == ""
     assert data["returned_chars"] == 0
@@ -215,7 +278,12 @@ def test_fetch_url_does_not_cache_binary(monkeypatch):
     _install(monkeypatch, _resp("", content_type="application/pdf"))
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
-    data = json.loads(_call(CallableTool(FetchUrl(state=state)), url="https://example.com/a.pdf"))
+    data = json.loads(
+        _call(
+            CallableTool(FetchUrl(state=state)),
+            url="https://example.com/a.pdf",
+        )
+    )
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert state.shared.fetch_url_cache == {}
@@ -231,7 +299,9 @@ def test_fetch_url_marks_unknown_binary_bytes_as_binary(monkeypatch):
             content=binary_payload,
         ),
     )
-    data = json.loads(_call(with_local_ctx(FetchUrl), url="https://example.com/blob"))
+    data = json.loads(
+        _call(with_local_ctx(FetchUrl), url="https://example.com/blob")
+    )
     assert data["ok"] is True
     assert data["is_binary"] is True
     assert data["result_type"] == "binary"
@@ -247,8 +317,12 @@ def test_simple_fetch_url_extracts_html_and_supports_pagination(monkeypatch):
     )
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = CallableTool(SimpleFetchUrl(state=state))
-    first = json.loads(_call(tool, url="https://example.com", offset=0, limit=7))
-    second = json.loads(_call(tool, url="https://example.com", offset=7, limit=50))
+    first = json.loads(
+        _call(tool, url="https://example.com", offset=0, limit=7)
+    )
+    second = json.loads(
+        _call(tool, url="https://example.com", offset=7, limit=50)
+    )
 
     assert first["ok"] is True
     assert first["result_type"] == "content"
@@ -271,7 +345,10 @@ def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
 
     data = json.loads(
         _call(
-            with_local_ctx(SimpleFetchUrl, config_dict=_url_policy_config(url_blacklist=["*.internal"])),
+            with_local_ctx(
+                SimpleFetchUrl,
+                config_dict=_url_policy_config(url_blacklist=["*.internal"]),
+            ),
             url="https://api.internal/path",
         )
     )
@@ -295,7 +372,9 @@ def test_simple_fetch_url_handles_lists_headings_pre_and_tables(monkeypatch):
         monkeypatch,
         _resp(html, content_type="text/html"),
     )
-    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com"))
+    data = json.loads(
+        _call(with_local_ctx(SimpleFetchUrl), url="https://example.com")
+    )
     text = data["content"]
     assert data["ok"] is True
     assert "## Title" in text
@@ -314,7 +393,9 @@ def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
             content=html.encode("utf-8"),
         ),
     )
-    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com"))
+    data = json.loads(
+        _call(with_local_ctx(SimpleFetchUrl), url="https://example.com")
+    )
     assert data["ok"] is True
     assert data["is_binary"] is False
     assert data["result_type"] == "content"
@@ -331,11 +412,21 @@ def test_simple_fetch_url_does_not_mark_utf8_html_as_binary(monkeypatch):
 
 def test_fetch_url_passes_proxy_to_client(monkeypatch):
     seen: dict = {}
-    _install(monkeypatch, _resp("<html><body><p>hello via proxy</p></body></html>"), seen)
-    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "hello via proxy")
+    _install(
+        monkeypatch,
+        _resp("<html><body><p>hello via proxy</p></body></html>"),
+        seen,
+    )
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura,
+        "extract",
+        lambda *a, **k: "hello via proxy",
+    )
 
     proxy = "socks5h://127.0.0.1:1080"
-    data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=proxy))
+    data = json.loads(
+        with_local_ctx(FetchUrl)(url="https://example.com", proxy=proxy)
+    )
 
     assert data["ok"] is True
     assert data["content"] == "hello via proxy"
@@ -346,10 +437,14 @@ def test_fetch_url_passes_proxy_to_client(monkeypatch):
 def test_fetch_url_empty_proxy_is_direct(monkeypatch):
     seen: dict = {}
     _install(monkeypatch, _resp("<html></html>"), seen)
-    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: "ok")
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura, "extract", lambda *a, **k: "ok"
+    )
 
     for value in ("", "   "):
-        data = json.loads(with_local_ctx(FetchUrl)(url="https://example.com", proxy=value))
+        data = json.loads(
+            with_local_ctx(FetchUrl)(url="https://example.com", proxy=value)
+        )
         assert data["ok"] is True
     for call in seen.get("calls", []):
         assert not call.get("proxies"), call
@@ -363,13 +458,19 @@ def test_fetch_url_cache_keyed_by_proxy(monkeypatch):
         return _resp("<html></html>")
 
     _install(monkeypatch, _handler)
-    monkeypatch.setattr(fetch_url_module.trafilatura, "extract", lambda *a, **k: f"body-{calls['n']}")
+    monkeypatch.setattr(
+        fetch_url_module.trafilatura,
+        "extract",
+        lambda *a, **k: f"body-{calls['n']}",
+    )
 
     state = SimpleNamespace(shared=SimpleNamespace(fetch_url_cache={}))
     tool = with_local_ctx(FetchUrl, state=state)
 
     first = json.loads(tool(url="https://example.com"))
-    second = json.loads(tool(url="https://example.com", proxy="socks5h://127.0.0.1:1080"))
+    second = json.loads(
+        tool(url="https://example.com", proxy="socks5h://127.0.0.1:1080")
+    )
 
     # Разный прокси — разный ключ кэша: ответ через прокси может отличаться,
     # и отдавать прямой ответ на запрос через прокси нельзя.
@@ -391,7 +492,13 @@ def test_simple_fetch_url_passes_proxy_to_the_client(monkeypatch):
     _install(monkeypatch, _resp("<html>hi</html>"), seen)
 
     proxy = "socks5h://127.0.0.1:1080"
-    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy=proxy))
+    data = json.loads(
+        _call(
+            with_local_ctx(SimpleFetchUrl),
+            url="https://example.com",
+            proxy=proxy,
+        )
+    )
 
     assert data["ok"] is True, data
     proxies = [c.get("proxies") for c in seen.get("calls", [])]
@@ -403,7 +510,13 @@ def test_simple_fetch_url_proxy_validation(monkeypatch):
     seen: dict = {}
     _install(monkeypatch, _resp("<html>hi</html>"), seen)
 
-    data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy="ftp://x"))
+    data = json.loads(
+        _call(
+            with_local_ctx(SimpleFetchUrl),
+            url="https://example.com",
+            proxy="ftp://x",
+        )
+    )
 
     assert data["ok"] is False, data
     assert data["error"]["field"] == "proxy", data
@@ -416,7 +529,13 @@ def test_simple_fetch_url_empty_proxy_is_direct(monkeypatch):
     _install(monkeypatch, _resp("<html>hi</html>"), seen)
 
     for value in ("", "   "):
-        data = json.loads(_call(with_local_ctx(SimpleFetchUrl), url="https://example.com", proxy=value))
+        data = json.loads(
+            _call(
+                with_local_ctx(SimpleFetchUrl),
+                url="https://example.com",
+                proxy=value,
+            )
+        )
         assert data["ok"] is True, data
     for call in seen.get("calls", []):
         assert not call.get("proxies"), call

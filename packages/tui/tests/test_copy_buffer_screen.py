@@ -34,13 +34,19 @@ async def test_copy_buffer_screen_chrome(tmp_path):
     from gc_tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
     from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore()
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="TCHROME"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="TCHROME")
+        )
         await pilot.pause()
         scr = pilot.app.screen
-        assert "Буфер сессии" in str(scr.query_one("#header-left", Static).render())
+        assert "Буфер сессии" in str(
+            scr.query_one("#header-left", Static).render()
+        )
         assert scr.query_one("#footer", Static) is not None
         ta = scr.query_one("#buffer_text", BufferTextArea)
         assert ta.styles.border_top[0] == "solid"  # не дефолт Textual (tall/…)
@@ -59,10 +65,14 @@ async def test_copy_buffer_screen_loads_existing(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый буфер")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T2"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T2")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text")
         assert ta.text == "старый буфер"
@@ -73,7 +83,9 @@ async def test_copy_buffer_screen_no_store_opens_empty(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(CopyBufferScreen(store=None, task_id=None))
         await pilot.pause()
@@ -86,10 +98,14 @@ async def test_esc_no_change_no_write(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="не меняли")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T3"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T3")
+        )
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
@@ -101,10 +117,14 @@ async def test_esc_with_change_saves(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T4"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T4")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text")
         ta.text = "новый текст"
@@ -119,10 +139,14 @@ async def test_esc_empty_clears_buffer(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="было")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T5"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T5")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text")
         ta.text = ""
@@ -137,10 +161,14 @@ async def test_save_clamps_to_max(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
     from gc_tui.services.copy_buffer import COPY_BUFFER_MAX
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T6"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T6")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text")
         ta.text = "x" * (COPY_BUFFER_MAX + 500)
@@ -157,11 +185,17 @@ async def test_paste_os_first(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
-        monkeypatch.setattr("gc_tui.services.os_ops.read_clipboard", lambda: "из-ОС")
+        monkeypatch.setattr(
+            "gc_tui.services.os_ops.read_clipboard", lambda: "из-ОС"
+        )
         store = _MockStore(existing_buffer="")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T7"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T7")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text")
         ta.action_paste()
@@ -174,11 +208,17 @@ async def test_ctrl_shift_v_binding_pastes(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
-        monkeypatch.setattr("gc_tui.services.os_ops.read_clipboard", lambda: "shift-v")
+        monkeypatch.setattr(
+            "gc_tui.services.os_ops.read_clipboard", lambda: "shift-v"
+        )
         store = _MockStore(existing_buffer="")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T7b"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T7b")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text", BufferTextArea)
         keys = {b.key for b in ta.BINDINGS}
@@ -194,13 +234,19 @@ async def test_paste_falls_back_to_internal(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
-        monkeypatch.setattr("gc_tui.services.os_ops.read_clipboard", lambda: "")
+        monkeypatch.setattr(
+            "gc_tui.services.os_ops.read_clipboard", lambda: ""
+        )
         # app.clipboard — read-only property, читает self._clipboard
         pilot.app._clipboard = "из-TUI"
         store = _MockStore(existing_buffer="")
-        await pilot.app.push_screen(CopyBufferScreen(store=store, task_id="T8"))
+        await pilot.app.push_screen(
+            CopyBufferScreen(store=store, task_id="T8")
+        )
         await pilot.pause()
         ta = pilot.app.screen.query_one("#buffer_text")
         ta.action_paste()

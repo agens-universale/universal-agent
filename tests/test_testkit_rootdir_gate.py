@@ -94,7 +94,10 @@ def _working_copy(tmp_path, name="repo"):
     """
     root = tmp_path / name
     # Маркер рабочей копии — тот самый, по которому её ищет gc_testkit.paths.
-    _write(root / "packages" / "core" / "pyproject.toml", '[project]\nname = "gc-core"\n\n' + _INI)
+    _write(
+        root / "packages" / "core" / "pyproject.toml",
+        '[project]\nname = "gc-core"\n\n' + _INI,
+    )
     _write(root / "pyproject.toml", _INI)
     # Модуль, которого нет ни в репозитории, ни в site-packages: виден, только
     # если бутстрап положил на sys.path packages/*/src ЭТОЙ копии.
@@ -106,7 +109,11 @@ def _working_copy(tmp_path, name="repo"):
     )
     # Чужой проект ВНУТРИ нашего дерева — как вендоренные MCP-серверы.
     _write(root / "external" / "vendor" / "thing-mcp" / "pyproject.toml", _INI)
-    for suite in (root, root / "packages" / "core", root / "external" / "vendor" / "thing-mcp"):
+    for suite in (
+        root,
+        root / "packages" / "core",
+        root / "external" / "vendor" / "thing-mcp",
+    ):
         _write(suite / "tests" / "test_probe.py", _PROBE)
     return root
 
@@ -148,7 +155,9 @@ def _gate(res):
     ],
     ids=["корень репозитория", "packages/<имя>", "вендоренный сервер"],
 )
-def test_bootstrap_follows_the_collected_suite(tmp_path, rel, bootstrap_expected):
+def test_bootstrap_follows_the_collected_suite(
+    tmp_path, rel, bootstrap_expected
+):
     root = _working_copy(tmp_path)
     res = _run(root, rel)
     assert res.returncode == 0, res.stdout + res.stderr
@@ -199,7 +208,11 @@ def test_every_vendored_server_declares_its_own_rootdir():
     manifests = sorted(VENDOR.glob("*/pyproject.toml"))
     assert manifests, f"в {VENDOR} не найдено ни одного манифеста"
 
-    without = [m.parent.name for m in manifests if "[tool.pytest.ini_options]" not in m.read_text(encoding="utf-8")]
+    without = [
+        m.parent.name
+        for m in manifests
+        if "[tool.pytest.ini_options]" not in m.read_text(encoding="utf-8")
+    ]
     assert not without, (
         f"без секции [tool.pytest.ini_options]: {', '.join(without)}. "
         "pytest объявит rootdir корнем монорепозитория, и бутстрап тест-кита "

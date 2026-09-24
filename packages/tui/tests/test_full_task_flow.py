@@ -19,7 +19,16 @@ class _FakeExecutor:
         self.system = system
         self.stopped = False
 
-    async def arun(self, messages, *, thread_id, start_new_thread=False, system=None, verbose=None, **_):
+    async def arun(
+        self,
+        messages,
+        *,
+        thread_id,
+        start_new_thread=False,
+        system=None,
+        verbose=None,
+        **_,
+    ):
         data = Path(self.threads_dir) / f"data_{self.system}_{thread_id}.jsonl"
         meta = Path(self.threads_dir) / f"meta_{self.system}_{thread_id}.json"
         lines: list[str] = []
@@ -29,7 +38,11 @@ class _FakeExecutor:
                     {
                         "type": "message",
                         "seq": i,
-                        "payload": {"id": f"u{i}", "role": "user", "content": msg},
+                        "payload": {
+                            "id": f"u{i}",
+                            "role": "user",
+                            "content": msg,
+                        },
                     }
                 )
             )
@@ -40,7 +53,11 @@ class _FakeExecutor:
                 {
                     "type": "message",
                     "seq": len(messages) + 1,
-                    "payload": {"id": "a1", "role": "assistant", "content": "это TUI проект на Textual"},
+                    "payload": {
+                        "id": "a1",
+                        "role": "assistant",
+                        "content": "это TUI проект на Textual",
+                    },
                 }
             )
         )
@@ -89,4 +106,6 @@ async def test_task_flow_renders_agent_output(tmp_path):
     # Главное: agent-ответ существует ТОЛЬКО в data_*.jsonl,
     # в UI попадает только через polling. Если attach_active_task не вызван —
     # _poll_active выходит сразу и assistant-сообщение не появится.
-    assert "это TUI проект на Textual" in text, f"polling did not pick up agent message; trace=\n{text}"
+    assert "это TUI проект на Textual" in text, (
+        f"polling did not pick up agent message; trace=\n{text}"
+    )

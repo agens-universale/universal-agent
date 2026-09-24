@@ -15,7 +15,11 @@ import json
 
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.save_base64_file import SaveBase64File
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
+from gc_testkit.harbor_fakes import (
+    FakeBackend,
+    bind_os_backend,
+    strip_path_fields,
+)
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -113,7 +117,9 @@ def test_invalid_argument_path_empty_envelope_matches_base(tmp_path):
     fake = FakeBackend()
     harbor_env = json.loads(_harbor_with(fake)(path="", data=TEXT_B64))
 
-    assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path")
+    assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+        base_env, "path"
+    )
     assert harbor_env["ok"] is False
 
 

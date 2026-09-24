@@ -7,17 +7,23 @@ from gc_core.tools.project.project_memory import backup_path
 def test_write_mirrors_to_backup(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
+    monkeypatch.setattr(
+        env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc")
+    )
     monkeypatch.chdir(tmp_path)
     main = tmp_path / ".gc" / "GIGACODE_memory.md"
     storage.write(main, "FACTS", backup=backup_path(cwd=str(tmp_path)))
-    assert backup_path(cwd=str(tmp_path)).read_text(encoding="utf-8") == "FACTS"
+    assert (
+        backup_path(cwd=str(tmp_path)).read_text(encoding="utf-8") == "FACTS"
+    )
 
 
 def test_read_restores_from_backup_when_main_deleted(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
+    monkeypatch.setattr(
+        env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc")
+    )
     monkeypatch.chdir(tmp_path)
     main = tmp_path / ".gc" / "GIGACODE_memory.md"
     bkp = backup_path(cwd=str(tmp_path))
@@ -31,7 +37,9 @@ def test_read_restores_from_backup_when_main_deleted(tmp_path, monkeypatch):
 def test_append_mirrors_to_backup(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
+    monkeypatch.setattr(
+        env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc")
+    )
     monkeypatch.chdir(tmp_path)
     main = tmp_path / ".gc" / "GIGACODE_memory.md"
     main.parent.mkdir(parents=True, exist_ok=True)
@@ -53,7 +61,9 @@ def test_no_backup_arg_leaves_existing_callers_unaffected(tmp_path):
 def test_backup_path_shape(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc"))
+    monkeypatch.setattr(
+        env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc")
+    )
     monkeypatch.chdir(tmp_path)
     bkp = backup_path(cwd=str(tmp_path))
     assert bkp.name == "GIGACODE_memory_backup.md"

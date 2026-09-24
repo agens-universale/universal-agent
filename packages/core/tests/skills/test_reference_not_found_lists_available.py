@@ -9,16 +9,25 @@ def _reg_with_refs(tmp_path):
     system = tmp_path / "system"
     skill = system / "qa-req-validation"
     (skill / "references").mkdir(parents=True)
-    (skill / "SKILL.md").write_text("---\nname: qa-req-validation\ndescription: d\n---\nbody\n", encoding="utf-8")
-    (skill / "references" / "quality_criteria.md").write_text("qc", encoding="utf-8")
-    (skill / "references" / "report_templates.md").write_text("rt", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: qa-req-validation\ndescription: d\n---\nbody\n",
+        encoding="utf-8",
+    )
+    (skill / "references" / "quality_criteria.md").write_text(
+        "qc", encoding="utf-8"
+    )
+    (skill / "references" / "report_templates.md").write_text(
+        "rt", encoding="utf-8"
+    )
     return SkillsRegistry(system_root=str(system))
 
 
 async def test_load_reference_miss_lists_available(tmp_path):
     reg = _reg_with_refs(tmp_path)
     with pytest.raises(KeyError) as ei:
-        await reg.load_reference("qa-req-validation", "manual")  # выдуманный slug
+        await reg.load_reference(
+            "qa-req-validation", "manual"
+        )  # выдуманный slug
     msg = str(ei.value)
     assert "quality_criteria" in msg
     assert "report_templates" in msg

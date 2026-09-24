@@ -93,7 +93,11 @@ def _field_entries(params: Dict[str, Any]) -> "tuple[list[str], list[str]]":
 def _join_field_lines(all_field_lines: list[str]) -> str:
     # Add comma after each field entry (non-comment lines), except the last one
     body_lines = []
-    last_field_idx = max(i for i, line in enumerate(all_field_lines) if not line.strip().startswith("//"))
+    last_field_idx = max(
+        i
+        for i, line in enumerate(all_field_lines)
+        if not line.strip().startswith("//")
+    )
     for i, line in enumerate(all_field_lines):
         is_comment = line.strip().startswith("//")
         is_last_field = not is_comment and i == last_field_idx
@@ -103,7 +107,11 @@ def _join_field_lines(all_field_lines: list[str]) -> str:
 
 def _correct_call_format_body(expected_schema: Any) -> "str | None":
     """Тело JSON-блока 'Correct call format' или None, если полей нет."""
-    params = expected_schema.get("parameters", {}) if isinstance(expected_schema, dict) else {}
+    params = (
+        expected_schema.get("parameters", {})
+        if isinstance(expected_schema, dict)
+        else {}
+    )
     required_entries, optional_entries = _field_entries(params)
     if not required_entries and not optional_entries:
         return None
@@ -171,7 +179,9 @@ class WrongFunctionArgumentsException(Exception):
         if self.expected_schema:
             body = _correct_call_format_body(self.expected_schema)
             if body is not None:
-                feedback += f"Correct call format:\n```json\n{{\n{body}\n}}\n```\n\n"
+                feedback += (
+                    f"Correct call format:\n```json\n{{\n{body}\n}}\n```\n\n"
+                )
 
         feedback += "Fix the arguments and retry the tool call."
         return feedback
@@ -238,7 +248,9 @@ def _decode_double_encoded(value: str, subschema: Dict[str, Any]) -> Any:
     return decoded if Draft7Validator(subschema).is_valid(decoded) else None
 
 
-def unknown_property_names(parsed_args: Dict[str, Any], params_schema: Dict[str, Any]) -> list[str]:
+def unknown_property_names(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> list[str]:
     """Ключи верхнего уровня, которых нет в ``properties``.
 
     ``additionalProperties`` — инструкция модели в схеме, не рантайм-политика:
@@ -254,11 +266,15 @@ def format_dropped_arguments_note(names: list[str]) -> str:
     """Информационная строка для вывода тула: какие поля сняты и почему."""
     listed = ", ".join(names)
     if len(names) == 1:
-        return f"Field {listed} was dropped because it is not in the tool schema."
+        return (
+            f"Field {listed} was dropped because it is not in the tool schema."
+        )
     return f"Fields {listed} were dropped because they are not in the tool schema."
 
 
-def annotate_output_with_dropped_arguments(output: str, dropped: list[str]) -> str:
+def annotate_output_with_dropped_arguments(
+    output: str, dropped: list[str]
+) -> str:
     """Вставить заметку об отброшенных полях в вывод тула.
 
     JSON-объект получает поле ``dropped_arguments`` первым, чтобы заметка
@@ -274,7 +290,9 @@ def annotate_output_with_dropped_arguments(output: str, dropped: list[str]) -> s
         except json.JSONDecodeError:
             data = None
         if isinstance(data, dict) and "dropped_arguments" not in data:
-            return json.dumps({"dropped_arguments": note, **data}, ensure_ascii=False)
+            return json.dumps(
+                {"dropped_arguments": note, **data}, ensure_ascii=False
+            )
     if not output:
         return note
     return f"{note}\n{output}"
@@ -296,7 +314,9 @@ def _drop_unknown_properties(
     properties = params_schema.get("properties") or {}
     if not isinstance(properties, dict):
         properties = {}
-    stripped = {key: value for key, value in parsed_args.items() if key in properties}
+    stripped = {
+        key: value for key, value in parsed_args.items() if key in properties
+    }
     return stripped, unknown
 
 
@@ -322,11 +342,17 @@ def _drop_empty_optional_keys(
     return coerced, coerced != parsed_args
 
 
-def _numeric_target_schema(subschema: Dict[str, Any]) -> "tuple[str, Dict[str, Any]] | None":
+def _numeric_target_schema(
+    subschema: Dict[str, Any],
+) -> "tuple[str, Dict[str, Any]] | None":
     """(ожидаемый числовой type, схема для валидации) или None, если поле не числовое."""
     expected = subschema.get("type")
     if expected is not None:
-        return (expected, subschema) if expected in ("integer", "number") else None
+        return (
+            (expected, subschema)
+            if expected in ("integer", "number")
+            else None
+        )
     # anyOf/oneOf without a top-level type (e.g. `occurrence` in
     # fs_search_and_replace / fs_apply_file_edits): locate a numeric branch
     # so numeric strings are coerced like plain integer/number fields.
@@ -334,7 +360,10 @@ def _numeric_target_schema(subschema: Dict[str, Any]) -> "tuple[str, Dict[str, A
     if not isinstance(composite, list):
         return None
     for branch in composite:
-        if isinstance(branch, dict) and branch.get("type") in ("integer", "number"):
+        if isinstance(branch, dict) and branch.get("type") in (
+            "integer",
+            "number",
+        ):
             return branch["type"], branch
     return None
 
@@ -354,7 +383,9 @@ def _parse_numeric_string(value: str, expected: str) -> Any:
     return num
 
 
-def _coerce_numeric_strings(parsed_args: Dict[str, Any], params_schema: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+def _coerce_numeric_strings(
+    parsed_args: Dict[str, Any], params_schema: Dict[str, Any]
+) -> tuple[Dict[str, Any], bool]:
     """Recovery-проход: строка там, где схема ждёт число, и парс однозначен → число.
 
     Консервативно: только для полей с type integer/number; дробное значение в
@@ -382,7 +413,9 @@ def _coerce_numeric_strings(parsed_args: Dict[str, Any], params_schema: Dict[str
     return coerced, changed
 
 
-def _parse_arguments_object(arguments: Any, reject, *, allow_empty: bool) -> Any:
+def _parse_arguments_object(
+    arguments: Any, reject, *, allow_empty: bool
+) -> Any:
     """dict из аргументов (dict / JSON-строка); reject(message=…) бросает при пустоте или битом JSON."""
     if isinstance(arguments, dict):
         return arguments
@@ -390,7 +423,9 @@ def _parse_arguments_object(arguments: Any, reject, *, allow_empty: bool) -> Any
     if arg_str == "":
         if allow_empty:
             return {}
-        reject(message="аргументы инструмента пустые, ожидается валидный JSON-объект")
+        reject(
+            message="аргументы инструмента пустые, ожидается валидный JSON-объект"
+        )
     try:
         return json.loads(arg_str)
     except Exception as e:
@@ -398,7 +433,10 @@ def _parse_arguments_object(arguments: Any, reject, *, allow_empty: bool) -> Any
 
 
 def _recover_arguments(
-    tool_name: str, parsed_args: Dict[str, Any], params_schema: Dict[str, Any], validation_schema: Any
+    tool_name: str,
+    parsed_args: Dict[str, Any],
+    params_schema: Dict[str, Any],
+    validation_schema: Any,
 ) -> "Dict[str, Any] | None":
     """Коэрсеры по очереди; первый вариант, проходящий валидацию, либо None."""
     candidate = parsed_args
@@ -430,7 +468,9 @@ def parse_and_validate_tool_arguments(
     tool_fabric: Type[Any] | None = None,
     dropped_unknown: list[str] | None = None,
 ) -> Dict[str, Any]:
-    params_schema = tool_spec.get("parameters", {}) if isinstance(tool_spec, dict) else {}
+    params_schema = (
+        tool_spec.get("parameters", {}) if isinstance(tool_spec, dict) else {}
+    )
     params_schema = params_schema if isinstance(params_schema, dict) else {}
     properties = params_schema.get("properties", {}) or {}
     required = params_schema.get("required", []) or []
@@ -445,7 +485,9 @@ def parse_and_validate_tool_arguments(
         parsed_args=None,
     )
     parsed_args = _parse_arguments_object(
-        arguments, reject, allow_empty=allow_empty_for_empty_schema and is_empty_schema
+        arguments,
+        reject,
+        allow_empty=allow_empty_for_empty_schema and is_empty_schema,
     )
     if not isinstance(parsed_args, dict):
         _raise_wrong_function_arguments(
@@ -459,13 +501,17 @@ def parse_and_validate_tool_arguments(
 
     # Лишние ключи корня снимаем до валидации, иначе схема без
     # additionalProperties: false их пропустит и они доедут до тула.
-    parsed_args, dropped_names = _drop_unknown_properties(parsed_args, params_schema)
+    parsed_args, dropped_names = _drop_unknown_properties(
+        parsed_args, params_schema
+    )
 
     validation_schema = parameters_schema_for_local_validation(params_schema)
     try:
         _validate_tool_arguments(tool_name, validation_schema, parsed_args)
     except Exception as e:
-        recovered_args = _recover_arguments(tool_name, parsed_args, params_schema, validation_schema)
+        recovered_args = _recover_arguments(
+            tool_name, parsed_args, params_schema, validation_schema
+        )
         if recovered_args is not None:
             parsed_args = recovered_args
         else:

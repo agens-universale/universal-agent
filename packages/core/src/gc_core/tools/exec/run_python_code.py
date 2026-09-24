@@ -3,12 +3,21 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.backends.async_protocol import aexec_port
-from gc_core.config_modules.agent import exec_output_preview_edge_chars_from_config_dict, exec_timeout_from_config_dict
+from gc_core.config_modules.agent import (
+    exec_output_preview_edge_chars_from_config_dict,
+    exec_timeout_from_config_dict,
+)
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.security.command_guard import enforce_command_guard
-from gc_core.security.command_moderation import effective_command_cwd, moderate_command_execution
+from gc_core.security.command_moderation import (
+    effective_command_cwd,
+    moderate_command_execution,
+)
 from gc_core.security.path_policy import resolve_tool_context
-from gc_core.tools.exec.exec_envelope import as_captured_stream, build_exec_envelope
+from gc_core.tools.exec.exec_envelope import (
+    as_captured_stream,
+    build_exec_envelope,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
@@ -24,7 +33,9 @@ def _dedupe_abs_paths_ordered(paths: list[str]) -> list[str]:
     return ordered
 
 
-def _cwd_invalid_error(cwd_used: Optional[str], allowed_write_paths: list) -> dict:
+def _cwd_invalid_error(
+    cwd_used: Optional[str], allowed_write_paths: list
+) -> dict:
     return {
         "type": "cwd_invalid",
         "message": f"Working directory is not an existing directory: {cwd_used}",
@@ -37,7 +48,9 @@ def _cwd_invalid_error(cwd_used: Optional[str], allowed_write_paths: list) -> di
     }
 
 
-def _parse_env_vars(env_vars) -> "tuple[Optional[Dict[str, str]], Optional[dict]]":
+def _parse_env_vars(
+    env_vars,
+) -> "tuple[Optional[Dict[str, str]], Optional[dict]]":
     """Список {'name','value'} → dict (None, если не задан); (None, error) при невалидной записи."""
     if env_vars is None:
         return None, None
@@ -57,10 +70,16 @@ def _parse_env_vars(env_vars) -> "tuple[Optional[Dict[str, str]], Optional[dict]
             }
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
-            return None, {"type": "invalid_argument", "field": f"env_vars[{idx}].name"}
+            return None, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}].name",
+            }
         value = item.get("value")
         if not isinstance(value, str):
-            return None, {"type": "invalid_argument", "field": f"env_vars[{idx}].value"}
+            return None, {
+                "type": "invalid_argument",
+                "field": f"env_vars[{idx}].value",
+            }
         parsed[name.strip()] = value
     return parsed, None
 
@@ -165,7 +184,9 @@ Usage:
             timed_out=timed_out,
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
-            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(self._config_dict),
+            preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
+                self._config_dict
+            ),
             error=error,
         )
 
@@ -229,25 +250,40 @@ Usage:
             error={"type": "execution_failed", "message": str(exc)},
         )
 
-    async def _resolve_cwd(self, cwd: Optional[str], kwargs: dict) -> "tuple[Optional[str], Optional[dict]]":
+    async def _resolve_cwd(
+        self, cwd: Optional[str], kwargs: dict
+    ) -> "tuple[Optional[str], Optional[dict]]":
         """Рабочий каталог запуска или ошибка cwd_invalid (с подсказкой, куда можно писать)."""
         if self._backend.is_sandbox:
             cwd_used = cwd  # None → container default workdir
-            if cwd_used is not None and not await self._backend.is_dir(cwd_used):
+            if cwd_used is not None and not await self._backend.is_dir(
+                cwd_used
+            ):
                 return cwd_used, _cwd_invalid_error(cwd_used, [])
             return cwd_used, None
         security_context = resolve_tool_context(self, **kwargs)
-        cwd_used = effective_command_cwd(EXEC_PYTHON_NAME, {"cwd": cwd}, security_context)
+        cwd_used = effective_command_cwd(
+            EXEC_PYTHON_NAME, {"cwd": cwd}, security_context
+        )
         if Path(cwd_used).is_dir():
             return cwd_used, None
         launch_abs = os.path.abspath(str(security_context.launch_root))
         candidate_roots = _dedupe_abs_paths_ordered(
             [
                 launch_abs,
-                *[os.path.abspath(str(extra)) for extra in (security_context.write_guard.extra_paths or [])],
+                *[
+                    os.path.abspath(str(extra))
+                    for extra in (
+                        security_context.write_guard.extra_paths or []
+                    )
+                ],
             ]
         )
-        allowed_write_paths = [p for p in candidate_roots if Path(p).is_dir() and directory_allows_probe_write(p)]
+        allowed_write_paths = [
+            p
+            for p in candidate_roots
+            if Path(p).is_dir() and directory_allows_probe_write(p)
+        ]
         return cwd_used, _cwd_invalid_error(cwd_used, allowed_write_paths)
 
     async def _plan(
@@ -273,9 +309,19 @@ Usage:
         if not isinstance(code, str):
             return reject({"type": "invalid_argument", "field": "code"})
         if not code.strip():
-            return reject({"type": "invalid_argument", "field": "code", "message": "Code is empty"})
+            return reject(
+                {
+                    "type": "invalid_argument",
+                    "field": "code",
+                    "message": "Code is empty",
+                }
+            )
 
-        effective_timeout = timeout if timeout is not None else exec_timeout_from_config_dict(self._config_dict)
+        effective_timeout = (
+            timeout
+            if timeout is not None
+            else exec_timeout_from_config_dict(self._config_dict)
+        )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
             return reject({"type": "invalid_argument", "field": "timeout"})
 
@@ -304,8 +350,12 @@ Usage:
         # getattr, а не атрибут: backend вправе вернуть свой результат-подобный
         # объект без структуры потока — тогда падаем обратно на плоский текст,
         # а не роняем тулу AttributeError уже после исполнения команды.
-        stdout_stream = as_captured_stream(getattr(res, "stdout_stream", None) or getattr(res, "stdout", ""))
-        stderr_stream = as_captured_stream(getattr(res, "stderr_stream", None) or getattr(res, "stderr", ""))
+        stdout_stream = as_captured_stream(
+            getattr(res, "stdout_stream", None) or getattr(res, "stdout", "")
+        )
+        stderr_stream = as_captured_stream(
+            getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
+        )
 
         if res.timed_out:
             return self._result(
@@ -314,12 +364,22 @@ Usage:
                 timed_out=True,
                 stdout=stdout_stream,
                 stderr=stderr_stream,
-                error={"type": "timeout", "message": f"Execution timed out after {effective_timeout} seconds"},
+                error={
+                    "type": "timeout",
+                    "message": f"Execution timed out after {effective_timeout} seconds",
+                },
             )
 
         return_code = res.return_code
         ok = return_code == 0
-        error = None if ok else {"type": "non_zero_exit", "message": f"Process exited with status {return_code}"}
+        error = (
+            None
+            if ok
+            else {
+                "type": "non_zero_exit",
+                "message": f"Process exited with status {return_code}",
+            }
+        )
         return self._result(
             ok=ok,
             return_code=return_code,

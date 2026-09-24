@@ -51,7 +51,9 @@ def _no_threads(monkeypatch) -> list:
     return spawned
 
 
-async def test_discovery_spawns_no_thread_for_an_agent_runtime_server(monkeypatch):
+async def test_discovery_spawns_no_thread_for_an_agent_runtime_server(
+    monkeypatch,
+):
     """ГЛАВНОЕ: наличие бэкенда больше не заставляет заводить поток."""
 
     async def _alist(self, *, timeout):
@@ -60,7 +62,9 @@ async def test_discovery_spawns_no_thread_for_an_agent_runtime_server(monkeypatc
     monkeypatch.setattr(AgentRuntimeClient, "alist_tools", _alist)
     spawned = _no_threads(monkeypatch)
 
-    tools, status = await reg._adiscover_one("srv", dict(STREAM_CFG), timeout=5, os_backend=_Sandbox())
+    tools, status = await reg._adiscover_one(
+        "srv", dict(STREAM_CFG), timeout=5, os_backend=_Sandbox()
+    )
 
     assert status["status"] == "connected", status
     assert [t["name"] for t in tools] == ["do_x"], tools
@@ -77,7 +81,13 @@ async def test_sandbox_server_still_goes_through_the_backend(monkeypatch):
     seen: list = []
 
     def _resolve(server_name, server_cfg, *, os_backend=None):
-        seen.append(type(resolve_mcp_client(server_name, server_cfg, os_backend=os_backend)).__name__)
+        seen.append(
+            type(
+                resolve_mcp_client(
+                    server_name, server_cfg, os_backend=os_backend
+                )
+            ).__name__
+        )
 
         class _Stub:
             async def alist_tools(self, *, timeout):
@@ -85,12 +95,16 @@ async def test_sandbox_server_still_goes_through_the_backend(monkeypatch):
 
         return _Stub()
 
-    monkeypatch.setitem(reg._adiscover_one.__globals__, "resolve_mcp_client", _resolve)
+    monkeypatch.setitem(
+        reg._adiscover_one.__globals__, "resolve_mcp_client", _resolve
+    )
     cfg = dict(STREAM_CFG, execute_on="os_backend")
 
     await reg._adiscover_one("srv", cfg, timeout=5, os_backend=_Sandbox())
 
-    assert seen == ["OsBackendStatelessClient"], f"сервер из песочницы поехал не тем клиентом: {seen}"
+    assert seen == ["OsBackendStatelessClient"], (
+        f"сервер из песочницы поехал не тем клиентом: {seen}"
+    )
 
 
 def test_the_locus_rule_lives_in_one_place():
@@ -104,8 +118,14 @@ def test_the_locus_rule_lives_in_one_place():
         ({"transport": "http", "url": "u"}, _Local()),
         ({"transport": "http", "url": "u"}, _Sandbox()),
         ({"transport": "http", "url": "u", "execute_on": "os_backend"}, None),
-        ({"transport": "http", "url": "u", "execute_on": "os_backend"}, _Local()),
-        ({"transport": "http", "url": "u", "execute_on": "os_backend"}, _Sandbox()),
+        (
+            {"transport": "http", "url": "u", "execute_on": "os_backend"},
+            _Local(),
+        ),
+        (
+            {"transport": "http", "url": "u", "execute_on": "os_backend"},
+            _Sandbox(),
+        ),
     ]
     for cfg, backend in cases:
         predicate = runs_in_agent_runtime(cfg, os_backend=backend)
@@ -128,9 +148,12 @@ def test_discovery_has_exactly_one_form():
     names = {
         n.name
         for n in ast.walk(tree)
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and "discover_one" in n.name
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and "discover_one" in n.name
     }
-    assert names == {"_adiscover_one"}, f"формы дискавери размножились: {names}"
+    assert names == {"_adiscover_one"}, (
+        f"формы дискавери размножились: {names}"
+    )
 
 
 async def test_loop_stays_responsive_during_discovery(monkeypatch):
@@ -152,7 +175,9 @@ async def test_loop_stays_responsive_during_discovery(monkeypatch):
 
     beat = asyncio.create_task(_heartbeat())
     try:
-        await reg._adiscover_one("srv", dict(STREAM_CFG), timeout=5, os_backend=_Sandbox())
+        await reg._adiscover_one(
+            "srv", dict(STREAM_CFG), timeout=5, os_backend=_Sandbox()
+        )
     finally:
         beat.cancel()
 

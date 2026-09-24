@@ -20,8 +20,17 @@ from typing import Any, Callable
 
 from gc_core.security.confirm_port import request_confirm
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
-from gc_core.security.path_policy import _extract_named_value, _tool_name, audit_policy_decision, resolve_tool_context
-from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
+from gc_core.security.path_policy import (
+    _extract_named_value,
+    _tool_name,
+    audit_policy_decision,
+    resolve_tool_context,
+)
+from gc_core.security.protected_paths import (
+    classify_path,
+    protected_paths,
+    protection_enabled,
+)
 
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
 
@@ -136,7 +145,9 @@ def expand_path_placeholders(raw: str, launch_root: str) -> str:
         return os.path.realpath(absolute)
 
 
-def _is_within(candidate_abs: str, root_abs: str, *, case_insensitive: bool) -> bool:
+def _is_within(
+    candidate_abs: str, root_abs: str, *, case_insensitive: bool
+) -> bool:
     """True если candidate лежит под root (по os.path.commonpath)."""
     a = candidate_abs.casefold() if case_insensitive else candidate_abs
     b = root_abs.casefold() if case_insensitive else root_abs
@@ -148,7 +159,10 @@ def _is_within(candidate_abs: str, root_abs: str, *, case_insensitive: bool) -> 
 
 
 def _allow_by_default_wildcard(allowed_read_roots: list[str]) -> bool:
-    return any(isinstance(r, str) and r.strip().lower() in _GLOB_WILDCARD_MARKERS for r in allowed_read_roots)
+    return any(
+        isinstance(r, str) and r.strip().lower() in _GLOB_WILDCARD_MARKERS
+        for r in allowed_read_roots
+    )
 
 
 def _resolve_candidate(raw_path: str, launch_root: str) -> str:
@@ -178,7 +192,11 @@ def _resolve_candidate(raw_path: str, launch_root: str) -> str:
 
 
 def _in_allow_override(
-    candidate: str, cfg: ReadGuardConfig, extra_allowed_paths, launch_root: str, case_insensitive: bool
+    candidate: str,
+    cfg: ReadGuardConfig,
+    extra_allowed_paths,
+    launch_root: str,
+    case_insensitive: bool,
 ) -> bool:
     # allowed_read_paths override — если путь явно разрешён, пропускаем
     # остальные проверки denied_*. `extra_allowed_paths` — программно добавленные
@@ -187,17 +205,28 @@ def _in_allow_override(
     if extra_allowed_paths:
         cfg_paths.extend(extra_allowed_paths)
     return any(
-        _is_within(candidate, expand_path_placeholders(p, launch_root), case_insensitive=case_insensitive)
+        _is_within(
+            candidate,
+            expand_path_placeholders(p, launch_root),
+            case_insensitive=case_insensitive,
+        )
         for p in cfg_paths
     )
 
 
-def _check_denied_rules(candidate: str, cfg: ReadGuardConfig, launch_root: str, case_insensitive: bool) -> None:
+def _check_denied_rules(
+    candidate: str,
+    cfg: ReadGuardConfig,
+    launch_root: str,
+    case_insensitive: bool,
+) -> None:
     """Шаги 3–5: denied_read_paths, denied_file_patterns, denied_extensions → ReadGuardViolation."""
     # 3. denied_read_paths
     for raw_denied in cfg.denied_read_paths:
         denied_abs = expand_path_placeholders(raw_denied, launch_root)
-        if _is_within(candidate, denied_abs, case_insensitive=case_insensitive):
+        if _is_within(
+            candidate, denied_abs, case_insensitive=case_insensitive
+        ):
             raise ReadGuardViolation(
                 path=candidate,
                 reason=f"path is within denied root: {denied_abs}",
@@ -262,7 +291,9 @@ def check_read_path_allowed(
     #    отрезать, см. шаг 6 — поэтому override применяется ВНУТРИ denied_*.)
     #    `extra_allowed_paths` — программно добавленные exceptions (например,
     #    путь до скиллов из get_skills_registry), не из конфига.
-    if _in_allow_override(candidate, cfg, extra_allowed_paths, launch_root, case_insensitive):
+    if _in_allow_override(
+        candidate, cfg, extra_allowed_paths, launch_root, case_insensitive
+    ):
         return candidate
 
     _check_denied_rules(candidate, cfg, launch_root, case_insensitive)
@@ -274,7 +305,10 @@ def check_read_path_allowed(
 
     roots = cfg.allowed_read_roots or [launch_root]
     roots_abs = [expand_path_placeholders(r, launch_root) for r in roots]
-    if any(_is_within(candidate, r, case_insensitive=case_insensitive) for r in roots_abs):
+    if any(
+        _is_within(candidate, r, case_insensitive=case_insensitive)
+        for r in roots_abs
+    ):
         return candidate
 
     raise ReadGuardViolation(
@@ -324,10 +358,20 @@ def _read_guard_blocked_result(
     return _default_blocked_envelope(_tool_name(func, args), error)
 
 
-def _operational_read_block(func, args, kwargs, path_arg, path_extractor, context, blocked_result_factory):
+def _operational_read_block(
+    func,
+    args,
+    kwargs,
+    path_arg,
+    path_extractor,
+    context,
+    blocked_result_factory,
+):
     """Floor carve-out (Spec B §6): блок чтения operational .gc или None."""
     try:
-        cand = _extract_named_value(func, args, kwargs, path_arg, path_extractor, "path")
+        cand = _extract_named_value(
+            func, args, kwargs, path_arg, path_extractor, "path"
+        )
         ps = protected_paths(cwd=context.launch_root)
     except ValueError:
         return None
@@ -354,7 +398,17 @@ def _operational_read_block(func, args, kwargs, path_arg, path_extractor, contex
     )
 
 
-def _resolve_read_violation(exc, cfg, context, tool_name, candidate_path, func, args, kwargs, blocked_result_factory):
+def _resolve_read_violation(
+    exc,
+    cfg,
+    context,
+    tool_name,
+    candidate_path,
+    func,
+    args,
+    kwargs,
+    blocked_result_factory,
+):
     """Нарушение периметра по режиму: (True, None) — читать можно; (False, blocked) — отказ.
 
     Генератор, как и тело гарда: подтверждение человека в режиме ask идёт
@@ -408,7 +462,9 @@ def _resolve_read_violation(exc, cfg, context, tool_name, candidate_path, func, 
         context,
         tool_name=tool_name,
         decision="blocked",
-        reason_code="policy_deny" if mode == "deny" else "policy_ask_cancelled",
+        reason_code="policy_deny"
+        if mode == "deny"
+        else "policy_ask_cancelled",
         error_type=exc.error.get("type"),
     )
     return False, _read_guard_blocked_result(
@@ -420,7 +476,9 @@ def _resolve_read_violation(exc, cfg, context, tool_name, candidate_path, func, 
     )
 
 
-def _read_guard_flow(func, args, kwargs, path_arg, path_extractor, blocked_result_factory):
+def _read_guard_flow(
+    func, args, kwargs, path_arg, path_extractor, blocked_result_factory
+):
     """Тело декоратора — генератор: `(yield)` — точка вызова самого тула."""
     context = resolve_tool_context(*args, **kwargs)
     config_dict = _config_from_context(context)

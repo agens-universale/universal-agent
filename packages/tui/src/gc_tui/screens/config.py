@@ -11,10 +11,16 @@ from textual.widgets import Input, Static
 
 from gc_tui.palette import DIM, MUTED
 from gc_tui.services.redact import redact_secrets
-from gc_tui.services.yaml_view import safe_yaml_dump, yaml_syntax_renderable, yaml_syntax_widget
+from gc_tui.services.yaml_view import (
+    safe_yaml_dump,
+    yaml_syntax_renderable,
+    yaml_syntax_widget,
+)
 
 _FOOTER = "[Esc] back  [↑↓ / PgUp PgDn] прокрутка"
-_SNAPSHOT_HINT = "снимок на момент запуска · правки применятся после перезапуска"
+_SNAPSHOT_HINT = (
+    "снимок на момент запуска · правки применятся после перезапуска"
+)
 _NO_MATCH = "(нет совпадений)"
 
 
@@ -34,7 +40,11 @@ def _filter_config_by_key(obj, q: str):
             if sub:
                 out[k] = sub  # вложенный совпал → путь
         elif isinstance(v, list):
-            kept = [_filter_config_by_key(it, q) for it in v if isinstance(it, dict)]
+            kept = [
+                _filter_config_by_key(it, q)
+                for it in v
+                if isinstance(it, dict)
+            ]
             kept = [it for it in kept if it]
             if kept:
                 out[k] = kept
@@ -42,7 +52,10 @@ def _filter_config_by_key(obj, q: str):
 
 
 def _paths_block(
-    config: dict, config_path: str | None, project_local: str | None, profile_path: str | None = None
+    config: dict,
+    config_path: str | None,
+    project_local: str | None,
+    profile_path: str | None = None,
 ) -> Text:
     """Строки путей: метка (dim) + значение (ink); '(не задано)' — muted.
     Заголовок блока живёт в border_title панели, не в тексте."""
@@ -162,7 +175,12 @@ class ConfigScreen(Screen):
             + "\n"
             + _SNAPSHOT_HINT
             + "\n"
-            + _paths_block(self._config, self._config_path, self._project_local, self._profile_path).plain
+            + _paths_block(
+                self._config,
+                self._config_path,
+                self._project_local,
+                self._profile_path,
+            ).plain
             + "\n"
             + self._yaml_text()
         )
@@ -170,12 +188,21 @@ class ConfigScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static("config · снимок сессии", id="header-left", markup=False)
+                yield Static(
+                    "config · снимок сессии", id="header-left", markup=False
+                )
             with VerticalScroll(id="trace", classes="quiet-focus"):
                 yield Static(self._profile_header(), classes="config-caption")
-                yield Static(_SNAPSHOT_HINT, classes="config-caption", markup=False)
+                yield Static(
+                    _SNAPSHOT_HINT, classes="config-caption", markup=False
+                )
                 paths = Static(
-                    _paths_block(self._config, self._config_path, self._project_local, self._profile_path),
+                    _paths_block(
+                        self._config,
+                        self._config_path,
+                        self._project_local,
+                        self._profile_path,
+                    ),
                 )
                 paths.add_class("config-panel")
                 paths.border_title = "пути"
@@ -198,11 +225,18 @@ class ConfigScreen(Screen):
         if event.input.id == "config-filter":
             self._filter = event.value
             if self._yaml_w is not None:
-                self._yaml_w.update(yaml_syntax_renderable(self._filtered_yaml_text()))
+                self._yaml_w.update(
+                    yaml_syntax_renderable(self._filtered_yaml_text())
+                )
 
     # Фильтр-Input в фокусе (как на скиллах) → клавиатурную прокрутку #trace
     # форвардим вручную. home/end оставляем Input'у (курсор в строке фильтра).
-    _SCROLL = {"up": "scroll_up", "down": "scroll_down", "pageup": "scroll_page_up", "pagedown": "scroll_page_down"}
+    _SCROLL = {
+        "up": "scroll_up",
+        "down": "scroll_down",
+        "pageup": "scroll_page_up",
+        "pagedown": "scroll_page_down",
+    }
 
     def on_key(self, event: events.Key) -> None:
         action = self._SCROLL.get(event.key)

@@ -41,13 +41,21 @@ def test_save_meta_merges_swarm_meta_patch(tmp_path):
         str(tmp_path),
         "x_y",
         base_meta={"system": "x", "task_id": "y"},
-        swarm_meta_patch={"id": "x_y", "status": "queued", "pid": 100, "limits": {"timeout_seconds": 60}},
+        swarm_meta_patch={
+            "id": "x_y",
+            "status": "queued",
+            "pid": 100,
+            "limits": {"timeout_seconds": 60},
+        },
     )
     storage.save_swarm_meta(
         str(tmp_path),
         "x_y",
         base_meta={"system": "x", "task_id": "y"},
-        swarm_meta_patch={"status": "running", "started_at": "2026-06-04T00:00:00Z"},
+        swarm_meta_patch={
+            "status": "running",
+            "started_at": "2026-06-04T00:00:00Z",
+        },
     )
     meta = storage.load_swarm_meta(str(tmp_path), "x_y")
     sm = meta["swarm_meta"]
@@ -125,8 +133,12 @@ def test_load_completion_info_in_exports():
 
 
 def test_append_then_load_messages_roundtrip(tmp_path):
-    storage.append_swarm_message(str(tmp_path), "mid", stream="stdout", message="hello")
-    storage.append_swarm_message(str(tmp_path), "mid", stream="stderr", message="warn")
+    storage.append_swarm_message(
+        str(tmp_path), "mid", stream="stdout", message="hello"
+    )
+    storage.append_swarm_message(
+        str(tmp_path), "mid", stream="stderr", message="warn"
+    )
     msgs = storage.load_swarm_messages(str(tmp_path), "mid")
     assert len(msgs) == 2
     assert msgs[0]["stream"] == "stdout"
@@ -180,7 +192,9 @@ def test_resolve_messages_path_prefers_sandbox_when_exists(tmp_path):
     # Создаём канал-E путь в sandbox.
     sandbox_path = sandbox / "sid" / ".gc" / "threads" / "sid"
     sandbox_path.mkdir(parents=True)
-    (sandbox_path / "messages.jsonl").write_text('{"ts":"x","stream":"y","message":"z"}\n')
+    (sandbox_path / "messages.jsonl").write_text(
+        '{"ts":"x","stream":"y","message":"z"}\n'
+    )
 
     result = storage._resolve_messages_path(str(threads), "sid", str(sandbox))
     assert result == str(sandbox_path / "messages.jsonl")
@@ -194,7 +208,9 @@ def test_load_swarm_messages_reads_from_sandbox(tmp_path):
     sandbox.mkdir()
     sandbox_path = sandbox / "sid" / ".gc" / "threads" / "sid"
     sandbox_path.mkdir(parents=True)
-    (sandbox_path / "messages.jsonl").write_text('{"ts":"2026-06-04T10:00:00Z","stream":"stdout","message":"hello"}\n')
+    (sandbox_path / "messages.jsonl").write_text(
+        '{"ts":"2026-06-04T10:00:00Z","stream":"stdout","message":"hello"}\n'
+    )
 
     msgs = storage.load_swarm_messages(str(threads), "sid", str(sandbox))
     assert len(msgs) == 1
@@ -203,7 +219,9 @@ def test_load_swarm_messages_reads_from_sandbox(tmp_path):
 
 def test_load_swarm_messages_legacy_signature_still_works(tmp_path):
     """Старая сигнатура без sandbox_root_dir остаётся работоспособной."""
-    storage.append_swarm_message(str(tmp_path), "sid", stream="stdout", message="ok")
+    storage.append_swarm_message(
+        str(tmp_path), "sid", stream="stdout", message="ok"
+    )
     msgs = storage.load_swarm_messages(str(tmp_path), "sid")
     assert len(msgs) == 1
 

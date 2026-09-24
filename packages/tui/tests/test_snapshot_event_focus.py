@@ -25,12 +25,21 @@ def test_event_focus_snapshot(snap_compare, tmp_path):
         encoding="utf-8",
     )
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "...", "messages_count": 1, "tui": {"cwd": "/work/demo"}}),
+        json.dumps(
+            {
+                "thread_id": tid,
+                "updated_at": "...",
+                "messages_count": 1,
+                "tui": {"cwd": "/work/demo"},
+            }
+        ),
         encoding="utf-8",
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
     )
 
     async def setup(pilot):

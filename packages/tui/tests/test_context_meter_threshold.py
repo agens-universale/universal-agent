@@ -28,7 +28,9 @@ def _write_task(tmp_path, tid, content):
         "ts": "t",
         "payload": {"role": "user", "content": content},
     }
-    (tmp_path / f"data_cli_{tid}.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text(
+        json.dumps(rec) + "\n", encoding="utf-8"
+    )
 
 
 def _cfg(trigger, turn_end):
@@ -50,13 +52,19 @@ async def test_meter_uses_hard_threshold_not_turn_end(tmp_path):
 
     tid = "ctxm0000000000000000000000000001a"
     _write_task(tmp_path, tid, "hello")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_cfg(trigger=10_000_000, turn_end=1))
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config=_cfg(trigger=10_000_000, turn_end=1),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         meter = scr._context_meter()
         assert meter is not None
-        assert "0%" in meter.plain  # summary 10M в знаменателе; на старом коде (turn_end=1) было бы 100%
+        assert (
+            "0%" in meter.plain
+        )  # summary 10M в знаменателе; на старом коде (turn_end=1) было бы 100%
 
 
 @pytest.mark.asyncio
@@ -67,10 +75,16 @@ async def test_meter_falls_back_to_turn_end_when_no_hard_threshold(tmp_path):
 
     tid = "ctxm0000000000000000000000000002a"
     _write_task(tmp_path, tid, "hello")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_cfg(trigger=0, turn_end=10_000_000))
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config=_cfg(trigger=0, turn_end=10_000_000),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         meter = scr._context_meter()
-        assert meter is not None  # fallback на turn_end (иначе порог 0 → None/скрыт)
+        assert (
+            meter is not None
+        )  # fallback на turn_end (иначе порог 0 → None/скрыт)
         assert "%" in meter.plain

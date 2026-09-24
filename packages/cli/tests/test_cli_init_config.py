@@ -47,7 +47,9 @@ def test_cli_init_does_not_clobber_existing(tmp_path, monkeypatch, capsys):
     _isolate(tmp_path, monkeypatch)
     cfgdir = tmp_path / "gc"
     cfgdir.mkdir(parents=True)
-    (cfgdir / "config.yml").write_text("agent:\n  model: mine\n", encoding="utf-8")
+    (cfgdir / "config.yml").write_text(
+        "agent:\n  model: mine\n", encoding="utf-8"
+    )
     rc = cli._run_init()
     assert rc == 0
     # Новое поведение: не-TTY → setup_guide (путь к конфигу выводится в stderr)

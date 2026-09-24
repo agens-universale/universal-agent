@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from gc_core.instructions.loader import AGENTSMD_OVERRIDE_IGNORED_WARNING, build_instructions
+from gc_core.instructions.loader import (
+    AGENTSMD_OVERRIDE_IGNORED_WARNING,
+    build_instructions,
+)
 
 
 def _write(p: Path, text: str):
@@ -13,7 +16,9 @@ def test_agent_md_given_replaces_everything(tmp_path):
     l0 = tmp_path / "role.md"
     _write(l0, "ROLE PROMPT")
     _write(tmp_path / "AGENTS.md", "PROJECT RULES")
-    r = build_instructions(agent_md_path=str(l0), is_tui=True, cwd=str(tmp_path))
+    r = build_instructions(
+        agent_md_path=str(l0), is_tui=True, cwd=str(tmp_path)
+    )
     assert r.loaded_ids == ["L0"]
     assert "ROLE PROMPT" in r.text
     assert "PROJECT RULES" not in r.text
@@ -30,7 +35,9 @@ def test_cli_without_agent_md_is_empty(tmp_path):
 def test_tui_assembles_layers(tmp_path, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "no_global")  # L1 absent
+    monkeypatch.setattr(
+        env_vars.env, "gc_home", tmp_path / "no_global"
+    )  # L1 absent
     _write(tmp_path / ".gc" / "AGENTS.md", "GC RULES")  # L2
     _write(tmp_path / "AGENTS.md", "ROOT RULES")  # L3
     r = build_instructions(agent_md_path="", is_tui=True, cwd=str(tmp_path))
@@ -43,7 +50,12 @@ def test_tui_assembles_layers(tmp_path, monkeypatch):
 def test_tui_override_keeps_only_l3(tmp_path):
     _write(tmp_path / ".gc" / "AGENTS.md", "GC RULES")
     _write(tmp_path / "AGENTS.md", "ROOT RULES")
-    r = build_instructions(agent_md_path="", is_tui=True, agentsmd_override=True, cwd=str(tmp_path))
+    r = build_instructions(
+        agent_md_path="",
+        is_tui=True,
+        agentsmd_override=True,
+        cwd=str(tmp_path),
+    )
     assert r.loaded_ids == ["L3"]
     assert "GC RULES" not in r.text and "ROOT RULES" in r.text
 
@@ -51,12 +63,22 @@ def test_tui_override_keeps_only_l3(tmp_path):
 def test_path_beats_override_with_warning(tmp_path):
     l0 = tmp_path / "role.md"
     _write(l0, "ROLE")
-    r = build_instructions(agent_md_path=str(l0), is_tui=True, agentsmd_override=True, cwd=str(tmp_path))
+    r = build_instructions(
+        agent_md_path=str(l0),
+        is_tui=True,
+        agentsmd_override=True,
+        cwd=str(tmp_path),
+    )
     assert r.loaded_ids == ["L0"]
     assert AGENTSMD_OVERRIDE_IGNORED_WARNING in r.warnings
 
 
 def test_override_no_warning_when_no_path(tmp_path):
     _write(tmp_path / "AGENTS.md", "ROOT")
-    r = build_instructions(agent_md_path="", is_tui=True, agentsmd_override=True, cwd=str(tmp_path))
+    r = build_instructions(
+        agent_md_path="",
+        is_tui=True,
+        agentsmd_override=True,
+        cwd=str(tmp_path),
+    )
     assert r.warnings == []

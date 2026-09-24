@@ -26,17 +26,27 @@ def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
     office = MCPEntry(
         name="office",
         path=Path("recommended_mcp/office"),
-        install=InstallSpec(type="source", source=Path("../external/office-mcp")),
+        install=InstallSpec(
+            type="source", source=Path("../external/office-mcp")
+        ),
     )
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([office], Path(".")))
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([office], Path(".")),
+    )
     installed = []
     monkeypatch.setattr(
         cli,
         "_install_one",
-        lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: installed.append(e.name) or True,
+        lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: (
+            installed.append(e.name) or True
+        ),
     )
     wired = []
-    monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: wired.append(e.name))
+    monkeypatch.setattr(
+        cli, "_wire_one", lambda e, root, dep: wired.append(e.name)
+    )
 
     rc = cli.main(["install", "office"])
     assert rc == 0
@@ -46,7 +56,9 @@ def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
 def test_install_unknown_name_errors(fake_env, monkeypatch):
     from recommended_mcp.runtime import cli
 
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], Path(".")))
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([], Path("."))
+    )
     rc = cli.main(["install", "nope"])
     assert rc != 0
 
@@ -57,14 +69,28 @@ def test_install_all_wires_only_installed(fake_env, monkeypatch):
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime import cli
 
-    good = MCPEntry(name="good", path=Path("."), install=InstallSpec(type="source"))
-    bad = MCPEntry(name="bad", path=Path("."), install=InstallSpec(type="source"))
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([good, bad], Path(".")))
+    good = MCPEntry(
+        name="good", path=Path("."), install=InstallSpec(type="source")
+    )
+    bad = MCPEntry(
+        name="bad", path=Path("."), install=InstallSpec(type="source")
+    )
     monkeypatch.setattr(
-        cli, "_install_one", lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: e.name == "good"
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([good, bad], Path(".")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_install_one",
+        lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: (
+            e.name == "good"
+        ),
     )
     wired = []
-    monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: wired.append(e.name))
+    monkeypatch.setattr(
+        cli, "_wire_one", lambda e, root, dep: wired.append(e.name)
+    )
     rc = cli.main(["install"])  # no name → all
     assert rc == 0
     assert wired == ["good"]  # bad failed install → not wired
@@ -74,12 +100,19 @@ def test_remove_unwires(fake_env, monkeypatch):
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime import cli, wiring
 
-    office = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([office], Path(".")))
+    office = MCPEntry(
+        name="office", path=Path("."), install=InstallSpec(type="source")
+    )
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([office], Path(".")),
+    )
     monkeypatch.setattr(cli, "_uninstall_one", lambda e, root: None)
     (fake_env / "cfg").mkdir(parents=True, exist_ok=True)
     (fake_env / "cfg" / "config.local.yml").write_text(
-        "mcp:\n  servers:\n    office:\n      transport: stdio\n", encoding="utf-8"
+        "mcp:\n  servers:\n    office:\n      transport: stdio\n",
+        encoding="utf-8",
     )
 
     rc = cli.main(["remove", "office"])
@@ -93,8 +126,13 @@ def test_wire_one_missing_snippet_does_not_raise(fake_env, monkeypatch):
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime import cli
 
-    monkeypatch.setattr("recommended_mcp.install._node_install_paths", lambda dep: {"npx": "/n"})
-    e = MCPEntry(name="x", path=Path("nope-dir"), install=InstallSpec(type="source"))
+    monkeypatch.setattr(
+        "recommended_mcp.install._node_install_paths",
+        lambda dep: {"npx": "/n"},
+    )
+    e = MCPEntry(
+        name="x", path=Path("nope-dir"), install=InstallSpec(type="source")
+    )
     # recipe dir has no agent_config.snippet.yml → wire_snippet raises FileNotFoundError;
     # _wire_one must catch it (warn + return), NOT propagate.
     cli._wire_one(e, fake_env, fake_env / "d")  # must not raise
@@ -110,10 +148,21 @@ def test_install_threads_config_and_editable(fake_env, monkeypatch):
 
     def fake_load(config=None):
         seen["config"] = config
-        return ([MCPEntry(name="x", path=Path("."), install=InstallSpec(type="source"))], Path("."))
+        return (
+            [
+                MCPEntry(
+                    name="x",
+                    path=Path("."),
+                    install=InstallSpec(type="source"),
+                )
+            ],
+            Path("."),
+        )
 
     monkeypatch.setattr(cli, "_load_manifest_entries", fake_load)
-    monkeypatch.setattr(cli, "_load_repo_url", lambda config=None: (None, None))
+    monkeypatch.setattr(
+        cli, "_load_repo_url", lambda config=None: (None, None)
+    )
     monkeypatch.setattr(
         cli,
         "_install_one",
@@ -134,9 +183,15 @@ def test_install_threads_repo_url(fake_env, monkeypatch):
     from recommended_mcp.manifest import InstallSpec, MCPEntry
     from recommended_mcp.runtime import cli
 
-    e = MCPEntry(name="office", path=Path("."), install=InstallSpec(type="source"))
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([e], Path(".")))
-    monkeypatch.setattr(cli, "_load_repo_url", lambda config=None: ("https://x/repo", "main"))
+    e = MCPEntry(
+        name="office", path=Path("."), install=InstallSpec(type="source")
+    )
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([e], Path("."))
+    )
+    monkeypatch.setattr(
+        cli, "_load_repo_url", lambda config=None: ("https://x/repo", "main")
+    )
     seen = {}
     monkeypatch.setattr(
         cli,
@@ -147,7 +202,10 @@ def test_install_threads_repo_url(fake_env, monkeypatch):
     )
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: None)
     rc = cli.main(["install", "office"])
-    assert rc == 0 and seen == {"repo_url": "https://x/repo", "repo_ref": "main"}
+    assert rc == 0 and seen == {
+        "repo_url": "https://x/repo",
+        "repo_ref": "main",
+    }
 
 
 def test_remove_all_wipes_our_dirs(fake_env, monkeypatch):
@@ -175,7 +233,10 @@ def test_remove_all_keep_package_keeps_dirs(fake_env, monkeypatch):
 
     cfg = fake_env / "cfg"
     cfg.mkdir(parents=True, exist_ok=True)
-    (cfg / "config.local.yml").write_text("mcp:\n  servers:\n    office:\n      transport: stdio\n", encoding="utf-8")
+    (cfg / "config.local.yml").write_text(
+        "mcp:\n  servers:\n    office:\n      transport: stdio\n",
+        encoding="utf-8",
+    )
     data = fake_env / "d"
     (data / "recommended_mcp").mkdir(parents=True)
 
@@ -188,6 +249,10 @@ def test_remove_all_keep_package_keeps_dirs(fake_env, monkeypatch):
 def test_remove_no_name_no_all_errors(fake_env, monkeypatch):
     from recommended_mcp.runtime import cli
 
-    monkeypatch.setattr(cli, "_load_manifest_entries", lambda config=None: ([], __import__("pathlib").Path(".")))
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([], __import__("pathlib").Path(".")),
+    )
     rc = cli.main(["remove"])
     assert rc != 0

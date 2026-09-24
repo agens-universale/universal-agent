@@ -44,23 +44,37 @@ from gc_core.config_modules.layers import (  # noqa: F401
     validate_config_text_with_sections,
     validate_profile_text_with_sections,
 )
-from gc_core.config_modules.model_registry import ModelEntry, validate_registry_pairs
-from gc_core.config_modules.model_sections_validation import validate_model_sections
+from gc_core.config_modules.model_registry import (
+    ModelEntry,
+    validate_registry_pairs,
+)
+from gc_core.config_modules.model_sections_validation import (
+    validate_model_sections,
+)
 from gc_core.config_modules.profiles import (
     ProfileMeta,
     mtime_or_none,
     profile_roots,
 )
-from gc_core.config_modules.root import SCHEMA_ERROR_PREFIX, AppConfig, resolve_paths, schema_error_details
+from gc_core.config_modules.root import (
+    SCHEMA_ERROR_PREFIX,
+    AppConfig,
+    resolve_paths,
+    schema_error_details,
+)
 from gc_core.config_modules.security import (
     apply_cli_command_moderation_overrides,
 )
-from gc_core.config_modules.summary import DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+from gc_core.config_modules.summary import (
+    DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
+)
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
 
 # Backward compatibility for existing imports.
-_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+_DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
+    DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+)
 
 _LOGGING_SYNC_KEYS = (
     "full_log_backend",
@@ -110,7 +124,9 @@ def _xdg_config_path() -> Optional[str]:
     пакетные дефолты (project-local <cwd>/.gc/config.yml по-прежнему
     мерджится поверх выбранной базы).
     """
-    candidate = os.path.abspath(os.path.join(str(env_vars.effective_config_dir()), CONFIG_FILE_NAME))
+    candidate = os.path.abspath(
+        os.path.join(str(env_vars.effective_config_dir()), CONFIG_FILE_NAME)
+    )
     if os.path.isfile(candidate):
         return candidate
     return None
@@ -154,7 +170,9 @@ def resolve_base_config_path(config_path: Optional[str] = None) -> str:
     return config_path or _xdg_config_path() or _default_config_path()
 
 
-def _apply_models_override(config_dict: Dict[str, Any], resolved: Dict[str, Any]) -> None:
+def _apply_models_override(
+    config_dict: Dict[str, Any], resolved: Dict[str, Any]
+) -> None:
     if "models" not in resolved:
         return
     # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
@@ -171,7 +189,9 @@ def _apply_models_override(config_dict: Dict[str, Any], resolved: Dict[str, Any]
         }
 
 
-def _normalize_trace_id_key(config_dict: Dict[str, Any], trace_id: Optional[str]) -> None:
+def _normalize_trace_id_key(
+    config_dict: Dict[str, Any], trace_id: Optional[str]
+) -> None:
     # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
     # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
     # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
@@ -206,8 +226,12 @@ def apply_cli_overrides(
         # для детекта легаси-форса (см. cli_forces_legacy_model ниже).
         explicit = set(config_dict.get("cli_explicit_keys") or ())
         config_dict["cli_explicit_keys"] = sorted(explicit | set(resolved))
-    effective_write_guard_override = False if no_write_guard else write_guard_enabled
-    effective_read_guard_override = False if no_read_guard else read_guard_enabled
+    effective_write_guard_override = (
+        False if no_write_guard else write_guard_enabled
+    )
+    effective_read_guard_override = (
+        False if no_read_guard else read_guard_enabled
+    )
     apply_cli_command_moderation_overrides(
         config_dict,
         write_guard_enabled=effective_write_guard_override,
@@ -257,8 +281,14 @@ def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
         "model": entry.model,
         "url": entry.url,
         "authorization_header": entry.authorization_header,
-        "pricing": entry.pricing.model_dump() if entry.pricing is not None else None,
-        "backend_overrides": (entry.backend.model_dump(exclude_unset=True) if entry.backend is not None else {}),
+        "pricing": entry.pricing.model_dump()
+        if entry.pricing is not None
+        else None,
+        "backend_overrides": (
+            entry.backend.model_dump(exclude_unset=True)
+            if entry.backend is not None
+            else {}
+        ),
     }
 
 
@@ -299,7 +329,8 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
         "tui_finish_gate_mode": app_cfg.tui.finish_gate_mode,
-        "tui_finish_gate_mode_explicit": "finish_gate_mode" in app_cfg.tui.model_fields_set,
+        "tui_finish_gate_mode_explicit": "finish_gate_mode"
+        in app_cfg.tui.model_fields_set,
         "strict_turn_finish_explicit_false": (
             "strict_turn_finish_validation" in app_cfg.agent.model_fields_set
             and not app_cfg.agent.strict_turn_finish_validation
@@ -318,7 +349,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
             "verify_ssl": app_cfg.voice.verify_ssl,
         },
         "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
-        "voice_endpoint_presets": [p.model_dump() for p in app_cfg.voice_endpoint_presets],
+        "voice_endpoint_presets": [
+            p.model_dump() for p in app_cfg.voice_endpoint_presets
+        ],
         "command_moderation": {
             "enabled": app_cfg.security.command_moderation.enabled,
             "mode": app_cfg.security.command_moderation.mode,
@@ -355,7 +388,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "working_memory_max_chars_knowledge": app_cfg.working_memory.max_chars_knowledge,
         "working_memory_total_budget_chars": app_cfg.working_memory.total_budget_chars,
         "tool_usage_notice": app_cfg.tool_usage_notice,
-        "tool_usage_notice_params": [rule.model_dump() for rule in app_cfg.tool_usage_notice],
+        "tool_usage_notice_params": [
+            rule.model_dump() for rule in app_cfg.tool_usage_notice
+        ],
         "project_memory": app_cfg.project_memory,
         "project_memory_params": app_cfg.project_memory.model_dump(),
         "project_memory_check_interval_messages": app_cfg.project_memory.check_interval_messages,
@@ -415,16 +450,24 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "model_steering": app_cfg.agent.model_steering,
         "limit_trace_summary": app_cfg.agent.limit_trace_summary,
         "loop_detector": app_cfg.agent.loop_detector.model_dump(),
-        "mcp-servers": {name: server.model_dump(by_alias=True) for name, server in app_cfg.mcp.servers.items()},
+        "mcp-servers": {
+            name: server.model_dump(by_alias=True)
+            for name, server in app_cfg.mcp.servers.items()
+        },
         "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
         "pricing": app_cfg.pricing.model_dump(),
-        "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
+        "agent_auth": app_cfg.agent_auth.model_dump()
+        if app_cfg.agent_auth
+        else {},
         "diff_tui": app_cfg.diff_tui.model_dump(),
         "fs_tools": app_cfg.fs_tools.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
         # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
         # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).
-        "models": {alias: _serialize_model_entry(entry) for alias, entry in app_cfg.models.items()},
+        "models": {
+            alias: _serialize_model_entry(entry)
+            for alias, entry in app_cfg.models.items()
+        },
         "slots": app_cfg.slots.model_dump(),
         "assign": app_cfg.assign.model_dump(),
         "profile": app_cfg.profile,
@@ -442,7 +485,11 @@ def _build_mtime_set(
 ) -> Dict[str, Optional[float]]:
     """Снимок mtime базового/managed/проектного конфига + обоих кандидатных путей
     активного профиля (спека §3.3): отсутствующий файл — ключ есть, значение None."""
-    project_config_path = Path(project_path) if project_path is not None else project_gc_dir() / CONFIG_FILE_NAME
+    project_config_path = (
+        Path(project_path)
+        if project_path is not None
+        else project_gc_dir() / CONFIG_FILE_NAME
+    )
     mtime_set: Dict[str, Optional[float]] = {
         str(base_path): mtime_or_none(base_path),
         str(managed_path): mtime_or_none(managed_path),
@@ -455,7 +502,9 @@ def _build_mtime_set(
     return mtime_set
 
 
-def profile_mtime_set(config_path: Optional[str], active_name: Optional[str] = None) -> Dict[str, Optional[float]]:
+def profile_mtime_set(
+    config_path: Optional[str], active_name: Optional[str] = None
+) -> Dict[str, Optional[float]]:
     """Тот же снимок, что строит `load_config_ex` (спека §3.3), но БЕЗ парсинга/
     валидации файлов — только `stat()`. Точка входа для TUI (`set_config_path`):
     связывание пути с окном не обязано гонять полную загрузку конфига ради снимка
@@ -468,7 +517,9 @@ def profile_mtime_set(config_path: Optional[str], active_name: Optional[str] = N
     managed_path = mcp_paths.managed_config_path()
     project_path = env_vars.project_local_config_path()
     roots = profile_roots(Path(os.getcwd()), base_path)
-    return _build_mtime_set(base_path, managed_path, project_path, active_name, roots)
+    return _build_mtime_set(
+        base_path, managed_path, project_path, active_name, roots
+    )
 
 
 def load_config_ex(
@@ -512,9 +563,20 @@ def load_config_ex(
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
     base_before_env = raw_config
     raw_config = resolve_env_placeholders(raw_config)
-    validate_registry_pairs(raw_config, source=str(base_path), raw_source=base_before_env)
+    validate_registry_pairs(
+        raw_config, source=str(base_path), raw_source=base_before_env
+    )
 
-    (raw_config, ref, active_name, roots, managed_path, project_path, managed_raw, _base_voice) = _merge_layers(
+    (
+        raw_config,
+        ref,
+        active_name,
+        roots,
+        managed_path,
+        project_path,
+        managed_raw,
+        _base_voice,
+    ) = _merge_layers(
         raw_config,
         path,
         profile_override=profile_override,
@@ -528,7 +590,9 @@ def load_config_ex(
         project_path=env_vars.project_local_config_path(),
     )
 
-    mtime_set = _build_mtime_set(base_path, managed_path, project_path, active_name, roots)
+    mtime_set = _build_mtime_set(
+        base_path, managed_path, project_path, active_name, roots
+    )
 
     # Перекрыт ли юзерский voice managed-слоем (gc-voice install) — для notices. Правило
     # общее с установкой: она предупреждает о том же факте, и вердикт обязан совпадать.
@@ -545,9 +609,15 @@ def load_config_ex(
 
         _managed_url = str(_mv.get("url") or "")
         _merged_voice = raw_config.get("voice")
-        _effective_url = str((_merged_voice or {}).get("url") or "") if isinstance(_merged_voice, dict) else ""
+        _effective_url = (
+            str((_merged_voice or {}).get("url") or "")
+            if isinstance(_merged_voice, dict)
+            else ""
+        )
         if _effective_url == _managed_url:
-            _voice_overridden = overridden_user_voice(_base_voice, _managed_url)
+            _voice_overridden = overridden_user_voice(
+                _base_voice, _managed_url
+            )
 
     # Compat-слой (A4): rename/remove устаревших ключей in-memory, файл не трогаем.
     # Применяется к итоговому мержу — профильный слой проходит его так же, как
@@ -560,7 +630,9 @@ def load_config_ex(
     try:
         app_cfg = AppConfig.model_validate(raw_config)
     except _PydanticValidationError as exc:
-        raise ValueError(f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}") from exc
+        raise ValueError(
+            f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
+        ) from exc
     _model_section_notices = validate_model_sections(app_cfg)
     resolve_paths(app_cfg, config_dir)
 
@@ -574,7 +646,9 @@ def load_config_ex(
     # Не поле схемы: результат разбора СЫРОГО конфига compat-слоем — докладывает загрузчик.
     # Фаза 2 секций моделей (ссылочная целостность на merged-реестре) и лоадер
     # профилей (зарезервированные имена, секрет-политика) — тот же канал notices.
-    config_dict["compat_notices"] = _compat_notices + _model_section_notices + notices
+    config_dict["compat_notices"] = (
+        _compat_notices + _model_section_notices + notices
+    )
     # Не поле схемы: факт перекрытия юзерского voice managed-слоем — знает только загрузчик.
     config_dict["voice_overridden_by_managed"] = _voice_overridden
 
@@ -586,7 +660,9 @@ def load_config_ex(
     # httpx, своих предупреждений urllib3 больше не рождает, а сам пакет ядро
     # не объявляет — он приезжал транзитом через trafilatura. Тот же класс
     # поломки, что был с requests у голоса, только тише.
-    meta = ProfileMeta(active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices)
+    meta = ProfileMeta(
+        active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices
+    )
     return config_dict, meta
 
 

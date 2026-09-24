@@ -1,4 +1,7 @@
-from gc_core.utils.chat_completions_stream import assemble_streamed_completion, iter_sse_data_lines
+from gc_core.utils.chat_completions_stream import (
+    assemble_streamed_completion,
+    iter_sse_data_lines,
+)
 
 # Realistic OpenAI-compatible stream: reasoning_content, content, a fragmented
 # tool call, finish_reason, and usage in the final chunk.
@@ -32,7 +35,13 @@ def test_assemble_reassembles_message_content_and_tool_calls():
     assert msg["role"] == "assistant"
     assert msg["content"] == "Это проект."
     assert msg["reasoning_content"] == "анализирую"
-    assert msg["tool_calls"] == [{"id": "t1", "type": "function", "function": {"name": "ping", "arguments": '{"a":1}'}}]
+    assert msg["tool_calls"] == [
+        {
+            "id": "t1",
+            "type": "function",
+            "function": {"name": "ping", "arguments": '{"a":1}'},
+        }
+    ]
     assert result["choices"][0]["finish_reason"] == "tool_calls"
     assert result["usage"] == {"completion_tokens": 42}
     assert ("think", "ана") in deltas
@@ -77,7 +86,9 @@ def test_tool_only_stream_still_emits_progress_deltas():
         on_delta=lambda kind, text: deltas.append((kind, text)),
     )
     tool_deltas = [t for k, t in deltas if k == "tool"]
-    assert tool_deltas, "на шаге с вызовом инструмента не пришло ни одной дельты"
+    assert tool_deltas, (
+        "на шаге с вызовом инструмента не пришло ни одной дельты"
+    )
     assert "".join(tool_deltas) == '{"task_report":"готово"}'
 
     # Вид отдельный, а не "answer": иначе сырой JSON уехал бы в блок потока на экран.
@@ -85,7 +96,10 @@ def test_tool_only_stream_still_emits_progress_deltas():
 
     # Сборка ответа при этом не изменилась.
     msg = result["choices"][0]["message"]
-    assert msg["tool_calls"][0]["function"]["arguments"] == '{"task_report":"готово"}'
+    assert (
+        msg["tool_calls"][0]["function"]["arguments"]
+        == '{"task_report":"готово"}'
+    )
     assert result["usage"] == {"completion_tokens": 952}
 
 
@@ -118,4 +132,6 @@ def test_reasoning_alias_is_read_and_not_double_counted():
         ),
         on_delta=lambda kind, text: both.append((kind, text)),
     )
-    assert [t for k, t in both if k == "think"] == ["канон"], "оба поля сложились"
+    assert [t for k, t in both if k == "think"] == ["канон"], (
+        "оба поля сложились"
+    )

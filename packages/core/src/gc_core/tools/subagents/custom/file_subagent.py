@@ -61,7 +61,9 @@ class FileDefinedSubagent(AbstractSubagent):
         }
     )
 
-    def __init__(self, definition: SubagentDefinition, task: str, reason: str = "") -> None:
+    def __init__(
+        self, definition: SubagentDefinition, task: str, reason: str = ""
+    ) -> None:
         self.definition = definition
         self.task = task
         self.reason = reason
@@ -78,7 +80,9 @@ class FileDefinedSubagent(AbstractSubagent):
         return BoundFileSubagent(definition)
 
     @classmethod
-    def required_tools_banned(cls, definition: SubagentDefinition) -> list[str]:
+    def required_tools_banned(
+        cls, definition: SubagentDefinition
+    ) -> list[str]:
         """Служебные тулы, которые файл пытается запретить через ``stop_tools``.
 
         Запрет не исполняется (ядро выдаётся всегда), но и молчать нельзя: оператор
@@ -142,14 +146,18 @@ class FileDefinedSubagent(AbstractSubagent):
         # HANDOFF_CONTRACT_GUIDANCE — кастомная роль получает тот же контракт
         # сдачи, что встроенные. Отменить его из файла нельзя.
         role = self.with_handoff_contract(self.definition.role)
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
         return role, assignment
 
     def get_agent_name(self) -> str:
         return self.definition.name
 
     @classmethod
-    def get_agent_specification(cls) -> Dict[str, Any]:  # pragma: no cover - см. ниже
+    def get_agent_specification(
+        cls,
+    ) -> Dict[str, Any]:  # pragma: no cover - см. ниже
         # Спека зависит от определения, а не от класса. Основной production-путь —
         # BoundFileSubagent.get_agent_specification() через bound(). Classmethod
         # оставлен только ради контракта AbstractSubagent.
@@ -178,7 +186,9 @@ class BoundFileSubagent:
 
     async def create_instance(self, **kwargs: Any) -> FileDefinedSubagent:
         kwargs.pop("definition", None)  # definition только из bound
-        return await FileDefinedSubagent.create_instance(definition=self.definition, **kwargs)
+        return await FileDefinedSubagent.create_instance(
+            definition=self.definition, **kwargs
+        )
 
 
 # Module-level re-export для короткого импорта в tools/__init__.py (child filter).

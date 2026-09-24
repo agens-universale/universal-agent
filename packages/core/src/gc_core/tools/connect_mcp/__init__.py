@@ -1,4 +1,6 @@
-from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
+from gc_core.tools.connect_mcp.agent_tools import (
+    aget_mcp_tools_data_for_config,
+)
 from gc_core.tools.connect_mcp.api import acall_mcp_tool
 from gc_core.tools.connect_mcp.registry import ToolsCache
 

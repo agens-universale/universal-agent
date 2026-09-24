@@ -108,4 +108,4 @@ test_project_data_backend import FakeSandboxBackend`): pytest кладёт ка�
 Линтер, форматтер, порог когнитивной сложности и локальный аналог правил
 Sonar живут в одном гейте — `scripts/lint.sh` (внутри pre-commit). Как
 поставить хуки, что и где проверяется и как глушить находки — в
-[docs/code-quality.md](code-quality.md).
+[CONTRIBUTING.md](../CONTRIBUTING.md#качество-кода).

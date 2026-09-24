@@ -156,7 +156,9 @@ class TestApplyToolPassesCallId:
         state = _make_state()
         run_agent_func = MagicMock(return_value="ok")
 
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             instance = MockRunner.return_value
 
             # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
@@ -188,7 +190,9 @@ class TestApplyToolPassesCallId:
         state = _make_state()
         run_agent_func = MagicMock(return_value="ok")
 
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             instance = MockRunner.return_value
 
             # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
@@ -238,7 +242,9 @@ class TestProcessToolCallsForwardsCallId:
             seen.update(kwargs)
             return '{"ok": true}'
 
-        monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
+        monkeypatch.setattr(
+            "gc_core.processing_responses.aapply_tool", _fake_apply_tool
+        )
         run_coro(
             aprocess_tool_calls(
                 messages=[

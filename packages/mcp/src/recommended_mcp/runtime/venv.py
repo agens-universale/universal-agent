@@ -26,7 +26,12 @@ def _python_runs(py: Path) -> bool:
     Ловит битый venv: stdlib-venv из uv-managed standalone Python на macOS даёт
     python, который не находит libpython*.dylib и падает с SIGABRT ещё до pip."""
     try:
-        return subprocess.run([str(py), "-c", ""], capture_output=True, timeout=15).returncode == 0
+        return (
+            subprocess.run(
+                [str(py), "-c", ""], capture_output=True, timeout=15
+            ).returncode
+            == 0
+        )
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -107,12 +112,16 @@ def query_installed_version(distribution_name: str) -> str | None:
     argv = [str(active_pip_python()), "-c", script]
     from gc_core.utils.win_console import preserve_console_mode
 
-    with preserve_console_mode():  # зовётся из воркеров при живом TUI: subprocess на
-        result = subprocess.run(  # Windows сбрасывает режим консоли (мышь, Ctrl+C)
-            argv,
-            capture_output=True,
-            text=True,
-            check=False,
+    with (
+        preserve_console_mode()
+    ):  # зовётся из воркеров при живом TUI: subprocess на
+        result = (
+            subprocess.run(  # Windows сбрасывает режим консоли (мышь, Ctrl+C)
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         )
     if result.returncode != 0:
         return None

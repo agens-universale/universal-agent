@@ -22,7 +22,11 @@ def test_tui_special_instructions_path_resolves():
     from gc_tui.services.prompt_assets import tui_special_instructions_path
 
     p = tui_special_instructions_path()
-    assert p == str(bundled_root() / "prompts" / "chat_completions_tui_special_instructions.md")
+    assert p == str(
+        bundled_root()
+        / "prompts"
+        / "chat_completions_tui_special_instructions.md"
+    )
     import os
 
     assert os.path.isfile(p)
