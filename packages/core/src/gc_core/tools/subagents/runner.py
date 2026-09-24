@@ -18,7 +18,11 @@ from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.model_router import AliasCircuitOpenError, ModelRouter, SUBAGENT_CONSUMER_PREFIX
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
-from gc_core.summarize.config import parse_summary_trigger_chars
+from gc_core.summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_trigger_tokens,
+    summary_mid_turn_enabled,
+)
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from gc_core.message_policy.tool_availability import available_tool_names, tool_is_available
 from gc_core.message_policy.tool_usage_notice.policy import get_thread_memory_registers_from_shared, subagent_thread_memory_bootstrap_text, wrap_thread_memory_technical_user_message
@@ -297,9 +301,10 @@ class SubagentRunner:
                 extra={"steps": child_state.steps},
             )
             summary_trigger_chars = parse_summary_trigger_chars(self._config)
+            summary_trigger_tokens = parse_summary_trigger_tokens(self._config)
             should_enable_summary = (
                 child_state.backend_api_mode == "chat_completions"
-                and summary_trigger_chars > 0
+                and summary_mid_turn_enabled(self._config)
             )
 
             persist_messages_callback = partial(
@@ -312,6 +317,7 @@ class SubagentRunner:
                     state=child_state,
                     thread_session=None,
                     summary_trigger_chars=summary_trigger_chars,
+                    summary_trigger_tokens=summary_trigger_tokens,
                     is_cli_mode=False,
                     pre_backend_trigger_reason="subagent_pre_backend",
                     logger=_log,

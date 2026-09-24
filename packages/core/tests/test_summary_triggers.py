@@ -188,7 +188,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
+                "exceeded_summary_triggers",
                 side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
@@ -240,7 +240,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
+                "exceeded_summary_triggers",
                 side_effect=_hist_exceeds,
             ), patch.object(
                 run_summary_coordinator_module,
@@ -282,7 +282,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
+                "exceeded_summary_triggers",
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
@@ -357,7 +357,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 agent_executor_module, "arun_agent", side_effect=_fake_run_agent
             ), patch.object(
                 run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
+                "exceeded_summary_triggers",
                 return_value=False,
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)

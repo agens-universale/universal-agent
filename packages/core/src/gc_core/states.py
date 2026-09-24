@@ -153,6 +153,11 @@ class State:
         # None, пока прогон не завершился. Оба доступны in-memory через get_state().
         self.usage = UsageAccount()
         self.last_run_usage: Optional[UsageAccount] = None
+        # Input-токены последнего главного chat_completions этого State и
+        # сколько сообщений истории в тот prompt уже вошло. None — числа ещё нет.
+        # После сжатия оба снова None. В meta треда — те же ключи (null = нет числа).
+        self.last_main_prompt_tokens: Optional[int] = None
+        self.last_main_prompt_message_count: Optional[int] = None
         # Снимок кумулятива на старте текущего прогона (meta-dict, JSON-safe).
         # По нему футер считает live-«запрос» текущего хода (usage − baseline),
         # пока last_run_usage ещё не выставлен. Транзиентный (per-run), не биллится.

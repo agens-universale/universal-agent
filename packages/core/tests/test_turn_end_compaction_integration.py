@@ -449,7 +449,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
     # Строковые пути: после reload в test_summary_triggers импорт ``rsc`` в этом файле
     # может указывать на старый модуль, а AgentExecutor — на актуальный.
     monkeypatch.setattr(
-        "gc_core.run_summary_coordinator.history_exceeds_summary_trigger",
+        "gc_core.run_summary_coordinator.exceeded_summary_triggers",
         lambda **_k: True,
     )
     monkeypatch.setattr(

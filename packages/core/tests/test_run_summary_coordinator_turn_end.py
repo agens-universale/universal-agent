@@ -32,7 +32,7 @@ def ctx_stub():
 
 def test_turn_end_skips_when_volume_below_threshold(monkeypatch, ctx_stub):
     state = _minimal_state(messages=[{"role": "user", "content": "x", "id": "1"}])
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: False)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: False)
     compaction = MagicMock()
     monkeypatch.setattr(rsc, "arun_summary_compaction", compaction)
 
@@ -59,7 +59,7 @@ def test_turn_end_runs_compaction_with_reason(monkeypatch, ctx_stub):
         captured.update(kwargs)
         state.messages = [sys_m, {"role": "user", "content": "<summary/>", "id": "sum"}]
 
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
     monkeypatch.setattr(rsc, "arun_summary_compaction", capture)
 
     coord = RunSummaryCoordinator(
@@ -83,7 +83,7 @@ def test_turn_end_swallows_compaction_errors(monkeypatch, ctx_stub, capsys):
     def boom(**_kwargs):
         raise RuntimeError("summary down")
 
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
     monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
 
     coord = RunSummaryCoordinator(
@@ -104,7 +104,7 @@ def test_turn_end_swallows_compaction_errors(monkeypatch, ctx_stub, capsys):
 def test_turn_end_disabled_when_trigger_zero(monkeypatch, ctx_stub):
     state = _minimal_state(messages=[{"role": "user", "content": "x", "id": "1"}])
     compaction = MagicMock()
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger", lambda **_k: True)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
     monkeypatch.setattr(rsc, "arun_summary_compaction", compaction)
 
     coord = RunSummaryCoordinator(

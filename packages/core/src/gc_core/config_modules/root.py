@@ -174,18 +174,24 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     ) or _prompt_default(config_dir, "chat_completions_memory_patch_replace.md")
     if cfg.summary.intent_log_preview_chars <= 0:
         cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
-    if cfg.summary.chat_completions_summary_trigger_chars < 0:
-        cfg.summary.chat_completions_summary_trigger_chars = 0
-    turn_end_raw = cfg.summary.chat_completions_summary_turn_end_trigger_chars
-    if turn_end_raw is None:
-        trigger = cfg.summary.chat_completions_summary_trigger_chars
-        cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
-            max(1, int(trigger * DEFAULT_TURN_END_TRIGGER_RATIO))
-            if trigger > 0
-            else 0
+    cfg.summary.chat_completions_summary_trigger_chars = _clamp_summary_trigger(
+        cfg.summary.chat_completions_summary_trigger_chars
+    )
+    cfg.summary.chat_completions_summary_turn_end_trigger_chars = (
+        _resolve_turn_end_trigger(
+            cfg.summary.chat_completions_summary_turn_end_trigger_chars,
+            cfg.summary.chat_completions_summary_trigger_chars,
         )
-    elif turn_end_raw <= 0:
-        cfg.summary.chat_completions_summary_turn_end_trigger_chars = 0
+    )
+    cfg.summary.chat_completions_summary_trigger_tokens = _clamp_summary_trigger(
+        cfg.summary.chat_completions_summary_trigger_tokens
+    )
+    cfg.summary.chat_completions_summary_turn_end_trigger_tokens = (
+        _resolve_turn_end_trigger(
+            cfg.summary.chat_completions_summary_turn_end_trigger_tokens,
+            cfg.summary.chat_completions_summary_trigger_tokens,
+        )
+    )
     if cfg.summary.last_dialog_steps_count <= 0:
         cfg.summary.last_dialog_steps_count = DEFAULT_LAST_DIALOG_STEPS_COUNT
     if cfg.summary.last_dialog_step_message_max_chars <= 0:
@@ -241,6 +247,21 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     write_guard.extra_paths = [
         to_abs(path) or path for path in write_guard.extra_paths
     ]
+
+
+def _clamp_summary_trigger(value: int) -> int:
+    return 0 if value < 0 else value
+
+
+def _resolve_turn_end_trigger(raw: int | None, mid: int) -> int:
+    """Нет ключа — 60% от mid-turn этой же шкалы. Явный 0 и отрицательное — плечо выкл."""
+    if raw is None:
+        return (
+            max(1, int(mid * DEFAULT_TURN_END_TRIGGER_RATIO))
+            if mid > 0
+            else 0
+        )
+    return 0 if raw <= 0 else raw
 
 
 # Вводная текста ошибки схемы — ОДНА строка на всех пишущих и на разбор

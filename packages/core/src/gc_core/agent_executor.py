@@ -27,7 +27,13 @@ from gc_core.run_summary_coordinator import (
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
 )
-from gc_core.summarize.config import parse_summary_trigger_chars, parse_summary_turn_end_trigger_chars
+from gc_core.summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_trigger_tokens,
+    parse_summary_turn_end_trigger_chars,
+    parse_summary_turn_end_trigger_tokens,
+    summary_mid_turn_enabled,
+)
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.intent_log.user_turn import append_user_ask_deduped, append_user_asks_from_messages
 from gc_core.message_policy.user_message_policy import extract_real_user_message_text
@@ -341,6 +347,8 @@ class AgentExecutor:
 
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
         turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(config_dict)
+        summary_trigger_tokens = parse_summary_trigger_tokens(config_dict)
+        turn_end_trigger_tokens = parse_summary_turn_end_trigger_tokens(config_dict)
 
         chat_completions_system_prompt: str | None = None
         rendered_system_prompt: str | None = None
@@ -425,6 +433,10 @@ class AgentExecutor:
             state.infer_user_turn_seq_if_missing()
             state.init_tool_usage_notice_from_meta(meta)
             state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
+            (
+                state.last_main_prompt_tokens,
+                state.last_main_prompt_message_count,
+            ) = ThreadMetaMapper.read_prompt_token_fields(meta)
             state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         if (
             backend_api_mode == "chat_completions"
@@ -494,6 +506,8 @@ class AgentExecutor:
             thread_session=thread_session,
             summary_trigger_chars=summary_trigger_chars,
             turn_end_trigger_chars=turn_end_trigger_chars,
+            summary_trigger_tokens=summary_trigger_tokens,
+            turn_end_trigger_tokens=turn_end_trigger_tokens,
             is_cli_mode=is_cli_mode,
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
@@ -606,7 +620,7 @@ class AgentExecutor:
 
             persist_messages_callback = _persist_thread_batch
             get_full_history_messages = thread_session.get_full_history_messages
-        elif backend_api_mode == "chat_completions" and summary_trigger_chars > 0:
+        elif backend_api_mode == "chat_completions" and summary_mid_turn_enabled(config_dict):
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
                 if is_persist_discarded(state):
                     return

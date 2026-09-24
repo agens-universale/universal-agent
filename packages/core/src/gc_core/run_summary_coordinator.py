@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
-    history_exceeds_summary_trigger,
+    exceeded_summary_triggers,
 )
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
@@ -29,6 +29,13 @@ if TYPE_CHECKING:
     from gc_core.run_context import RunContext
     from gc_core.states import State
     from gc_core.thread_store import ThreadSession
+
+def _hit_pair(hits: Any) -> tuple[bool, bool]:
+    """Bool из старых подмен предиката — символьное плечо. Объект — оба флага."""
+    if isinstance(hits, bool):
+        return hits, False
+    return bool(getattr(hits, "chars", False)), bool(getattr(hits, "tokens", False))
+
 
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
 _FUNCTION_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
@@ -266,6 +273,8 @@ class RunSummaryCoordinator:
         thread_session: ThreadSession | None,
         summary_trigger_chars: int,
         turn_end_trigger_chars: int = 0,
+        summary_trigger_tokens: int = 0,
+        turn_end_trigger_tokens: int = 0,
         is_cli_mode: bool,
         pre_backend_trigger_reason: str,
         logger: Any | None = None,
@@ -275,6 +284,8 @@ class RunSummaryCoordinator:
         self._thread_session = thread_session
         self._summary_trigger_chars = summary_trigger_chars
         self._turn_end_trigger_chars = turn_end_trigger_chars
+        self._summary_trigger_tokens = summary_trigger_tokens
+        self._turn_end_trigger_tokens = turn_end_trigger_tokens
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
@@ -308,16 +319,22 @@ class RunSummaryCoordinator:
         """
         logger = self._logger
         state = self._state
-        if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
+        if state.backend_api_mode != "chat_completions":
+            return
+        if self._summary_trigger_chars <= 0 and self._summary_trigger_tokens <= 0:
             return
         rounds = 0
         try:
-            while history_exceeds_summary_trigger(
-                state=state,
-                summary_trigger_chars=self._summary_trigger_chars,
-                tags=self._proj_tags,
-                strip_think=True,
-            ):
+            while True:
+                hits = exceeded_summary_triggers(
+                    state=state,
+                    summary_trigger_chars=self._summary_trigger_chars,
+                    summary_trigger_tokens=self._summary_trigger_tokens,
+                    tags=self._proj_tags,
+                    strip_think=True,
+                )
+                if not hits:
+                    break
                 rounds += 1
                 if rounds > _PRE_RUN_SUMMARY_MAX_ROUNDS:
                     log_pre_run_max_rounds(
@@ -326,6 +343,7 @@ class RunSummaryCoordinator:
                         max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
                     )
                     break
+                exceeded_chars, exceeded_tokens = _hit_pair(hits)
                 async with _asummarizing_flag(self._thread_session):
                     await arun_summary_compaction(
                         ctx=self._ctx,
@@ -334,7 +352,13 @@ class RunSummaryCoordinator:
                         is_cli_mode=self._is_cli_mode,
                         on_summary_applied=self.on_summary_applied,
                         trigger_threshold_chars=self._summary_trigger_chars,
+                        exceeded_chars=exceeded_chars,
+                        exceeded_tokens=exceeded_tokens,
                     )
+                # Число забыто сжатием. Символы выключены — спросить провайдера
+                # некого, следующий круг вёл бы только их.
+                if self._summary_trigger_chars <= 0:
+                    break
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             if rounds > 0:
                 gc.collect()
@@ -383,15 +407,20 @@ class RunSummaryCoordinator:
         корутинную функцию цикл ждёт нативно, без потока из пула.
         """
         state = self._state
-        if state.backend_api_mode != "chat_completions" or self._summary_trigger_chars <= 0:
+        if state.backend_api_mode != "chat_completions":
             return
-        if not history_exceeds_summary_trigger(
+        if self._summary_trigger_chars <= 0 and self._summary_trigger_tokens <= 0:
+            return
+        hits = exceeded_summary_triggers(
             state=state,
             summary_trigger_chars=self._summary_trigger_chars,
+            summary_trigger_tokens=self._summary_trigger_tokens,
             tags=self._proj_tags,
             strip_think=True,
-        ):
+        )
+        if not hits:
             return
+        exceeded_chars, exceeded_tokens = _hit_pair(hits)
 
         state_tail = getattr(state, "messages", None)
         if not isinstance(state_tail, list):
@@ -424,6 +453,8 @@ class RunSummaryCoordinator:
                 is_cli_mode=self._is_cli_mode,
                 on_summary_applied=self.on_summary_applied,
                 trigger_threshold_chars=self._summary_trigger_chars,
+                exceeded_chars=exceeded_chars,
+                exceeded_tokens=exceeded_tokens,
             )
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):
@@ -450,15 +481,18 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
-        if self._turn_end_trigger_chars <= 0:
+        if self._turn_end_trigger_chars <= 0 and self._turn_end_trigger_tokens <= 0:
             return
-        if not history_exceeds_summary_trigger(
+        hits = exceeded_summary_triggers(
             state=state,
             summary_trigger_chars=self._turn_end_trigger_chars,
+            summary_trigger_tokens=self._turn_end_trigger_tokens,
             tags=self._proj_tags,
             strip_think=True,
-        ):
+        )
+        if not hits:
             return
+        exceeded_chars, exceeded_tokens = _hit_pair(hits)
 
         logger = self._logger
         try:
@@ -470,6 +504,8 @@ class RunSummaryCoordinator:
                     is_cli_mode=self._is_cli_mode,
                     on_summary_applied=self.on_summary_applied,
                     trigger_threshold_chars=self._turn_end_trigger_chars,
+                    exceeded_chars=exceeded_chars,
+                    exceeded_tokens=exceeded_tokens,
                 )
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             gc.collect()

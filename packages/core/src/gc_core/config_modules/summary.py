@@ -16,6 +16,8 @@ class SummaryConfig(BaseModel):
     chat_completions_memory_patch_replace_prompt_path: str | None = None
     chat_completions_summary_trigger_chars: int = 0
     chat_completions_summary_turn_end_trigger_chars: int | None = None
+    chat_completions_summary_trigger_tokens: int = 0
+    chat_completions_summary_turn_end_trigger_tokens: int | None = None
     incremental_batch_chars: int | None = None
     max_message_chars: int = DEFAULT_MAX_MESSAGE_CHARS
     max_dialogue_chars: int = DEFAULT_MAX_DIALOGUE_CHARS

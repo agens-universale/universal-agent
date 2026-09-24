@@ -14,7 +14,7 @@ from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
 from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
 from gc_core.persistence.live_volume import bump_live_volume_for_messages, live_volume_from_messages, merge_tui_into_meta
 from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper, read_optional_nonneg_int
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_DIALOG_SUMMARY, wrap_technical_user_content
 from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.utils.atomic_io import atomic_replace
@@ -905,6 +905,9 @@ class ThreadSession:
             base_meta["user_turn_seq"] = int(self.meta.get("user_turn_seq") or 0)
         if "dialog_steps_offset" in self.meta:
             base_meta["dialog_steps_offset"] = int(self.meta.get("dialog_steps_offset") or 0)
+        for prompt_key in ("last_main_prompt_tokens", "last_main_prompt_message_count"):
+            if prompt_key in self.meta:
+                base_meta[prompt_key] = read_optional_nonneg_int(self.meta.get(prompt_key))
         if isinstance(self.meta.get("token_usage"), dict):
             base_meta["token_usage"] = self.meta["token_usage"]
         # Persist rendered chat/completions system prompt for transparency/debugging.
@@ -1005,6 +1008,12 @@ class ThreadSession:
         if effective_steps_offset < 0:
             effective_steps_offset = 0
         new_meta["dialog_steps_offset"] = effective_steps_offset
+        new_meta["last_main_prompt_tokens"] = read_optional_nonneg_int(
+            summary_payload.get("last_main_prompt_tokens")
+        )
+        new_meta["last_main_prompt_message_count"] = read_optional_nonneg_int(
+            summary_payload.get("last_main_prompt_message_count")
+        )
         if isinstance(user_intent_log, list):
             new_meta["user_intent_log"] = serialize_for_meta(
                 deserialize_list(user_intent_log)

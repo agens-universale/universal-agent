@@ -877,20 +877,38 @@ class TraceScreen(Screen):
         cfg = getattr(self.app, "_config", None) or {}
         if str(cfg.get("backend_api_mode")) != "chat_completions":
             return None
-        # Калибруем гейдж на ЖЁСТКИЙ порог форс-сжатия — summary_trigger (по нему жмут
-        # pre_backend мид-турн и pre-run). turn-end (ratio 0.6) — ПРОАКТИВНАЯ уборка
-        # только на границе хода (turn_finish), её показывает нижняя плашка «сжимаю…»,
-        # а не 100% на баре. summary_trigger=0 (форс-сжатие выключено) → fallback на
-        # turn-end как на единственный реальный порог.
+        # Знаменатель шкалы — её mid-turn. turn-end (60%) подставляется только когда
+        # mid-turn этой шкалы выключен: иначе проактивная уборка показывала бы 100%.
+        if self._store is None or self._active_task_id is None:
+            return None
+        meta = self._store.get_task_meta(self._active_task_id)
         from gc_core.summarize.config import (
             parse_summary_trigger_chars,
+            parse_summary_trigger_tokens,
             parse_summary_turn_end_trigger_chars,
+            parse_summary_turn_end_trigger_tokens,
         )
+        # Токенная шкала — сохранённое число провайдера без хвоста. Числа нет
+        # или токенный порог выключен — символы, как раньше. Знаменатель шкалы —
+        # её mid-turn; mid-turn 0 подменяется её turn-end, и только тогда.
+        token_mid = parse_summary_trigger_tokens(cfg)
+        token_end = parse_summary_turn_end_trigger_tokens(cfg)
+        saved_tokens = meta.get("last_main_prompt_tokens")
+        if (
+            not isinstance(saved_tokens, bool)
+            and isinstance(saved_tokens, int)
+            and saved_tokens > 0
+            and (token_mid > 0 or token_end > 0)
+        ):
+            denominator = token_mid if token_mid > 0 else token_end
+            if denominator <= 0:
+                return None
+            return render_context_meter(saved_tokens, denominator)
+
         threshold = parse_summary_trigger_chars(cfg) or parse_summary_turn_end_trigger_chars(cfg)
-        if threshold <= 0 or self._store is None or self._active_task_id is None:
+        if threshold <= 0:
             return None
-        # Источник — meta.runtime.live_history_chars (persist).
-        meta = self._store.get_task_meta(self._active_task_id)
+        # Источник символьной шкалы — meta.runtime.live_history_chars (persist).
         rt = meta.get("runtime") or {}
         if "live_history_chars" not in rt:
             return None

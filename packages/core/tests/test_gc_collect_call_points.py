@@ -24,7 +24,7 @@ def _coord(monkeypatch, calls, gc_calls, backend="chat_completions",
 
     ``calls`` — список аргументов run_summary_compaction (mock).
     ``gc_calls`` — список-счётчик вызовов gc.collect.
-    ``threshold_exceeded`` управляет mock'ом history_exceeds_summary_trigger.
+    ``threshold_exceeded`` управляет mock'ом exceeded_summary_triggers.
     """
     rsc = importlib.import_module("gc_core.run_summary_coordinator")
     state = types.SimpleNamespace(
@@ -42,7 +42,7 @@ def _coord(monkeypatch, calls, gc_calls, backend="chat_completions",
         calls.append(kw)
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", _fake_compaction)
-    monkeypatch.setattr(rsc, "history_exceeds_summary_trigger",
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers",
                         lambda **kw: threshold_exceeded)
     monkeypatch.setattr(rsc, "gc", types.SimpleNamespace(collect=lambda: gc_calls.append(1)))
     return coord

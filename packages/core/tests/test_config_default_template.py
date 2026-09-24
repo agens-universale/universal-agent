@@ -224,6 +224,7 @@ EXPERT_ONLY_KEYS: set = {
     "summary.chat_completions_summary_prompt_path",
     "summary.chat_completions_memory_patch_replace_prompt_path",
     "summary.chat_completions_summary_turn_end_trigger_chars",
+    "summary.chat_completions_summary_turn_end_trigger_tokens",
     "summary.incremental_batch_chars",
     "summary.intent_log_preview_chars",
 

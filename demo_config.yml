@@ -416,6 +416,7 @@ intent_scope:
 
 summary:
   chat_completions_summary_trigger_chars: 200000
+  chat_completions_summary_trigger_tokens: 0
   # Turn-end compaction после accept submit_solution (по умолчанию = 60% trigger)
   chat_completions_summary_turn_end_trigger_chars: 120000
   incremental_batch_chars: 280000
