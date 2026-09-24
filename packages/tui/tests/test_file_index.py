@@ -570,29 +570,47 @@ def test_walk_keeps_rest_of_dir_when_one_entry_errors(tmp_path, monkeypatch):
             self._entry = entry
             self.name = entry.name
 
-        def is_dir(self):
-            return self._entry.is_dir()
-
         def is_symlink(self):
             if self.name == "bad":
                 raise OSError("boom")
             return self._entry.is_symlink()
 
+        def __getattr__(self, name):
+            return getattr(self._entry, name)
+
     class _Scan:
+        """Как настоящий scandir: и контекстный менеджер, и итератор.
+
+        Path.walk и уборка каталогов pytest итерируют сам объект
+        (``for entry in os.scandir(path)``), а не значение из ``__enter__``.
+        """
+
         def __init__(self, path):
             self._it = real_scandir(path)
 
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return _Entry(next(self._it))
+
         def __enter__(self):
             self._it.__enter__()
-            return (_Entry(e) for e in self._it)
+            return self
 
         def __exit__(self, *exc):
             return self._it.__exit__(*exc)
 
+    # Подмена глобальная (file_index.os — модуль os). Снять её надо в теле
+    # теста: при KeyboardInterrupt pytest не доходит до teardown фикстур,
+    # и финал сессии падает на ещё висящей подмене scandir.
     monkeypatch.setattr(file_index.os, "scandir", _Scan)
-    paths, truncated = file_index._walk_paths(str(tmp_path))
-    assert sorted(paths) == ["aaa.py", "bad/", "zzz.py"]
-    assert truncated is False
+    try:
+        paths, truncated = file_index._walk_paths(str(tmp_path))
+        assert sorted(paths) == ["aaa.py", "bad/", "zzz.py"]
+        assert truncated is False
+    finally:
+        monkeypatch.undo()
 
 
 def test_rank_with_limit_equals_sorted_prefix():
