@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from recommended_mcp import process_supervisor
 from recommended_mcp.manifest import RunSpec
 from recommended_mcp.process_supervisor import (
     RunSupervisor,
@@ -23,6 +24,7 @@ from recommended_mcp.process_supervisor import (
     stop_command_daemons,
     terminate_pid,
     terminate_process,
+    terminate_processes,
     write_pid,
 )
 
@@ -242,10 +244,10 @@ def test_shutdown_managed_survives_broken_print(
         write_pid(name, pid, tmp_path)
         supervisor._managed.append((name, proc))
         procs.append(proc)
-    terminated: list[object] = []
+    batches: list[list[object]] = []
     monkeypatch.setattr(
-        "recommended_mcp.process_supervisor.terminate_process",
-        lambda proc, **kwargs: terminated.append(proc),
+        "recommended_mcp.process_supervisor.terminate_processes",
+        lambda procs, **kwargs: batches.append(list(procs)),
     )
 
     def _broken_print(*args: object, **kwargs: object) -> None:
@@ -255,7 +257,53 @@ def test_shutdown_managed_survives_broken_print(
     supervisor.shutdown_managed()
     monkeypatch.undo()
 
-    assert terminated == [procs[1], procs[0]]
+    # Все демоны — одним гашением: по очереди время росло бы с их числом.
+    assert batches == [[procs[1], procs[0]]]
     assert supervisor._managed == []
     assert read_pid("first", tmp_path) is None
     assert read_pid("second", tmp_path) is None
+
+
+_DEAF_DAEMON = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="группы процессов — только POSIX")
+def test_terminate_processes_takes_one_timeout_for_many() -> None:
+    """Демоны, глухие к SIGTERM, гасятся разом: одно общее ожидание и SIGKILL всем
+    оставшимся. По очереди каждый стоил бы весь таймаут, и аварийный выход TUI с
+    общим бюджетом обрывал бы гашение — демоны оставались бы жить."""
+    procs = [
+        subprocess.Popen([sys.executable, "-c", _DEAF_DAEMON], **_popen_kwargs(None, None))
+        for _ in range(3)
+    ]
+    try:
+        time.sleep(0.5)   # обработчик SIG_IGN успел встать
+        started = time.monotonic()
+        terminate_processes(procs, graceful_timeout=1.0)
+        elapsed = time.monotonic() - started
+        assert elapsed < 2.5
+        assert [is_pid_alive(proc.pid) for proc in procs] == [False, False, False]
+    finally:
+        for proc in procs:
+            _kill_leftovers(proc, None)
+
+
+def test_windows_termination_is_polite_to_all_then_forces_survivors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """На Windows тот же порядок: вежливый taskkill всем деревьям, общее ожидание,
+    принудительный — только выжившим."""
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        process_supervisor.subprocess, "run", lambda cmd, **kwargs: commands.append(cmd)
+    )
+    monkeypatch.setattr(process_supervisor, "is_pid_alive", lambda pid: pid == 22)
+
+    process_supervisor._terminate_windows([11, 22, 33], graceful_timeout=0.3)
+
+    assert commands == [
+        ["taskkill", "/PID", "11", "/T"],
+        ["taskkill", "/PID", "22", "/T"],
+        ["taskkill", "/PID", "33", "/T"],
+        ["taskkill", "/PID", "22", "/T", "/F"],
+    ]
