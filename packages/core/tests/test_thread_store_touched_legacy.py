@@ -1,21 +1,38 @@
-"""Суммаризация не трогает touched journal (только delete/reset треда)."""
+"""Legacy touched-журнал: путь, чистка при удалении треда, суммаризация.
+
+Класс `TouchedJournal` умер вместе с пакетом `diff_tui` — файлы `touched_*.json`
+у пользователей остались. `thread_store` обязан их знать: чтобы прибирать за
+собой при удалении/сбросе треда и чтобы суммаризация их не трогала.
+"""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from gc_tui.diff_tui.touched import TouchedJournal
 from gc_core.thread_store import ThreadSession, delete_thread, touched_journal_path
+
+
+def _seed_touched(threads: Path, system_id: str, thread_id: str) -> Path:
+    """Legacy-файл в формате умершего журнала — как он лежит у пользователей."""
+    path = Path(touched_journal_path(str(threads), system_id, thread_id))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"paths": {"src/a.py": {"ts": 1}}}) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def test_path_helper_matches_data_meta_suffix(tmp_path):
+    threads = str(tmp_path / "threads")
+    path = touched_journal_path(threads, "Tui", "abc-1")
+    assert path == str(Path(threads) / "touched_tui_abc-1.json")
 
 
 async def test_summary_leaves_touched_journal_intact(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
     tid = "arch1"
-    j = TouchedJournal(str(threads), "tui", tid)
-    j.add("src/a.py")
-    touched = Path(touched_journal_path(str(threads), "tui", tid))
-    assert touched.is_file()
+    touched = _seed_touched(threads, "tui", tid)
     before = touched.read_text(encoding="utf-8")
 
     data = threads / f"data_tui_{tid}.jsonl"
@@ -53,7 +70,6 @@ async def test_summary_leaves_touched_journal_intact(tmp_path):
     assert "archive_touched_path" not in result
     assert touched.is_file()
     assert touched.read_text(encoding="utf-8") == before
-    assert TouchedJournal(str(threads), "tui", tid).paths() == {"src/a.py"}
     assert not list(threads.glob(f"touched_tui_{tid}__pre_summary__*.json"))
 
 
@@ -61,9 +77,7 @@ def test_delete_thread_removes_touched_and_legacy_archives(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
     tid = "del1"
-    j = TouchedJournal(str(threads), "tui", tid)
-    j.add("src/a.py")
-    touched = Path(touched_journal_path(str(threads), "tui", tid))
+    touched = _seed_touched(threads, "tui", tid)
     legacy = threads / f"touched_tui_{tid}__pre_summary__20260101_000000.json"
     legacy.write_text('{"paths": {}}\n', encoding="utf-8")
     (threads / f"data_tui_{tid}.jsonl").write_text("", encoding="utf-8")
@@ -74,29 +88,3 @@ def test_delete_thread_removes_touched_and_legacy_archives(tmp_path):
     assert str(legacy) in deleted
     assert not touched.exists()
     assert not legacy.exists()
-
-
-def test_legacy_gc_touched_json_ignored(tmp_path, monkeypatch):
-    """Старый ``.gc/diffs/touched.json`` не читаем."""
-    from gc_core.config_modules import env_vars
-    from gc_tui.diff_tui.service import DiffService
-
-    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
-    root = tmp_path / "proj"
-    root.mkdir()
-    threads = tmp_path / "threads"
-    threads.mkdir()
-    gc = root / ".gc" / "diffs"
-    gc.mkdir(parents=True)
-    (gc / "touched.json").write_text(
-        json.dumps({"paths": {"ghost.py": {"ts": 1}}}), encoding="utf-8"
-    )
-    (root / "ghost.py").write_text("x\n", encoding="utf-8")
-    svc = DiffService(
-        str(root),
-        threads_dir=str(threads),
-        system_id="tui",
-        thread_id="t1",
-        emit_notices=False,
-    )
-    assert svc.list_entries(pending_only=True) == []
