@@ -225,10 +225,14 @@ def _walk_paths(root: str, max_paths: int = MAX_INDEX_PATHS, *,
     всё ещё может вытеснить соседей. Симлинк на папку показываем, но внутрь не
     идём (как os.walk без followlinks). `ignore_anywhere`/`ignore_root` —
     имена папок из корневого .gitignore (см. `_simple_gitignore_dirs`),
-    пропускаются наравне с `_IGNORE_DIRS`."""
+    пропускаются наравне с `_IGNORE_DIRS`. Начался выход из программы
+    (`kill_running_processes`) — обход останавливается на следующей папке и отдаёт
+    собранное как обрезанное: дочитывать проект в умирающем процессе некому."""
     out: list[str] = []
     queue: deque[str] = deque([""])
     while queue:
+        if _exiting:
+            return out, True
         rel_dir = queue.popleft()
         try:
             with os.scandir(os.path.join(root, rel_dir) if rel_dir else root) as it:
@@ -345,6 +349,30 @@ def _reap(proc: "subprocess.Popen") -> None:
         pass
 
 
+# Процессы, запущенные `_stream_bounded` и ещё не подобранные. При выходе из программы
+# их гасит `kill_running_processes`: поток сборки индекса — демон и умрёт вместе с
+# процессом, а запущенный им git — нет, он дочитывал бы репозиторий уже без хозяина и
+# без таймаута. Снимаются с учёта только после подбора — PID подобранного процесса мог
+# бы уже достаться другому.
+_running: set["subprocess.Popen"] = set()
+_running_lock = threading.Lock()
+_exiting = False        # выход начался — новых команд не запускаем, обход диска прерываем
+
+
+def kill_running_processes() -> None:
+    """Выход из программы: погасить деревья всех ещё идущих команд индекса, новых не
+    запускать и прервать обход диска — и запасной после погашенного git, и уже
+    идущий: процессор нужен остальной уборке при выходе. Зовёт `main()` TUI в
+    `finally` после `app.run()`."""
+    global _exiting
+    with _running_lock:
+        _exiting = True
+        procs = list(_running)
+    for proc in procs:
+        if proc.poll() is None:
+            _kill_process_tree(proc)
+
+
 def _stream_bounded(cmd: list[str], cwd: str, timeout: float,
                     on_chunk: Callable[[bytes], None]) -> bool:
     """Запустить команду и отдавать её stdout кусками в on_chunk. True — код
@@ -362,16 +390,34 @@ def _stream_bounded(cmd: list[str], cwd: str, timeout: float,
 
     Не subprocess.run: на Windows он после kill() ждёт закрытия пайпа без таймаута,
     а пайп держит переживший обёртку дочерний процесс — «таймаут 5 с» превращался
-    в ожидание полного прогона git (замер: 19 с на репозитории в 926 тыс. файлов)."""
+    в ожидание полного прогона git (замер: 19 с на репозитории в 926 тыс. файлов).
+
+    Запущенный процесс до подбора числится в реестре (`_running`) — его погасит
+    `kill_running_processes` при выходе из программы; после начала выхода команда не
+    запускается вовсе — False."""
     kwargs: dict = {}
     if os.name != "nt":
         kwargs["start_new_session"] = True      # своя группа — чтобы гасить её целиком
+    with _running_lock:
+        if _exiting:
+            return False
+        try:
+            proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL, **kwargs)
+        except OSError:
+            return False
+        _running.add(proc)
     try:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, **kwargs)
-    except OSError:
-        return False
+        return _pump_bounded(proc, cmd, timeout, on_chunk)
+    finally:
+        with _running_lock:
+            _running.discard(proc)
 
+
+def _pump_bounded(proc: "subprocess.Popen", cmd: list[str], timeout: float,
+                  on_chunk: Callable[[bytes], None]) -> bool:
+    """Тело `_stream_bounded` после запуска процесса: чтение служебным потоком с
+    дедлайном, гашение и подбор (контракт — там)."""
     failure: list[BaseException] = []
     stop = threading.Event()        # после таймаута вывод никому не нужен
 
@@ -515,10 +561,10 @@ class PathIndex:
     """Индекс путей одного корня: собирается один раз при первом поиске, дальше
     каждая буква фильтрует готовый список в памяти.
 
-    Потокобезопасен: поиск зовут из фоновых потоков (по одному на нажатие) —
-    пока первый собирает список, остальные ждут на локе, а не запускают второй
-    обход диска. `truncated` осмыслен после сборки — первого `build` или
-    `search`."""
+    Потокобезопасен: поиск зовут потоки сеансов пикера (FileSearchSession) — поток
+    закрытого сеанса может ещё собирать список, когда поток следующего уже ищет:
+    тот ждёт на локе, а не запускает второй обход диска. `truncated` осмыслен после
+    сборки — первого `build` или `search`."""
 
     def __init__(self, root: str, *, max_paths: int = MAX_INDEX_PATHS,
                  use_git: bool = True) -> None:

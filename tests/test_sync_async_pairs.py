@@ -42,7 +42,7 @@ def _pairs() -> set:
             for n in asy:
                 b = _base_of(n)
                 if b and b in names and b not in asy:
-                    rel = str(p).split("/src/")[-1]
+                    rel = p.as_posix().split("/src/")[-1]   # str(p) на Windows — с «\», разреза не было бы
                     rows.add(f"{rel}::{getattr(scope, 'name', '<модуль>')}.{b}")
     return rows
 

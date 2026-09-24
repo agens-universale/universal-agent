@@ -274,11 +274,12 @@ def test_main_hands_the_profile_flag_to_the_app(monkeypatch, tmp_path):
 def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     """Аварийный выход сторожа терминала и штатный `finally` зовут одну уборку
     main(), и она выполняется ровно раз — иначе демоны либо сиротеют, либо
-    гасятся дважды."""
+    гасятся дважды. В неё же входят процессы индекса путей: при аварийном выходе
+    git пикера тоже гасится."""
     pytest.importorskip("textual")
 
     from gc_tui import app as tui_app
-    from gc_tui.services import terminal_guard
+    from gc_tui.services import file_index, terminal_guard
     from gc_tui.voice_runtime import autostart
 
     guards: list = []
@@ -315,6 +316,8 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     )
     released: list[bool] = []
     monkeypatch.setattr(autostart, "release_voice_service", lambda: released.append(True))
+    killed: list[bool] = []
+    monkeypatch.setattr(file_index, "kill_running_processes", lambda: killed.append(True))
 
     from gc_tui import main
 
@@ -324,3 +327,46 @@ def test_main_emergency_exit_reuses_the_one_cleanup(monkeypatch, tmp_path):
     assert len(guards) == 1
     assert calls == ["ensure", "shutdown"]
     assert released == [True]
+    assert killed == [True]
+
+
+@pytest.mark.parametrize("run_fails", [False, True])
+def test_main_kills_file_index_processes_on_exit(monkeypatch, tmp_path, run_fails):
+    """Выход из TUI гасит процессы индекса путей (git ls-files) — и когда app.run()
+    упал: поток сборки — демон, а сам git пережил бы программу."""
+    pytest.importorskip("textual")
+
+    from gc_tui import app as tui_app
+    from gc_tui.services import file_index
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            pass
+
+        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+            self._config_path = path
+
+        def _maybe_notice_profile_activation(self, *a, **k):   # cold-start notice §3.5 — no-op
+            pass
+
+        def run(self):
+            if run_fails:
+                raise RuntimeError("boom")
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.ensure_mcp_daemons",
+                        lambda cfg, **kw: None)
+    monkeypatch.setattr("recommended_mcp.runtime.daemon_autostart.shutdown_mcp_daemons",
+                        lambda: None)
+    killed = []
+    monkeypatch.setattr(file_index, "kill_running_processes", lambda: killed.append(True))
+
+    from gc_tui import main
+
+    cfg_path = _cfg_for_main(tmp_path)
+    if run_fails:
+        with pytest.raises(RuntimeError, match="boom"):
+            main(argv=["--config", str(cfg_path)])
+    else:
+        assert main(argv=["--config", str(cfg_path)]) == 0
+    assert killed == [True]

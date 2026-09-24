@@ -1,6 +1,8 @@
 """@-аттач: ввод '@' открывает FilePicker; фильтрация; достройка; пара на сабмите."""
 import pytest
 
+from file_search_harness import settled
+
 
 @pytest.mark.asyncio
 async def test_at_opens_file_picker(tmp_path):
@@ -20,7 +22,7 @@ async def test_at_opens_file_picker(tmp_path):
         # иначе курсор остаётся в (0,0) и @-сегмент не распознаётся.
         inp.insert("@age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker is not None
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
@@ -44,7 +46,7 @@ async def test_complete_dir_keeps_picker_and_file_closes(tmp_path):
         # выбрать папку agents/ → буфер @agents/, пикер остаётся
         inp.insert("@agents")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         await pilot.press("tab")
         await pilot.pause(0.1)
@@ -194,7 +196,8 @@ async def test_submit_without_attachment_single_message(tmp_path):
 @pytest.mark.asyncio
 async def test_fuzzy_search_runs_off_ui_thread(tmp_path, monkeypatch):
     """Поиск по индексу не исполняется в UI-потоке: на огромном проекте он вешал
-    event loop на минуты (не работал даже Ctrl-C)."""
+    event loop на минуты (не работал даже Ctrl-C). Считает его поток сеанса —
+    демон, а не воркер из общего пула цикла событий."""
     pytest.importorskip("textual")
     import threading
     from gc_tui.app import TuiApp
@@ -202,11 +205,12 @@ async def test_fuzzy_search_runs_off_ui_thread(tmp_path, monkeypatch):
 
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "agent.py").write_text("x", encoding="utf-8")
-    in_main_thread = []
+    seen = []
     real = file_index.PathIndex.search
 
     def spy(self, query, **kw):
-        in_main_thread.append(threading.current_thread() is threading.main_thread())
+        thread = threading.current_thread()
+        seen.append((thread is threading.main_thread(), thread.name, thread.daemon))
         return real(self, query, **kw)
 
     monkeypatch.setattr(file_index.PathIndex, "search", spy)
@@ -218,9 +222,10 @@ async def test_fuzzy_search_runs_off_ui_thread(tmp_path, monkeypatch):
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
-        assert in_main_thread == [False]
+        # Поток сеанса, не пул цикла событий; демон — иначе выход повис бы в threading._shutdown.
+        assert seen == [(False, "file-search", True)]
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
 
 
@@ -239,12 +244,12 @@ async def test_index_is_reused_between_keystrokes_and_dropped_on_close(tmp_path)
         inp.focus()
         inp.insert("@ag")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         first = scr._path_index
         assert first is not None
         inp.insert("e")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         assert scr._path_index is first
         await pilot.press("escape")
         await pilot.pause()
@@ -278,12 +283,12 @@ async def test_late_search_result_does_not_reopen_picker(tmp_path, monkeypatch):
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         assert scr._file_picker is None          # результат ещё не пришёл
         inp.insert(" ")                          # сегмент закончился
         await pilot.pause()
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause()
         assert scr._file_picker is None
 
@@ -312,7 +317,7 @@ async def test_truncated_index_shows_note_in_picker(tmp_path, monkeypatch):
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         picker = scr._file_picker
         assert picker._truncated is True
@@ -321,7 +326,7 @@ async def test_truncated_index_shows_note_in_picker(tmp_path, monkeypatch):
         # Человек пошёл по папкам ('/' в запросе) — совет выполнен, строка уходит.
         inp.insert("nts/ag")                     # @agents/ag
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker._truncated is False
 
@@ -345,7 +350,7 @@ async def test_result_of_another_picker_session_is_dropped(tmp_path):
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         before = list(scr._file_picker._entries)
         scr._on_file_search_done(PathIndex(str(tmp_path / "other")), "age", ["zzz.py"], False)
@@ -355,8 +360,8 @@ async def test_result_of_another_picker_session_is_dropped(tmp_path):
 
 @pytest.mark.asyncio
 async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch, caplog):
-    """Сбой поиска не роняет TUI (run_worker exit_on_error) и не молчит: в лог
-    уходит warning с корнем и запросом, пикер просто не открывается."""
+    """Сбой поиска не роняет TUI и не молчит: в лог уходит warning с корнем и
+    запросом, пикер просто не открывается."""
     pytest.importorskip("textual")
     import logging
     from gc_tui.app import TuiApp
@@ -367,7 +372,7 @@ async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch,
 
     monkeypatch.setattr(file_index.PathIndex, "search", boom)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
-    with caplog.at_level(logging.WARNING, logger="gc_tui.screens.main"):
+    with caplog.at_level(logging.WARNING, logger="gc_tui.services.file_search"):
         async with app.run_test() as pilot:
             scr = pilot.app.screen
             scr._project_root = lambda: str(tmp_path)
@@ -375,7 +380,7 @@ async def test_failed_search_is_logged_and_does_not_crash(tmp_path, monkeypatch,
             inp.focus()
             inp.insert("@age")
             await pilot.pause()
-            await scr._file_search_worker.wait()
+            await settled(scr._file_search)
             await pilot.pause()
             assert scr._file_picker is None
             assert pilot.app.is_running
@@ -418,7 +423,7 @@ async def test_tab_on_stale_list_does_not_complete_wrong_path(tmp_path, monkeypa
         await pilot.pause()
         assert inp.text == "@qqtar"          # устаревший список не применён
         release.set()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         await pilot.press("tab")             # список свежий — достройка работает
         await pilot.pause()
@@ -453,12 +458,12 @@ async def test_late_result_does_not_overwrite_directory_listing(tmp_path, monkey
         inp.focus()
         inp.insert("@agents")
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         inp.insert("/")                      # синхронный листинг agents/
         await pilot.pause()
         assert scr._file_picker._entries == ["agents/agent.py"]
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause()
         assert scr._file_picker._entries == ["agents/agent.py"]
 
@@ -490,7 +495,7 @@ async def test_truncated_index_with_no_matches_keeps_picker_with_note(tmp_path, 
         inp.focus()
         inp.insert("@zzz")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         picker = scr._file_picker
         assert picker is not None
@@ -528,7 +533,7 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert len(git_calls) == 1
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
@@ -536,7 +541,7 @@ async def test_git_timeout_is_remembered_for_next_picker_session(tmp_path, monke
         await pilot.pause()
         inp.insert("n")                          # @agen — новый сеанс, новый индекс
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert len(git_calls) == 1               # git второй раз не звали
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
@@ -577,7 +582,7 @@ async def test_slow_search_shows_searching_row_then_results(tmp_path, monkeypatc
         assert scr._file_picker._entries == []
         assert scr._file_picker._searching is True
         release.set()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker._searching is False
         assert scr._file_picker._entries == ["qqtarget.py"]
@@ -606,7 +611,7 @@ async def test_fast_search_never_shows_searching_row(tmp_path):
         inp.focus()
         inp.insert("@qqtar")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause(0.5)                          # порог 0.3 с давно прошёл
         assert seen == [False]
         assert scr._file_picker._entries == ["qqtarget.py"]
@@ -638,13 +643,13 @@ async def test_escape_cancels_search_in_flight_before_picker_is_shown(tmp_path, 
         inp.focus()
         inp.insert("@qqtar")                             # одним вводом: листинга не было
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         assert scr._file_picker is None
         await pilot.press("escape")
         await pilot.pause()
         assert scr._file_query is None
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause(0.5)                           # и порог индикатора прошёл
         assert scr._file_picker is None
         assert inp.text == "@qqtar"
@@ -677,6 +682,7 @@ async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path
         inp.focus()
         inp.insert("@qqtar")                      # поиск ушёл в фон и заблокирован
         await pilot.pause()
+        search = scr._file_search
         inp.text = "/skill zz"                    # одним событием: открылся skill-пикер
         await pilot.pause()
         assert scr._skill_picker is not None
@@ -684,7 +690,7 @@ async def test_escape_closes_open_overlay_before_cancelling_file_search(tmp_path
         await pilot.pause()
         assert scr._skill_picker is None          # Esc достался открытому оверлею
         release.set()
-        await scr._file_search_worker.wait()
+        await settled(search)
         await pilot.pause()
 
 
@@ -714,7 +720,7 @@ async def test_truncated_note_stays_for_slash_query_without_such_dir(tmp_path, m
         inp.focus()
         inp.insert("@nodir/ag")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker._entries == ["src/nodir/agent.py"]
         assert scr._file_picker._truncated is True
@@ -768,7 +774,7 @@ async def test_enter_waits_while_file_search_in_flight(tmp_path, monkeypatch):
         assert sent == []
         assert inp.text == "@qqtar"
         release.set()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         await pilot.press("enter")                      # результат пришёл — достройка
         await pilot.pause()
@@ -814,13 +820,14 @@ async def test_escape_then_enter_sends_text_as_is(tmp_path, monkeypatch):
         inp.focus()
         inp.insert("привет @qqtar")
         await pilot.pause()
+        search = scr._file_search
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause(0.3)
         assert sent and sent[0][0] == "привет @qqtar"
         release.set()
-        await scr._file_search_worker.wait()
+        await settled(search)
         await pilot.pause()
 
 
@@ -857,12 +864,12 @@ async def test_stale_search_skips_filtering_after_index_build(tmp_path, monkeypa
         inp.focus()
         inp.insert("@qq")
         await pilot.pause()
-        first = scr._file_search_worker
+        first = scr._file_search
         inp.insert("tar")                                # @qqtar
         await pilot.pause()
         release.set()
-        await first.wait()
-        await scr._file_search_worker.wait()
+        await settled(first)
+        await settled(scr._file_search)
         await pilot.pause()
         assert searched == ["qqtar"]
         assert scr._file_picker._entries == ["qqtarget.py"]
@@ -897,11 +904,11 @@ async def test_git_timeout_is_remembered_even_if_search_was_cancelled(tmp_path, 
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         await pilot.press("escape")
         await pilot.pause()
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause()
         assert str(tmp_path) in file_index._slow_git_roots
         assert scr._file_picker is None
@@ -936,14 +943,14 @@ async def test_escape_during_index_build_does_not_start_second_build(tmp_path, m
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        first = scr._file_search_worker
+        first = scr._file_search
         await pilot.press("escape")
         await pilot.pause()
         inp.insert("n")                                  # @agen — новый сеанс
         await pilot.pause()
         release.set()
-        await first.wait()
-        await scr._file_search_worker.wait()
+        await settled(first)
+        await settled(scr._file_search)
         await pilot.pause()
         assert builds == [str(tmp_path)]
         assert any("agents/agent.py" in e for e in scr._file_picker._entries)
@@ -976,18 +983,18 @@ async def test_index_finished_after_close_is_not_reused_by_next_session(tmp_path
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         kept = scr._path_index
         await pilot.press("escape")
         await pilot.pause()
         assert scr._path_index is kept                   # строится — оставлен
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause()
         assert kept.built is True
         inp.insert("n")                                  # новый сеанс после достройки
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._path_index is not kept
 
@@ -1018,12 +1025,12 @@ async def test_switching_to_skill_input_ends_file_search_session(tmp_path, monke
         inp.focus()
         inp.insert("@qqtar")
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         inp.text = "/skill zz"
         await pilot.pause()
         assert scr._file_query is None
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause(0.5)
         assert scr._file_picker is None
 
@@ -1054,13 +1061,13 @@ async def test_switching_to_arg_picker_input_ends_file_search_session(tmp_path, 
         inp.focus()
         inp.insert("@qqtar")
         await pilot.pause()
-        worker = scr._file_search_worker
+        search = scr._file_search
         inp.text = "/export j"
         await pilot.pause()
         assert scr._arg_picker is not None
         assert scr._file_query is None
         release.set()
-        await worker.wait()
+        await settled(search)
         await pilot.pause(0.5)
         assert scr._file_picker is None
 
@@ -1089,7 +1096,7 @@ async def test_big_directory_listing_is_capped_with_note(tmp_path):
         assert len(picker.query(".palette-keys")) == 2
         inp.insert("f149")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert scr._file_picker._entries == ["many/f149.txt"]
         assert scr._file_picker._note_text() == ""
@@ -1121,7 +1128,7 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
         inp.focus()
         inp.insert("@age")
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert len(git_calls) == 1
         await pilot.press("escape")
@@ -1129,6 +1136,85 @@ async def test_slow_git_memo_expires_and_git_is_tried_again(tmp_path, monkeypatc
         monkeypatch.setattr(file_index, "_SLOW_GIT_RETRY_AFTER", 0.0)   # срок вышел
         inp.insert("n")                                  # новый сеанс
         await pilot.pause()
-        await scr._file_search_worker.wait()
+        await settled(scr._file_search)
         await pilot.pause()
         assert len(git_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_typing_during_index_build_starts_no_new_threads(tmp_path, monkeypatch):
+    """Пока собирается индекс, быстрый набор букв не плодит потоки: их считает один
+    поток сеанса, после сборки фильтруется только последний запрос."""
+    pytest.importorskip("textual")
+    import threading
+    from gc_tui.app import TuiApp
+    from gc_tui.services import file_index
+
+    (tmp_path / "qqtarget.py").write_text("x", encoding="utf-8")
+    release = threading.Event()
+    build_entered = threading.Event()
+    builders = []
+    real_build = file_index.PathIndex.build
+    real_search = file_index.PathIndex.search
+    searched = []
+
+    def slow_build(self):
+        builders.append(threading.current_thread())
+        build_entered.set()
+        release.wait(timeout=5)
+        return real_build(self)
+
+    def spy_search(self, query, **kw):
+        searched.append(query)
+        return real_search(self, query, **kw)
+
+    monkeypatch.setattr(file_index.PathIndex, "build", slow_build)
+    monkeypatch.setattr(file_index.PathIndex, "search", spy_search)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("@q")                                 # первая поисковая буква — поток сеанса
+        await pilot.pause()
+        search = scr._file_search
+        for ch in "qtar":
+            inp.insert(ch)
+            await pilot.pause()
+        assert build_entered.wait(5)
+        # Считает один поток: сборку ждёт только поток сеанса, а не поток на каждую букву.
+        # Разность threading.enumerate() тут не годится: на Windows pilot.pause() сам
+        # заводит потоки executor'а (textual/_win_sleep.py).
+        assert [t.name for t in builders] == ["file-search"]
+        assert scr._file_search is search
+        release.set()
+        await settled(search)
+        await pilot.pause()
+        assert searched == ["qqtar"]
+        assert scr._file_picker._entries == ["qqtarget.py"]
+
+
+@pytest.mark.asyncio
+async def test_app_exit_ends_file_search_thread(tmp_path):
+    """Экран снят (выход из приложения) — сеанс поиска закрыт, его поток завершился,
+    а не висит простаивающим."""
+    pytest.importorskip("textual")
+    import threading
+    from gc_tui.app import TuiApp
+
+    (tmp_path / "qqtarget.py").write_text("x", encoding="utf-8")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    before = set(threading.enumerate())
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("@qqtar")
+        await pilot.pause()
+        await settled(scr._file_search)
+        started = [t for t in set(threading.enumerate()) - before if t.name == "file-search"]
+        assert len(started) == 1
+    started[0].join(5)
+    assert not started[0].is_alive()
