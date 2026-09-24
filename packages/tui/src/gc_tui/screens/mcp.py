@@ -185,8 +185,8 @@ class McpScreen(Screen):
             with Horizontal(id="header"):
                 yield Static("mcp · серверы и тулы", id="header-left", markup=False)
             trace = VerticalScroll(id="trace")
-            trace.can_focus = False  # фокус живёт на карточках; глобальный
-            # #trace:focus-outline рисуется поверх контента — здесь не нужен
+            trace.can_focus = False  # фокус живёт на карточках; контейнеру он
+            # не нужен (рамка фокуса у #trace снята в styles.tcss для всех)
             with trace:
                 empty = self._empty_renderable()
                 if empty is not None:

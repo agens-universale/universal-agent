@@ -6,6 +6,9 @@ pytest.importorskip("textual")
 from textual.widgets import Static
 from gc_testkit.tui_support import open_settings_section, settings_section_index, wait_until
 from form_harness import recording_probe, settings_connection, settings_mcp_section, settings_voice_section
+# Хвост подсказки прокрутки зависит от того, влезло ли содержимое в окно
+# теста, и к предмету этих сверок не относится.
+from gc_tui.form_frame import FOOTER_SCROLL
 
 
 def _cfg():
@@ -816,7 +819,7 @@ async def test_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
         assert rows and not any(r.startswith("▸") for r in rows)   # видны все, подсвеченной нет
         hint = str(list(scr.query(".conn-url-preset-hint"))[-1].render())
         assert hint == PRESET_HINT_NO_MATCH
-        footer = str(scr.query_one("#set-footer", Static).render())
+        footer = str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
         assert footer == _FOOTER_PRESET_LIST_NO_MATCH
 
 
@@ -837,15 +840,15 @@ async def test_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
         scr = await _open_settings(app, pilot, cfg_file, cfg)
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        footer = str(scr.query_one("#set-footer", Static).render())
+        footer = str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
         assert "Alt+↓ — показать список" in footer
         await pilot.press("down")            # адрес → токен
         await pilot.pause()
-        footer2 = str(scr.query_one("#set-footer", Static).render())
+        footer2 = str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
         assert "Alt+↓" not in footer2
         await pilot.press("up")              # обратно на адрес
         await pilot.pause()
-        footer3 = str(scr.query_one("#set-footer", Static).render())
+        footer3 = str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
         assert "Alt+↓ — показать список" in footer3
 
 
@@ -1131,7 +1134,7 @@ async def test_a_reply_replaces_the_report_and_clears_its_promise(tmp_path):
         await pilot.pause()
         assert not scr.query("#set-report")             # отчёт уступил место реплике
         assert scr.query("#set-notice")
-        footer = str(scr.query_one("#set-footer", Static).render())
+        footer = str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
         assert "Esc — закрыть отчёт" not in footer      # и обещание снято
         await pilot.press("escape")
         await pilot.pause()
@@ -2624,7 +2627,7 @@ async def test_modes_footer_shows_value_hint(tmp_path):
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n')  # high -> пресет-строка
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        footer = str(scr.query_one("#set-footer", Static).render())
+        footer = str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
         assert footer == ("↑/↓ — выбор · ←/→/Enter — переключить · "
                            "PgUp/PgDn — секции · Esc — меню")
         hint0 = str(scr.query_one(".set-modes-hint", Static).render())

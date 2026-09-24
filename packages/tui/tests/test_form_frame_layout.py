@@ -485,3 +485,159 @@ async def test_voice_remove_confirm_is_pulled_into_view(tmp_path):
         await pilot.pause()
         assert scr._voice_awaiting_remove, "предусловие: вопрос задан"
         await _assert_revealed(pilot, scr, ".set-voicehint")
+
+
+
+def _block_app(*, lines_above_field: int, lines_below_field: int):
+    """Прокрутка на 8 строк, в ней блок `REVEAL_WITH_TAIL`: строки, поле, строки.
+
+    Минимальное приложение вместо экрана настроек: проверяется правило подводки,
+    а не раскладка конкретной секции."""
+    from textual.app import App
+    from textual.containers import Vertical, VerticalScroll
+    from textual.widgets import Input, Static
+    from gc_tui.form_frame import REVEAL_WITH_TAIL
+
+    class _App(App):
+        # У `Vertical` по умолчанию `height: 1fr` и обрезка: блок сжался бы до окна,
+        # и поле под обрезкой было бы не подвести никакой прокруткой. У настоящих
+        # блоков форм высота по содержимому.
+        CSS = "Vertical { height: auto; }"
+
+        def compose(self):
+            with VerticalScroll(id="body"):
+                for i in range(3):
+                    yield Static(f"над блоком {i}")
+                with Vertical(classes=REVEAL_WITH_TAIL):
+                    for i in range(lines_above_field):
+                        yield Static(f"строка блока {i}")
+                    yield Input(id="field")
+                    for i in range(lines_below_field):
+                        yield Static(f"под рамкой {i}", classes="under")
+                for i in range(20):
+                    yield Static(f"ниже блока {i}")
+
+    return _App()
+
+
+async def _reveal_field(pilot, app):
+    from gc_tui.form_frame import reveal_focus
+    field = app.query_one("#field")
+    field.focus()
+    await pilot.pause()
+    reveal_focus(field)
+    for _ in range(6):
+        await pilot.pause()
+    return app.query_one("#body")
+
+
+async def test_field_is_revealed_with_its_lines_under_the_frame():
+    """Курсор в поле подводится вместе со строками под рамкой блока.
+
+    Строки под рамкой (счётчик и источник списка моделей, ⚠) — про то же поле, а
+    `Ctrl+↓` в таком поле занят раскрытием списка: подводка одного поля оставляла
+    их за краем, и с клавиатуры до них было не дотянуться (живой случай — секция
+    «Модели» на терминале в 12 строк). Блок целиком в окно НЕ влезает — ровно как
+    там: подводить надо хвост, а не весь блок."""
+    app = _block_app(lines_above_field=5, lines_below_field=3)
+    async with app.run_test(size=(40, 8)) as pilot:
+        body = await _reveal_field(pilot, app)
+        field = app.query_one("#field")
+        last = app.query(".under").last()
+        assert body.region.contains_region(field.region), (
+            f"поле за краем: {field.region} ⊄ {body.region}")
+        assert body.region.contains_region(last.region), (
+            f"строка под рамкой за краем: {last.region} ⊄ {body.region}")
+
+
+async def test_tail_that_does_not_fit_yields_to_the_cursor():
+    """Хвост, который вместе с полем в окно не влезает, уступает полю.
+
+    Иначе подводка показала бы конец блока, а поле — то, куда человек печатает, —
+    уехало бы за верхний край."""
+    app = _block_app(lines_above_field=0, lines_below_field=12)
+    async with app.run_test(size=(40, 8)) as pilot:
+        body = await _reveal_field(pilot, app)
+        field = app.query_one("#field")
+        assert body.region.contains_region(field.region), (
+            f"поле за краем: {field.region} ⊄ {body.region}")
+
+
+async def _connection_at_the_cursor(pilot, tmp_path):
+    """«Подключение» на низком окне: автопроверка входа отработала, кадр — на курсоре.
+
+    Кадр к курсору подводится ЯВНО: при входе вердикт автопроверки и курсор тянули
+    кадр каждый к себе, и кто успевал последним, тот и оставался. Здесь нужна
+    устоявшаяся исходная точка, а не исход той гонки."""
+    from gc_tui.form_frame import reveal_focus
+    from gc_tui.screens.settings import SettingsScreen
+    scr = SettingsScreen(config=_cfg(), config_path=str(tmp_path / "config.yml"),
+                         on_apply=lambda: None, probe_fn=ok_probe())
+    await pilot.app.push_screen(scr)
+    await pilot.pause()
+    open_settings_section(scr, "Подключение")
+    await wait_until(pilot, lambda: scr._draft_checked is not None,
+                     "автопроверка входа отработала")
+    reveal_focus(scr)
+    await _assert_revealed(pilot, scr, "#conn-url")
+    scroll = scr.query_one("#set-scroll")
+    assert not scroll.region.contains_region(_target(scr, ".set-probe").region), (
+        "предусловие: вердикт под сгибом")
+    return scr
+
+
+async def test_automatic_probe_verdict_leaves_the_frame_at_the_cursor(tmp_path):
+    """Вердикт АВТОпроверки кадр не двигает: в кадре остаётся поле под курсором.
+
+    Автопроверку запускает не человек, а вход в секцию или уход с поля — он в это
+    время смотрит на поле, по которому ходит. Вердикт, подводивший себя сам, уводил
+    кадр вниз из-под курсора, а при входе ещё и гонялся с подводкой курсора: исход
+    решал порядок отложенных заказов (снапшот `connection_low` падал первым прогоном
+    и проходил на перезапуске). Медленная сеть здесь — вердикт, пришедший, когда
+    кадр уже устоялся."""
+    from gc_tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg())
+    async with app.run_test(size=(100, 12)) as pilot:
+        scr = await _connection_at_the_cursor(pilot, tmp_path)
+        scr._on_draft_probe(scr._draft_checked, gen=scr._draft_gen,
+                            section=scr._view, on_done=None)
+        for _ in range(20):
+            await pilot.pause()
+        field = _target(scr, "#conn-url")
+        assert scr.query_one("#set-scroll").region.contains_region(field.region), (
+            "вердикт автопроверки увёл кадр из-под курсора")
+
+
+async def test_manual_probe_verdict_is_pulled_into_view(tmp_path):
+    """Проверку, запущенную человеком (`Ctrl+Space`), видно: вердикт — ответ на клавишу.
+
+    Строка вердикта стоит последней в карточке, и на низком окне ответ на нажатие
+    оказывался бы под сгибом — выглядело бы как «проверка ничего не сделала»."""
+    from gc_tui.app import TuiApp
+    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg())
+    async with app.run_test(size=(100, 12)) as pilot:
+        scr = await _connection_at_the_cursor(pilot, tmp_path)
+        before = scr._draft_gen
+        await pilot.press("ctrl+space")
+        await wait_until(pilot, lambda: scr._draft_gen > before
+                         and scr._draft_checked is not None, "ручная проверка отработала")
+        await _assert_revealed(pilot, scr, ".set-probe")
+
+
+async def test_manual_voice_probe_verdict_is_pulled_into_view(tmp_path):
+    """Тот же канон у ручной проверки голоса: вердикт `Ctrl+Space` виден и на низком окне.
+
+    Строка вердикта у голоса общая с «Подключением» и больше себя сама не подводит —
+    подводит её ответ на клавишу."""
+    from test_settings_voice import CLOUD_CONFIG, OFF, _mk_screen, _open_cloud
+    from gc_tui.app import TuiApp
+    from gc_tui.services.voice_setup import ProbeResult
+    app = TuiApp(config={"model": "M"})
+    async with app.run_test(size=(80, 12)) as pilot:
+        scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
+        fake.probe_result = ProbeResult(ok=True, latency_ms=42, error=None)
+        await _open_cloud(app, scr, pilot)
+        await pilot.press("ctrl+space")
+        await wait_until(pilot, lambda: scr._voice_probe_result is not None,
+                         "ручная проверка голоса отработала")
+        await _assert_revealed(pilot, scr, ".set-probe")

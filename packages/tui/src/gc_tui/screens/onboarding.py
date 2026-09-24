@@ -15,10 +15,10 @@ from textual.widgets import Static
 from rich.text import Text
 
 from gc_core import onboarding
-from gc_core import onboarding_fields as _of
 from gc_tui import branding
+from gc_core import onboarding_fields as _of
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
-from gc_tui.form_frame import cap_frame_height, reveal
+from gc_tui.form_frame import (FOOTER_SCROLL, KEEP_IN_VIEW, body_scrollable, cap_frame_height, reveal, reveal_focus, scroll_body)
 
 # Именованные шаги мастера. Состав статичен, но шаг адресуется ИМЕНЕМ, а не
 # номером: числовые сравнения врали бы при любой правке состава.
@@ -129,6 +129,7 @@ _VOICE_FIELD_KEYS = ("url", "token", "model")
 
 
 class OnboardingScreen(Screen):
+
     # Модальный экран: конфига ещё нет, глобальная навигация (F1/F4/…) поверх мастера
     # показывала бы справку с неработающими клавишами и уведомления по незаписанному
     # конфигу. Гейт — TuiApp.check_action.
@@ -211,9 +212,11 @@ class OnboardingScreen(Screen):
         with Vertical(id="root"):
             with Horizontal(id="onb-header"):
                 yield Static(self._title_text(), id="header-left", markup=False)
-            scroll = VerticalScroll(id="onb-scroll")
-            scroll.can_focus = False
-            with scroll:
+            # Фокус у области прокрутки не отнимаем (Р17): на нём держится
+            # клавиатурная прокрутка. Свои клавиши шаг забирает раньше — `on_key`
+            # предка отрабатывает ДО проверки биндингов, — контейнеру достаётся
+            # только незанятое (PgUp/PgDn, Home/End).
+            with VerticalScroll(id="onb-scroll"):
                 with Vertical(id="onb-frame"):
                     yield Static(branding.logo_text(), id="onb-logo", markup=False)
                     yield Static(branding.tagline_under_logo(), id="onb-tagline", markup=False)
@@ -370,7 +373,7 @@ class OnboardingScreen(Screen):
             voice=_VOICE_SUMMARY_LABELS.get(self._voice_choice, ""),
         )
 
-    def _footer_text(self) -> str:
+    def _footer_base(self) -> str:
         step = self._step_id()
         if step == STEP_CONFIRM:
             return "Enter — подтвердить и завершить настройку  ·  PgUp — назад  ·  Esc — выход"
@@ -441,6 +444,18 @@ class OnboardingScreen(Screen):
         if tab := self._voice_tab_hint():
             parts.insert(1, tab)      # клавиша курсора — рядом с ↑↓, а не в хвосте
         return "  ·  ".join(parts)
+
+    def _footer_text(self) -> str:
+        # Клавиша прокрутки называется, только пока карточка не влезает в кадр
+        # (наша правка поверх канона develop: подсказка не врёт про то, чего нет).
+        base = self._footer_base()
+        return base + FOOTER_SCROLL if body_scrollable(self, "#onb-scroll") else base
+
+    def _sync_footer(self) -> None:
+        try:
+            self.query_one("#onb-footer", Static).update(self._footer_text())
+        except Exception:
+            pass
 
     def _connection_editor(self):
         """Редактор шага «Подключение» или None. Отдельный доступ нужен футеру: тот
@@ -527,12 +542,18 @@ class OnboardingScreen(Screen):
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр шага (см. form_frame).
         cap_frame_height(self, "#onb-scroll")
+        # Влезет ли карточка, видно только ПОСЛЕ раскладки — от этого зависит,
+        # называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
 
     def _mount_step_body(self) -> None:
         """Смонтировать виджеты текущего шага в #onb-frame (после #onb-body)."""
         # Снять фокус ДО remove: detached focused-виджет рвёт Screen._binding_chain
         # (идёт через focused.ancestors_with_self) — priority PgUp перестаёт находиться.
         self.set_focus(None)
+        # Влезет ли карточка, видно только ПОСЛЕ раскладки — а от этого
+        # зависит, называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
         for w in self.query(".onb-dyn"):
             w.remove()
         body = self.query_one("#onb-frame", Vertical)
@@ -1771,6 +1792,15 @@ class OnboardingScreen(Screen):
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
+        if event.key in ("ctrl+up", "ctrl+down"):
+            event.stop()
+            scroll_body(self, "#onb-scroll", -1 if event.key == "ctrl+up" else 1)
+            return
+        if event.key in ("up", "down"):
+            # Кадр едет за курсором шага; PgUp тут занят возвратом назад, а
+            # Home/End внутри поля принадлежат тексту — без этого вернуть кадр
+            # к логотипу и сводке было нечем.
+            reveal_focus(self)
         step = self._step_id()
         if event.key == "ctrl+u" and step == STEP_CONNECTION:
             # Очистка сохранённого токена — та же клавиша, что в /settings.

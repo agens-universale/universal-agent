@@ -21,9 +21,8 @@ from gc_tui.editors.models_section import FOOTER_PROFILE_BACK
 from gc_tui.editors.voice_endpoint import _MODEL_RELOAD_HINT, _URL_REQUIRED
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, WARN
 from gc_tui.services.probe_presentation import connection_line_text
-from gc_tui.form_frame import (EPHEMERAL, KEEP_IN_VIEW, KEEP_UNTIL_DISMISSED,
-                            cap_frame_height, reveal, reveal_focus)
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
+from gc_tui.form_frame import (EPHEMERAL, FOOTER_SCROLL, KEEP_IN_VIEW, KEEP_UNTIL_DISMISSED, body_scrollable, cap_frame_height, reveal, reveal_focus, scroll_body)
 
 SECTIONS = ("Подключение", "Модели", "Профили", "MCP-серверы", "Голосовой ввод",
             "Режимы работы", "Обновление")
@@ -31,6 +30,8 @@ SECTIONS = ("Подключение", "Модели", "Профили", "MCP-с�
 _CONNECTION, _MODELS, _PROFILES, _MCP, _VOICE, _MODES, _UPDATE = 0, 1, 2, 3, 4, 5, 6
 _EDITOR_SECTIONS = {_CONNECTION}           # редакторные: writable, dirty-tracked, submit
 _PROBE_SECTIONS = {_CONNECTION}            # server-probe: ручная проверка, глиф из config-probe
+# Явная прокрутка тела секции — обещание `FOOTER_SCROLL`.
+_SCROLL_KEYS = ("ctrl+up", "ctrl+down")
 # Секции, пишущие в базовый config.yml: гейт пакетного шаблона общий, а вот
 # save-машина — только у редакторных. «Модели» пишут немедленно по действию
 # (решение 2 волны B), но в пакетный шаблон писать по-прежнему нельзя.
@@ -381,6 +382,7 @@ def _empty_anchor(value) -> bool:
 
 
 class SettingsScreen(Screen):
+
     def __init__(self, *, config, config_path, on_apply, probe_fn=None,
                  auth_probe_fn=None, voice=None) -> None:
         super().__init__()
@@ -477,9 +479,12 @@ class SettingsScreen(Screen):
             with Horizontal(id="set-header"):
                 yield Static(self._title_text(), id="header-left", markup=False)
                 yield Static(self._version_text(), id="header-right", markup=False)
-            scroll = VerticalScroll(id="set-scroll")
-            scroll.can_focus = False
-            with scroll:
+            # Фокус у области прокрутки не отнимаем (Р17): на нём держится
+            # клавиатурная прокрутка. Свои клавиши экран забирает раньше —
+            # `on_key` предка отрабатывает ДО проверки биндингов, — поэтому
+            # ↑/↓ и PgUp/PgDn остаются за меню и секциями, а контейнеру
+            # достаётся только то, что экран не занял (Home/End и прочее).
+            with VerticalScroll(id="set-scroll"):
                 with Vertical(id="set-frame"):
                     yield Static("Настройки", id="set-title", markup=False)
             yield Static(self._footer_text(), id="set-footer", markup=False)
@@ -496,7 +501,7 @@ class SettingsScreen(Screen):
             return "Настройки"
         return f"Настройки · {SECTIONS[self._view]}"
 
-    def _footer_text(self) -> str:
+    def _footer_base(self) -> str:
         if self._report_open():
             # Отчёт держит экран: единственное, что сейчас работает, — его закрытие.
             return _FOOTER_REPORT
@@ -546,6 +551,28 @@ class SettingsScreen(Screen):
                 return _FOOTER_PROFILES_ADD
             return _FOOTERS[_PROFILES]
         return _FOOTERS.get(self._view, _FOOTER_READONLY)
+
+    def _footer_text(self) -> str:
+        # Клавиша прокрутки называется, только пока есть что прокручивать —
+        # то же правило «мёртвые клавиши не рекламируются», что и на экране
+        # изменений. На высоком окне подсказки о ней нет вовсе.
+        base = self._footer_base()
+        return base + FOOTER_SCROLL if body_scrollable(self, "#set-scroll") else base
+
+    def _sync_footer(self) -> None:
+        """Перерисовать полосу подсказок (подсказка прокрутки зависит от высоты)."""
+        try:
+            self.query_one("#set-footer", Static).update(self._footer_text())
+        except NoMatches:
+            pass
+
+    def on_resize(self, event: events.Resize) -> None:
+        # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
+        # ресайз, а не на каждый кадр секции (см. form_frame).
+        cap_frame_height(self, "#set-scroll")
+        # Влезет ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
+        # называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
 
     def _profile_footer(self, ed) -> str:
         """Футер под-вида профиля: строку даёт редактор (она позиционная), а
@@ -685,11 +712,6 @@ class SettingsScreen(Screen):
         self._kick_voice_alive()
         self.set_interval(3.0, self._voice_alive_tick)
         self.call_after_refresh(cap_frame_height, self, "#set-scroll")
-
-    def on_resize(self, event: events.Resize) -> None:
-        # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
-        # ресайз, а не на каждый кадр секции (см. form_frame).
-        cap_frame_height(self, "#set-scroll")
 
     # --- сырые значения полей (файл — источник для редакторов и сверки «не изменено») ---
     def _read_raw(self) -> dict:
@@ -1144,6 +1166,10 @@ class SettingsScreen(Screen):
             self._report_text = None
             self._report_section = None
         self.query_one("#header-left", Static).update(self._title_text())
+        self.query_one("#set-footer", Static).update(self._footer_text())
+        # Влезет ли содержимое, видно только ПОСЛЕ раскладки — а от этого
+        # зависит, называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
         frame = self.query_one("#set-frame", Vertical)
         title = self.query_one("#set-title", Static)
         # Снять фокус ДО remove: detached focused-виджет рвёт последующую доставку
@@ -1380,21 +1406,27 @@ class SettingsScreen(Screen):
             self._start_wave()      # пока идёт probe — крутим волну (стоп в _wave_tick)
 
     # --- draft-probe секции (Ctrl+Space / умный Enter, спека v2 §3.1) ---
-    def _start_draft_probe(self, section: int, on_done=None) -> None:
+    def _start_draft_probe(self, section: int, on_done=None, *,
+                           manual: bool = False) -> None:
         """Differential-probe «Подключения»: контрольный запрос БЕЗ токена определяет,
         требует ли сервер авторизацию; только при 401 проверяем сам токен. Так
         честно отличаем «сервер не требует токен» от «токен принят/отклонён».
 
         Endpoint и token берутся из ПОЛЯ (ConnectionEditor.peek(), draft), а не из
         сохранённого конфига — иначе проверялась бы несуществующая комбинация
-        «новый адрес + старый токен»."""
+        «новый адрес + старый токен».
+
+        `manual` — проверку запустил человек (`Ctrl+Space`, `Enter`): её строки —
+        ответ на клавишу и подводятся в кадр. Автопроверка кадр не двигает (см.
+        `_set_probe_line`)."""
+        show = self._show_probe_line if manual else self._set_probe_line
         from gc_core.onboarding import authorization_header
         endpoint_cfg, auth_cfg, verify, model, proxy_cfg = self._probe_args_from_config()
         url, auth_idx, token_raw, proxy_draft = self._connection_editor().peek()
         endpoint = url or endpoint_cfg               # поле пусто → действующий (для ссылок)
         if not endpoint:
-            self._set_probe_line(Text("сначала настройте адрес — проверка стучится на него",
-                                      style=DEEP_DIM))
+            show(Text("сначала настройте адрес — проверка стучится на него",
+                      style=DEEP_DIM))
             return
         if auth_idx == 1:
             token = None                             # без авторизации
@@ -1414,7 +1446,7 @@ class SettingsScreen(Screen):
         self._last_probed_snapshot = self._connection_editor().probe_snapshot()
         self._draft_gen += 1
         gen = self._draft_gen
-        self._set_probe_line(Text("проверяю…", style=DEEP_DIM))
+        show(Text("проверяю…", style=DEEP_DIM))
 
         def _work() -> None:
             from gc_tui.services.settings_probe import ProbeResult, probe_connection
@@ -1425,29 +1457,54 @@ class SettingsScreen(Screen):
             except Exception as exc:
                 result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
             self.app.call_from_thread(self._on_draft_probe, result, gen=gen,
-                                      section=_CONNECTION, on_done=on_done)
+                                      section=_CONNECTION, on_done=on_done,
+                                      manual=manual)
 
         self.run_worker(_work, thread=True, name="settings-draft-probe")
 
-    def _on_draft_probe(self, result, *, gen, section, on_done) -> None:
+    def _on_draft_probe(self, result, *, gen, section, on_done,
+                        manual: bool = False) -> None:
         if gen != self._draft_gen or not self.is_mounted or self._view != section:
             return
         self._draft_checked = result
-        self._set_probe_line(connection_line_text(result))
+        show = self._show_probe_line if manual else self._set_probe_line
+        show(connection_line_text(result))
         if on_done is not None:
             on_done(result)
 
-    def _set_probe_line(self, text: Text) -> None:
+    def _set_probe_line(self, text: Text) -> Static | None:
+        """Строка вердикта проверки — БЕЗ подводки кадра.
+
+        Кадр двигает только ответ на клавишу (`_show_probe_line`). Автопроверку
+        (вход в секцию, уход с поля) и кадры анимации «волны» человек не
+        запускал — он смотрит на поле под курсором. Строка, подводившая себя
+        сама на КАЖДОМ обновлении, уводила кадр из-под курсора, а при входе в
+        секцию ещё и гонялась с подводкой курсора: кто успевал последним, тот и
+        оставался в кадре (снапшот `connection_low` падал первым прогоном и
+        проходил на перезапуске).
+        """
         try:
-            self.query_one(".set-probe", Static).update(text)
-            return
+            line = self.query_one(".set-probe", Static)
+            line.update(text)
         except NoMatches:
-            pass
-        try:
-            frame = self.query_one("#set-frame", Vertical)
-        except NoMatches:
-            return
-        frame.mount(Static(text, classes="set-hint set-dyn set-probe"))
+            try:
+                frame = self.query_one("#set-frame", Vertical)
+            except NoMatches:
+                return None
+            line = Static(text, classes="set-hint set-dyn set-probe")
+            frame.mount(line)
+        return line
+
+    def _show_probe_line(self, text: Text) -> None:
+        """Строка вердикта как ОТВЕТ НА КЛАВИШУ проверки — подвести в кадр.
+
+        Строка стоит последней в карточке: на низком окне ответ на нажатие
+        оказывался под сгибом, и выглядело это как «проверка ничего не
+        сделала». Подводка — разовая, общим `reveal` (сообщение, а не вопрос:
+        кадр она не держит, см. `form_frame`)."""
+        line = self._set_probe_line(text)
+        if line is not None:
+            reveal(line)
 
     def _reset_draft_state(self) -> None:
         self._draft_checked = None
@@ -1677,12 +1734,20 @@ class SettingsScreen(Screen):
             return True
         if event.key in ("alt+down", "ctrl+down"):
             # Карта проб §2.5: подбор списка (форма — свой, легаси-редактор —
-            # свой). Клавиша съедается безусловно: свёртывания у списка
-            # моделей нет, обещание в футере гейтится позицией курсора.
-            event.stop()
-            ed.alt_down()
-            self._refresh_footer()
-            return True
+            # свой). Съедаем, ТОЛЬКО если редактору было что раскрыть, — он сам
+            # об этом и отвечает (`alt_down` возвращает признак действия). Иначе
+            # клавиша проваливается к прокрутке тела: футер обещает «Ctrl+↑/↓ —
+            # прокрутка», и молча съеденная клавиша это обещание нарушала (тот же
+            # класс, что у адреса подключения и голоса).
+            #
+            # В поле модели прокрутки клавиша не получит и так: там `alt_down`
+            # всегда перечитывает список. Строки под рамкой поля довозит подводка
+            # кадра (`REVEAL_WITH_TAIL` у `ModelEditor`).
+            if ed.alt_down():
+                event.stop()
+                self._refresh_footer()
+                return True
+            return False
         if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
             # Проба есть только у формы записи; на списке и в легаси-редакторе
             # её нет (§5.2) — клавиша съедается молча, ничего не обещая.
@@ -2893,8 +2958,8 @@ class SettingsScreen(Screen):
             # `ModelListController._load`) — находка финального ревью 2026-08-06 (F):
             # разные ответы на один и тот же вопрос «адреса нет» путали; хвост
             # «проверка стучится на него» — только здесь, это специфика пробы.
-            self._set_probe_line(Text(f"{_URL_REQUIRED} — проверка стучится на него",
-                                      style=DEEP_DIM))
+            self._show_probe_line(Text(f"{_URL_REQUIRED} — проверка стучится на него",
+                                       style=DEEP_DIM))
             return
         from gc_core.onboarding import _valid_endpoint_url
         from gc_core import config_raw
@@ -2909,8 +2974,8 @@ class SettingsScreen(Screen):
             # http(s)-схемы), но блокировать пробу здесь нельзя — это откроет наружу
             # ту же дыру, что чинили в «Подключении» (фикс-раунд 1 ревью): корп-конфиг
             # с ${ENV:GC_URL} потерял бы ручную перепроверку связи насовсем.
-            self._set_probe_line(Text("сначала выберите адрес endpoint — проверка стучится на него",
-                                      style=DEEP_DIM))
+            self._show_probe_line(Text("сначала выберите адрес endpoint — проверка стучится на него",
+                                       style=DEEP_DIM))
             return
         self._voice_probe_values = values
         self._voice_probe_gen += 1
@@ -2920,7 +2985,8 @@ class SettingsScreen(Screen):
         # Точечное обновление строки probe, БЕЗ _render_view(): полный ре-рендер секции
         # заново поднял бы поля из файла (_mount_voice_section) и стёр бы то, что человек
         # только что набрал (тот же приём и та же причина, что у _cancel_env_confirm).
-        self._set_probe_line(self._voice_probe_line())
+        # Единственный вызывающий — ручной Ctrl+Space: строка — ответ на клавишу.
+        self._show_probe_line(self._voice_probe_line())
         # Всё, что нужно запросу, снимаем ЗДЕСЬ: поток в состояние экрана не лезет.
         verify_ssl = self._voice_verify_ssl()
 
@@ -2935,7 +3001,7 @@ class SettingsScreen(Screen):
                     return                          # устаревший/посмертный — отбросить
                 self._voice_probe_in_flight = False
                 self._voice_probe_result = r
-                self._set_probe_line(self._voice_probe_line())
+                self._show_probe_line(self._voice_probe_line())
             try:
                 self.app.call_from_thread(_apply)
             except Exception:
@@ -5641,6 +5707,10 @@ class SettingsScreen(Screen):
 
     def on_key(self, event: events.Key) -> None:
         self._dismiss_ephemeral()
+        if event.key in ("up", "down"):
+            # Кадр едет за курсором секции. Клавишу НЕ забираем — её разберут
+            # редакторы ниже; здесь только заказ доводки после раскладки.
+            reveal_focus(self)
         if event.key == "escape":
             if self._dismiss_report():
                 # Первая ступень лестницы: открытый отчёт закрывается СВОИМ Esc,
@@ -5769,8 +5839,10 @@ class SettingsScreen(Screen):
             # Развод клавиш (спека 2026-08-06 §2): раскрытие списка — теперь ЦЕЛИКОМ
             # на Alt+↓ (и тихом синониме Ctrl+↓), Ctrl+Space ниже про список больше не
             # спрашивает. У адреса список есть (пресеты) — свёрнутый раскрываем,
-            # раскрытый перечитывать нечего (статика), и клавиша просто ничего не
-            # делает (не проваливаясь никуда — падать в пробу ей больше некуда).
+            # раскрытый перечитывать нечего (статика). Тогда клавиша проваливается к
+            # прокрутке тела в конце обработчика: `Ctrl+↓` обещан футером как
+            # прокрутка, и съесть его молча значило бы соврать (в пробу ей больше не
+            # попасть — проба на своих клавишах).
             try:
                 ed = self._connection_editor()
             except NoMatches:
@@ -5778,7 +5850,7 @@ class SettingsScreen(Screen):
             if ed is not None and ed.reload_presets():
                 event.stop()
                 self._refresh_footer()      # обещания клавиш меняются вместе со списком
-            return
+                return
         if event.key in ("ctrl+at", "ctrl+space", "ctrl+@") and self._view in _PROBE_SECTIONS:
             # Развод §2: клавиша больше не спрашивает список (см. ветку Alt+↓ выше) —
             # порядок неважен, она всегда «перепроверить связь» (§2.2 спеки). Проба
@@ -5808,12 +5880,12 @@ class SettingsScreen(Screen):
                 # ревью, фикс-раунд 1). Пропускаем гейт и отдаём решение
                 # `_start_draft_probe` как есть — она сегодня шлёт ссылку в probe_fn
                 # без резолва (тот же пробел жил тут и ДО этой задачи, не наш скоуп).
-                self._set_probe_line(Text("сначала выберите адрес — проверка стучится на него",
-                                          style=DEEP_DIM))
+                self._show_probe_line(Text("сначала выберите адрес — проверка стучится на него",
+                                           style=DEEP_DIM))
                 return
             self._reset_draft_state()
             self._cancel_autoprobe()                  # запускаем СВОЮ пробу — автопроба лишняя
-            self._start_draft_probe(self._view)
+            self._start_draft_probe(self._view, manual=True)
             return
         if self._view == _MODELS:
             ed = self._models_editor()
@@ -5848,7 +5920,7 @@ class SettingsScreen(Screen):
                 return
             self._cancel_autoprobe()                  # запускаем СВОЮ пробу — автопроба лишняя
             self._start_draft_probe(section, on_done=lambda r: self._smart_enter_decide(
-                section, self._collect_values(section) or {}, r))
+                section, self._collect_values(section) or {}, r), manual=True)
             return
         if event.key == "enter" and self._view == _UPDATE:
             event.stop()
@@ -5885,11 +5957,14 @@ class SettingsScreen(Screen):
                 # отвечает за /audio/transcriptions — успех первого про второй ничего
                 # не говорит, и зелёная ✓ на неработающем endpoint'е была бы ложью
                 # (заодно подавив настоящую пробу через `_voice_probe_values`).
+                #
+                # Раскрывать нечего — клавиша проваливается к прокрутке тела (тот же
+                # довод, что у адреса подключения выше).
                 ctrl = self._voice_list_ctrl()
                 if ctrl is not None and ctrl.reload():
                     event.stop()
                     self._refresh_footer()
-                return
+                    return
             if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
                 # Проба — только в облачной панели (§2.5 спеки 2026-08-06): локальная
                 # адреса не спрашивает (канон §9.2), проверять там нечего — клавиша
@@ -5949,7 +6024,15 @@ class SettingsScreen(Screen):
                 # записи реестра. PgUp/PgDn и Esc сюда не доходят — их разбирают
                 # гейты выше.
                 ed = self._models_editor()
-                if ed is not None and not self._route_registry_editor(ed, event):
+                if ed is not None and self._route_registry_editor(ed, event):
+                    return
+                if event.key in _SCROLL_KEYS:
+                    # Прокрутка тела — не клавиша списка под под-видом: её не
+                    # проваливаем, а исполняем здесь. Иначе футер, обещающий
+                    # «Ctrl+↑/↓ — прокрутка», врал бы в открытом профиле.
+                    self._scroll_body_key(event)
+                    return
+                if ed is not None:
                     self._route_profile_file_view(ed, event)
                 return
             if self._profiles_name_prompt is not None:
@@ -6111,6 +6194,18 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._open_section(self._menu_idx)
                 return
+        # Запасной вариант, ПОСЛЕ всех претендентов: Ctrl+↑/↓ прокручивают тело
+        # секции постранично. Стоят в конце, а не в начале: у develop Ctrl+↓
+        # раскрывает список в редакторах проб, и перехват сверху отнял бы у него
+        # клавишу — сюда управление доходит только если её никто не разобрал.
+        if event.key in _SCROLL_KEYS:
+            self._scroll_body_key(event)
+            return
+
+    def _scroll_body_key(self, event: events.Key) -> None:
+        """`Ctrl+↑`/`Ctrl+↓` — прокрутка тела секции страницами (обещана футером)."""
+        event.stop()
+        scroll_body(self, "#set-scroll", -1 if event.key == "ctrl+up" else 1)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._view in _PROBE_SECTIONS:

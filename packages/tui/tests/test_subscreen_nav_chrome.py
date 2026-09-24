@@ -76,3 +76,32 @@ async def test_mcp_header_has_no_brand_block():
 
     async with _A().run_test() as pilot:
         assert len(pilot.app.screen.query("#header-right")) == 0
+
+
+@pytest.mark.asyncio
+async def test_focused_trace_draws_no_frame_over_content(tmp_path):
+    """Фокус на `#trace` не рисует рамку поверх содержимого — ни на одном экране.
+
+    `outline` в Textual места не резервирует: движок затирает им первую и
+    последнюю строки виджета (`_styles_cache.render_line`), а дети закрашивают
+    середину рамки собой — выходила разорванная рамка, съедавшая первую строку.
+    База гасила это по месту (help/mcp снимают фокус, config — классом
+    `quiet-focus`); правило снято с `#trace` целиком, и этот страж держит
+    решение общим: контейнер остаётся фокусируемым (на нём клавиатурная
+    прокрутка), но рамки поверх контента не рисует.
+    """
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
+
+    payload = {"lines": [f"строка {i}" for i in range(30)]}
+
+    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+        await pilot.app.push_screen(ViewerScreen(title="просмотр", content=payload))
+        await pilot.pause()
+        trace = pilot.app.screen.query_one("#trace")
+        assert trace.has_focus                      # рамке было бы откуда взяться
+        lines = ["".join(seg.text for seg in strip)
+                 for strip in pilot.app.screen._compositor.render_strips()]
+        assert not [line for line in lines if set(line) & set("┌┐└┘│")], lines
+        assert any("строка 0" in line for line in lines), lines

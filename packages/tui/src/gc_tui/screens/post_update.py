@@ -14,8 +14,8 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui.form_frame import cap_frame_height
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
+from gc_tui.form_frame import (FOOTER_SCROLL, body_scrollable, cap_frame_height, scroll_body)
 
 _FOOTER = "Space — отметить · Enter — выполнить отмеченное · Esc — позже (доступно в /settings)"
 _FOOTER_EMPTY = "Enter или Esc — продолжить"      # отмечать нечего — футер не врёт
@@ -26,6 +26,8 @@ class PostUpdateScreen(Screen):
     # Модальный экран (см. OnboardingScreen.BLOCKS_GLOBAL_NAV): показывается сразу после
     # апгрейда, до того как юзер дошёл до сессии. Гейт — TuiApp.check_action.
     BLOCKS_GLOBAL_NAV = True
+    # Миксин здесь ради одного — потолка рамки (Р19): курсор экрана по карточке
+    # не ходит, прокрутка у него своя, страницами (PgUp/PgDn контейнера).
 
     def __init__(self, *, upgrade, config: dict, config_path: str) -> None:
         super().__init__()
@@ -65,8 +67,14 @@ class PostUpdateScreen(Screen):
             self.run_worker(self._scan_mcp_updates, thread=True, name="post-update-mcp-scan")
 
     def on_resize(self, event: events.Resize) -> None:
-        # Потолок рамки зависит только от высоты окна и хрома (см. form_frame).
+        # Дважды: сразу — под новую высоту экрана, после раскладки — под новую
+        # высоту полосы подсказок (на узком окне она переносится и растёт: своего
+        # `Resize` при этом нет, и одиночный замер остался бы протухшим).
         cap_frame_height(self, "#pu-scroll")
+        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
+        # Влезло ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
+        # называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
 
     def _scan_mcp_updates(self) -> None:
         """Фоновый воркер: у кого из подключённых версия отстала от рецепта."""
@@ -119,7 +127,7 @@ class PostUpdateScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with VerticalScroll(id="pu-scroll"):
-                with Vertical(id="pu-frame"):          # карточка по контенту (§6)
+                with Vertical(id="pu-frame"):          # содержимое рамки (§6, Р19)
                     title_classes = "pu-title" if self._items else "pu-title solo"
                     yield Static(self._title_text(), classes=title_classes, markup=False)
                     # Блок «Осталось обновить» — только когда правда есть что обновлять
@@ -131,7 +139,16 @@ class PostUpdateScreen(Screen):
             yield Static(self._footer_text(), id="footer", markup=False)
 
     def _footer_text(self) -> str:
-        return _FOOTER if self._items else _FOOTER_EMPTY
+        base = _FOOTER if self._items else _FOOTER_EMPTY
+        # Клавиша прокрутки называется, только пока есть что прокручивать — то
+        # же правило, что в настройках и онбординге.
+        return base + FOOTER_SCROLL if body_scrollable(self, "#pu-scroll") else base
+
+    def _sync_footer(self) -> None:
+        try:
+            self.query_one("#footer", Static).update(self._footer_text())
+        except Exception:
+            pass
 
     def _title_text(self) -> Text:
         old = self._upgrade.old_version
@@ -182,7 +199,10 @@ class PostUpdateScreen(Screen):
             frame.mount(Static(_HINT, classes="post-update-hint pu-hint"))
         for i, key in enumerate(self._items):
             frame.mount(Static(self._row_text(key, i), classes="post-update-item"))
-        self.query_one("#footer", Static).update(self._footer_text())
+        self._sync_footer()
+        # Полный футер длиннее и на узком окне занимает больше строк — потолок
+        # рамки считается от его фактической высоты, значит пересчитать.
+        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
 
     # --- навигация/действия ---
 
@@ -254,7 +274,11 @@ class PostUpdateScreen(Screen):
     # --- клавиши ---
 
     def on_key(self, event: events.Key) -> None:
-        if event.key == "down":
+        if event.key in ("ctrl+up", "ctrl+down"):
+            # Постраничная прокрутка тела — как в двух других экранах форм.
+            event.stop()
+            scroll_body(self, "#pu-scroll", -1 if event.key == "ctrl+up" else 1)
+        elif event.key == "down":
             event.stop()
             self._move(1)
         elif event.key == "up":

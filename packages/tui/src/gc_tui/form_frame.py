@@ -32,6 +32,7 @@
 """
 from __future__ import annotations
 
+from textual.containers import VerticalScroll
 from textual.css.query import NoMatches
 
 #: Коробка скролл-контейнера в НОРМАЛЬНОМ (некомпактном) режиме: `border: round`
@@ -41,7 +42,13 @@ from textual.css.query import NoMatches
 #: замер ПОСЛЕ переключения увидел бы уже урезанную коробку — решение мигало бы
 #: между режимами на одной и той же высоте (компакт → коробка 0 → «места хватает»
 #: → некомпакт → коробка 4 → «снова тесно» → компакт…).
-_NORMAL_FRAME_BOX = 4
+#: Величина — под КАНОН, действующий в styles.tcss: у `#set-scroll`/`#onb-scroll`/
+#: `#pu-scroll` рамка `round` (две строки) и `padding: 0`. Канон проверен
+#: перебором после перевода подводки на `reveal_focus`: с отступом develop
+#: (`padding: 1 2`, `margin: 1 1`) падает 23 теста — футер перестаёт прилегать к
+#: нижней грани (Р19), а тесный режим при коробке 4 снимает границу и выносит
+#: скроллбар наружу на узких окнах. Смесь (отступ его, нижний margin наш) — 5.
+_NORMAL_FRAME_BOX = 2
 
 
 def cap_frame_height(screen, scroll_id: str) -> None:
@@ -101,6 +108,14 @@ EPHEMERAL = "ephemeral"
 #: лестницы) либо до смены секции. Различается ПРИРОДА, а не длина: граница
 #: «длиннее N строк» была бы произвольной и непредсказуемой для читателя.
 KEEP_UNTIL_DISMISSED = "keep-until-dismissed"
+
+#: Маркер другого рода — не про время жизни, а про ГРАНИЦУ цели подводки. Его несёт
+#: блок поля, у которого под рамкой живут свои строки (счётчик и источник списка
+#: моделей, ⚠): курсор внутри блока подводится вместе с хвостом блока. Иначе кадр
+#: показывал поле, а строки про него оставались за краем — и с клавиатуры до них было
+#: не дотянуться: `Ctrl+↓` в таком поле занят раскрытием списка, а не прокруткой.
+#: Не влезают вместе — побеждает курсор: поле, куда печатают, важнее его подписей.
+REVEAL_WITH_TAIL = "reveal-with-tail"
 
 
 def reveal_focus(host) -> None:
@@ -196,7 +211,75 @@ def _reveal_focus_now(host, frame: int) -> None:
         found = [w for w in scope.query(selector) if w.display]
         if found:
             target = found[-1]
-            target.scroll_visible(animate=False)
             break
-    if target is not None and _again(frame, target):
-        _schedule(host, frame + 1)
+    if target is None:
+        # Третий ярус: курсор — само поле. Там, где выбор не помечают строкой
+        # (адрес в мастере, поля голосового ввода), курсор — это фокус, и без
+        # этого яруса подводить было бы нечего. Область ограничена прокруткой:
+        # фокус ВНЕ её (футер, баннер экрана) кадром не двигает.
+        target = _focus_inside_scroll(scope)
+    if target is not None:
+        tail = _tail_of(target)
+        if tail is not None:
+            # Сперва хвост, затем цель: второй сдвиг минимален и хвост не уводит,
+            # если оба помещаются, а если нет — цель всё равно оказывается в кадре.
+            # `immediate`: иначе Textual применит сдвиг после отрисовки, и цель
+            # посчитает свой от старого положения — хвост уведёт её за край. Мы и
+            # так внутри отложенного такта, раскладка уже устоялась.
+            tail.scroll_visible(animate=False, immediate=True)
+        target.scroll_visible(animate=False)
+        if _again(frame, target):
+            _schedule(host, frame + 1)
+
+
+def _tail_of(target):
+    """Последняя видимая строка блока `REVEAL_WITH_TAIL` вокруг цели, если он есть."""
+    block = next((node for node in target.ancestors_with_self
+                  if node.has_class(REVEAL_WITH_TAIL)), None)
+    if block is None:
+        return None
+    shown = [child for child in block.children if child.display]
+    return shown[-1] if shown else None
+
+
+def _focus_inside_scroll(scope):
+    """Виджет в фокусе, если он лежит внутри прокручиваемой области экрана."""
+    node = getattr(scope, "focused", None) or getattr(scope.app, "focused", None)
+    if node is None:
+        return None
+    walker = node
+    while walker is not None:
+        if isinstance(walker, VerticalScroll):
+            return node
+        walker = walker.parent
+    return None
+
+
+# Подсказка о явной прокрутке — одна на все экраны форм: клавиша та же, значит и
+# слова те же (иначе пользователь читал бы их как разные жесты).
+FOOTER_SCROLL = "  ·  Ctrl+↑/↓ — прокрутка"
+
+
+def body_scrollable(screen, scroll_id: str) -> bool:
+    """Есть ли что прокручивать — от этого зависит подсказка в футере."""
+    try:
+        return bool(screen.query_one(scroll_id, VerticalScroll).max_scroll_y)
+    except NoMatches:
+        return False
+
+
+def scroll_body(screen, scroll_id: str, step: int) -> None:
+    """`Ctrl+↑`/`Ctrl+↓`: прокрутка страницами, независимо от фокуса.
+
+    Пара выбрана потому, что свободна и в поле ввода (`Input` занимает
+    `Home`/`End`/`Ctrl+A`/`Ctrl+E`, но не `Ctrl+↑`/`Ctrl+↓`), и в контейнере
+    прокрутки — а до части содержимого курсором не дотянуться вовсе.
+    """
+    try:
+        scroll = screen.query_one(scroll_id, VerticalScroll)
+    except NoMatches:
+        return
+    if step > 0:
+        scroll.scroll_page_down(animate=False)
+    else:
+        scroll.scroll_page_up(animate=False)
