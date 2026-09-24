@@ -5,6 +5,7 @@ import os
 import tempfile
 from types import SimpleNamespace
 
+from gc_core import run_summary_coordinator as rsc
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.processing_responses import remember_main_prompt_tokens
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
@@ -92,8 +93,6 @@ def test_both_exceeded_is_one_compaction_and_log_names_both(monkeypatch, tmp_pat
     async def _capture(**kwargs):
         calls.append(kwargs)
 
-    from gc_core import run_summary_coordinator as rsc
-
     monkeypatch.setattr(rsc, "arun_summary_compaction", _capture)
     coord = RunSummaryCoordinator(
         ctx=SimpleNamespace(config_dict={}),
@@ -152,8 +151,6 @@ def test_pre_run_tokens_only_stops_after_one_pass(monkeypatch):
     async def _keep_number(**kwargs):
         calls.append(1)
 
-    from gc_core import run_summary_coordinator as rsc
-
     monkeypatch.setattr(rsc, "arun_summary_compaction", _keep_number)
     coord = RunSummaryCoordinator(
         ctx=SimpleNamespace(config_dict={}),
@@ -177,8 +174,6 @@ def test_pre_run_chars_keep_going_after_token_number_is_forgotten(monkeypatch):
         calls.append(1)
         kwargs["state"].last_main_prompt_tokens = None
         kwargs["state"].last_main_prompt_message_count = None
-
-    from gc_core import run_summary_coordinator as rsc
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", _clear_tokens)
     coord = RunSummaryCoordinator(
