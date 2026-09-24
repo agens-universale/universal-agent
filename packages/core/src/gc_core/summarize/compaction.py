@@ -179,12 +179,6 @@ class SummaryTriggerHits:
         return self.chars or self.tokens
 
 
-def _nonneg_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return None
-    return value
-
-
 def _prompt_token_estimate(
     state: Any,
     *,
@@ -196,8 +190,11 @@ def _prompt_token_estimate(
     Числа или границы нет — None, токенное плечо молчит. Хвост — сообщения
     после уже посчитанного prompt; всю историю второй раз не считаем.
     """
-    tokens = _nonneg_int(getattr(state, "last_main_prompt_tokens", None))
-    boundary = _nonneg_int(getattr(state, "last_main_prompt_message_count", None))
+    # Цикл: persistence → states → tools → session_compact → этот модуль.
+    from gc_core.persistence.thread_meta_mapper import read_optional_nonneg_int
+
+    tokens = read_optional_nonneg_int(getattr(state, "last_main_prompt_tokens", None))
+    boundary = read_optional_nonneg_int(getattr(state, "last_main_prompt_message_count", None))
     if tokens is None or boundary is None:
         return None
     messages = getattr(state, "messages", None)
