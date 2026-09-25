@@ -1377,6 +1377,31 @@ def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(repo):
     assert base == "НЕСОХРАН\n".encode("utf-8")
 
 
+def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_files(repo):
+    """Файл, который журнал уже знает, идёт в карман раньше только проиндексированных.
+
+    Игнорируемый `.env`, правленный агентом раньше, другого источника «до» не
+    имеет: git-подканал его не видит. Проиндексированные хотя бы лежат в
+    объектах git. Сотня проиндексированных файлов впереди выталкивала `.env`
+    за потолок, и правка командой терялась без записи (ревью починок, находка 3)."""
+    launch_root, threads_dir = repo
+    (launch_root / ".gitignore").write_text(".env\n", encoding="utf-8")
+    _git(launch_root, "add", ".gitignore")
+    _git(launch_root, "commit", "-qm", "ignore env")
+    _seed_known_file(threads_dir, launch_root, ".env", b"SECRET=1\n", ts=1.0)
+    vendor = launch_root / "a_vendor"
+    vendor.mkdir()
+    for i in range(150):
+        (vendor / f"f{i:03d}.txt").write_text(f"{i}\n", encoding="utf-8")
+    _git(launch_root, "add", "a_vendor")
+
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, "open('.env','wb').write(b'SECRET=2\\n')")
+    delta.after_and_record()
+
+    assert [r.op for r in _records(threads_dir) if r.path == ".env"][1:] == ["shell"]
+
+
 def test_command_that_commits_falls_back_to_counting(repo):
     """Команда сама сдвинула HEAD (add+commit) — точная база недоказуема: HEAD,
     прочитанный ПОСЛЕ команды, мог оказаться уже промежуточным результатом её
