@@ -46,7 +46,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.file_lock import file_lock
@@ -584,6 +584,19 @@ class SnapshotStore:
             _apply_marks(view, key, pending)
             entry = view.get(key, {})
         return entry
+
+    def index_signature(self) -> Optional[Tuple[int, int]]:
+        """Подпись файла индекса (размер, mtime) — ``None``, пока индекса нет.
+
+        Для кэшей над стором: отметки (принятие, ревизии, ходы) меняют индекс и
+        только его — ни журнал, ни диск, ни HEAD при принятии не трогаются, и
+        кэш, собранный без этой подписи, не увидел бы принятия из другого окна.
+        """
+        try:
+            st = self.index_path.stat()
+        except OSError:
+            return None
+        return (st.st_size, st.st_mtime_ns)
 
     def _index_snapshot(self) -> Dict[str, Any]:
         """Индекс целиком, с кэшем по подписи файла (размер + mtime).

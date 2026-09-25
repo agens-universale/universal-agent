@@ -2622,3 +2622,24 @@ def test_a_created_then_reverted_file_leaves_no_row(tmp_path):
     for source in (SOURCE_SESSION, SOURCE_TURN):
         view = ws.view.session_view(source)
         assert [row.entry.path for row in view.active] == ["keep.py"], source
+
+
+def test_an_accept_by_another_instance_invalidates_the_cached_view(tmp_path):
+    """Принятие во втором экземпляре TUI видно первому — кэш вида не устаревает.
+
+    Принятие не трогает ни журнал, ни диск, ни HEAD — а только из них и
+    собирался ключ кэша. Первый экземпляр продолжал считать файл активным, и
+    его откат вёл к началу сессии вместо принятого состояния (ревью PR,
+    находка 8). Ключ теперь включает подпись индекса снимков."""
+    ws = _Workspace(tmp_path)
+    ws.session_base("a.py", "original\n")
+    ws.write("a.py", "agent\n")
+    ws.journal.append(_rec("a.py"))
+    assert [row.entry.path for row in ws.view.session_view(SOURCE_SESSION).active] == ["a.py"]
+
+    other = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), {})
+    other.accept(["a.py"])
+
+    view = ws.view.session_view(SOURCE_SESSION)
+    assert view.active == []
+    assert [row.path for row in view.settled] == ["a.py"]
