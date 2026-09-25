@@ -99,8 +99,8 @@ import_path: adapters.gc_cli_external:GcCliExternal
 model: openai/MiniMaxAI/MiniMax-M2.7
 agent_kwargs:
   gc_cli_config:
-    max_steps: 300                      # дефолт 200
-    no_tool_call_max_count: 3           # дефолт 3 (0 = обрыв с первой ошибки тула)
+    max_steps: 300                      # дефолт схемы: 1000
+    no_tool_call_max_count: 3           # дефолт схемы: 5 (0 = обрыв с первой ошибки тула)
     chat_completion_kwargs:             # сэмплинг агента
       temperature: 1.0
       top_p: 0.95
