@@ -758,7 +758,6 @@ def create_call_data_completions(
         "model": effective_model,
         "messages": to_send_messages_formatted,
         "tools": to_send_tools,
-        "tool_choice": "auto",
     }
     _use_max_tokens_param = backend_override_value(resolved, "use_max_tokens_param")
     if _use_max_tokens_param is NO_BACKEND_OVERRIDE:
@@ -789,7 +788,6 @@ def create_call_data_completions(
             "model",
             "messages",
             "tools",
-            "tool_choice",
             "max_tokens",
             "max_completion_tokens",
         }
