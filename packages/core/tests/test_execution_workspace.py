@@ -57,8 +57,24 @@ def test_launch_root_from_config_falls_back_to_cwd(tmp_path, monkeypatch):
     assert launch_root_from_config({}) == os.getcwd()
     assert launch_root_from_config(None) == os.getcwd()
     assert launch_root_from_config({"launch_root": "  "}) == os.getcwd()
-    assert launch_root_from_config({"project_root": "/p"}) == "/p"
-    assert launch_root_from_config({"launch_root": "/l", "project_root": "/p"}) == "/l"
+    assert launch_root_from_config({"project_root": "/p"}) == os.path.abspath("/p")
+    assert launch_root_from_config({"launch_root": "/l", "project_root": "/p"}) == os.path.abspath("/l")
+
+
+def test_launch_root_from_config_is_normalised_like_the_execution_root(tmp_path, monkeypatch):
+    """Корень из конфига нормализуется так же, как у записи правок.
+
+    Снимки пишет корень, прошедший `expanduser` и `abspath`
+    (`resolve_execution_root`), а сброс треда брал его как есть: при
+    `project_root: '~'` уборка искала снимки в каталоге с именем «~», старые
+    переживали сброс, и новая сессия не могла снять свою базу поверх них
+    (ревью PR, находка 5)."""
+    from gc_core.execution_workspace import launch_root_from_config
+
+    monkeypatch.chdir(tmp_path)
+
+    assert launch_root_from_config({"project_root": "~"}) == os.path.expanduser("~")
+    assert launch_root_from_config({"project_root": "proj/../proj"}) == str(tmp_path / "proj")
 
 
 def test_local_workspace_uses_launch_root(tmp_path):

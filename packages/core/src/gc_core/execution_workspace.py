@@ -218,8 +218,16 @@ def launch_root_from_config(config: Optional[Dict[str, Any]]) -> str:
     неоткуда: у вызывающих до контекста бэкенда ещё нет. На хосте такой путь
     всё равно не существует, так что уборка по нему ничего не найдёт и
     ничего не сломает.
+
+    Нормализация — та же, что у невиртуального ветвления: снимки пишет корень,
+    прошедший ``expanduser`` и ``abspath``, и уборка обязана искать их там же.
+    Сырой ``~`` из конфига вёл её в каталог с именем «~» — снимки переживали
+    сброс.
     """
-    return _config_root_raw(config) or os.getcwd()
+    raw = _config_root_raw(config)
+    if not raw:
+        return os.getcwd()
+    return os.path.abspath(os.path.expanduser(os.path.normpath(raw)))
 
 
 def resolve_execution_root(
