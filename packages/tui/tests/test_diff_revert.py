@@ -1923,6 +1923,42 @@ async def test_confirm_does_not_overwrite_an_edit_made_after_the_preview(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_confirm_does_not_revert_when_the_target_changed_after_the_preview(tmp_path):
+    """Цель отката сменилась в другом окне — `Enter` не пишет ничего.
+
+    Диск не менялся, а цель — да: превью обещало вернуть файл к принятому
+    состоянию, другой экземпляр снял принятие, и откат записал бы начало
+    сессии, которого пользователь в превью не видел (ревью починок, находка 1).
+    Сверяется не только диск, но и индекс снимков, где живут принятия."""
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.diff import REVERT_STALE
+    from gc_tui.services.edits_view import EditsView
+
+    ws = _Workspace(tmp_path)
+    ws.base("a.py", "original\n")
+    ws.accept("a.py", "accepted\n")
+    ws.write("a.py", "agent\n")
+    ws.journal.append(_rec("a.py"))
+
+    async with TuiApp(
+        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+    ).run_test() as pilot:
+        scr = await _open(pilot, ws.screen())
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, RevertConfirmScreen)
+
+        other = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), {})
+        other.reset_accept(["a.py"])
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert ws.read("a.py") == "agent\n"
+        assert any(REVERT_STALE in n.message for n in pilot.app._notifications)
+        assert pilot.app.screen is scr
+
+
+@pytest.mark.asyncio
 async def test_revert_from_viewer_returns_to_list(tmp_path):
     from gc_tui.app import TuiApp
 

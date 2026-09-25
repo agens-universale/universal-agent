@@ -2643,3 +2643,24 @@ def test_an_accept_by_another_instance_invalidates_the_cached_view(tmp_path):
     view = ws.view.session_view(SOURCE_SESSION)
     assert view.active == []
     assert [row.path for row in view.settled] == ["a.py"]
+
+
+def test_revert_state_catches_an_edit_that_kept_the_modification_time(tmp_path):
+    """Правка того же размера с сохранённым временем изменения — подпись другая.
+
+    Время изменения выставляет кто угодно (`cp -p`, `rsync -a`, `os.utime`), а
+    на части файловых систем оно грубое. Подпись несёт ещё номер файла —
+    атомарная замена его меняет — и `ctime`, который программе не выставить
+    (ревью починок, находка 2)."""
+    import os
+
+    ws = _Workspace(tmp_path)
+    path = ws.write("a.py", "aaaa\n")
+    before = ws.view.revert_state(["a.py"])
+    st = path.stat()
+
+    replacement = ws.write("a.py.new", "bbbb\n")
+    os.replace(replacement, path)
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    assert ws.view.revert_state(["a.py"]) != before

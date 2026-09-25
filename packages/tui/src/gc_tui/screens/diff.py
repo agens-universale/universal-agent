@@ -2511,10 +2511,10 @@ class DiffScreen(_ActionFlash, Screen):
         external = [entry.path for entry in targets if entry.external]
         path_keys = [entry.path for entry in entries]
 
-        # Состояние файлов — ДО расчёта превью: правка, пришедшая, пока оно
+        # Состояние отката — ДО расчёта превью: перемена, пришедшая, пока оно
         # считалось, тоже расходится с показанным.
         target_paths = [entry.path for entry in targets]
-        shown_state = self._edits.disk_state(target_paths)
+        shown_state = self._edits.revert_state(target_paths)
 
         def _on_result(confirmed: bool) -> None:
             if confirmed:
@@ -2563,10 +2563,10 @@ class DiffScreen(_ActionFlash, Screen):
     ) -> None:
         """Откатить пути и рассказать об этом всем, кого это касается.
 
-        ``shown_state`` — пути и подписи их файлов на момент показа превью.
-        Разошлись — откат не пишет ничего: он затёр бы правку, которой в превью
-        не было (ревью PR, находка 6). Список перечитывается, чтобы новое
-        подтверждение показало то, что на диске сейчас.
+        ``shown_state`` — пути и всё, от чего зависит их откат, на момент показа
+        превью (``EditsView.revert_state``: файлы, принятия, HEAD). Разошлось —
+        откат не пишет ничего: он записал бы то, чего в превью не было. Список
+        перечитывается, чтобы новое подтверждение показало то, что сейчас.
         """
         # Проверка ПОВТОРЯЕТСЯ здесь, а не только перед вопросом: окно
         # подтверждения и есть та щель, ради которой она заводилась — пока
@@ -2579,7 +2579,7 @@ class DiffScreen(_ActionFlash, Screen):
             return
         if shown_state is not None:
             shown_paths, state = shown_state
-            if self._edits.disk_state(shown_paths) != state:
+            if self._edits.revert_state(shown_paths) != state:
                 self.app.notify(REVERT_STALE, severity="warning")
                 self._reload()
                 return
