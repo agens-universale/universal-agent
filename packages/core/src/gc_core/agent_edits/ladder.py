@@ -6,7 +6,9 @@
 1. Ступень HEAD существует ⇔ ``rel`` задан ∧ ``git`` задан ∧
    ``session_snapshot is not None`` ∧ ``committed_since_snapshot`` ∧
    ``not git.has_filter(rel)`` ∧ ``git.head_bytes(rel) is not None`` ∧
-   ``head_bytes != session_snapshot``.
+   ``head_bytes != session_snapshot``. Либо, вместо двух последних условий,
+   путь ДОКАЗАННО удалён в HEAD (``git.head_absent``) — тогда ступень —
+   «файла нет» (``content=None``).
 2. Есть только ``.accepted`` → она; только HEAD → она; **обе** → HEAD, если
    ``git.head_oid(rel) != accepted.head_oid`` или ``accepted.head_oid is None``
    (коммит после принятия / неразрешимо → безопасная сторона Р28); иначе
@@ -52,7 +54,7 @@ class SessionStep:
     """
 
     kind: str                # STEP_ACCEPTED | STEP_HEAD
-    content: bytes | None    # None только при kind=STEP_ACCEPTED и принятом «отсутствии»
+    content: bytes | None    # None — ступень «файла нет»: принятое отсутствие или удаление в HEAD
     ts: float | None         # момент принятия (kind=STEP_ACCEPTED), иначе None
     commit_ref: str | None   # сырой ref коммита (kind=STEP_HEAD), иначе None
 
@@ -67,6 +69,8 @@ class GitFacts(Protocol):
     def has_filter(self, rel: str) -> bool: ...
 
     def head_ref(self, rel: str) -> str | None: ...          # сырой ref последнего коммита пути
+
+    def head_absent(self, rel: str) -> bool: ...             # пути ДОКАЗАННО нет в HEAD
 
 
 def session_step(
@@ -97,6 +101,14 @@ def session_step(
             head = SessionStep(
                 kind=STEP_HEAD, content=head_bytes, ts=None, commit_ref=git.head_ref(rel)
             )
+        elif head_bytes is None and git.head_absent(rel):
+            # Коммит после снимка УДАЛИЛ путь: закоммиченное состояние — «файла
+            # нет». Без этой ступени откат сессии возвращал старую копию, то
+            # есть уходил ниже коммита. Голое «байтов нет» ступенью не считается:
+            # так же выглядит отказ git, а откат к «файла нет» файл удаляет.
+            head = SessionStep(
+                kind=STEP_HEAD, content=None, ts=None, commit_ref=git.head_ref(rel)
+            )
 
     if accepted is None:
         return head
@@ -106,6 +118,12 @@ def session_step(
     )
     if head is None:
         return accepted_step
+    if head.content is None:
+        # Путь удалён в HEAD. Пустой oid принятия здесь не «неразрешимо», а
+        # факт: при принятии пути в HEAD уже не было — удаление закоммичено
+        # раньше, принятие моложе. Oid есть — путь тогда ещё был, и удаление
+        # закоммичено после принятия.
+        return accepted_step if accepted.head_oid is None else head
     if accepted.head_oid is None or git.head_oid(rel) != accepted.head_oid:
         return head
     return accepted_step

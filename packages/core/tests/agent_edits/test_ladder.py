@@ -13,11 +13,13 @@ class _Git:
         oid: str | None = None,
         filtered: bool = False,
         ref: str | None = None,
+        absent: bool = False,
     ) -> None:
         self._head = head
         self._oid = oid
         self._filtered = filtered
         self._ref = ref
+        self._absent = absent
 
     def head_bytes(self, rel: str) -> bytes | None:
         return self._head
@@ -30,6 +32,9 @@ class _Git:
 
     def head_ref(self, rel: str) -> str | None:
         return self._ref
+
+    def head_absent(self, rel: str) -> bool:
+        return self._absent
 
 
 def test_no_steps_returns_none():
@@ -162,3 +167,32 @@ def test_accepted_survives_without_commit_flag():
                         committed_since_snapshot=False)
 
     assert step == SessionStep(kind=STEP_ACCEPTED, content=b"acc", ts=5.0, commit_ref=None)
+
+
+def test_a_committed_deletion_is_a_head_step_of_absence():
+    """Удаление, закоммиченное после снимка, — ступень HEAD «файла нет».
+
+    Без неё откат сессии возвращал старую копию файла, удаление которого уже
+    в коммите, — то есть уходил ниже коммита (ревью PR, второй коллега,
+    находка 1). Отсутствие должно быть ДОКАЗАНО (``head_absent``): голое
+    «байтов нет» бывает и отказом git, и ступень «удалить» по нему удалила бы
+    файл пользователя."""
+    git = _Git(head=None, absent=True, ref="d1e2l3")
+    step = session_step("a.py", "a.py", None, b"orig", git, committed_since_snapshot=True)
+    assert step == SessionStep(kind=STEP_HEAD, content=None, ts=None, commit_ref="d1e2l3")
+
+
+def test_accepted_after_the_committed_deletion_wins():
+    """Принятие при уже удалённом в HEAD пути (oid принятия пуст) — моложе коммита."""
+    acc = AcceptedState(content=b"acc", ts=5.0, head_oid=None)
+    step = session_step("a.py", "a.py", acc, b"orig", _Git(head=None, absent=True),
+                        committed_since_snapshot=True)
+    assert step.kind == STEP_ACCEPTED
+
+
+def test_deletion_committed_after_the_accept_wins():
+    """Принятие при пути, ещё бывшем в HEAD, — коммит удаления моложе принятия."""
+    acc = AcceptedState(content=b"acc", ts=5.0, head_oid="was-there")
+    step = session_step("a.py", "a.py", acc, b"orig", _Git(head=None, absent=True),
+                        committed_since_snapshot=True)
+    assert step.kind == STEP_HEAD and step.content is None

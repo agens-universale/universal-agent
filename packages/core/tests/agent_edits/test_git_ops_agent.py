@@ -852,3 +852,17 @@ def test_ignored_paths_treats_a_git_failure_as_ignored(tmp_path):
     from gc_core.agent_edits.git_ops import ignored_paths
 
     assert ignored_paths(str(tmp_path), ["a.py", "b.py"]) == {"a.py", "b.py"}
+
+
+def test_head_tree_tells_a_git_failure_from_an_absent_path(tmp_git_repo, tmp_path):
+    """Отсутствие пути в HEAD и отказ git — разные ответы: по отсутствию строится
+    ступень «файла нет», откат к которой файл удаляет."""
+    from gc_core.agent_edits.git_ops import head_tree
+
+    root = tmp_git_repo
+    tracked = next(p.name for p in root.iterdir() if p.is_file())
+
+    tree = head_tree(str(root), [tracked, "never-committed.py"])
+
+    assert set(tree) == {tracked}
+    assert head_tree(str(tmp_path / "not-a-repo"), ["a.py"]) is None

@@ -627,13 +627,26 @@ def head_blob_oids(launch_root: str, rels: Sequence[str]) -> dict[str, str]:
     у ``ls-tree`` то же glob-расползание pathspec без ``:(literal)`` не
     воспроизводится (путь с ``[``/``]`` лишних ключей не даёт) — ключи словаря
     безопасно использовать напрямую, не только поэлементным lookup'ом.
+
+    Отказ git здесь неотличим от «ни одного пути в HEAD» — кому различие важно,
+    зовёт ``head_tree``.
+    """
+    return head_tree(launch_root, rels) or {}
+
+
+def head_tree(launch_root: str, rels: Sequence[str]) -> dict[str, str] | None:
+    """То же, что ``head_blob_oids``, но отказ git ОТЛИЧИМ: ``None``.
+
+    Нужно тому, кто строит по отсутствию пути ступень «файла нет»: откат к ней
+    УДАЛЯЕТ файл, и спутать отказ git с отсутствием значило бы удалить файл
+    пользователя.
     """
     rels = list(rels)
     if not rels:
         return {}
     outputs = _chunked_outputs(launch_root, ["ls-tree", "-z", "HEAD", "--"], rels)
     if outputs is None:
-        return {}
+        return None
     oids: dict[str, str] = {}
     for record in (rec for out in outputs for rec in _decode(out).split("\x00")):
         if not record:

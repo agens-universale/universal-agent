@@ -99,6 +99,7 @@ TARGET_SESSION_START = "начало сессии"
 TARGET_TURN_START = "начало хода"
 TARGET_DELETE_CREATED = "будет удалён (создан агентом)"
 TARGET_DELETE_ACCEPTED_ABSENT = "будет удалён (принято отсутствие файла)"
+TARGET_DELETE_HEAD_ABSENT = "будет удалён (удаление закоммичено)"
 
 # Причина «пропустить» цель отката — тот же приём: готовые слова, не машинный
 # код (в отличие от REASON_* самого отката, который работает уже ПОСЛЕ факта).
@@ -354,6 +355,8 @@ class _LadderGitFacts:
         self._commit_ts_cache: Dict[Tuple[str, str], Optional[float]] = {}
         # Сырые блобы HEAD, прочитанные пачкой (`prefetch`); ``None`` — пути в HEAD нет.
         self._blob_cache: Dict[Tuple[str, str], Optional[bytes]] = {}
+        # Пути ДОКАЗАННО нет в HEAD (`head_absent`); отказ git сюда ложится как «есть».
+        self._absent_cache: Dict[Tuple[str, str], bool] = {}
 
     def prime(self, head_rev: str, oids: Dict[str, str]) -> None:
         """Задаёт контекст текущего запроса (ревизия + батч oid'ов).
@@ -454,6 +457,30 @@ class _LadderGitFacts:
                     self._launch_root, rel, disk, rev="HEAD"
                 )
         return self._bytes_cache[key]
+
+    def head_absent(self, rel: str) -> bool:
+        """Пути ДОКАЗАННО нет в дереве HEAD: коммит удалил его.
+
+        Отказ git — «есть»: по отсутствию лестница строит ступень «файла нет»,
+        и откат к ней файл удаляет, — сомнение обязано вести к сохранению.
+        """
+        key = (rel, self._head_rev)
+        if key not in self._absent_cache:
+            tree = git_ops.head_tree(self._launch_root, [rel])
+            self._absent_cache[key] = tree is not None and rel not in tree
+        return self._absent_cache[key]
+
+    def note_head_tree(self, rels: Sequence[str], tree: Optional[Dict[str, str]]) -> None:
+        """Ответ ``ls-tree`` по ``rels``, уже полученный сборкой, — в кэш отсутствия.
+
+        Тот же запуск, что дал oid'ы (``prime``): второй по тем же путям только
+        ради «есть ли путь в HEAD» был бы лишним. ``None`` — git отказал, и
+        отсутствие не доказано: кэш не трогаем, путь спросит сам.
+        """
+        if tree is None or self._head_rev is None:
+            return
+        for rel in rels:
+            self._absent_cache[(rel, self._head_rev)] = rel not in tree
 
     def head_oid(self, rel: str) -> Optional[str]:
         return self._oids.get(rel)
@@ -827,8 +854,12 @@ class EditsView:
         почему файл исчезнет.
         """
         step = self._session_ladder.get(key)
-        if step is not None and step.kind == STEP_ACCEPTED and step.content is None:
-            return RevertTarget(key, "delete", TARGET_DELETE_ACCEPTED_ABSENT, None, ())
+        if step is not None and step.content is None:
+            label = (
+                TARGET_DELETE_ACCEPTED_ABSENT if step.kind == STEP_ACCEPTED
+                else TARGET_DELETE_HEAD_ABSENT
+            )
+            return RevertTarget(key, "delete", label, None, ())
         if entry.kind == "created":
             # Ступени с содержимым нет (иначе `file_entries` не дал бы этот
             # kind, см. §3.2 «Пересмотр правила») — откат удаляет файл.
@@ -1259,8 +1290,9 @@ class EditsView:
         committed: set = set()
         if head_rev is not None:
             rels = [key for key in path_keys if not Path(key).is_absolute()]
-            oids = git_ops.head_blob_oids(self._launch_root, rels) if rels else {}
-            self._ladder_facts.prime(head_rev, oids)
+            tree = git_ops.head_tree(self._launch_root, rels) if rels else {}
+            self._ladder_facts.prime(head_rev, tree or {})
+            self._ladder_facts.note_head_tree(rels, tree)
             git_facts = self._ladder_facts
             committed, by_rev = self._committed_by_rev(rels, head_rev)
             self._ladder_facts.prefetch(by_rev)
@@ -1391,7 +1423,7 @@ class EditsView:
         (см. ``_entries_for_revert``), и `r` файл удаляет.
         """
         step = self._session_ladder.get(path_key)
-        return step is not None and step.kind == STEP_ACCEPTED and step.content is None
+        return step is not None and step.content is None
 
     def _session_ladder_baseline(self, key: str) -> Optional[bytes]:
         """База «Сессии» для СЧЁТА и превью: ступень лестницы, иначе счётная база
@@ -1436,7 +1468,7 @@ class EditsView:
         overridden = dict(entries)
         for key, entry in entries.items():
             step = self._session_ladder.get(key)
-            if step is not None and step.kind == STEP_ACCEPTED and step.content is None:
+            if step is not None and step.content is None:
                 overridden[key] = replace(entry, kind="created", revertable=True)
         return overridden
 
@@ -1735,11 +1767,26 @@ class EditsView:
                             and rel not in status_paths
                         ):
                             settled.add(rel)
+                        elif (
+                            rel in self._session_committed
+                            and rel not in status_paths
+                            and self._head_deleted(rel)
+                            and not abs_path_for_key(self._launch_root, rel).exists()
+                        ):
+                            # Коммит удалил путь, и на диске его нет: закоммиченное
+                            # «файла нет» и есть текущее состояние. `ls_files` такого
+                            # пути не знает — правило выше его бы не поймало.
+                            settled.add(rel)
 
         return {
             key: (SETTLED_MANUAL if accepted_by_path[key] is not None else SETTLED_COMMIT)
             for key in settled
         }
+
+    def _head_deleted(self, path_key: str) -> bool:
+        """Ступень пути — удаление, закоммиченное в этой сессии (``STEP_HEAD`` без байтов)."""
+        step = self._session_ladder.get(path_key)
+        return step is not None and step.kind == STEP_HEAD and step.content is None
 
     def _settled_rows(
         self, records: List[EditRecord], reasons: Dict[str, str]

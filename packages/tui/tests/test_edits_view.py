@@ -2664,3 +2664,48 @@ def test_revert_state_catches_an_edit_that_kept_the_modification_time(tmp_path):
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
 
     assert ws.view.revert_state(["a.py"]) != before
+
+
+def _deleted_and_committed(tmp_path) -> "_Workspace":
+    """Файл правили в сессии, затем удалили и закоммитили удаление."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("a.py", "orig\n")
+    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    ws.session_base("a.py", "orig\n")
+    ws.write("a.py", "orig\nnew\n")
+    ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
+    subprocess.run(["git", "rm", "-qf", "a.py"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "drop a"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    return ws
+
+
+def test_a_committed_deletion_settles_the_file_instead_of_offering_its_old_copy(tmp_path):
+    """Удаление закоммичено — откатывать сессии нечего: файл уходит в разобранные.
+
+    Прежде откат сессии восстанавливал старую копию — уходил ниже коммита
+    (ревью PR, второй коллега, находка 1)."""
+    ws = _deleted_and_committed(tmp_path)
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert view.active == []
+    assert [row.path for row in view.settled] == ["a.py"]
+
+
+def test_a_file_recreated_after_its_committed_deletion_is_reverted_by_deleting(tmp_path):
+    """Файл пересоздан после закоммиченного удаления — откат его удаляет, а не
+    возвращает содержимое из-до коммита."""
+    ws = _deleted_and_committed(tmp_path)
+    ws.write("a.py", "again\n")
+    ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", op="create", add=1, del_=0))
+
+    [row] = ws.view.session_view(SOURCE_SESSION).active
+    [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
+    assert target.kind == "delete"
+
+    ws.view.revert(SOURCE_SESSION, ["a.py"])
+    assert not (ws.root / "a.py").exists()
