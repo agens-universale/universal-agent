@@ -18,11 +18,10 @@
 """
 import asyncio
 import gc
-import shlex
-import sys
 import time
 
 from gc_core.backends.local import LocalFsBackend
+from gc_testkit.helpers.crossplatform import python_command
 
 
 def test_background_writer_survives_the_end_of_the_turn(tmp_path):
@@ -36,10 +35,7 @@ def test_background_writer_survives_the_end_of_the_turn(tmp_path):
         "        print('tick', i, file=ticks, flush=True)\n"
         "        time.sleep(0.1)\n"
     )
-    cmd = (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} "
-        f"{shlex.quote(str(log))}"
-    )
+    cmd = python_command(tmp_path, child, log)
 
     async def turn():
         started = await LocalFsBackend().aspawn_background(cmd)

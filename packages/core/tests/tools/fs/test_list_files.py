@@ -8,6 +8,7 @@ from gc_core.tools.fs.list_files import ListFiles
 
 
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.helpers.crossplatform import require_symlinks
 
 def test_list_default_and_hidden(tmp_path):
     (tmp_path / "a.txt").write_text("x", encoding="utf-8")
@@ -61,6 +62,7 @@ def test_list_extra_validation_and_not_a_directory(tmp_path):
 
 
 def test_list_symlink_to_dir_depth0_and_depth1(tmp_path):
+    require_symlinks(tmp_path)
     sub = tmp_path / "sub"
     sub.mkdir()
     link = tmp_path / "linkdir"

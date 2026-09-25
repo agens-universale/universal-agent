@@ -13,7 +13,7 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def test_run_python_success_non_zero_and_timeout():
     tool = with_local_ctx(RunPythonCode)
     ok = json.loads(tool(code="print('ok')"))
-    assert ok["ok"] is True and ok["stdout"]["content"].rstrip("\n") == "ok"
+    assert ok["ok"] is True and ok["stdout"]["content"].rstrip("\r\n") == "ok"
     bad = json.loads(tool(code="import sys; sys.exit(3)"))
     assert bad["ok"] is False and bad["return_code"] == 3
     timeout = json.loads(tool(code="import time; time.sleep(2)", timeout=1))
@@ -27,7 +27,8 @@ def test_run_python_validation_and_truncation():
         RunPythonCode,
         config_dict={"exec_output_capture_max_chars": 10, "exec_output_preview_edge_chars": 5},
     )
-    trunc = json.loads(trunc_tool(code="print('A'*100)"))
+    # Байтами, а не print: на Windows print кончает строку \r\n.
+    trunc = json.loads(trunc_tool(code="import sys; sys.stdout.buffer.write(b'A'*100 + bytes([10]))"))
     assert trunc["truncated"] is True
     assert trunc["stdout"]["head"] + trunc["stdout"]["tail"] == "A" * 5 + "A" * 4 + "\n"
     assert trunc["stdout"]["omitted_chars"] == 91

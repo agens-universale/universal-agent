@@ -22,14 +22,18 @@ def test_execute_env_timeout_and_truncation(tmp_path):
             env_vars=[{"name": "X", "value": "v"}],
         )
     )
-    assert env["ok"] is True and env["stdout"]["content"].rstrip("\n") == "v"
+    assert env["ok"] is True and env["stdout"]["content"].rstrip("\r\n") == "v"
     timeout = json.loads(tool(command=f'"{sys.executable}" -c "import time; time.sleep(2)"', timeout=1))
     assert timeout["ok"] is False and timeout["timed_out"] is True
     trunc_tool = with_local_ctx(
         ExecuteCommand,
         config_dict={"exec_output_capture_max_chars": 10, "exec_output_preview_edge_chars": 5},
     )
-    trunc = json.loads(trunc_tool(command=f'"{sys.executable}" -c "print(\'A\'*100)"'))
+    # Байтами, а не print: на Windows print кончает строку \r\n, и хвост со
+    # счётчиком пропущенного зависели бы от ОС.
+    trunc = json.loads(trunc_tool(
+        command=f'"{sys.executable}" -c "import sys; sys.stdout.buffer.write(b\'A\'*100 + bytes([10]))"'
+    ))
     assert trunc["truncated"] is True
     assert trunc["stdout"]["head"] + trunc["stdout"]["tail"] == "A" * 5 + "A" * 4 + "\n"
     assert trunc["stdout"]["omitted_chars"] == 91
@@ -48,7 +52,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
     marker.write_text("ok", encoding="utf-8")
     cmd = f'"{sys.executable}" -c "from pathlib import Path; print(Path(\'marker.txt\').exists())"'
     in_cwd = json.loads(tool(command=cmd, cwd=str(tmp_path)))
-    assert in_cwd["ok"] is True and in_cwd["stdout"]["content"].rstrip("\n") == "True"
+    assert in_cwd["ok"] is True and in_cwd["stdout"]["content"].rstrip("\r\n") == "True"
 
     env_casted = json.loads(
         tool(

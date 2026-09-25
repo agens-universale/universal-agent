@@ -740,7 +740,7 @@ class TestPrefilterNeedles:
         )
         assert data["ok"] is True
         assert data["count"] == 2
-        files = {m["file"].rsplit("/", 1)[-1] for m in data["matches"]}
+        files = {Path(m["file"]).name for m in data["matches"]}
         assert files == {"a.py", "b.py"}
 
     def test_no_prefilter_pattern(self, tmp_path):
@@ -894,6 +894,7 @@ class TestErrorEnvelopes:
         assert data["ok"] is False
         assert data["error"]["field"] == "pattern"
 
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO в файловой системе есть только в POSIX")
     def test_path_is_neither_file_nor_dir(self, tmp_path):
         fifo = tmp_path / "pipe"
         os.mkfifo(str(fifo))

@@ -50,7 +50,7 @@ def test_apply_batch_atomic_fail_keeps_file(tmp_path):
 
 def test_apply_batch_dry_run(tmp_path):
     p = tmp_path / "f.txt"
-    p.write_text("foo bar\n", encoding="utf-8")
+    p.write_text("foo bar\n", encoding="utf-8", newline="")
     res = json.loads(
         with_local_ctx(ApplyFileEdits)(
             path=str(p),

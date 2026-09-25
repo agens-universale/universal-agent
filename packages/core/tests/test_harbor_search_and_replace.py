@@ -26,10 +26,11 @@ def _run_both(tmp_path, content, **kwargs):
     f = tmp_path / "f.txt"
     files = {}
     if content is not None:
-        f.write_text(content, encoding="utf-8")
+        f.write_text(content, encoding="utf-8", newline="")
         files["/work/f.txt"] = content
     base_env = json.loads(_base()(path=str(f), **kwargs))
-    base_content = f.read_text(encoding="utf-8") if f.exists() else None
+    # Байты как есть: read_text сгладил бы CRLF и спрятал расхождение концов строк.
+    base_content = f.read_bytes().decode("utf-8") if f.exists() else None
     h = _harbor(files)
     harbor_env = json.loads(h(path="/work/f.txt", **kwargs))
     return base_env, base_content, harbor_env, h._backend.files.get("/work/f.txt")

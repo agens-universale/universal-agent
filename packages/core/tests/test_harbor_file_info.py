@@ -26,6 +26,10 @@ from gc_core.tools.fs.file_info import FileInfo
 # ---------------------------------------------------------------------------
 
 ENV_FIELDS = {"path", "modified_time"}
+# Windows не хранит POSIX-права: chmod(0o644) там меняет лишь флаг «только
+# чтение», и stat отдаёт rw-rw-rw-. Права сверяются только на POSIX.
+if os.name == "nt":
+    ENV_FIELDS.add("permissions")
 
 
 def _base_tool():
@@ -118,6 +122,8 @@ def test_binary_file_with_hash():
         # permissions and classification must match; sha256 may differ for binary due to
         # encoding mismatch in FakeBackend (latin-1 content, utf-8 encode)
         for field in ("permissions", "is_binary", "exists", "is_file", "type", "hash_mode"):
+            if field in ENV_FIELDS:
+                continue
             assert base_strip[field] == harbor_strip[field], (
                 f"Field {field!r} mismatch: base={base_strip[field]!r}, harbor={harbor_strip[field]!r}"
             )
@@ -134,6 +140,7 @@ def test_missing_path_returns_exists_false():
     assert harbor_env["error"] is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows не хранит POSIX-права: chmod 0o644 не применяется")
 def test_permissions_are_symbolic_not_octal():
     """Regression: permissions must be 9-char symbolic string, not octal '644'."""
     content = "check permissions\n"

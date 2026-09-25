@@ -142,7 +142,7 @@ def test_search_context_symmetric_before_and_after(tmp_path):
     """context = up to 5 lines before + match line + up to 5 lines after."""
     lines = [f"L{i}\n" for i in range(1, 16)]
     lines[7] = "TARGET_LINE\n"  # line 8
-    (tmp_path / "c.txt").write_text("".join(lines), encoding="utf-8")
+    (tmp_path / "c.txt").write_text("".join(lines), encoding="utf-8", newline="")
     data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="TARGET_LINE"))
     assert data["ok"] is True and data["total_matches"] == 1
     m = data["matches"][0]
@@ -167,6 +167,7 @@ def test_search_context_edges_and_nearby_matches(tmp_path):
     (tmp_path / "e.txt").write_text(
         "A\nB\nHIT1\nC\nHIT2\nD\nE\nF\nG\nH\nI\n",
         encoding="utf-8",
+        newline="",
     )
     data = json.loads(with_local_ctx(SearchFiles)(path=str(tmp_path), regex="HIT[12]"))
     assert data["ok"] is True and data["total_matches"] == 2
@@ -223,8 +224,8 @@ def test_search_skips_file_over_size_cap(tmp_path):
 def test_search_skipped_list_capped(tmp_path, monkeypatch):
     monkeypatch.setattr(SearchFiles, "default_skipped_limit", 2)
     for i in range(5):
-        (tmp_path / f"big{i}.txt").write_text("FINDME xxxxxxxx\n", encoding="utf-8")
-    (tmp_path / "small.txt").write_text("FINDME\n", encoding="utf-8")
+        (tmp_path / f"big{i}.txt").write_text("FINDME xxxxxxxx\n", encoding="utf-8", newline="")
+    (tmp_path / "small.txt").write_text("FINDME\n", encoding="utf-8", newline="")
     tool = with_local_ctx(
         SearchFiles,
         config_dict={"fs_tools": {"max_read_bytes": len(b"FINDME\n")}},
@@ -239,7 +240,7 @@ def test_search_skipped_list_capped(tmp_path, monkeypatch):
 
 def test_search_spans_lines_by_default(tmp_path):
     p = tmp_path / "block.txt"
-    p.write_text("alpha\nSTART\nmiddle\nEND\nomega\n", encoding="utf-8")
+    p.write_text("alpha\nSTART\nmiddle\nEND\nomega\n", encoding="utf-8", newline="")
     tool = with_local_ctx(SearchFiles)
     data = json.loads(tool(path=str(p), regex=r"START.*?END"))
     assert data["ok"] is True

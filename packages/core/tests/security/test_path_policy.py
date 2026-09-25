@@ -1,9 +1,11 @@
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
 
 from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, enforce_write_guard, is_within_root, normalize_path_for_policy
+from gc_testkit.helpers.crossplatform import require_symlinks
 
 
 class _Logger:
@@ -55,6 +57,7 @@ def test_check_write_path_blocks_outside_root(tmp_path):
 
 
 def test_check_write_path_blocks_symlink_escape(tmp_path):
+    require_symlinks(tmp_path)
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     outside = tmp_path / "outside"
@@ -67,7 +70,17 @@ def test_check_write_path_blocks_symlink_escape(tmp_path):
 
 
 def test_is_within_root_supports_case_insensitive_comparison():
-    assert is_within_root("/PROJECT/src/file.py", "/project", case_insensitive=True)
+    # Пути в нативной записи: is_within_root сравнивает уже нормализованные пути.
+    candidate = os.path.join(os.sep, "PROJECT", "src", "file.py")
+    root = os.path.join(os.sep, "project")
+    assert is_within_root(candidate, root, case_insensitive=True)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="ntpath.commonpath сравнивает без учёта регистра — на Windows регистр не различается никогда",
+)
+def test_is_within_root_is_case_sensitive_by_default():
     assert not is_within_root("/PROJECT/src/file.py", "/project", case_insensitive=False)
 
 

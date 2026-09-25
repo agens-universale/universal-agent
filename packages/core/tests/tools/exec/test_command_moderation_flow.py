@@ -43,7 +43,7 @@ def test_exec_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["stdout"]["content"].rstrip("\n") == "123"
+    assert result["stdout"]["content"].rstrip("\r\n") == "123"
 
 
 def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
@@ -60,7 +60,7 @@ def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["stdout"]["content"].rstrip("\n") == "456"
+    assert result["stdout"]["content"].rstrip("\r\n") == "456"
 
 
 def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
