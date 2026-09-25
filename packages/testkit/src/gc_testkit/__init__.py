@@ -6,6 +6,14 @@
 подключается автоматически через entry point ``pytest11``.
 """
 
+import sys
+
+#: Шаг системного таймера, по которому просыпается ``asyncio.sleep``. На Windows
+#: по умолчанию 1/64 с (15,6 мс): пульс с шагом 10 мс тикает раз в 15,6 мс на
+#: СВОБОДНОМ цикле, и критерий «медиана < шаг × 1,5» краснел бы на пустом месте.
+#: На macOS и Linux таймер точный — пола нет.
+LOOP_TIMER_QUANTUM = 1 / 64 if sys.platform == "win32" else 0.0
+
 
 def as_coro(fn):
     """Обернуть синхронную заглушку в корутинную функцию.
@@ -158,6 +166,8 @@ def assert_loop_was_free(gaps, *, tick, allowed_stalls=1, label=""):
     """
     import statistics
 
+    # Шаг не мельче кванта таймера ОС — см. LOOP_TIMER_QUANTUM.
+    tick = max(tick, LOOP_TIMER_QUANTUM)
     assert gaps, f"{label}пульс не тикнул ни разу — loop был занят целиком"
     ordered = sorted(gaps)
     p50 = statistics.median(ordered)
