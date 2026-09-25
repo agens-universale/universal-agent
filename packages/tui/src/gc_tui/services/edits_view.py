@@ -460,33 +460,30 @@ class _LadderGitFacts:
         return self._bytes_cache[key]
 
     def head_absent(self, rel: str) -> bool:
-        """Пути ДОКАЗАННО нет в дереве HEAD: коммит удалил его.
+        """Удаление пути закоммичено, и файла нет и на диске.
 
-        Отказ git — «есть»: по отсутствию лестница строит ступень «файла нет»,
-        и откат к ней файл удаляет, — сомнение обязано вести к сохранению.
+        Отсутствие в HEAD само по себе удалением не является: путь пропадает из
+        HEAD и тогда, когда файл снят с учёта (`git rm --cached`), пересоздан
+        после коммита или переименован одним регистром — файла или каталога,
+        на macOS и Windows `ls-tree` различает регистр, а диск нет. Во всех этих
+        случаях файл лежит на диске, и ступень «файла нет» заставила бы откат
+        его УДАЛИТЬ. Поэтому ступень строится, только если файла нет и на диске:
+        откат тогда удалять нечего, а путь честно уходит в разобранные.
+
+        Отказ git — «есть». Отсутствие в HEAD кэшируется по ревизии, диск
+        проверяется при каждом обращении: файл может появиться снова.
         """
         key = (rel, self._head_rev)
         if key not in self._absent_cache:
             tree = git_ops.head_tree(self._launch_root, [rel])
             self._absent_cache[key] = tree is not None and rel not in tree
-        return self._absent_cache[key] and not self._under_other_case(rel)
-
-    def _under_other_case(self, rel: str) -> bool:
-        """На диске лежит тот же файл, но в другом регистре имени.
-
-        `ls-tree` сравнивает регистр строго: после закоммиченного `git mv
-        Readme.md README.md` путь `Readme.md` в HEAD «отсутствует». А файловая
-        система macOS и Windows регистр не различает — файл на месте, и откат
-        по ступени «файла нет» удалил бы закоммиченный `README.md`. Сомнение —
-        в сторону сохранения: отсутствие такого пути не считается доказанным.
-        """
+        if not self._absent_cache[key]:
+            return False
         path = abs_path_for_key(self._launch_root, rel)
         try:
-            names = os.listdir(path.parent)
+            return not path.exists() and not path.is_symlink()
         except OSError:
             return False
-        folded = path.name.casefold()
-        return any(name != path.name and name.casefold() == folded for name in names)
 
     def note_head_tree(self, rels: Sequence[str], tree: Optional[Dict[str, str]]) -> None:
         """Ответ ``ls-tree`` по ``rels``, уже полученный сборкой, — в кэш отсутствия.

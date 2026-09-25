@@ -2696,19 +2696,71 @@ def test_a_committed_deletion_settles_the_file_instead_of_offering_its_old_copy(
     assert [row.path for row in view.settled] == ["a.py"]
 
 
-def test_a_file_recreated_after_its_committed_deletion_is_reverted_by_deleting(tmp_path):
-    """Файл пересоздан после закоммиченного удаления — откат его удаляет, а не
-    возвращает содержимое из-до коммита."""
+def test_a_file_back_on_disk_after_its_committed_deletion_is_never_deleted(tmp_path):
+    """Файл снова на диске после закоммиченного удаления — откат его не удаляет.
+
+    Ступень «удаление закоммичено» строится, только если файла нет и на диске:
+    путь отсутствует в HEAD и тогда, когда файл пересоздан, снят с учёта или
+    переименован регистром, — и во всех этих случаях удаление стёрло бы файл
+    пользователя (ревью починок). Откат возвращает содержимое, ничего не удаляя."""
     ws = _deleted_and_committed(tmp_path)
     ws.write("a.py", "again\n")
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", op="create", add=1, del_=0))
 
-    [row] = ws.view.session_view(SOURCE_SESSION).active
-    [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
-    assert target.kind == "delete"
+    ws.view.session_view(SOURCE_SESSION)
+    assert all(t.kind != "delete" for t in ws.view.revert_targets(SOURCE_SESSION, ["a.py"]))
 
     ws.view.revert(SOURCE_SESSION, ["a.py"])
-    assert not (ws.root / "a.py").exists()
+    assert (ws.root / "a.py").exists()
+
+
+def test_an_untracked_but_kept_file_is_never_deleted_by_revert(tmp_path):
+    """`git rm --cached` и коммит: файла нет в HEAD, но он остался на диске — откат
+    его не удаляет (ревью починок, находка 2)."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("config.local", "orig\n")
+    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    ws.session_base("config.local", "orig\n")
+    ws.write("config.local", "orig\nmine\n")
+    ws.journal.append(_rec("config.local", ts=1.0, add=1, del_=0))
+    subprocess.run(["git", "rm", "-q", "--cached", "config.local"], cwd=str(ws.root),
+                   check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "untrack"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+
+    ws.view.session_view(SOURCE_SESSION)
+    assert all(t.kind != "delete"
+               for t in ws.view.revert_targets(SOURCE_SESSION, ["config.local"]))
+    ws.view.revert(SOURCE_SESSION, ["config.local"])
+    assert (ws.root / "config.local").exists()
+
+
+def test_a_committed_case_only_directory_rename_is_not_a_deletion(tmp_path):
+    """Каталог переименован только регистром (`Docs` → `docs`) — не удаление.
+
+    Проверка имени файла это не ловила: на macOS и Windows `Docs/a.md` открывается
+    как прежде, а `ls-tree` его не находит (ревью починок, находка 1)."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("Docs/a.md", "orig\n")
+    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    ws.session_base("Docs/a.md", "orig\n")
+    ws.write("Docs/a.md", "orig\nnew\n")
+    ws.journal.append(_rec("Docs/a.md", ts=1.0, add=1, del_=0))
+    # В два шага: на файловой системе без различия регистра `git mv Docs docs` отказывает.
+    for src, dst in (("Docs", "docs-tmp"), ("docs-tmp", "docs")):
+        subprocess.run(["git", "mv", src, dst], cwd=str(ws.root), check=True,
+                       capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "rename dir"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+
+    ws.view.session_view(SOURCE_SESSION)
+    assert all(t.kind != "delete" for t in ws.view.revert_targets(SOURCE_SESSION, ["Docs/a.md"]))
+    ws.view.revert(SOURCE_SESSION, ["Docs/a.md"])
+    assert (ws.root / "docs" / "a.md").exists()
 
 
 def test_a_committed_case_only_rename_is_not_a_deletion(tmp_path):
