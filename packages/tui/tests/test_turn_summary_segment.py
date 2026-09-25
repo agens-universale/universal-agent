@@ -200,6 +200,30 @@ def test_indicator_done_with_summary_shows_segment():
     assert plain.endswith("изменено 2 файла · +5 −6")
 
 
+@pytest.mark.parametrize(
+    "state, head",
+    [
+        ("failed", "✗ Ошибка"),
+        ("cancelled", "■ Отменено"),
+        ("stopped_steps", "⏹ Остановлено: превышен лимит шагов"),
+        ("stopped_errors", "⏹ Остановлено: превышен лимит ошибок"),
+        ("stopped_tokens", "⏹ Остановлено: превышен лимит токенов"),
+        ("stopped_tool_calls", "⏹ Остановлено: превышен лимит вызовов инструментов"),
+    ],
+)
+def test_every_terminal_state_shows_the_edits_summary(state, head):
+    """Ход, упавший или остановленный, файлы уже менял — и об этом строка говорит.
+
+    Сводку сохраняли для любого исхода, а рисовали только у «Выполнил»: после
+    ошибки пользователь видел одно «Ошибка», хотя именно тогда ему важнее всего
+    знать, что файлы тронуты (ревью PR, находка 7)."""
+    ind = ThinkingIndicator(state=state, clock=lambda: 0.0, turn_summary=(1, 1, 1))
+    plain = ind._render_text().plain
+    assert plain.startswith(head)
+    assert plain.endswith("изменено 1 файл · +1 −1")
+    assert ind._summary_span is not None
+
+
 # --- проводка спадающего фронта --------------------------------------------
 
 

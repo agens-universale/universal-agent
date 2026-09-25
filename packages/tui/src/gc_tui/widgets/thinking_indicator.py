@@ -208,6 +208,17 @@ def compose_status_line(
     return out, (head.cell_len + gap, out.cell_len)
 
 
+# Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
+_TERMINAL_ENDINGS = {
+    _STATE_CANCELLED: ("■", "Отменено"),
+    _STATE_FAILED: ("✗", "Ошибка"),
+    _STATE_STOPPED_STEPS: ("⏹", "Остановлено: превышен лимит шагов"),
+    _STATE_STOPPED_ERRORS: ("⏹", "Остановлено: превышен лимит ошибок"),
+    _STATE_STOPPED_TOKENS: ("⏹", "Остановлено: превышен лимит токенов"),
+    _STATE_STOPPED_TOOL_CALLS: ("⏹", "Остановлено: превышен лимит вызовов инструментов"),
+}
+
+
 class ThinkingIndicator(Static):
     """Индикатор активности агента (thinking / validating / compressing).
 
@@ -419,36 +430,22 @@ class ThinkingIndicator(Static):
                 hover=self._summary_hover,
             )
             return line
-        if self._state == _STATE_CANCELLED:
-            text.append("■", style=_DIM)
+        ending = _TERMINAL_ENDINGS.get(self._state)
+        if ending is not None:
+            # Сводка правок — у ЛЮБОГО исхода, не только у «Выполнил»: упавший
+            # или остановленный ход файлы уже менял, и после ошибки знать это
+            # пользователю важнее всего (ревью PR, находка 7).
+            glyph, label = ending
+            text.append(glyph, style=_DIM)
             text.append(" ")
-            text.append("Отменено", style=_DIM)
-            return text
-        if self._state == _STATE_FAILED:
-            text.append("✗", style=_DIM)
-            text.append(" ")
-            text.append("Ошибка", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_STEPS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит шагов", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_ERRORS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит ошибок", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_TOKENS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит токенов", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_TOOL_CALLS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит вызовов инструментов", style=_DIM)
-            return text
+            text.append(label, style=_DIM)
+            line, self._summary_span = compose_status_line(
+                text,
+                self._turn_summary,
+                self._status_width(),
+                hover=self._summary_hover,
+            )
+            return line
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())
             text.append(" ")
